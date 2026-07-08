@@ -65,6 +65,30 @@
   `EUF_VIPER_CASES` and `EUF_VIPER_SIZE`; fixed after the run.
 - Job `139146` completed on WMI `cpu_idle` node `c3n1` in 14s; OR bench used
   8 cases, branches 1024, depth 4, total terms 24584, wall time 217220141ns.
+- Job `139149` completed the fixed QF_UF corpus campaign on WMI in 1:56 with
+  MaxRSS `2338356K`; official SMT-LIB 2025 QF_UF corpus ingested as 7503 files,
+  deterministic 40-instance sample run with `euf-viper`, Z3Py 4.16.0, and cvc5
+  1.3.4. No Z3/cvc5 mismatches; `euf-viper` solved 1 eq-diamond instance and
+  returned `unsupported` on 39 Boolean-heavy instances.
+
+## Benchmark Corpus
+
+- Official source: SMT-LIB release 2025 non-incremental benchmark record
+  `10.5281/zenodo.16740866`.
+- QF_UF archive: `QF_UF.tar.zst`, size `54182823`, MD5
+  `e185bc80a80116bcfea116df190f87d2`.
+- Local and WMI ingestion found 7503 `QF_UF` SMT2 files: 4361 `unsat`, 3142
+  `sat`.
+- Downloaded corpora and manifests are ignored under `benchmarks/smtlib-2025/`
+  because manifests contain machine-local absolute paths.
+
+## Solvers
+
+- Local cvc5 Homebrew formula was unavailable; installed official cvc5 1.3.4
+  macOS arm64 static release under ignored `third_party/solvers`.
+- WMI cvc5 uses official cvc5 1.3.4 Linux x86_64 static release.
+- WMI Z3 uses Python `z3-solver 4.16.0.0` wrapper because WMI glibc is 2.35
+  and official Z3 4.16.0 Linux CLI binary requires glibc 2.39.
 
 ## LTS/Magma
 

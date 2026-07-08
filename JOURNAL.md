@@ -37,6 +37,13 @@
   - added repeated median Z3 comparator;
   - measured 18.8x to 64.4x local median speedups on diamond canaries;
   - submitted WMI job `139146`, which completed the OR bench successfully.
+- Added full SMT-LIB 2025 QF_UF corpus ingestion:
+  - downloaded and verified `QF_UF.tar.zst` from Zenodo record
+    `10.5281/zenodo.16740866`;
+  - generated a 7503-file manifest and deterministic sample manifests;
+  - added cvc5 1.3.4 setup from official release assets;
+  - added a Z3Py fallback wrapper for WMI glibc compatibility;
+  - submitted WMI corpus job `139149`, which completed successfully.
 
 ## Next Entry Template
 

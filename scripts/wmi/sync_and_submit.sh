@@ -16,6 +16,8 @@ rsync -az --delete \
   --exclude .git \
   --exclude results \
   --exclude docs/book/_build \
+  --exclude benchmarks/smtlib-2025 \
+  --exclude third_party/solvers \
   ./ "$REMOTE/"
 
 ssh wmicluster "cd ~/euf-viper && mkdir -p results && sbatch --export=ALL,EUF_VIPER_CASES=$CASES,EUF_VIPER_SIZE=$SIZE,EUF_VIPER_OR_CASES=$OR_CASES,EUF_VIPER_OR_BRANCHES=$OR_BRANCHES,EUF_VIPER_OR_DEPTH=$OR_DEPTH scripts/wmi/euf_viper_bench.sbatch"

@@ -20,6 +20,8 @@ cargo run --release -- solve --stats /tmp/chain.smt2
 cargo run --release -- bench --cases 10 --size 5000
 target/release/euf-viper bench-or --cases 4 --branches 256 --depth 4
 python3 benches/compare_z3.py generated/synthetic --viper target/release/euf-viper
+scripts/bench/install_solvers.sh
+scripts/bench/fetch_smtlib_qf_uf.sh
 ```
 
 Expected solver output is one of:
@@ -43,6 +45,13 @@ The next milestone improved the positive-`or` preprocessor.  On generated
 OR-stress canaries, median local speedups over Z3 4.16.0 were 18.8x and 64.4x
 on diamond instances, and 1.7x on a pruned-branch instance.  See
 `research-vault/06-results/2026-07-08-or-preprocessor.md`.
+
+The fixed WMI corpus campaign ingested the official SMT-LIB 2025 QF_UF slice
+and ran a 40-instance deterministic sample against `euf-viper`, Z3, and cvc5.
+Z3 and cvc5 agreed on all non-timeout results.  `euf-viper` solved one official
+`eq_diamond` instance and returned `unsupported` on the other 39 sample
+instances.  See
+`research-vault/06-results/2026-07-08-qf-uf-corpus-wmi-139149.md`.
 
 ## Repository Map
 

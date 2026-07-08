@@ -21,9 +21,11 @@ reproducible, evidence-backed comparison against Z3 and cvc5.
 - [x] Add branch-aware positive-`or` pruning against surrounding disequalities.
 - [x] Add repeated median Z3 comparator for cold-start-resistant local timing.
 - [ ] Integrate an optional SAT backend or IPASIR-compatible bridge.
-- [ ] Install or build cvc5 comparator in a reproducible environment.
-- [ ] Download SMT-LIB QF_UF benchmark releases and select SMT-COMP slices.
-- [ ] Run WMI cluster campaigns with fixed timeout, memory, and artifact logs.
+- [x] Install or build cvc5 comparator in a reproducible environment.
+- [x] Download SMT-LIB QF_UF benchmark release and build a full corpus manifest.
+- [x] Run WMI cluster campaign with fixed timeout, memory, and artifact logs.
+- [ ] Expand `euf-viper` beyond one solved official eq-diamond sample instance.
+- [ ] Run larger or full QF_UF corpus campaign after DPLL(T) support lands.
 - [ ] Run LTS CAS checks for the finite-model and quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
 

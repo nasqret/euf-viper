@@ -1,7 +1,11 @@
 /target/
 /results/
+/benchmarks/smtlib-2025/
+/third_party/solvers/
 /docs/book/_build/
 /.DS_Store
 *.log
 *.tmp
 *.sage.py
+__pycache__/
+*.pyc

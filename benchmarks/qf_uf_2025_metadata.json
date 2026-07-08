@@ -1,0 +1,14 @@
+{
+  "archive_md5": "e185bc80a80116bcfea116df190f87d2",
+  "doi": "10.5281/zenodo.16740866",
+  "file": "QF_UF.tar.zst",
+  "logic": "QF_UF",
+  "release": "SMT-LIB release 2025 (non-incremental benchmarks)",
+  "size": 54182823,
+  "source_url": "https://zenodo.org/api/records/16740866/files/QF_UF.tar.zst/content",
+  "status_counts": {
+    "sat": 3142,
+    "unsat": 4361
+  },
+  "total_files": 7503
+}
