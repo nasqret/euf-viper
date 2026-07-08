@@ -32,6 +32,10 @@
   tail gain.
 - Z3 superiority claims are blocked until a reproducible benchmark campaign is
   completed.
+- Long-timeout campaigns use a prepare job, bounded-concurrency SLURM array,
+  and dependent merge job. The prepare job creates
+  `qf_uf_campaign_<run-id>.jsonl`; every shard and the merge read that exact
+  manifest. The merge must see one row per manifest-path and solver pair.
 
 ## Local Canary Results
 
@@ -85,6 +89,8 @@
   speedup over `139211` on common correct instances.
 - Job `139375` confirms the accepted platform split still builds and solves on
   Linux after rejecting the Kissat 4 experiment.
+- Job `139381` is the first full four-solver, two-second campaign after adding
+  pinned Yices 2.7.0.
 
 ## Research Position
 

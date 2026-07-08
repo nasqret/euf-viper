@@ -29,6 +29,7 @@ front tier of a coverage-oriented portfolio.
 - [x] Run the full 7,503-instance QF_UF corpus at a fixed two-second budget.
 - [x] Add per-instance A/B comparison and structural manifest filtering.
 - [x] Add pinned Yices 2.7.0 to every comparator schema and solver log.
+- [x] Add restartable SLURM array sharding with strict complete-result merging.
 - [ ] Run the full corpus at 60 seconds per solver.
 - [ ] Run a competition-budget campaign using sharded SLURM jobs.
 - [ ] Quantify family balance and report QG versus non-QG results separately.

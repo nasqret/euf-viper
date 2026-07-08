@@ -79,6 +79,12 @@
   at 0.0324s. The official Apple arm64 binary requires an external CUDD dylib,
   so local setup warns and omits Yices when that dependency is absent, while
   Linux/WMI setup treats Yices as mandatory.
+- Submitted the first full four-solver two-second campaign as WMI job `139381`.
+- Added a long-timeout campaign pipeline with one immutable sampled or full
+  manifest, modulo SLURM array shards, per-shard checkpoint/resume files, and a
+  merge gate that rejects duplicate, missing, unexpected, wrong, or disagreeing
+  rows. Local validation partitioned all 7,503 paths exactly once and exercised
+  both successful and intentionally invalid merges.
 
 ## Next Entry Template
 

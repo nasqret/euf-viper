@@ -87,3 +87,10 @@ Yices 2.7.0 is installed from the official `yices-2.7.0` GitHub release. The
 Linux x86_64 static-GMP archive is pinned by SHA-256
 `49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a`.
 Four-solver WMI smoke `139380` passed before the first full Yices campaign.
+
+Long-timeout runs use `sync_and_submit_sharded_corpus.sh`. Its prepare job
+creates an immutable campaign manifest, array tasks assign rows by manifest
+offset modulo the shard count, and the dependent merge checks that every
+manifest-path and solver pair occurs exactly once before producing aggregate
+tables. The submission script refuses a dirty worktree so every campaign is
+tied to a committed solver revision.

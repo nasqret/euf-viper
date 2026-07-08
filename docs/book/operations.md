@@ -23,6 +23,30 @@ EUF_VIPER_CORPUS_SEED=euf-viper-qf-uf-wmi-20260708 \
 bash scripts/wmi/sync_and_submit_corpus.sh
 ```
 
+Submit a restartable long-timeout campaign. The default is 64 shards with at
+most four active array tasks. A prepare job pins one campaign manifest; a merge
+job runs only after every shard succeeds and rejects incomplete result sets.
+
+```bash
+EUF_VIPER_CORPUS_LIMIT=0 \
+EUF_VIPER_CORPUS_TIMEOUT=60 \
+EUF_VIPER_CORPUS_SHARDS=64 \
+EUF_VIPER_CORPUS_MAX_ACTIVE=4 \
+EUF_VIPER_CORPUS_JOBS=8 \
+bash scripts/wmi/sync_and_submit_sharded_corpus.sh
+```
+
+Use a bounded sample to smoke-test the complete prepare-array-merge dependency
+chain:
+
+```bash
+EUF_VIPER_CORPUS_LIMIT=8 \
+EUF_VIPER_CORPUS_TIMEOUT=2 \
+EUF_VIPER_CORPUS_SHARDS=2 \
+EUF_VIPER_CORPUS_MAX_ACTIVE=2 \
+bash scripts/wmi/sync_and_submit_sharded_corpus.sh
+```
+
 ## LTS
 
 Run CAS availability checks:
