@@ -115,6 +115,11 @@
 - WMI cvc5 uses official cvc5 1.3.4 Linux x86_64 static release.
 - WMI Z3 uses Python `z3-solver 4.16.0.0` wrapper because WMI glibc is 2.35
   and official Z3 4.16.0 Linux CLI binary requires glibc 2.39.
+- WMI Yices uses official Yices 2.7.0 Linux x86_64 static-GMP release, SHA-256
+  `49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a`.
+  Four-solver smoke job `139380` passed. The official Apple arm64 asset links
+  to `/usr/local/lib/libcudd-3.0.0.0.dylib`; local setup omits Yices with a
+  warning when that dylib is unavailable.
 
 ## LTS/Magma
 

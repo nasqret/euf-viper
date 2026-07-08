@@ -82,3 +82,8 @@ and improved common-instance aggregate time by 1.0848x over `139211`.
 The next protocol revision adds pinned Yices 2.7.0 and repeats the full corpus
 at 60 seconds and competition-style budgets. Family-stratified reporting is
 required because QG-classification dominates the corpus.
+
+Yices 2.7.0 is installed from the official `yices-2.7.0` GitHub release. The
+Linux x86_64 static-GMP archive is pinned by SHA-256
+`49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a`.
+Four-solver WMI smoke `139380` passed before the first full Yices campaign.

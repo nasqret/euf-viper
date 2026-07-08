@@ -73,6 +73,12 @@
 - Next experimental order is fixed: add pinned Yices 2.7.0, run full-corpus
   60-second and competition-budget campaigns, then add checked SAT proof
   artifacts plus EUF explanation metadata.
+- Added Yices 2.7.0 as the fourth benchmark solver using official release
+  assets and GitHub-provided SHA-256 digests. WMI smoke `139380` solved both
+  instances correctly with all four solvers; Yices had the lowest smoke median
+  at 0.0324s. The official Apple arm64 binary requires an external CUDD dylib,
+  so local setup warns and omits Yices when that dependency is absent, while
+  Linux/WMI setup treats Yices as mandatory.
 
 ## Next Entry Template
 

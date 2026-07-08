@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run euf-viper, Z3, and cvc5 on an SMT-LIB manifest."""
+"""Run euf-viper, Z3, cvc5, and Yices2 on an SMT-LIB manifest."""
 
 from __future__ import annotations
 
@@ -237,8 +237,10 @@ def main() -> int:
     parser.add_argument("--viper", default="target/release/euf-viper")
     parser.add_argument("--z3")
     parser.add_argument("--cvc5")
+    parser.add_argument("--yices")
     parser.add_argument("--no-z3", action="store_true")
     parser.add_argument("--no-cvc5", action="store_true")
+    parser.add_argument("--no-yices", action="store_true")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--limit", type=int)
@@ -252,6 +254,8 @@ def main() -> int:
         parser.error("--no-z3 cannot be combined with --z3")
     if args.no_cvc5 and args.cvc5:
         parser.error("--no-cvc5 cannot be combined with --cvc5")
+    if args.no_yices and args.yices:
+        parser.error("--no-yices cannot be combined with --yices")
 
     solvers: list[tuple[str, list[str]]] = []
     viper = solver_path(args.viper, "euf-viper")
@@ -265,6 +269,10 @@ def main() -> int:
         cvc5 = solver_path(args.cvc5, "cvc5")
         if cvc5:
             solvers.append(("cvc5", [cvc5]))
+    if not args.no_yices:
+        yices = solver_path(args.yices, "yices-smt2")
+        if yices:
+            solvers.append(("yices2", [yices]))
     if not solvers:
         raise SystemExit("no solver binaries found")
 

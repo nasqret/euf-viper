@@ -56,6 +56,7 @@ scripts/bench/compare_solvers.py "$RUN_MANIFEST" \
   --viper "$PWD/target/release/euf-viper" \
   --z3 "$PWD/third_party/solvers/bin/z3" \
   --cvc5 "$PWD/third_party/solvers/bin/cvc5" \
+  --yices "$PWD/third_party/solvers/bin/yices-smt2" \
   --timeout "${EUF_VIPER_CORPUS_TIMEOUT:-10}" \
   --jobs "$JOBS" \
   --resume \
