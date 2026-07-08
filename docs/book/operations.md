@@ -37,13 +37,14 @@ bash scripts/wmi/sync_and_submit_sharded_corpus.sh
 ```
 
 Use a bounded sample to smoke-test the complete prepare-array-merge dependency
-chain:
+chain in an isolated remote checkout:
 
 ```bash
 EUF_VIPER_CORPUS_LIMIT=8 \
 EUF_VIPER_CORPUS_TIMEOUT=2 \
 EUF_VIPER_CORPUS_SHARDS=2 \
 EUF_VIPER_CORPUS_MAX_ACTIVE=2 \
+EUF_VIPER_REMOTE='wmicluster:~/euf-viper-sharded-smoke' \
 bash scripts/wmi/sync_and_submit_sharded_corpus.sh
 ```
 

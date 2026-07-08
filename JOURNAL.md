@@ -85,6 +85,8 @@
   merge gate that rejects duplicate, missing, unexpected, wrong, or disagreeing
   rows. Local validation partitioned all 7,503 paths exactly once and exercised
   both successful and intentionally invalid merges.
+- Made the sharded submitter honor `EUF_VIPER_REMOTE` for synchronization,
+  submission, and metadata so concurrent campaigns can use isolated checkouts.
 
 ## Next Entry Template
 

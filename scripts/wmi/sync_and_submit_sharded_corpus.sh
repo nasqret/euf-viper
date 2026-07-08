@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REMOTE="${EUF_VIPER_REMOTE:-wmicluster:~/euf-viper}"
+REMOTE_HOST="${REMOTE%%:*}"
+REMOTE_ROOT="${REMOTE#*:}"
 LOCAL_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SHARDS="${EUF_VIPER_CORPUS_SHARDS:-64}"
 MAX_ACTIVE="${EUF_VIPER_CORPUS_MAX_ACTIVE:-4}"
@@ -14,6 +16,12 @@ LIMIT="${EUF_VIPER_CORPUS_LIMIT:-0}"
 SEED="${EUF_VIPER_CORPUS_SEED:-euf-viper-qf-uf-wmi-20260708}"
 
 cd "$LOCAL_ROOT"
+if [ "$REMOTE_HOST" = "$REMOTE" ] || \
+  ! [[ "$REMOTE_HOST" =~ ^[A-Za-z0-9._-]+$ ]] || \
+  ! [[ "$REMOTE_ROOT" =~ ^~?/[A-Za-z0-9._/-]+$ ]]; then
+  echo "remote must use HOST:PATH with a shell-safe absolute or home-relative path" >&2
+  exit 1
+fi
 if ! git diff --quiet || ! git diff --cached --quiet || \
   [ -n "$(git ls-files --others --exclude-standard)" ]; then
   echo "refusing sharded campaign from a dirty worktree" >&2
@@ -67,25 +75,26 @@ rsync -az --delete \
   --exclude docs/book/_build \
   --exclude benchmarks/smtlib-2025 \
   --exclude third_party/solvers \
-  ./ "$REMOTE/"
+  ./ "$REMOTE_HOST:$REMOTE_ROOT/"
 
-PREP_JOB="$(ssh wmicluster \
-  "cd ~/euf-viper && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_GIT_REVISION=$REVISION,EUF_VIPER_CORPUS_LIMIT=$LIMIT,EUF_VIPER_CORPUS_SEED=$SEED scripts/wmi/euf_viper_prepare.sbatch")"
+PREP_JOB="$(ssh "$REMOTE_HOST" \
+  "cd $REMOTE_ROOT && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_GIT_REVISION=$REVISION,EUF_VIPER_CORPUS_LIMIT=$LIMIT,EUF_VIPER_CORPUS_SEED=$SEED scripts/wmi/euf_viper_prepare.sbatch")"
 RUN_ID="${PREP_JOB%%;*}"
 ARRAY_END="$((SHARDS - 1))"
-ARRAY_JOB="$(ssh wmicluster \
-  "cd ~/euf-viper && sbatch --parsable --dependency=afterok:$RUN_ID --array=0-${ARRAY_END}%${MAX_ACTIVE} --time=$WALL_TIME --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT,EUF_VIPER_CORPUS_JOBS=$JOBS,EUF_VIPER_AXIOM_ORDER=$AXIOM_ORDER,EUF_VIPER_AXIOM_SEED=$AXIOM_SEED scripts/wmi/euf_viper_corpus_shard.sbatch")"
+ARRAY_JOB="$(ssh "$REMOTE_HOST" \
+  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$RUN_ID --array=0-${ARRAY_END}%${MAX_ACTIVE} --time=$WALL_TIME --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT,EUF_VIPER_CORPUS_JOBS=$JOBS,EUF_VIPER_AXIOM_ORDER=$AXIOM_ORDER,EUF_VIPER_AXIOM_SEED=$AXIOM_SEED scripts/wmi/euf_viper_corpus_shard.sbatch")"
 ARRAY_ID="${ARRAY_JOB%%;*}"
-MERGE_JOB="$(ssh wmicluster \
-  "cd ~/euf-viper && sbatch --parsable --dependency=afterok:$ARRAY_ID --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT scripts/wmi/euf_viper_merge_shards.sbatch")"
+MERGE_JOB="$(ssh "$REMOTE_HOST" \
+  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$ARRAY_ID --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT scripts/wmi/euf_viper_merge_shards.sbatch")"
 MERGE_ID="${MERGE_JOB%%;*}"
 
 METADATA="$(printf \
-  '{"run_id":"%s","revision":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s"}' \
-  "$RUN_ID" "$REVISION" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$LIMIT" "$SEED" "$SHARDS" \
+  '{"run_id":"%s","revision":"%s","remote_root":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s"}' \
+  "$RUN_ID" "$REVISION" "$REMOTE_ROOT" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$LIMIT" "$SEED" "$SHARDS" \
   "$MAX_ACTIVE" "$TIMEOUT" "$JOBS" "$WALL_TIME" "$AXIOM_ORDER")"
-printf '%s\n' "$METADATA" | ssh wmicluster \
-  "cat > ~/euf-viper/results/qf-uf-campaign-${RUN_ID}.json"
+printf '%s\n' "$METADATA" | ssh "$REMOTE_HOST" \
+  "cat > $REMOTE_ROOT/results/qf-uf-campaign-${RUN_ID}.json"
 
-printf 'run_id=%s prepare_job=%s array_job=%s merge_job=%s revision=%s\n' \
-  "$RUN_ID" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$REVISION"
+printf 'run_id=%s prepare_job=%s array_job=%s merge_job=%s revision=%s remote=%s:%s\n' \
+  "$RUN_ID" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$REVISION" \
+  "$REMOTE_HOST" "$REMOTE_ROOT"
