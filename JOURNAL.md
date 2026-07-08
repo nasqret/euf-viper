@@ -134,6 +134,41 @@
   total time from 2,647.98s to 2,638.97s. Common-correct aggregate speed was
   1.0023x, geometric speed was 0.9978x, and there were zero wrong answers or
   execution errors.
+- Rejected increasing the finite-domain eager cap from 8 to 11. WMI array
+  `139766` tested four PEQ size 9-11 gaps at 120 seconds; both configurations
+  solved 0/4 and totals were 480.50s versus 480.77s. The experimental knob was
+  removed rather than retained without a win.
+- Rejected bypassing finite-domain routing on the 69-case hard tail. WMI array
+  `139710` and merge `139711` measured 12/69 correct for automatic routing
+  versus 8/69 when disabled, with five baseline-only and one candidate-only
+  solve. The favorable common-solved speed was survivor bias and did not pass
+  the coverage gate.
+- Rejected a root-propagated finite pigeonhole clique shortcut. Initial tail
+  array `139798` preserved coverage at 9/69 with only a 1.0007x
+  timeout-inclusive movement. Corrected profile `139875` found no clique on
+  four eligible hard instances while adding 63-486ms of preprocessing, so the
+  experimental implementation was removed.
+- Rejected Sinz sequential at-most-one clauses as a replacement for pairwise
+  finite-domain clauses. Target array `139894` and merge `139898` solved 0/4
+  hard instances for both encodings at 120 seconds; totals were 480.4604s and
+  480.4609s. The exhaustively unit-tested opt-in path was removed.
+- Rejected direct CaDiCaL routing on the same finite-tail target. Array
+  `139900` and merge `139904` solved 0/4 for both auto/Kissat and CaDiCaL at
+  120 seconds, with 480.4649s and 480.4643s totals. No router was added.
+- Completed the revision-aware 1,200-second campaign `139688`/`139689`/`139690`.
+  Strict merge validated all 30,012 rows with no wrong answers, disagreements,
+  or execution errors. Coverage was `euf-viper` 7,478, Z3 7,500, cvc5 7,491,
+  and Yices2 7,503. `euf-viper` retained a 1.069x geometric edge over Z3 on
+  7,478 common solves but lost common aggregate time 20,668.55s to 5,365.05s;
+  Yices achieved full coverage and dominated both speed measures.
+- Hardened benchmark checkpointing to consume worker results in completion
+  order and made A/B summary formatting total when no common-correct speedup
+  exists.
+- Revalidated the CAS artifact collection. Sage and Singular passed locally;
+  the Julia fallback passed while Oscar remained unavailable; Magma V2.28-3
+  passed on `lts-faculty` in 0.010s. The local wrapper now isolates writable
+  Sage and Julia state under temporary homes while exposing installed Julia
+  packages through a read-through depot.
 
 ## Next Entry Template
 

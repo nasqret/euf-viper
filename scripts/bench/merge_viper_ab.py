@@ -106,12 +106,17 @@ def main() -> int:
     )
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     args.summary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    def format_speedup(value: float | None) -> str:
+        return f"{value:.4f}x" if value is not None else "n/a"
+
     print(
         f"instances={len(rows)} observations={len(samples)} "
         f"coverage={payload['baseline_correct']}->{payload['candidate_correct']} "
-        f"common_total_speedup={payload['candidate_speedup_by_total']:.4f}x "
-        f"all_total_speedup={payload['candidate_all_speedup_by_total']:.4f}x "
-        f"geomean={payload['candidate_geometric_speedup']:.4f}x"
+        "common_total_speedup="
+        f"{format_speedup(payload['candidate_speedup_by_total'])} "
+        "all_total_speedup="
+        f"{format_speedup(payload['candidate_all_speedup_by_total'])} "
+        f"geomean={format_speedup(payload['candidate_geometric_speedup'])}"
     )
     if wrong_answers:
         return 2

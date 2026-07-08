@@ -140,3 +140,25 @@ a new result CSV containing only revision-compatible retained observations plus
 new measurements, so the 60-second campaign remains unchanged and the strict
 merge still validates a complete matrix. For a new `euf-viper` revision, the
 campaign retains 22,457 comparator rows and measures 7,555 rows.
+
+## Competition-Budget Campaign
+
+Revision `1f68ff1cb5f1c9ee951f181a6127427b2e6d3044` ran under prepare job
+`139688`, 64-shard array `139689`, and strict merge `139690`. The timeout was
+1,200 seconds, at most four allocations were active, and each shard used eight
+worker processes. All 30,012 rows completed without wrong answers,
+disagreements, or execution errors.
+
+| Solver | Correct | Coverage | Median time | Total time |
+|---|---:|---:|---:|---:|
+| euf-viper | 7,478 | 99.67% | 0.0910s | 50,674.22s |
+| Z3 4.16.0 | 7,500 | 99.96% | 0.1426s | 11,435.55s |
+| cvc5 1.3.4 | 7,491 | 99.84% | 0.2293s | 27,875.21s |
+| Yices 2.7.0 | 7,503 | 100.00% | 0.0278s | 2,652.64s |
+
+The run retained successful comparator rows from the 60-second campaign and
+reran only their 52 timeouts. Every `euf-viper` row was rerun because its
+revision changed. On common `euf-viper`/Z3 solves the geometric speedup is
+1.069x, but aggregate common time is 20,668.55s versus 5,365.05s. Yices covers
+the complete corpus and is fastest on 6,821 instances. This supports a
+fast-head front tier, not an overall superiority claim.

@@ -130,15 +130,47 @@
   portfolio contribution, not an overall fastest-QF_UF claim.
 - The unresolved tail is concentrated in finite-model, pigeonhole-shaped
   families where one-hot CNF encounters hard resolution proofs.
+- Raising the finite-domain eager cap from 8 to 11 did not attack that wall:
+  WMI job `139766` solved 0/4 selected PEQ size 9-11 cases at 120 seconds for
+  both configurations. Do not reintroduce the cap change without a different
+  encoding or symmetry argument.
+- Disabling automatic finite-domain routing is also rejected. Hard-tail A/B
+  `139710`/`139711` reduced coverage from 12/69 to 8/69 despite faster
+  common-solved timings. Preserve the route unless a candidate keeps or raises
+  coverage under the same timeout.
+- The root-level finite pigeonhole detector is rejected. Tail A/B `139798`
+  kept coverage at 9/69 with a noise-sized 1.0007x aggregate change, and
+  corrected profile `139875` detected zero target cliques while costing
+  63-486ms on eligible cases. The implementation was removed.
+- Sequential per-term at-most-one encoding is rejected. WMI `139894`/`139898`
+  solved 0/4 selected finite-model gaps for both pairwise and sequential
+  encodings at 120 seconds, with equal timeout-inclusive totals. The option was
+  removed; future cardinality work must target cross-term structure.
+- Direct CaDiCaL routing does not solve that target either. WMI
+  `139900`/`139904` produced 0/4 correct for auto/Kissat and direct CaDiCaL at
+  120 seconds with equal totals. Backend selection is not the missing
+  cross-term reasoning.
 - The 60-second run leaves 69 `euf-viper`, 17 Z3, 32 cvc5, and 3 Yices2
   timeouts. The all-solver oracle covers 7,500/7,503; `PEQ014_size10`,
   `PEQ014_size11`, and `PEQ018_size7` are the shared UNSAT gaps.
-- The next mandatory experiment is the 1,200-second continuation. If the
-  `euf-viper` revision changes, it must retain only 22,457 unchanged comparator
-  rows, rerun all 7,503 `euf-viper` rows plus 52 comparator timeouts, and write
-  new outputs. Reusing old solver timings across revisions is forbidden.
+- The revision-aware 1,200-second continuation is complete as
+  `139688`/`139689`/`139690` at revision `1f68ff1`. It retained 22,457
+  unchanged comparator rows and measured all 7,503 `euf-viper` rows plus 52
+  comparator timeout rows. Coverage is 7,478 `euf-viper`, 7,500 Z3, 7,491
+  cvc5, and 7,503 Yices2, with zero wrong answers or execution errors.
+- On 7,478 common `euf-viper`/Z3 solves at competition budget, `euf-viper` has
+  a 1.069x geometric speedup and wins 3,878 versus 3,600, but common totals are
+  20,668.55s versus 5,365.05s and Z3 has 22 additional solves. Yices wins
+  6,852 common cases, covers all 25 `euf-viper` gaps, and is the only solver
+  that covers the complete corpus.
+- All 6,396 QG-classification instances are covered by every solver at the
+  competition budget. The remaining performance and coverage deficit is
+  entirely in the 1,107-instance non-QG stratum.
 - Certificate work should pair SAT proof traces for the exact emitted CNF with
   a replayable manifest of EUF-derived clauses and finite-domain axioms.
+- Corpus workers must checkpoint in completion order; ordered executor results
+  can hide completed tasks behind one slow early task. A/B summaries must
+  render missing common-case metrics as `n/a` rather than crashing.
 
 ## Benchmark Corpus
 
@@ -170,6 +202,11 @@
   user startup file because home-directory logging hit quota.
 - `scripts/lts/run_magma_remote.sh` ran `artifacts/magma/euf_quotient.m`
   successfully from `/tmp/$USER/euf-viper-cas`.
+- The 2026-07-08 revalidation passed Sage and Singular locally and Magma
+  V2.28-3 on LTS in 0.010s; the Julia fallback passed with Oscar unavailable.
+  `check_cas_local.sh` supplies isolated writable homes for Sage and Julia,
+  invokes Julia directly, and layers a writable depot before installed
+  packages to avoid cache and launcher lock failures.
 
 ## Literature Pointers
 

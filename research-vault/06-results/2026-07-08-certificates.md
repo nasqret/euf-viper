@@ -35,6 +35,8 @@ exists`.
 
 Two SMT-LIB 2025 QF_UF instances also passed the independent checker:
 
+Reproduce both with `scripts/cert/run_official_smoke.sh` after corpus ingestion.
+
 | Instance | Variables | Clauses | Replayed theory clauses | Source SHA-256 |
 |---|---:|---:|---:|---|
 | `20170829-Rodin/smt3166111930664231918.smt2` | 5 | 8 | 0 | `1abb91b15a44b6be0202349f3f747f3dfb892aefbca9fe65f84c132c269c4e89` |

@@ -32,13 +32,16 @@ front tier of a coverage-oriented portfolio.
 - [x] Run the full four-solver corpus at a fixed two-second budget.
 - [x] Add restartable SLURM array sharding with strict complete-result merging.
 - [x] Run the full corpus at 60 seconds per solver.
-- [ ] Run a competition-budget campaign using sharded SLURM jobs.
+- [x] Run a competition-budget campaign using sharded SLURM jobs.
 - [x] Quantify family balance and report QG versus non-QG results separately.
 - [x] Emit exact DIMACS plus SAT proof traces for UNSAT eager runs.
 - [x] Check SAT proofs independently and replay EUF-derived axiom manifests.
 - [ ] Independently reconstruct the base Tseitin CNF from SMT-LIB input.
 - [x] Route invalid eager SAT models through measured CaDiCaL lazy refinement.
-- [ ] Run LTS CAS checks for the finite-model and quotient-congruence artifacts.
+- [x] Test finite-cap, finite-bypass, sequential-AMO, direct-CaDiCaL, and
+  root-pigeonhole tail hypotheses under paired WMI gates; remove every
+  candidate that fails coverage and speed gates.
+- [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
 
 ## Acceptance Criteria For A Superiority Claim
@@ -56,10 +59,9 @@ following exist:
 
 ## Current Limitation
 
-At 60 seconds, Yices2 remains both faster and more complete: 7,500/7,503
-correct at a 0.0278s median versus `euf-viper` at 7,434/7,503 and 0.0666s.
-`euf-viper` beats Z3 on 5,581/7,433 jointly correct instances, but its hard
-tail makes common-instance total time 5,915.88s versus Z3's 3,685.61s. No
-global superiority claim is allowed. If the fallback revision is accepted, the
-competition campaign must rerun all 7,503 `euf-viper` rows plus 52 comparator
-timeouts; only unchanged comparator rows may be inherited from run `139420`.
+At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a
+0.0278s median versus `euf-viper` at 7,478/7,503 and 0.0910s. On 7,478 common
+`euf-viper`/Z3 solves, `euf-viper` has a 1.069x geometric speedup, but its hard
+tail makes common-instance total time 20,668.55s versus Z3's 5,365.05s. Z3
+adds 22 solves and Yices covers all 25 remaining gaps. No global superiority
+claim is allowed.

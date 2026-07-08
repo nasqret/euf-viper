@@ -397,7 +397,11 @@ def main() -> int:
             executor = None
         else:
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs)
-            task_results = executor.map(execute, tasks)
+            futures = [executor.submit(execute, task) for task in tasks]
+            task_results = (
+                future.result()
+                for future in concurrent.futures.as_completed(futures)
+            )
 
         try:
             for completed, (row, name, observation) in enumerate(task_results, start=1):

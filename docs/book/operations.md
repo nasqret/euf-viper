@@ -85,3 +85,18 @@ Run local CAS syntax/sanity checks where tools are installed:
 ```bash
 bash scripts/lts/check_cas_local.sh
 ```
+
+Run the Magma quotient artifact on LTS:
+
+```bash
+bash scripts/lts/run_magma_remote.sh
+```
+
+The local wrapper uses isolated temporary homes for Sage and Julia, with a
+writable Julia depot layered before the existing package depot. A missing
+Oscar package is reported explicitly; the Julia-only quotient assertions still
+run. The remote Magma command uses `magma -n` to avoid user startup files.
+
+Corpus workers write observations as futures complete, so one long-running
+early task cannot block checkpoint progress from later tasks. A/B merge output
+prints `n/a` when no common-correct timing population exists.

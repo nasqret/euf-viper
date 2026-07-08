@@ -26,6 +26,7 @@ cargo build --release --features certificates
 target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
   --out-prefix results/cert-basic
 scripts/cert/check_certificate.py results/cert-basic.euf.json
+scripts/cert/run_official_smoke.sh
 ```
 
 Expected solver output is one of:
@@ -75,12 +76,37 @@ the same three PEQ instances. A 1,200-second continuation from a new
 `euf-viper` revision retains 22,457 unchanged comparator rows, reruns all 7,503
 `euf-viper` rows and 52 comparator timeouts, and writes a new immutable run.
 
+The revision-aware 1,200-second continuation `139688`/`139689`/`139690`
+completed with zero wrong answers, disagreements, or execution errors:
+
+| Solver | Correct | Coverage | Median | Total time |
+|---|---:|---:|---:|---:|
+| euf-viper | 7,478 | 99.67% | 0.0910s | 50,674.22s |
+| Z3 4.16.0 | 7,500 | 99.96% | 0.1426s | 11,435.55s |
+| cvc5 1.3.4 | 7,491 | 99.84% | 0.2293s | 27,875.21s |
+| Yices 2.7.0 | 7,503 | 100.00% | 0.0278s | 2,652.64s |
+
+On 7,478 common `euf-viper`/Z3 solves, `euf-viper` has a 1.069x geometric
+speedup but loses common aggregate time 20,668.55s to 5,365.05s. Yices covers
+all 25 `euf-viper` gaps and is fastest on 6,821/7,503 instances. The comparator
+totals combine retained successful 60-second rows with rerun timeout rows; all
+`euf-viper` rows were newly measured at revision `1f68ff1`.
+
 The first controlled post-campaign optimization replaces Varisat with CaDiCaL
 refinement only after Kissat returns a SAT assignment that fails EUF model
 validation. Full-corpus paired job `139497` improved two-second coverage from
 6,873 to 6,886 and timeout-inclusive total time by 0.34%, with zero wrong
 answers or execution errors. Linux x86_64 now uses this route by default;
 `EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` restores the prior behavior.
+
+Five controlled hard-tail alternatives were rejected or left unimplemented:
+raising the finite-domain cap solved 0/4 selected PEQ gaps, disabling finite
+routing reduced 69-case tail coverage from 12 to 8, sequential at-most-one
+clauses solved 0/4 selected gaps for both encodings, direct CaDiCaL solved 0/4
+just as the automatic Kissat route did, and a root-level pigeonhole clique
+detector found no target clique while adding measurable preprocessing. The
+negative results and immutable WMI job identifiers are retained under
+`research-vault/06-results/`.
 
 ## Repository Map
 
@@ -112,7 +138,6 @@ answers or execution errors. Linux x86_64 now uses this route by default;
 
 The evidence supports a fast-head QF_UF tier, not a global superiority claim.
 The hard tail is concentrated in finite-model and pigeonhole-shaped families.
-Yices 2.7.0 is in the comparator, the 60-second campaign is complete, and
-certificate v1 checks the exact SAT refutation plus all EUF clauses. The
-competition-budget continuation remains pending, and certificate v1 still
-trusts the SMT-to-base-CNF translation.
+At 1,200 seconds, Yices 2.7.0 covers all 7,503 instances, Z3 covers 7,500, and
+`euf-viper` covers 7,478. Certificate v1 checks the exact SAT refutation plus
+all EUF clauses but still trusts the SMT-to-base-CNF translation.
