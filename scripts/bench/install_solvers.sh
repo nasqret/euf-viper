@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEST="${1:-$ROOT/third_party/solvers}"
 UNAME_S="$(uname -s)"
 UNAME_M="$(uname -m)"
-USE_Z3PY=0
+BUILD_Z3_API_RUNNER=0
 
 mkdir -p "$DEST/downloads" "$DEST/bin"
 
@@ -62,7 +62,7 @@ case "$UNAME_S:$UNAME_M" in
     else
       Z3_URL=""
       Z3_SHA=""
-      USE_Z3PY=1
+      BUILD_Z3_API_RUNNER=1
     fi
     ;;
   Darwin:arm64)
@@ -91,16 +91,19 @@ if [ -n "$Z3_URL" ]; then
   Z3_ZIP="$DEST/downloads/$(basename "$Z3_URL")"
   download_checked "$Z3_URL" "$Z3_SHA" "$Z3_ZIP"
   install_zip_binary "$Z3_ZIP" z3 '*/bin/z3'
-elif [ "$USE_Z3PY" = 1 ]; then
+elif [ "$BUILD_Z3_API_RUNNER" = 1 ]; then
   python3 - <<'PY' >/dev/null 2>&1 || python3 -m pip install --user z3-solver==4.16.0.0
 import z3
-assert z3.get_version_string().startswith("4.16.0")
+assert z3.get_version_string() == "4.16.0"
 PY
-  cat > "$DEST/bin/z3" <<EOF
-#!/usr/bin/env bash
-python3 "$ROOT/scripts/bench/z3_smt2.py" "\$@"
-EOF
-  chmod +x "$DEST/bin/z3"
+  Z3_PACKAGE_DIR="$(python3 -c 'import pathlib, z3; print(pathlib.Path(z3.__file__).parent)')"
+  "${CC:-cc}" -O2 -DNDEBUG \
+    -I "$Z3_PACKAGE_DIR/include" \
+    "$ROOT/scripts/bench/z3_native_runner.c" \
+    -L "$Z3_PACKAGE_DIR/lib" \
+    -Wl,-rpath,"$Z3_PACKAGE_DIR/lib" \
+    -lz3 \
+    -o "$DEST/bin/z3"
 elif command -v z3 >/dev/null 2>&1; then
   ln -sf "$(command -v z3)" "$DEST/bin/z3"
 else

@@ -18,12 +18,18 @@
 
 ## Design Decisions
 
-- First solver milestone is a strict EUF ground-conjunction verifier, not a
-  full Boolean SMT solver.
-- Unsupported Boolean structures are reported as `unsupported` instead of being
-  approximated.
-- The first Rust implementation has no external crate dependencies so it can
-  build in restricted cluster environments once Rust is available.
+- The current solver supports arbitrary ground Boolean QF_UF structure through
+  Tseitin CNF plus SAT backends. Unsupported syntax is still reported rather
+  than approximated.
+- UNSAT from a sound eager encoding is accepted; SAT assignments are checked
+  with full EUF congruence closure, and invalid assignments trigger lazy
+  theory-lemma refinement. This is the core soundness boundary.
+- Linux uses a namespaced Kissat 0.1 backend because Kissat 4 was slower on the
+  measured WMI hard tail. CaDiCaL and Varisat remain available as alternate
+  routes.
+- Finite predicate-table channeling is retained behind environment flags but is
+  not enabled by default because WMI jobs `139240` and `139242` showed no hard
+  tail gain.
 - Z3 superiority claims are blocked until a reproducible benchmark campaign is
   completed.
 
@@ -70,6 +76,26 @@
   deterministic 40-instance sample run with `euf-viper`, Z3Py 4.16.0, and cvc5
   1.3.4. No Z3/cvc5 mismatches; `euf-viper` solved 1 eq-diamond instance and
   returned `unsupported` on 39 Boolean-heavy instances.
+- Job `139158` completed all 7,503 official instances at two seconds per solver.
+  `euf-viper` solved 6,276 (83.65%), Z3 solved 6,910 (92.10%), and cvc5 solved
+  6,513 (86.81%); all three had zero wrong answers. `euf-viper` median latency
+  was 0.1126s versus Z3's 0.1676s and cvc5's 0.2939s.
+- Job `139229` is the accepted post-parser finite-domain smoke checkpoint:
+  37/40 correct, matching Z3 coverage on that sample, with 1.0848x aggregate
+  speedup over `139211` on common correct instances.
+- Job `139375` confirms the accepted platform split still builds and solves on
+  Linux after rejecting the Kissat 4 experiment.
+
+## Research Position
+
+- Current evidence supports a fast-head portfolio tier, not a general claim of
+  being a better SMT solver than Z3.
+- The unresolved tail is concentrated in finite-model, pigeonhole-shaped
+  families where one-hot CNF encounters hard resolution proofs.
+- The next mandatory comparator is Yices 2.7.0. Longer 60-second and
+  competition-budget campaigns must follow before publishing coverage claims.
+- Certificate work should pair SAT proof traces for the exact emitted CNF with
+  a replayable manifest of EUF-derived clauses and finite-domain axioms.
 
 ## Benchmark Corpus
 

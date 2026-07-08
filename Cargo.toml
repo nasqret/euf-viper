@@ -4,3 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rustsat = "0.7.5"
+rustsat-cadical = { version = "0.7.5", features = ["quiet"] }
+varisat = "0.2.2"
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+kissat = "0.1.0"
+
+[target.'cfg(not(all(target_os = "linux", target_arch = "x86_64")))'.dependencies]
+rustsat-kissat = { version = "0.7.5", features = ["quiet"] }
+
+[patch.crates-io]
+kissat = { path = "vendor/kissat" }

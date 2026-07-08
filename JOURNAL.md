@@ -44,6 +44,35 @@
   - added cvc5 1.3.4 setup from official release assets;
   - added a Z3Py fallback wrapper for WMI glibc compatibility;
   - submitted WMI corpus job `139149`, which completed successfully.
+- Replaced the conjunction-only frontend with a Boolean QF_UF pipeline:
+  - parses Boolean constants, predicates, `and`, `or`, `not`, implication,
+    equivalence, `xor`, `ite`, annotations, and zero-arity Boolean macros;
+  - Tseitin-encodes Boolean structure;
+  - validates SAT assignments with congruence closure and falls back to lazy
+    theory-lemma refinement when an eager first pass is incomplete;
+  - integrates CaDiCaL, Varisat, and a namespaced Kissat backend.
+- Ran the complete 7,503-instance corpus as WMI job `139158` with a two-second
+  per-solver budget:
+  - `euf-viper`: 6,276 correct, 1,147 timeouts, 80 unsupported, zero wrong;
+  - Z3 4.16.0: 6,910 correct, 593 timeouts, zero wrong;
+  - cvc5 1.3.4: 6,513 correct, 990 timeouts, zero wrong;
+  - `euf-viper` had the best median latency at 0.1126s, but lower coverage.
+- Added result analysis, same-instance run comparison, manifest filtering,
+  checkpoint/resume support, and WMI A/B profiling scripts.
+- Iterated parser gating, canonical congruence routing, finite-domain first
+  passes, and direct finite equality channeling. Accepted WMI smoke `139229`:
+  37/40 correct, zero wrong, 1.0848x aggregate and 1.0990x geometric speedup
+  over `139211` on common correct instances, with one additional solve.
+- Rejected two measured alternatives as defaults:
+  - routing Linux finite-predicate instances to CaDiCaL (`139215`) reduced
+    coverage;
+  - finite predicate-table channeling and Kissat 4 did not improve the WMI
+    hard tail (`139240`, `139242`, `139244`, `139245`).
+- Restored the accepted Linux Kissat 0.1 route and passed WMI build/smoke job
+  `139375` after the rollback.
+- Next experimental order is fixed: add pinned Yices 2.7.0, run full-corpus
+  60-second and competition-budget campaigns, then add checked SAT proof
+  artifacts plus EUF explanation metadata.
 
 ## Next Entry Template
 

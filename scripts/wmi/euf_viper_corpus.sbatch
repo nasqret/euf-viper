@@ -30,6 +30,18 @@ MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
 RUN_MANIFEST="$MANIFEST"
 LIMIT="${EUF_VIPER_CORPUS_LIMIT:-40}"
 SEED="${EUF_VIPER_CORPUS_SEED:-euf-viper-qf-uf-wmi-20260708}"
+JOBS="${EUF_VIPER_CORPUS_JOBS:-${SLURM_CPUS_PER_TASK:-1}}"
+PATH_REGEX="${EUF_VIPER_CORPUS_PATH_REGEX:-}"
+
+if [ -n "$PATH_REGEX" ]; then
+  MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_filter_${SLURM_JOB_ID}.jsonl"
+  scripts/bench/filter_manifest.py \
+    "$PWD/benchmarks/smtlib-2025/qf_uf_manifest.jsonl" \
+    --path-regex "$PATH_REGEX" \
+    --out "$MANIFEST" \
+    > "results/qf-uf-filter-${SLURM_JOB_ID}.log"
+  RUN_MANIFEST="$MANIFEST"
+fi
 
 if [ "$LIMIT" -gt 0 ]; then
   RUN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_sample_${LIMIT}_${SLURM_JOB_ID}.jsonl"
@@ -45,5 +57,8 @@ scripts/bench/compare_solvers.py "$RUN_MANIFEST" \
   --z3 "$PWD/third_party/solvers/bin/z3" \
   --cvc5 "$PWD/third_party/solvers/bin/cvc5" \
   --timeout "${EUF_VIPER_CORPUS_TIMEOUT:-10}" \
+  --jobs "$JOBS" \
+  --resume \
   --out "results/qf-uf-corpus-${SLURM_JOB_ID}.csv" \
-  --summary "results/qf-uf-corpus-${SLURM_JOB_ID}.json"
+  --summary "results/qf-uf-corpus-${SLURM_JOB_ID}.json" \
+  --progress "results/qf-uf-corpus-${SLURM_JOB_ID}.progress.json"

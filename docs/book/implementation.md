@@ -1,21 +1,19 @@
 # Implementation
 
-The first milestone is intentionally small and auditable.
+The current pipeline keeps each soundness boundary explicit.
 
 1. Parse SMT-LIB S-expressions.
-2. Collect ground equalities and disequalities from conjunctions.
-3. Hash-cons all terms.
-4. Merge asserted equalities with union-find.
-5. Rebuild function-application signatures until no congruence merge remains.
-6. Check each disequality against the final classes.
+2. Hash-cons data and Boolean application terms.
+3. Tseitin-encode arbitrary ground Boolean structure.
+4. Detect small explicit finite domains and add sound one-hot and function
+   channeling clauses where applicable.
+5. Add selected equality-transitivity and congruence axioms.
+6. Solve with Kissat, CaDiCaL, or Varisat according to structural routing.
+7. Trust UNSAT from the sound clause set; validate SAT models with full EUF
+   congruence closure.
+8. If validation finds a theory conflict, add explanation clauses and refine.
 
-The implementation rejects positive Boolean structure such as `or` because
-that requires a SAT layer.  The planned design is DPLL(T): Boolean abstraction,
-SAT search, theory consistency checks, theory lemmas, and selected theory
-propagation.
-
-One safe exception is implemented for positive `or`: the parser computes branch
-literals, prunes branches inconsistent with surrounding EUF literals, and adds
-equalities common to the remaining satisfiable branches.  If every branch is
-inconsistent, or if the common equalities contradict a disequality, the solver
-can return `unsat`; otherwise the formula remains `unsupported`.
+The parser also retains a narrowly gated branch-intersection preprocessor for
+single-assertion equational diamonds. Finite predicate-table channeling exists
+as an experimental flag, but remains disabled after failing its WMI hard-tail
+gate.

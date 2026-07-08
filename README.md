@@ -1,11 +1,9 @@
 # euf-viper
 
-`euf-viper` is a Rust-first SMT verifier for the equality theory of
-uninterpreted functions (EUF).  The current milestone is a deliberately strict
-QF_UF ground-conjunction checker: it accepts equalities, disequalities,
-`and`, `not` around atoms, `distinct`, and `let`, then runs congruence closure.
-It rejects Boolean search problems as `unsupported` until the DPLL(T) layer is
-implemented.
+`euf-viper` is a Rust-first SMT solver for quantifier-free equality with
+uninterpreted functions. It parses ground SMT-LIB Boolean structure, builds a
+Tseitin CNF, runs an eager finite-domain/EUF encoding through SAT backends, and
+validates candidate SAT models with congruence closure before accepting them.
 
 The long-term research target is to outperform Z3 on QF_UF benchmark families.
 This repository is structured so that claim can only be made after reproducible
@@ -22,6 +20,8 @@ target/release/euf-viper bench-or --cases 4 --branches 256 --depth 4
 python3 benches/compare_z3.py generated/synthetic --viper target/release/euf-viper
 scripts/bench/install_solvers.sh
 scripts/bench/fetch_smtlib_qf_uf.sh
+python3 scripts/bench/compare_solvers.py \
+  benchmarks/smtlib-2025/qf_uf_manifest.jsonl --timeout 2 --jobs 8
 ```
 
 Expected solver output is one of:
@@ -30,7 +30,8 @@ Expected solver output is one of:
 - `unsat`
 - `unsupported`
 
-`unsupported` is an intentional correctness boundary, not a timeout.
+`unsupported` is reserved for syntax or resource boundaries that are not
+implemented soundly; it is distinct from a timeout.
 
 ## Local Canary
 
@@ -46,17 +47,17 @@ OR-stress canaries, median local speedups over Z3 4.16.0 were 18.8x and 64.4x
 on diamond instances, and 1.7x on a pruned-branch instance.  See
 `research-vault/06-results/2026-07-08-or-preprocessor.md`.
 
-The fixed WMI corpus campaign ingested the official SMT-LIB 2025 QF_UF slice
-and ran a 40-instance deterministic sample against `euf-viper`, Z3, and cvc5.
-Z3 and cvc5 agreed on all non-timeout results.  `euf-viper` solved one official
-`eq_diamond` instance and returned `unsupported` on the other 39 sample
-instances.  See
-`research-vault/06-results/2026-07-08-qf-uf-corpus-wmi-139149.md`.
+The full WMI campaign `139158` ran all 7,503 SMT-LIB 2025 QF_UF instances at a
+two-second per-solver budget. `euf-viper` solved 6,276 with zero wrong answers,
+versus 6,910 for Z3 and 6,513 for cvc5. Its median latency was lowest at
+0.1126s, but its coverage and aggregate time did not beat Z3. The accepted
+post-parser smoke `139229` reached 37/40, matching Z3 on that sample with a
+0.0739s median. See the corresponding notes under `research-vault/06-results/`.
 
 ## Repository Map
 
-- `src/main.rs`: SMT-LIB subset parser, term arena, congruence closure engine,
-  CLI, and unit tests.
+- `src/main.rs`: SMT-LIB parser, Boolean CNF encoder, SAT portfolio,
+  congruence-closure validator, CLI, and unit tests.
 - `benches/`: local comparator harnesses.
 - `scripts/wmi/`: WMI SLURM preflight, sync, and benchmark campaign scripts.
 - `scripts/lts/`: LTS/CAS preflights and artifact checks.
@@ -79,6 +80,7 @@ instances.  See
 
 ## Current Boundary
 
-This is not yet a full SMT solver.  It is a fast EUF verifier for conjunctions
-of ground literals.  The next performance jump is a DPLL(T) layer with cheap
-preprocessing for disjunctive benchmark families such as equational diamonds.
+The evidence supports a fast-head QF_UF tier, not a global superiority claim.
+The hard tail is concentrated in finite-model and pigeonhole-shaped families.
+The next mandatory experiments add Yices 2.7.0, increase the full-corpus time
+budgets, and emit independently checked UNSAT certificates.

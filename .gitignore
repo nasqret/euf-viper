@@ -3,9 +3,12 @@
 /benchmarks/smtlib-2025/
 /third_party/solvers/
 /docs/book/_build/
-/.DS_Store
+.DS_Store
 *.log
 *.tmp
 *.sage.py
 __pycache__/
 *.pyc
+/vendor/rustsat-kissat/
+**/.cargo-ok
+**/.cargo_vcs_info.json
