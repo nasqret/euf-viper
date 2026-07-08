@@ -87,6 +87,33 @@
   both successful and intentionally invalid merges.
 - Made the sharded submitter honor `EUF_VIPER_REMOTE` for synchronization,
   submission, and metadata so concurrent campaigns can use isolated checkouts.
+- WMI sharded smoke `139382`/`139383`/`139384` completed the full
+  prepare-array-merge chain on eight sampled instances. Every solver produced
+  eight rows, all had 7/8 coverage and zero wrong answers, and the strict merge
+  reported no missing rows, execution errors, or disagreements.
+- Added proof-producing certification mode:
+  - emits exact DIMACS, an ASCII DRAT proof from a fresh CaDiCaL run, and a
+    SHA-256-linked term/atom/clause manifest;
+  - omits finite-domain shortcuts, then learns replayable EUF conflict clauses
+    until the CNF is UNSAT;
+  - independently checks DRAT with pinned `drat-trim` and replays every theory
+    clause by falsifying it and deriving an EUF congruence contradiction;
+  - passed conjunction, transitivity, function congruence, predicate
+    congruence, equational-diamond, and 1,000-edge explanation canaries;
+  - correctly refused to issue an UNSAT certificate for a SAT chain.
+- Kept certificate dependencies behind the opt-in `certificates` Cargo feature.
+  The default release binary remained 2,294,560 bytes and its Mach-O text
+  section was byte-identical to pre-certificate commit `0bb34c2`; paired
+  1,000-process startup loops were 1.71s versus 1.73s after warm-up.
+- Full four-solver WMI campaign `139381` completed all 7,503 instances at two
+  seconds with zero wrong answers, disagreements, or execution errors:
+  `euf-viper` 6,471 correct at 0.0886s median; Z3 6,911 at 0.1705s; cvc5 6,505
+  at 0.2956s; Yices2 7,394 at 0.0450s. On 6,463 jointly correct
+  `euf-viper`/Yices instances, Yices won 6,166 and used 456.60s versus
+  1,577.97s. This rejects any broad faster-than-Yices claim.
+- Extended result analysis with per-family and QG-versus-non-QG coverage,
+  median, correct-median, total, and correct-total timing. QG-classification is
+  6,396/7,503 instances (85.24%); Yices leads both that stratum and non-QG.
 
 ## Next Entry Template
 

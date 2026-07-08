@@ -8,8 +8,9 @@ congruence-closure model validator with lazy theory-lemma fallback.
 
 ```{admonition} Current Status
 :class: note
-At a two-second budget on 7,503 SMT-LIB 2025 QF_UF instances, `euf-viper` has
-the lowest median latency but lower coverage than Z3 and cvc5. The project is
-therefore positioned as a fast-head, certifying portfolio tier while Yices2,
-long-timeout, and proof-certificate experiments are completed.
+At a two-second budget on 7,503 SMT-LIB 2025 QF_UF instances, `euf-viper` is
+faster than Z3 on most jointly solved inputs but has lower coverage. Yices2 is
+both faster and substantially more complete than the current implementation.
+The project is therefore positioned as a certifying portfolio tier while
+long-timeout experiments quantify the remaining niche.
 ```

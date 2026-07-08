@@ -17,3 +17,20 @@ The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail
 gate.
+
+## UNSAT certificates
+
+The opt-in `certificates` Cargo feature keeps proof dependencies and code out of
+the benchmarked default binary. With that feature enabled, `certify` uses a
+deliberately separate path. It emits the base Tseitin clauses,
+equality-transitivity clauses, congruence clauses, and any EUF explanation
+clauses needed to reach Boolean UNSAT. Finite-domain shortcuts are omitted in
+certificate format v1. A fresh CaDiCaL instance then emits an ASCII DRAT proof
+for that exact DIMACS file.
+
+The manifest records every term, every SAT-variable interpretation, category
+counts, and SHA-256 digests for the source, DIMACS, and proof. The checker first
+runs `drat-trim`. For each non-base clause $C$, it then assumes $\neg C$, closes
+the resulting equalities under congruence, and requires a disequality conflict.
+This independently validates the SAT refutation and EUF axioms. The remaining
+v1 trust boundary is reconstruction of the base Tseitin clauses from SMT-LIB.

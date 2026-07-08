@@ -29,12 +29,14 @@ front tier of a coverage-oriented portfolio.
 - [x] Run the full 7,503-instance QF_UF corpus at a fixed two-second budget.
 - [x] Add per-instance A/B comparison and structural manifest filtering.
 - [x] Add pinned Yices 2.7.0 to every comparator schema and solver log.
+- [x] Run the full four-solver corpus at a fixed two-second budget.
 - [x] Add restartable SLURM array sharding with strict complete-result merging.
 - [ ] Run the full corpus at 60 seconds per solver.
 - [ ] Run a competition-budget campaign using sharded SLURM jobs.
 - [ ] Quantify family balance and report QG versus non-QG results separately.
-- [ ] Emit exact DIMACS plus SAT proof traces for UNSAT eager runs.
-- [ ] Check SAT proofs independently and replay EUF-derived axiom manifests.
+- [x] Emit exact DIMACS plus SAT proof traces for UNSAT eager runs.
+- [x] Check SAT proofs independently and replay EUF-derived axiom manifests.
+- [ ] Independently reconstruct the base Tseitin CNF from SMT-LIB input.
 - [ ] Add a lazy fallback route for pigeonhole-shaped finite-domain families.
 - [ ] Run LTS CAS checks for the finite-model and quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
@@ -54,7 +56,9 @@ following exist:
 
 ## Current Limitation
 
-The two-second full-corpus run has a strong latency head but weaker coverage:
-6,276/7,503 correct versus Z3's 6,910 and cvc5's 6,513. The remaining tail is
-dominated by finite-model and pigeonhole-shaped families. No global superiority
-claim is allowed until Yices2 and longer timeout campaigns are complete.
+The final two-second four-solver run shows that Yices2 is both faster and more
+complete: 7,394/7,503 correct at a 0.0450s median versus `euf-viper` at
+6,471/7,503 and 0.0886s. `euf-viper` remains faster than Z3 on most jointly
+solved instances but has lower coverage and higher timeout-inclusive total
+time. No global superiority claim is allowed; longer-timeout campaigns now
+measure the size of the gap and identify portfolio niches.

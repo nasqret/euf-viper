@@ -4,12 +4,22 @@ use rustsat::solvers::{
     GetInternalStats, LimitConflicts, Solve as RustSatSolve, SolverResult as RustSatResult,
 };
 use rustsat::types::{Clause as RustSatClause, Lit as RustSatLit, TernaryVal};
+#[cfg(feature = "certificates")]
+use rustsat_cadical::ProofFormat as CadicalProofFormat;
 use rustsat_cadical::{CaDiCaL as CadicalSolver, Config as CadicalConfig};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver};
+#[cfg(feature = "certificates")]
+use serde::Serialize;
+#[cfg(feature = "certificates")]
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs;
+#[cfg(feature = "certificates")]
+use std::io::{BufReader, BufWriter, Read, Write};
+#[cfg(feature = "certificates")]
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
@@ -1402,6 +1412,63 @@ struct CnfProblem {
     true_lit: Option<i32>,
     finite_equalities_complete: bool,
     finite_predicate_congruence_complete: bool,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct CertificateTerm {
+    id: TermId,
+    function: SymId,
+    args: Vec<TermId>,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CertificateAtom {
+    Auxiliary {
+        variable: usize,
+    },
+    Equality {
+        variable: usize,
+        left: TermId,
+        right: TermId,
+    },
+    BoolTerm {
+        variable: usize,
+        term: TermId,
+    },
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct CertificateClauseCounts {
+    base: usize,
+    transitivity: usize,
+    congruence: usize,
+    theory_conflicts: usize,
+    total: usize,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct CertificateManifest {
+    format: &'static str,
+    result: &'static str,
+    source: String,
+    source_sha256: String,
+    dimacs: String,
+    dimacs_sha256: String,
+    proof: String,
+    proof_sha256: String,
+    variables: usize,
+    true_term: TermId,
+    false_term: TermId,
+    terms: Vec<CertificateTerm>,
+    atoms: Vec<CertificateAtom>,
+    clauses: CertificateClauseCounts,
+    theory_rounds: usize,
+    finite_domain_axioms: usize,
 }
 
 impl CnfProblem {
@@ -3196,6 +3263,281 @@ fn solve_varisat_euf(
     )
 }
 
+#[cfg(feature = "certificates")]
+fn discover_certificate_theory_conflicts(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    max_rounds: usize,
+) -> Result<(usize, usize), String> {
+    let mut solver = VarisatSolver::new();
+    for clause in &cnf.clauses {
+        let literals = clause
+            .iter()
+            .map(|literal| Lit::from_dimacs(*literal as isize))
+            .collect::<Vec<_>>();
+        solver.add_clause(&literals);
+    }
+
+    let mut learned = HashSet::<Vec<i32>>::new();
+    for round in 1..=max_rounds {
+        match solver.solve() {
+            Ok(false) => return Ok((round, learned.len())),
+            Err(error) => return Err(format!("Varisat failed during certification: {error}")),
+            Ok(true) => {}
+        }
+
+        let mut assignment = vec![-1i8; cnf.var_count() + 1];
+        assignment[0] = 0;
+        for literal in solver.model().unwrap_or_default() {
+            let dimacs = literal.to_dimacs() as i32;
+            let var = dimacs.unsigned_abs() as usize;
+            if var < assignment.len() {
+                assignment[var] = if dimacs > 0 { 1 } else { -1 };
+            }
+        }
+        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+        if conflicts.is_empty() {
+            return Err("input is satisfiable; no UNSAT certificate exists".to_owned());
+        }
+
+        let mut added = 0usize;
+        for clause in conflicts {
+            if learned.insert(clause.clone()) {
+                let literals = clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>();
+                solver.add_clause(&literals);
+                cnf.clauses.push(clause);
+                added += 1;
+            }
+        }
+        if added == 0 {
+            return Err("certificate saturation repeated an EUF conflict clause".to_owned());
+        }
+    }
+    Err(format!(
+        "certificate saturation reached the {max_rounds}-round limit"
+    ))
+}
+
+#[cfg(feature = "certificates")]
+fn write_dimacs(path: &Path, cnf: &CnfProblem) -> Result<(), String> {
+    let file = fs::File::create(path)
+        .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    writeln!(writer, "p cnf {} {}", cnf.var_count(), cnf.clauses.len())
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    for clause in &cnf.clauses {
+        for literal in clause {
+            write!(writer, "{literal} ")
+                .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+        }
+        writeln!(writer, "0")
+            .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    }
+    writer
+        .flush()
+        .map_err(|error| format!("failed to flush {}: {error}", path.display()))
+}
+
+#[cfg(feature = "certificates")]
+fn write_cadical_drat(path: &Path, cnf: &CnfProblem) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_file(path)
+            .map_err(|error| format!("failed to replace {}: {error}", path.display()))?;
+    }
+    let result = {
+        let mut solver = CadicalSolver::default();
+        solver
+            .set_configuration(CadicalConfig::Plain)
+            .map_err(|error| format!("failed to configure proof solver: {error}"))?;
+        solver
+            .trace_proof(path, CadicalProofFormat::Drat { binary: false })
+            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+        for clause in &cnf.clauses {
+            solver
+                .add_clause(rustsat_clause(clause))
+                .map_err(|error| format!("failed to load certificate CNF: {error}"))?;
+        }
+        solver
+            .solve()
+            .map_err(|error| format!("CaDiCaL proof run failed: {error}"))?
+    };
+    if result != RustSatResult::Unsat {
+        return Err(format!(
+            "certificate CNF was expected UNSAT but CaDiCaL returned {result:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "certificates")]
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(feature = "certificates")]
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let file = fs::File::open(path)
+        .map_err(|error| format!("failed to hash {}: {error}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("failed to hash {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+#[cfg(feature = "certificates")]
+fn path_with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
+    let mut path = prefix.as_os_str().to_os_string();
+    path.push(suffix);
+    PathBuf::from(path)
+}
+
+#[cfg(feature = "certificates")]
+fn certificate_atoms(cnf: &CnfProblem) -> Vec<CertificateAtom> {
+    cnf.var_atoms
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(variable, atom)| match atom {
+            None => CertificateAtom::Auxiliary { variable },
+            Some(BoolAtomKey::Eq(left, right)) => CertificateAtom::Equality {
+                variable,
+                left: *left,
+                right: *right,
+            },
+            Some(BoolAtomKey::BoolTerm(term)) => CertificateAtom::BoolTerm {
+                variable,
+                term: *term,
+            },
+        })
+        .collect()
+}
+
+#[cfg(feature = "certificates")]
+fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, String> {
+    if max_rounds == 0 {
+        return Err("--max-theory-rounds must be at least 1".to_owned());
+    }
+    let source_path = Path::new(path);
+    let source_bytes = fs::read(source_path)
+        .map_err(|error| format!("failed to read {}: {error}", source_path.display()))?;
+    let input = std::str::from_utf8(&source_bytes)
+        .map_err(|error| format!("{} is not UTF-8: {error}", source_path.display()))?;
+    let problem = parse_problem(input)?;
+    let bool_problem = problem
+        .bool_problem
+        .as_ref()
+        .ok_or_else(|| "certificate mode requires a Boolean QF_UF assertion".to_owned())?;
+    if !bool_problem.unsupported.is_empty() {
+        return Err(format!(
+            "certificate mode does not support: {}",
+            bool_problem.unsupported.join("; ")
+        ));
+    }
+
+    let prefix = Path::new(prefix);
+    let dimacs_path = path_with_suffix(prefix, ".cnf");
+    let proof_path = path_with_suffix(prefix, ".drat");
+    let manifest_path = path_with_suffix(prefix, ".euf.json");
+    if let Some(parent) = dimacs_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+
+    let mut cnf = CnfProblem::new();
+    for assertion in &bool_problem.assertions {
+        cnf.add_assertion(assertion);
+    }
+    let base_count = cnf.clauses.len();
+    let transitivity = equality_transitivity_clauses(&cnf, problem.arena.terms.len());
+    let transitivity_count = transitivity.len();
+    cnf.clauses.extend(transitivity);
+    let congruence = congruence_axiom_clauses(&cnf, &problem.arena);
+    let congruence_count = congruence.len();
+    cnf.clauses.extend(congruence);
+
+    let (theory_rounds, conflict_count) = discover_certificate_theory_conflicts(
+        &mut cnf,
+        &problem.arena,
+        bool_problem.true_term,
+        bool_problem.false_term,
+        max_rounds,
+    )?;
+    write_dimacs(&dimacs_path, &cnf)?;
+    write_cadical_drat(&proof_path, &cnf)?;
+
+    let terms = problem
+        .arena
+        .terms
+        .iter()
+        .enumerate()
+        .map(|(id, term)| CertificateTerm {
+            id,
+            function: term.fun,
+            args: term.args.clone(),
+        })
+        .collect();
+    let manifest = CertificateManifest {
+        format: "euf-viper-euf-cnf-v1",
+        result: "unsat",
+        source: source_path.display().to_string(),
+        source_sha256: sha256_hex(&source_bytes),
+        dimacs: dimacs_path.display().to_string(),
+        dimacs_sha256: sha256_file(&dimacs_path)?,
+        proof: proof_path.display().to_string(),
+        proof_sha256: sha256_file(&proof_path)?,
+        variables: cnf.var_count(),
+        true_term: bool_problem.true_term,
+        false_term: bool_problem.false_term,
+        terms,
+        atoms: certificate_atoms(&cnf),
+        clauses: CertificateClauseCounts {
+            base: base_count,
+            transitivity: transitivity_count,
+            congruence: congruence_count,
+            theory_conflicts: conflict_count,
+            total: cnf.clauses.len(),
+        },
+        theory_rounds,
+        finite_domain_axioms: 0,
+    };
+    let manifest_file = fs::File::create(&manifest_path)
+        .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
+    let mut manifest_writer = BufWriter::new(manifest_file);
+    serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
+        .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+    writeln!(manifest_writer)
+        .map_err(|error| format!("failed to finish {}: {error}", manifest_path.display()))?;
+
+    println!("unsat");
+    eprintln!("dimacs={}", dimacs_path.display());
+    eprintln!("proof={}", proof_path.display());
+    eprintln!("manifest={}", manifest_path.display());
+    eprintln!("cnf_vars={}", cnf.var_count());
+    eprintln!("cnf_clauses={}", cnf.clauses.len());
+    eprintln!("theory_rounds={theory_rounds}");
+    eprintln!("theory_conflicts={conflict_count}");
+    Ok(0)
+}
+
 fn profile_phase(label: &str, start: Instant, count: usize) {
     profile_measurement(label, start.elapsed().as_nanos(), count);
 }
@@ -3964,6 +4306,17 @@ fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> Result<usize
     Ok(default)
 }
 
+#[cfg(feature = "certificates")]
+fn parse_required_flag<'a>(args: &'a [String], flag: &str) -> Result<&'a str, String> {
+    let position = args
+        .iter()
+        .position(|argument| argument == flag)
+        .ok_or_else(|| format!("{flag} is required"))?;
+    args.get(position + 1)
+        .map(String::as_str)
+        .ok_or_else(|| format!("{flag} requires a value"))
+}
+
 fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
     let value = value.ok_or_else(|| format!("missing {label}"))?;
     value
@@ -3971,10 +4324,25 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
         .map_err(|e| format!("invalid {label}: {e}"))
 }
 
+#[cfg(not(feature = "certificates"))]
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
   euf-viper stats FILE
+  euf-viper gen chain N [--sat]
+  euf-viper gen grid WIDTH DEPTH
+  euf-viper gen diamond BRANCHES DEPTH
+  euf-viper gen pruned-or BRANCHES
+  euf-viper bench [--cases N] [--size N]
+  euf-viper bench-or [--cases N] [--branches N] [--depth N]"
+}
+
+#[cfg(feature = "certificates")]
+fn usage() -> &'static str {
+    "usage:
+  euf-viper solve [--stats] FILE
+  euf-viper stats FILE
+  euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
   euf-viper gen diamond BRANCHES DEPTH
@@ -4001,6 +4369,13 @@ fn run() -> Result<i32, String> {
         "stats" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             stats_file(file)
+        }
+        #[cfg(feature = "certificates")]
+        "certify" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            let prefix = parse_required_flag(&args[3..], "--out-prefix")?;
+            let max_rounds = parse_flag_usize(&args[3..], "--max-theory-rounds", 100_000)?;
+            certify_file(file, prefix, max_rounds)
         }
         "gen" => gen_cmd(&args[1..]),
         "bench" => bench_cmd(&args[1..]),

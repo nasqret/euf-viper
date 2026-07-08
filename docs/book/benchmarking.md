@@ -79,14 +79,28 @@ All decisive answers matched the manifest. The result establishes a fast
 median, not an overall win. Accepted smoke `139229` subsequently reached 37/40
 and improved common-instance aggregate time by 1.0848x over `139211`.
 
-The next protocol revision adds pinned Yices 2.7.0 and repeats the full corpus
-at 60 seconds and competition-style budgets. Family-stratified reporting is
-required because QG-classification dominates the corpus.
-
 Yices 2.7.0 is installed from the official `yices-2.7.0` GitHub release. The
 Linux x86_64 static-GMP archive is pinned by SHA-256
 `49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a`.
 Four-solver WMI smoke `139380` passed before the first full Yices campaign.
+
+Full four-solver campaign `139381` then completed the corpus at two seconds:
+
+| Solver | Correct | Coverage | Median time | Total time |
+|---|---:|---:|---:|---:|
+| euf-viper | 6,471 | 86.25% | 0.0886s | 3,668.11s |
+| Z3 4.16.0 | 6,911 | 92.11% | 0.1705s | 3,494.35s |
+| cvc5 1.3.4 | 6,505 | 86.70% | 0.2956s | 4,909.17s |
+| Yices 2.7.0 | 7,394 | 98.55% | 0.0450s | 1,169.43s |
+
+All 30,012 solver-instance rows completed with no wrong answers, execution
+errors, or decisive disagreements. `euf-viper` beat Z3 on 5,428/6,437 jointly
+correct instances, but Yices beat `euf-viper` on 6,166/6,463. This result
+rejects a broad fastest-solver claim.
+
+QG-classification contributes 6,396 instances (85.24%). `euf-viper` covered
+86.18% of QG and 86.63% of non-QG; Yices covered 98.91% and 96.48%
+respectively. The 60-second and competition-budget runs retain both strata.
 
 Long-timeout runs use `sync_and_submit_sharded_corpus.sh`. Its prepare job
 creates an immutable campaign manifest, array tasks assign rows by manifest
@@ -94,3 +108,8 @@ offset modulo the shard count, and the dependent merge checks that every
 manifest-path and solver pair occurs exactly once before producing aggregate
 tables. The submission script refuses a dirty worktree so every campaign is
 tied to a committed solver revision.
+
+The dependency-chain smoke used prepare job `139382`, two array tasks under
+`139383`, and merge job `139384`. All stages completed. The merged eight-row
+sample had zero wrong answers, disagreements, missing rows, and execution
+errors; all four solvers covered 7/8 within two seconds.

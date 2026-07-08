@@ -22,6 +22,10 @@ scripts/bench/install_solvers.sh
 scripts/bench/fetch_smtlib_qf_uf.sh
 python3 scripts/bench/compare_solvers.py \
   benchmarks/smtlib-2025/qf_uf_manifest.jsonl --timeout 2 --jobs 8
+cargo build --release --features certificates
+target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
+  --out-prefix results/cert-basic
+scripts/cert/check_certificate.py results/cert-basic.euf.json
 ```
 
 Expected solver output is one of:
@@ -47,12 +51,13 @@ OR-stress canaries, median local speedups over Z3 4.16.0 were 18.8x and 64.4x
 on diamond instances, and 1.7x on a pruned-branch instance.  See
 `research-vault/06-results/2026-07-08-or-preprocessor.md`.
 
-The full WMI campaign `139158` ran all 7,503 SMT-LIB 2025 QF_UF instances at a
-two-second per-solver budget. `euf-viper` solved 6,276 with zero wrong answers,
-versus 6,910 for Z3 and 6,513 for cvc5. Its median latency was lowest at
-0.1126s, but its coverage and aggregate time did not beat Z3. The accepted
-post-parser smoke `139229` reached 37/40, matching Z3 on that sample with a
-0.0739s median. See the corresponding notes under `research-vault/06-results/`.
+The final four-solver WMI campaign `139381` ran all 7,503 SMT-LIB 2025 QF_UF
+instances at two seconds. `euf-viper` solved 6,471 at a 0.0886s median, Z3
+solved 6,911 at 0.1705s, cvc5 solved 6,505 at 0.2956s, and Yices2 solved 7,394
+at 0.0450s. All decisive answers matched the manifest. The data supports a
+faster-than-Z3 head on common solved instances, but Yices2 decisively leads the
+current implementation. See the corresponding notes under
+`research-vault/06-results/`.
 
 ## Repository Map
 
@@ -60,6 +65,7 @@ post-parser smoke `139229` reached 37/40, matching Z3 on that sample with a
   congruence-closure validator, CLI, and unit tests.
 - `benches/`: local comparator harnesses.
 - `scripts/wmi/`: WMI SLURM preflight, sync, and benchmark campaign scripts.
+- `scripts/cert/`: pinned DRAT checker setup and independent certificate replay.
 - `scripts/lts/`: LTS/CAS preflights and artifact checks.
 - `artifacts/`: SageMath, Magma, Singular, Oscar, and Rust-adjacent
   mathematical sanity artifacts.
@@ -77,10 +83,12 @@ post-parser smoke `139229` reached 37/40, matching Z3 on that sample with a
 - Congruence closure in proof-producing settings:
   https://arxiv.org/abs/1701.04391
 - Small proofs from congruence closure: https://arxiv.org/abs/2209.03398
+- DRAT-trim proof checker: https://github.com/marijnheule/drat-trim
 
 ## Current Boundary
 
 The evidence supports a fast-head QF_UF tier, not a global superiority claim.
 The hard tail is concentrated in finite-model and pigeonhole-shaped families.
-The next mandatory experiments add Yices 2.7.0, increase the full-corpus time
-budgets, and emit independently checked UNSAT certificates.
+Yices 2.7.0 is now in the comparator and certificate v1 checks the exact SAT
+refutation plus all EUF clauses. Longer full-corpus budgets remain mandatory,
+and certificate v1 still trusts the SMT-to-base-CNF translation.

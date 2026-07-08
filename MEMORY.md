@@ -36,6 +36,13 @@
   and dependent merge job. The prepare job creates
   `qf_uf_campaign_<run-id>.jsonl`; every shard and the merge read that exact
   manifest. The merge must see one row per manifest-path and solver pair.
+- Certificate format `euf-viper-euf-cnf-v1` links source, DIMACS, and ASCII DRAT
+  files by SHA-256. The Python checker invokes independent `drat-trim` and
+  validates each non-base clause by an EUF congruence replay. Format v1 does
+  not include finite-domain axioms and still trusts the SMT-to-base-CNF encoder.
+- Certificate code is behind the non-default `certificates` Cargo feature. The
+  default release text section is byte-identical to pre-certificate commit
+  `0bb34c2`, preserving the measured solver executable path.
 
 ## Local Canary Results
 
@@ -90,12 +97,20 @@
 - Job `139375` confirms the accepted platform split still builds and solves on
   Linux after rejecting the Kissat 4 experiment.
 - Job `139381` is the first full four-solver, two-second campaign after adding
-  pinned Yices 2.7.0.
+  pinned Yices 2.7.0. Final coverage: `euf-viper` 6,471, Z3 6,911, cvc5 6,505,
+  Yices2 7,394; medians were 0.0886s, 0.1705s, 0.2956s, and 0.0450s
+  respectively. There were no wrong answers or solver disagreements.
+- Jobs `139382` through `139384` validate the sharded prepare-array-merge chain
+  on eight sampled instances with four solvers and strict completeness checks.
 
 ## Research Position
 
 - Current evidence supports a fast-head portfolio tier, not a general claim of
   being a better SMT solver than Z3.
+- Yices2 decisively dominates the current implementation at two seconds: it
+  wins 6,166 of 6,463 jointly correct instances and has 98.55% coverage. The
+  research target is now a specialized certifying front tier or a structural
+  portfolio contribution, not an overall fastest-QF_UF claim.
 - The unresolved tail is concentrated in finite-model, pigeonhole-shaped
   families where one-hot CNF encounters hard resolution proofs.
 - The next mandatory comparator is Yices 2.7.0. Longer 60-second and

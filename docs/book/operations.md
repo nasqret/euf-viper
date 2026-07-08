@@ -48,6 +48,30 @@ EUF_VIPER_REMOTE='wmicluster:~/euf-viper-sharded-smoke' \
 bash scripts/wmi/sync_and_submit_sharded_corpus.sh
 ```
 
+## Certificates
+
+Install the pinned DRAT checker when it is not already available:
+
+```bash
+scripts/cert/install_drat_trim.sh
+```
+
+Emit and check an UNSAT certificate:
+
+```bash
+cargo build --release --features certificates
+target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
+  --out-prefix results/cert-basic
+scripts/cert/check_certificate.py results/cert-basic.euf.json \
+  --drat-trim third_party/checkers/bin/drat-trim
+```
+
+Run the complete certificate canary collection:
+
+```bash
+DRAT_TRIM=third_party/checkers/bin/drat-trim scripts/cert/run_smoke.sh
+```
+
 ## LTS
 
 Run CAS availability checks:

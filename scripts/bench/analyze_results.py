@@ -186,6 +186,49 @@ def pairwise_summary(
     }
 
 
+def grouped_summaries(
+    groups: dict[str, list[str]],
+    solvers: list[str],
+    by_path: dict[str, dict[str, dict]],
+    expected: dict[str, str],
+) -> dict[str, dict]:
+    payload = {}
+    for group, paths in sorted(groups.items()):
+        solver_data = {}
+        for solver in solvers:
+            observations = [
+                by_path[relative_path][solver]
+                for relative_path in paths
+                if solver in by_path.get(relative_path, {})
+            ]
+            correct_observations = [
+                by_path[relative_path][solver]
+                for relative_path in paths
+                if solver in by_path.get(relative_path, {})
+                and by_path[relative_path][solver]["result"] == expected[relative_path]
+            ]
+            times = [observation["time_s"] for observation in observations]
+            correct_times = [
+                observation["time_s"] for observation in correct_observations
+            ]
+            solver_data[solver] = {
+                "count": len(observations),
+                "correct": len(correct_observations),
+                "coverage": len(correct_observations) / len(paths),
+                "results": dict(
+                    sorted(Counter(obs["result"] for obs in observations).items())
+                ),
+                "total_time_s": sum(times),
+                "median_time_s": statistics.median(times) if times else None,
+                "correct_total_time_s": sum(correct_times),
+                "correct_median_time_s": (
+                    statistics.median(correct_times) if correct_times else None
+                ),
+            }
+        payload[group] = {"instances": len(paths), "solvers": solver_data}
+    return payload
+
+
 def family_summaries(
     solvers: list[str],
     by_path: dict[str, dict[str, dict]],
@@ -194,29 +237,23 @@ def family_summaries(
     families: dict[str, list[str]] = defaultdict(list)
     for relative_path in expected:
         families[family_name(relative_path)].append(relative_path)
+    return grouped_summaries(dict(families), solvers, by_path, expected)
 
-    payload = {}
-    for family, paths in sorted(families.items()):
-        solver_data = {}
-        for solver in solvers:
-            results = [
-                by_path[relative_path][solver]["result"]
-                for relative_path in paths
-                if solver in by_path.get(relative_path, {})
-            ]
-            correct = sum(
-                by_path[relative_path][solver]["result"] == expected[relative_path]
-                for relative_path in paths
-                if solver in by_path.get(relative_path, {})
-            )
-            solver_data[solver] = {
-                "count": len(results),
-                "correct": correct,
-                "coverage": correct / len(paths),
-                "results": dict(sorted(Counter(results).items())),
-            }
-        payload[family] = {"instances": len(paths), "solvers": solver_data}
-    return payload
+
+def stratum_summaries(
+    solvers: list[str],
+    by_path: dict[str, dict[str, dict]],
+    expected: dict[str, str],
+) -> dict[str, dict]:
+    groups = {"QG-classification": [], "non-QG": []}
+    for relative_path in expected:
+        group = (
+            "QG-classification"
+            if family_name(relative_path) == "QG-classification"
+            else "non-QG"
+        )
+        groups[group].append(relative_path)
+    return grouped_summaries(groups, solvers, by_path, expected)
 
 
 def main() -> int:
@@ -249,6 +286,7 @@ def main() -> int:
         "solvers": solver_data,
         "pairwise": pairwise,
         "families": family_summaries(solvers, by_path, expected),
+        "strata": stratum_summaries(solvers, by_path, expected),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
