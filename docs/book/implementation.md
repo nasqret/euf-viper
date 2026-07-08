@@ -25,6 +25,20 @@ single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail
 gate.
 
+## Structural portfolio
+
+The explicit `portfolio` command is separate from standalone `solve`. A frozen
+depth-3 tree counts parentheses, `not`, and `declare-fun` forms without using
+the benchmark path or expected-status metadata. Selected inputs run through
+`euf-viper` in-process; all other inputs replace the current Unix process with
+a user-supplied Yices executable.
+
+The tree is trained by `scripts/bench/train_structural_router.py`, which uses
+source-hash folds and rejects configurations that send an unresolved holdout
+case to `euf-viper`. The accepted full-corpus gate preserves complete Yices
+coverage and improves aggregate time, but not geometric speed. This mode
+inherits Yices's trust boundary and is not covered by certificate format v1.
+
 ## UNSAT certificates
 
 The opt-in `certificates` Cargo feature keeps proof dependencies and code out of

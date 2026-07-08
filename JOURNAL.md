@@ -161,6 +161,18 @@
   and Yices2 7,503. `euf-viper` retained a 1.069x geometric edge over Z3 on
   7,478 common solves but lost common aggregate time 20,668.55s to 5,365.05s;
   Yices achieved full coverage and dominated both speed measures.
+- Added an explicit structural Yices portfolio after content-hash
+  cross-validation found a coverage-preserving router candidate. Target gate
+  `139907`/`139912` kept 65/65 coverage and improved aggregate time 2.482x;
+  overhead gate `139925`/`139930` measured about 2.96ms per Yices-routed case.
+  Prototype full gate `139942`/`139947` kept 7,503/7,503 coverage and improved
+  aggregate time 1.0290x. Exact-source confirmation `140030`/`140035` improved
+  direct Yices 1,241.01s to 1,186.49s, a 1.0460x aggregate win, with zero wrong
+  answers or errors. Geometric speed was 0.8788x, so this is opt-in and not a
+  uniform speed claim.
+- Rejected streaming router input after `140012`/`140017` worsened the
+  200-case overhead aggregate from 0.9486x to 0.9416x versus direct Yices.
+  Restored the full-read binary measured by the full-corpus gate.
 - Hardened benchmark checkpointing to consume worker results in completion
   order and made A/B summary formatting total when no common-correct speedup
   exists.

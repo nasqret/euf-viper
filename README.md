@@ -15,6 +15,8 @@ SMT-LIB and SMT-COMP runs.
 cargo test
 cargo run --release -- gen chain 1000 > /tmp/chain.smt2
 cargo run --release -- solve --stats /tmp/chain.smt2
+cargo run --release -- portfolio \
+  --yices third_party/solvers/bin/yices-smt2 /tmp/chain.smt2
 cargo run --release -- bench --cases 10 --size 5000
 target/release/euf-viper bench-or --cases 4 --branches 256 --depth 4
 python3 benches/compare_z3.py generated/synthetic --viper target/release/euf-viper
@@ -92,6 +94,27 @@ all 25 `euf-viper` gaps and is fastest on 6,821/7,503 instances. The comparator
 totals combine retained successful 60-second rows with rerun timeout rows; all
 `euf-viper` rows were newly measured at revision `1f68ff1`.
 
+### Opt-In Structural Portfolio
+
+`portfolio` uses a frozen depth-3 lexical router, runs `euf-viper` internally
+for 65 structurally selected corpus cases, and execs a supplied Yices binary
+otherwise. It does not inspect benchmark paths or `:status` metadata. Full
+exact-source paired WMI gate `140030`/`140035` at 1,200 seconds produced:
+
+| Metric | Direct Yices | Portfolio |
+|---|---:|---:|
+| Correct | 7,503 | 7,503 |
+| Median | 0.0290s | 0.0334s |
+| Total time | 1,241.01s | 1,186.49s |
+| Pairwise wins | 6,327 | 1,176 |
+
+The portfolio is 1.046x faster by aggregate time but 0.8788x by geometric
+speed, so it is an aggregate-tail optimization rather than a per-instance
+win. It depends on Yices, was trained and measured on the same corpus, and is
+not an independent fastest-solver claim. `solve` remains standalone and
+unchanged. Training and all rejected follow-ups are recorded in
+`research-vault/06-results/2026-07-08-structural-yices-portfolio.md`.
+
 The first controlled post-campaign optimization replaces Varisat with CaDiCaL
 refinement only after Kissat returns a SAT assignment that fails EUF model
 validation. Full-corpus paired job `139497` improved two-second coverage from
@@ -140,4 +163,6 @@ The evidence supports a fast-head QF_UF tier, not a global superiority claim.
 The hard tail is concentrated in finite-model and pigeonhole-shaped families.
 At 1,200 seconds, Yices 2.7.0 covers all 7,503 instances, Z3 covers 7,500, and
 `euf-viper` covers 7,478. Certificate v1 checks the exact SAT refutation plus
-all EUF clauses but still trusts the SMT-to-base-CNF translation.
+all EUF clauses but still trusts the SMT-to-base-CNF translation. The opt-in
+structural portfolio covers 7,503 and improves paired aggregate time over
+Yices by 1.046x, while depending on Yices and losing the geometric metric.

@@ -20,7 +20,7 @@ use std::fs;
 use std::io::{BufReader, BufWriter, Read, Write};
 #[cfg(feature = "certificates")]
 use std::path::{Path, PathBuf};
-use std::process;
+use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
 
@@ -4115,6 +4115,98 @@ fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
     })
 }
 
+// Frozen depth-3 candidate emitted by scripts/bench/train_structural_router.py.
+const ROUTER_MAX_PARENS: usize = 1_912;
+const ROUTER_MAX_NOTS: usize = 7;
+const ROUTER_MAX_DECLARATIONS: usize = 18;
+
+fn count_byte_up_to(input: &[u8], byte: u8, limit: usize) -> usize {
+    input
+        .iter()
+        .filter(|&&candidate| candidate == byte)
+        .take(limit + 1)
+        .count()
+}
+
+fn count_pattern_up_to(input: &[u8], pattern: &[u8], limit: usize) -> usize {
+    input
+        .windows(pattern.len())
+        .filter(|window| *window == pattern)
+        .take(limit + 1)
+        .count()
+}
+
+fn structural_router_prefers_euf(input: &[u8]) -> bool {
+    count_byte_up_to(input, b'(', ROUTER_MAX_PARENS) <= ROUTER_MAX_PARENS
+        && count_pattern_up_to(input, b"(not", ROUTER_MAX_NOTS) <= ROUTER_MAX_NOTS
+        && count_pattern_up_to(input, b"(declare-fun", ROUTER_MAX_DECLARATIONS)
+            <= ROUTER_MAX_DECLARATIONS
+}
+
+fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, String> {
+    let input = fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let use_euf = structural_router_prefers_euf(&input);
+    if env::var_os("EUF_VIPER_PORTFOLIO_TRACE").is_some() {
+        eprintln!(
+            "portfolio_route={}",
+            if use_euf { "euf-viper" } else { "yices2" }
+        );
+    }
+    if use_euf {
+        return solve_file(path, with_stats);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let error = Command::new(yices).arg(path).exec();
+        Err(format!("failed to exec Yices fallback `{yices}`: {error}"))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = Command::new(yices)
+            .arg(path)
+            .status()
+            .map_err(|e| format!("failed to run Yices fallback `{yices}`: {e}"))?;
+        Ok(status.code().unwrap_or(1))
+    }
+}
+
+fn parse_portfolio_args(args: &[String]) -> Result<(&str, &str, bool), String> {
+    let mut yices = None;
+    let mut file = None;
+    let mut with_stats = false;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--yices" => {
+                yices = args.get(index + 1).map(String::as_str);
+                if yices.is_none() {
+                    return Err("--yices requires a value".to_owned());
+                }
+                index += 2;
+            }
+            "--stats" => {
+                with_stats = true;
+                index += 1;
+            }
+            option if option.starts_with("--") => {
+                return Err(format!("unknown portfolio option `{option}`"));
+            }
+            path if file.is_none() => {
+                file = Some(path);
+                index += 1;
+            }
+            path => return Err(format!("unexpected portfolio argument `{path}`")),
+        }
+    }
+    Ok((
+        file.ok_or_else(|| "portfolio input file is required".to_owned())?,
+        yices.ok_or_else(|| "--yices is required".to_owned())?,
+        with_stats,
+    ))
+}
+
 fn stats_file(path: &str) -> Result<i32, String> {
     let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let problem = parse_problem(&input)?;
@@ -4389,6 +4481,7 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
+  euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -4402,6 +4495,7 @@ fn usage() -> &'static str {
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
+  euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
   euf-viper gen chain N [--sat]
@@ -4426,6 +4520,10 @@ fn run() -> Result<i32, String> {
                 .find(|arg| !arg.starts_with("--"))
                 .ok_or_else(|| usage().to_owned())?;
             solve_file(file, with_stats)
+        }
+        "portfolio" => {
+            let (file, yices, with_stats) = parse_portfolio_args(&args)?;
+            portfolio_file(file, yices, with_stats)
         }
         "stats" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -4462,6 +4560,36 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structural_router_uses_only_bounded_lexical_features() {
+        assert!(structural_router_prefers_euf(
+            b"(set-logic QF_UF) (declare-fun a () Bool) (assert a)"
+        ));
+        assert!(!structural_router_prefers_euf(
+            "(declare-fun a () Bool)".repeat(19).as_bytes()
+        ));
+        assert!(!structural_router_prefers_euf(
+            "(not true)".repeat(8).as_bytes()
+        ));
+        assert!(!structural_router_prefers_euf("(".repeat(1_913).as_bytes()));
+    }
+
+    #[test]
+    fn parses_explicit_portfolio_arguments() {
+        let args = [
+            "euf-viper".to_owned(),
+            "portfolio".to_owned(),
+            "--yices".to_owned(),
+            "/solver/yices-smt2".to_owned(),
+            "--stats".to_owned(),
+            "input.smt2".to_owned(),
+        ];
+        assert_eq!(
+            parse_portfolio_args(&args).unwrap(),
+            ("input.smt2", "/solver/yices-smt2", true)
+        );
+    }
 
     fn solve_text(input: &str) -> SolveResult {
         solve_problem(parse_problem(input).unwrap()).result

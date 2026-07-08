@@ -100,3 +100,18 @@ run. The remote Magma command uses `magma -n` to avoid user startup files.
 Corpus workers write observations as futures complete, so one long-running
 early task cannot block checkpoint progress from later tasks. A/B merge output
 prints `n/a` when no common-correct timing population exists.
+
+Train the structural portfolio candidate from a complete result matrix:
+
+```bash
+scripts/bench/train_structural_router.py \
+  benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
+  results/qf-uf-corpus.csv --out results/structural-router.json
+```
+
+Run the explicit Yices-dependent portfolio:
+
+```bash
+target/release/euf-viper portfolio \
+  --yices third_party/solvers/bin/yices-smt2 input.smt2
+```

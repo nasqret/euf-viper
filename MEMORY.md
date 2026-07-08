@@ -166,6 +166,19 @@
 - All 6,396 QG-classification instances are covered by every solver at the
   competition budget. The remaining performance and coverage deficit is
   entirely in the 1,107-instance non-QG stratum.
+- The accepted opt-in structural portfolio is a separate claim from standalone
+  `solve`. It uses only bounded lexical structure, routes 65 corpus cases to
+  in-process `euf-viper`, and execs a supplied Yices binary otherwise. Full
+  exact-source WMI `140030`/`140035` preserved 7,503/7,503 coverage and improved
+  aggregate time from 1,241.01s to 1,186.49s (1.0460x), with zero wrong answers
+  or errors. Its geometric speed is 0.8788x and Yices wins 6,327 pairings.
+- Portfolio evidence is same-corpus-trained. Five-fold source-hash validation
+  had no coverage failures and projected only 1.0030x before launcher overhead.
+  Do not present the 1.0460x full result as an independent or general Yices
+  victory; fallback answers depend on Yices and need a new-release test.
+- The exact-source portfolio binary measured in `140030` has SHA-256
+  `2f2b90b94fd05e1b45e4067834a6045f39f2c1b7ddd80b79575ff61f3ffe6ea5`.
+  Streaming input was rejected by `140012`/`140017` because overhead regressed.
 - Certificate work should pair SAT proof traces for the exact emitted CNF with
   a replayable manifest of EUF-derived clauses and finite-domain axioms.
 - Corpus workers must checkpoint in completion order; ordered executor results

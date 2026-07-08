@@ -41,6 +41,8 @@ front tier of a coverage-oriented portfolio.
 - [x] Test finite-cap, finite-bypass, sequential-AMO, direct-CaDiCaL, and
   root-pigeonhole tail hypotheses under paired WMI gates; remove every
   candidate that fails coverage and speed gates.
+- [x] Add an opt-in structural Yices portfolio and pass a full 7,503-instance
+  coverage and aggregate-speed gate.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
 
@@ -64,4 +66,7 @@ At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a
 `euf-viper`/Z3 solves, `euf-viper` has a 1.069x geometric speedup, but its hard
 tail makes common-instance total time 20,668.55s versus Z3's 5,365.05s. Z3
 adds 22 solves and Yices covers all 25 remaining gaps. No global superiority
-claim is allowed.
+claim is allowed. The opt-in Yices-dependent portfolio reaches 7,503/7,503 and
+is 1.046x faster than direct Yices by paired aggregate time, but its geometric
+speed is 0.8788x and the router was trained on this corpus. It is not an
+independent solver victory.

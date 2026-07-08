@@ -162,3 +162,25 @@ revision changed. On common `euf-viper`/Z3 solves the geometric speedup is
 1.069x, but aggregate common time is 20,668.55s versus 5,365.05s. Yices covers
 the complete corpus and is fastest on 6,821 instances. This supports a
 fast-head front tier, not an overall superiority claim.
+
+## Structural Portfolio Gate
+
+The opt-in euf-viper/Yices portfolio used three paired gates. Selected-case
+array `139907` improved aggregate time 2.482x at 65/65 coverage. Five-repeat
+overhead array `139925` measured about 2.96ms per Yices-routed case. Prototype
+full array `139942` improved aggregate time 1.0290x. After rollback of a
+rejected streaming variant, exact-source array `140030` and strict merge
+`140035` ran all 7,503 instances at 1,200 seconds:
+
+| Metric | Direct Yices | Portfolio |
+|---|---:|---:|
+| Correct | 7,503 | 7,503 |
+| Median | 0.0290s | 0.0334s |
+| Total time | 1,241.01s | 1,186.49s |
+| Pairwise wins | 6,327 | 1,176 |
+
+There were no wrong answers or execution errors. Aggregate speedup was 1.046x;
+geometric speedup was 0.8788x. The router was trained on this corpus, so a new
+benchmark release remains mandatory for a generalization claim. Streaming
+only an input prefix was rejected by `140012`/`140017` after it worsened the
+overhead gate.
