@@ -22,6 +22,12 @@ cargo build --release
 ./target/release/euf-viper bench --cases "${EUF_VIPER_CASES:-40}" --size "${EUF_VIPER_SIZE:-20000}" \
   > "results/euf-viper-synthetic-${SLURM_JOB_ID}.log"
 
+./target/release/euf-viper bench-or \
+  --cases "${EUF_VIPER_OR_CASES:-8}" \
+  --branches "${EUF_VIPER_OR_BRANCHES:-512}" \
+  --depth "${EUF_VIPER_OR_DEPTH:-4}" \
+  > "results/euf-viper-or-${SLURM_JOB_ID}.log"
+
 if command -v z3 >/dev/null 2>&1 && [ -d "${SMTLIB_QF_UF_DIR:-}" ]; then
   python3 benches/compare_z3.py "$SMTLIB_QF_UF_DIR" --out "results/compare-z3-${SLURM_JOB_ID}.csv"
 fi

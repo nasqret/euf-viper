@@ -30,6 +30,13 @@
   remotely with `-n` to bypass quota-broken startup logging.
 - Submitted WMI job `139145`; it completed successfully and produced the first
   cluster synthetic benchmark log.
+- Continued improving against Z3:
+  - made positive `or` preprocessing branch-aware;
+  - added all-branch pruning against surrounding disequalities;
+  - added `diamond`, `pruned-or`, and `bench-or` generators;
+  - added repeated median Z3 comparator;
+  - measured 18.8x to 64.4x local median speedups on diamond canaries;
+  - submitted WMI job `139146`, which completed the OR bench successfully.
 
 ## Next Entry Template
 

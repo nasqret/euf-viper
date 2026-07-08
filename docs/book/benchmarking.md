@@ -23,6 +23,14 @@ The comparator harness is:
 python3 benches/compare_z3.py path/to/QF_UF --viper target/release/euf-viper
 ```
 
+For local timing with less process cold-start noise:
+
+```bash
+python3 benches/compare_z3_repeat.py generated/or-stress \
+  --viper target/release/euf-viper \
+  --timeout 30 --repeats 5 --warmups 1
+```
+
 ## Local Canary
 
 The first local canary compared Z3 4.16.0 against generated conjunction-heavy
@@ -33,3 +41,8 @@ consequences.
 
 See `research-vault/06-results/2026-07-08-local-canary.md` in the repository
 root for the raw table.
+
+The branch-aware `or` preprocessor produced stronger local evidence on
+OR-stress canaries: 18.8x and 64.4x median speedups on diamond instances, and
+1.7x on a pruned-branch instance, all against Z3 4.16.0.  This remains targeted
+evidence, not SMT-COMP coverage.

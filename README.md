@@ -18,6 +18,7 @@ cargo test
 cargo run --release -- gen chain 1000 > /tmp/chain.smt2
 cargo run --release -- solve --stats /tmp/chain.smt2
 cargo run --release -- bench --cases 10 --size 5000
+target/release/euf-viper bench-or --cases 4 --branches 256 --depth 4
 python3 benches/compare_z3.py generated/synthetic --viper target/release/euf-viper
 ```
 
@@ -37,6 +38,11 @@ equational-diamond `or` fixture unsat via common branch consequences.  The raw
 interpretation is recorded in
 `research-vault/06-results/2026-07-08-local-canary.md`.  This is not a global
 SMT-LIB claim.
+
+The next milestone improved the positive-`or` preprocessor.  On generated
+OR-stress canaries, median local speedups over Z3 4.16.0 were 18.8x and 64.4x
+on diamond instances, and 1.7x on a pruned-branch instance.  See
+`research-vault/06-results/2026-07-08-or-preprocessor.md`.
 
 ## Repository Map
 

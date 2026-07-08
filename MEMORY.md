@@ -40,12 +40,31 @@
   consequence preprocessor can return `unsat` on a positive `or` case.
 - These are narrow canaries, not global SMT-LIB evidence.
 
+## OR Preprocessor Improvement
+
+- Branch-aware positive `or` preprocessing now tracks both equalities and
+  disequalities per branch.
+- Same-level `and` processing delays positive `or` analysis until surrounding
+  non-`or` literals have been collected.
+- New generators:
+  - `euf-viper gen diamond BRANCHES DEPTH`
+  - `euf-viper gen pruned-or BRANCHES`
+  - `euf-viper bench-or --cases N --branches N --depth N`
+- Local median comparison against Z3 4.16.0:
+  - `diamond_b128_d8_unsat.smt2`: 18.8x faster.
+  - `diamond_b512_d4_unsat.smt2`: 64.4x faster.
+  - `pruned_or_b512_unsat.smt2`: 1.7x faster.
+- A larger local single point, `diamond 2048 4`, solved in about 0.01s by
+  `euf-viper` and about 5.10s by Z3.
+
 ## WMI Runs
 
 - Job `139145` completed on WMI `cpu_idle` node `c3n1` in 10s with MaxRSS
   `479492K`; 40 synthetic cases, 600380 total terms, benchmark wall time
   2.895389861s. The submit script initially failed to forward local
   `EUF_VIPER_CASES` and `EUF_VIPER_SIZE`; fixed after the run.
+- Job `139146` completed on WMI `cpu_idle` node `c3n1` in 14s; OR bench used
+  8 cases, branches 1024, depth 4, total terms 24584, wall time 217220141ns.
 
 ## LTS/Magma
 

@@ -17,7 +17,9 @@ reproducible, evidence-backed comparison against Z3 and cvc5.
 - [x] Run first WMI synthetic benchmark job.
 - [x] Run Magma artifact on LTS.
 - [ ] Add a DPLL(T) layer for arbitrary Boolean structure.
-- [ ] Add diamond/common-consequence preprocessing for QF_UF disjunctions.
+- [x] Add diamond/common-consequence preprocessing for QF_UF disjunctions.
+- [x] Add branch-aware positive-`or` pruning against surrounding disequalities.
+- [x] Add repeated median Z3 comparator for cold-start-resistant local timing.
 - [ ] Integrate an optional SAT backend or IPASIR-compatible bridge.
 - [ ] Install or build cvc5 comparator in a reproducible environment.
 - [ ] Download SMT-LIB QF_UF benchmark releases and select SMT-COMP slices.

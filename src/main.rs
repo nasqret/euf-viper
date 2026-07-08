@@ -90,6 +90,20 @@ struct Problem {
 }
 
 #[derive(Debug, Default)]
+struct BranchLiterals {
+    eqs: Vec<(TermId, TermId)>,
+    diseqs: Vec<(TermId, TermId)>,
+}
+
+#[derive(Debug, Default)]
+struct OrAnalysis {
+    branches: usize,
+    pruned_unsat: usize,
+    extracted_equalities: usize,
+    proved_unsat: bool,
+}
+
+#[derive(Debug, Default)]
 struct ParseCtx {
     symbols: SymbolInterner,
     arena: TermArena,
@@ -192,7 +206,15 @@ impl ParseCtx {
                 };
                 match head {
                     "and" if polarity => {
+                        let mut delayed_or = Vec::new();
                         for child in &items[1..] {
+                            if is_positive_or(child) {
+                                delayed_or.push(child);
+                            } else {
+                                self.collect_formula(child, true, env)?;
+                            }
+                        }
+                        for child in delayed_or {
                             self.collect_formula(child, true, env)?;
                         }
                     }
@@ -219,10 +241,15 @@ impl ParseCtx {
                         }
                     }
                     "or" if polarity => {
-                        let added = self.add_or_common_equalities(&items[1..], env)?;
-                        self.add_unsupported(format!(
-                            "positive or needs DPLL(T); extracted {added} common EUF equalities"
-                        ));
+                        let analysis = self.analyze_positive_or(&items[1..], env)?;
+                        if !analysis.proved_unsat {
+                            self.add_unsupported(format!(
+                                "positive or needs DPLL(T); branches={} pruned_unsat={} extracted_equalities={}",
+                                analysis.branches,
+                                analysis.pruned_unsat,
+                                analysis.extracted_equalities
+                            ));
+                        }
                     }
                     "and" | "=>" | "xor" | "ite" => {
                         self.add_unsupported(format!(
@@ -240,46 +267,71 @@ impl ParseCtx {
         }
     }
 
-    fn add_or_common_equalities(
+    fn analyze_positive_or(
         &mut self,
         branches: &[Sexp],
         env: &mut HashMap<String, TermId>,
-    ) -> Result<usize, String> {
+    ) -> Result<OrAnalysis, String> {
+        let mut analysis = OrAnalysis {
+            branches: branches.len(),
+            ..OrAnalysis::default()
+        };
         if branches.is_empty() {
-            return Ok(0);
+            analysis.proved_unsat = true;
+            self.contradiction = true;
+            return Ok(analysis);
         }
 
         let mut parsed_branches = Vec::with_capacity(branches.len());
         for branch in branches {
             let mut local = env.clone();
-            let Some(eqs) = self.collect_branch_equalities(branch, true, &mut local)? else {
-                return Ok(0);
+            let Some(lits) = self.collect_branch_literals(branch, true, &mut local)? else {
+                return Ok(analysis);
             };
-            parsed_branches.push(eqs);
+            parsed_branches.push(lits);
         }
 
         let term_count = self.arena.terms.len();
-        let mut branch_roots = Vec::with_capacity(parsed_branches.len());
-        for eqs in &parsed_branches {
+        let mut satisfiable_roots = Vec::with_capacity(parsed_branches.len());
+        for lits in &parsed_branches {
             let mut uf = UnionFind::new(term_count);
             for &(a, b) in &self.eqs {
                 uf.union(a, b);
             }
-            for &(a, b) in eqs {
+            for &(a, b) in &lits.eqs {
                 uf.union(a, b);
             }
             congruence_closure(&self.arena, &mut uf);
-            branch_roots.push(
+
+            let mut branch_unsat = false;
+            for &(a, b) in self.diseqs.iter().chain(lits.diseqs.iter()) {
+                if uf.find(a) == uf.find(b) {
+                    branch_unsat = true;
+                    break;
+                }
+            }
+            if branch_unsat {
+                analysis.pruned_unsat += 1;
+                continue;
+            }
+
+            satisfiable_roots.push(
                 (0..term_count)
                     .map(|term_id| uf.root_const(term_id))
                     .collect::<Vec<_>>(),
             );
         }
 
+        if satisfiable_roots.is_empty() {
+            analysis.proved_unsat = true;
+            self.contradiction = true;
+            return Ok(analysis);
+        }
+
         let mut first_classes: HashMap<usize, Vec<TermId>> = HashMap::new();
         for term_id in 0..term_count {
             first_classes
-                .entry(branch_roots[0][term_id])
+                .entry(satisfiable_roots[0][term_id])
                 .or_default()
                 .push(term_id);
         }
@@ -296,7 +348,7 @@ impl ParseCtx {
                 for j in (i + 1)..class.len() {
                     let a = class[i];
                     let b = class[j];
-                    let common = branch_roots.iter().all(|roots| roots[a] == roots[b]);
+                    let common = satisfiable_roots.iter().all(|roots| roots[a] == roots[b]);
                     if common && existing.insert(normalized_pair(a, b)) {
                         self.eqs.push((a, b));
                         added += 1;
@@ -307,26 +359,27 @@ impl ParseCtx {
                 }
             }
         }
-        Ok(added)
+        analysis.extracted_equalities = added;
+        Ok(analysis)
     }
 
-    fn collect_branch_equalities(
+    fn collect_branch_literals(
         &mut self,
         sexp: &Sexp,
         polarity: bool,
         env: &mut HashMap<String, TermId>,
-    ) -> Result<Option<Vec<(TermId, TermId)>>, String> {
-        let mut eqs = Vec::new();
-        let ok = self.collect_branch_equalities_into(sexp, polarity, env, &mut eqs)?;
-        Ok(ok.then_some(eqs))
+    ) -> Result<Option<BranchLiterals>, String> {
+        let mut lits = BranchLiterals::default();
+        let ok = self.collect_branch_literals_into(sexp, polarity, env, &mut lits)?;
+        Ok(ok.then_some(lits))
     }
 
-    fn collect_branch_equalities_into(
+    fn collect_branch_literals_into(
         &mut self,
         sexp: &Sexp,
         polarity: bool,
         env: &mut HashMap<String, TermId>,
-        eqs: &mut Vec<(TermId, TermId)>,
+        lits: &mut BranchLiterals,
     ) -> Result<bool, String> {
         match sexp {
             Sexp::Atom(atom) => Ok((atom == "true" && polarity) || (atom == "false" && !polarity)),
@@ -340,7 +393,7 @@ impl ParseCtx {
                 match head {
                     "and" if polarity => {
                         for child in &items[1..] {
-                            if !self.collect_branch_equalities_into(child, true, env, eqs)? {
+                            if !self.collect_branch_literals_into(child, true, env, lits)? {
                                 return Ok(false);
                             }
                         }
@@ -348,14 +401,14 @@ impl ParseCtx {
                     }
                     "or" if !polarity => {
                         for child in &items[1..] {
-                            if !self.collect_branch_equalities_into(child, false, env, eqs)? {
+                            if !self.collect_branch_literals_into(child, false, env, lits)? {
                                 return Ok(false);
                             }
                         }
                         Ok(true)
                     }
                     "not" if items.len() == 2 => {
-                        self.collect_branch_equalities_into(&items[1], !polarity, env, eqs)
+                        self.collect_branch_literals_into(&items[1], !polarity, env, lits)
                     }
                     "=" if polarity => {
                         let terms = self.parse_terms(&items[1..], env)?;
@@ -364,22 +417,32 @@ impl ParseCtx {
                         }
                         let first = terms[0];
                         for &term in &terms[1..] {
-                            eqs.push((first, term));
+                            lits.eqs.push((first, term));
                         }
+                        Ok(true)
+                    }
+                    "=" if !polarity && items.len() == 3 => {
+                        let terms = self.parse_terms(&items[1..], env)?;
+                        lits.diseqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
                     "distinct" if !polarity && items.len() == 3 => {
                         let terms = self.parse_terms(&items[1..], env)?;
-                        eqs.push((terms[0], terms[1]));
+                        lits.eqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
                     "distinct" if polarity => {
-                        self.parse_terms(&items[1..], env)?;
+                        let terms = self.parse_terms(&items[1..], env)?;
+                        for i in 0..terms.len() {
+                            for j in (i + 1)..terms.len() {
+                                lits.diseqs.push((terms[i], terms[j]));
+                            }
+                        }
                         Ok(true)
                     }
                     "let" if items.len() == 3 => {
                         let mut local = self.extend_let_env(&items[1], env)?;
-                        self.collect_branch_equalities_into(&items[2], polarity, &mut local, eqs)
+                        self.collect_branch_literals_into(&items[2], polarity, &mut local, lits)
                     }
                     _ => Ok(false),
                 }
@@ -690,6 +753,10 @@ fn atom_text(sexp: &Sexp) -> Option<&str> {
     }
 }
 
+fn is_positive_or(sexp: &Sexp) -> bool {
+    matches!(sexp, Sexp::List(items) if items.first().and_then(atom_text) == Some("or"))
+}
+
 fn normalized_pair(a: TermId, b: TermId) -> (TermId, TermId) {
     if a <= b { (a, b) } else { (b, a) }
 }
@@ -913,6 +980,59 @@ fn gen_grid(width: usize, depth: usize) -> String {
     out
 }
 
+fn gen_diamond(branches: usize, depth: usize) -> String {
+    let mut out = String::new();
+    out.push_str("(set-logic QF_UF)\n");
+    out.push_str("(declare-sort U 0)\n");
+    out.push_str("(declare-fun x0 () U)\n");
+    out.push_str("(declare-fun x1 () U)\n");
+    for branch in 0..branches {
+        for step in 0..depth {
+            out.push_str(&format!("(declare-fun d_{branch}_{step} () U)\n"));
+        }
+    }
+    out.push_str("(assert (and\n");
+    out.push_str("  (or\n");
+    for branch in 0..branches {
+        out.push_str("    (and");
+        if depth == 0 {
+            out.push_str(" (= x0 x1)");
+        } else {
+            out.push_str(&format!(" (= x0 d_{branch}_0)"));
+            for step in 1..depth {
+                out.push_str(&format!(" (= d_{branch}_{} d_{branch}_{step})", step - 1));
+            }
+            out.push_str(&format!(" (= d_{branch}_{} x1)", depth - 1));
+        }
+        out.push_str(")\n");
+    }
+    out.push_str("  )\n");
+    out.push_str("  (distinct x0 x1)\n");
+    out.push_str("))\n(check-sat)\n");
+    out
+}
+
+fn gen_pruned_or(branches: usize) -> String {
+    let mut out = String::new();
+    out.push_str("(set-logic QF_UF)\n");
+    out.push_str("(declare-sort U 0)\n");
+    for branch in 0..branches {
+        out.push_str(&format!("(declare-fun a_{branch} () U)\n"));
+        out.push_str(&format!("(declare-fun b_{branch} () U)\n"));
+    }
+    out.push_str("(assert (and\n");
+    for branch in 0..branches {
+        out.push_str(&format!("  (distinct a_{branch} b_{branch})\n"));
+    }
+    out.push_str("  (or\n");
+    for branch in 0..branches {
+        out.push_str(&format!("    (= a_{branch} b_{branch})\n"));
+    }
+    out.push_str("  )\n");
+    out.push_str("))\n(check-sat)\n");
+    out
+}
+
 fn nested_term(base: &str, depth: usize) -> String {
     let mut text = base.to_owned();
     for d in 0..depth {
@@ -923,7 +1043,7 @@ fn nested_term(base: &str, depth: usize) -> String {
 
 fn gen_cmd(args: &[String]) -> Result<i32, String> {
     if args.len() < 2 {
-        return Err("usage: euf-viper gen <chain|grid> ...".to_owned());
+        return Err("usage: euf-viper gen <chain|grid|diamond|pruned-or> ...".to_owned());
     }
     match args[1].as_str() {
         "chain" => {
@@ -935,6 +1055,15 @@ fn gen_cmd(args: &[String]) -> Result<i32, String> {
             let width = parse_usize(args.get(2), "grid width")?;
             let depth = parse_usize(args.get(3), "grid depth")?;
             print!("{}", gen_grid(width, depth));
+        }
+        "diamond" => {
+            let branches = parse_usize(args.get(2), "diamond branches")?;
+            let depth = parse_usize(args.get(3), "diamond depth")?;
+            print!("{}", gen_diamond(branches, depth));
+        }
+        "pruned-or" => {
+            let branches = parse_usize(args.get(2), "branch count")?;
+            print!("{}", gen_pruned_or(branches));
         }
         other => return Err(format!("unknown generator `{other}`")),
     }
@@ -979,6 +1108,45 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
     Ok(0)
 }
 
+fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
+    let cases = parse_flag_usize(args, "--cases", 8)?;
+    let branches = parse_flag_usize(args, "--branches", 512)?;
+    let depth = parse_flag_usize(args, "--depth", 4)?;
+    let mut total_terms = 0usize;
+    let start_all = Instant::now();
+    for i in 0..cases {
+        let input = if i % 2 == 0 {
+            gen_diamond(branches, depth)
+        } else {
+            gen_pruned_or(branches)
+        };
+        let start = Instant::now();
+        let problem = parse_problem(&input)?;
+        total_terms += problem.arena.terms.len();
+        let report = solve_problem(problem);
+        let elapsed = start.elapsed();
+        println!(
+            "or_case={i} kind={} result={} elapsed_ns={} terms={} eqs={} diseqs={} passes={} merges={}",
+            if i % 2 == 0 { "diamond" } else { "pruned-or" },
+            status_text(&report.result),
+            elapsed.as_nanos(),
+            report.stats.terms,
+            report.stats.eqs,
+            report.stats.diseqs,
+            report.stats.closure_passes,
+            report.stats.congruence_merges
+        );
+        if !matches!(report.result, SolveResult::Unsat) {
+            return Err(format!("or benchmark case {i} did not solve to unsat"));
+        }
+    }
+    eprintln!(
+        "or_bench_total_cases={cases} branches={branches} depth={depth} total_terms={total_terms} wall_ns={}",
+        start_all.elapsed().as_nanos()
+    );
+    Ok(0)
+}
+
 fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> Result<usize, String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -1007,7 +1175,10 @@ fn usage() -> &'static str {
   euf-viper stats FILE
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
-  euf-viper bench [--cases N] [--size N]"
+  euf-viper gen diamond BRANCHES DEPTH
+  euf-viper gen pruned-or BRANCHES
+  euf-viper bench [--cases N] [--size N]
+  euf-viper bench-or [--cases N] [--branches N] [--depth N]"
 }
 
 fn run() -> Result<i32, String> {
@@ -1031,6 +1202,7 @@ fn run() -> Result<i32, String> {
         }
         "gen" => gen_cmd(&args[1..]),
         "bench" => bench_cmd(&args[1..]),
+        "bench-or" => bench_or_cmd(&args[1..]),
         "--help" | "-h" | "help" => {
             println!("{}", usage());
             Ok(0)
@@ -1129,6 +1301,31 @@ mod tests {
             (check-sat)
         ";
         assert_eq!(solve_text(input), SolveResult::Unsat);
+    }
+
+    #[test]
+    fn prunes_all_or_branches_against_surrounding_disequalities() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun d () U)
+            (assert
+              (and
+                (or (= a b) (= c d))
+                (distinct a b)
+                (distinct c d)))
+            (check-sat)
+        ";
+        assert_eq!(solve_text(input), SolveResult::Unsat);
+    }
+
+    #[test]
+    fn generated_diamond_and_pruned_or_are_unsat() {
+        assert_eq!(solve_text(&gen_diamond(8, 4)), SolveResult::Unsat);
+        assert_eq!(solve_text(&gen_pruned_or(8)), SolveResult::Unsat);
     }
 
     #[test]

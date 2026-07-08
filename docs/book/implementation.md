@@ -14,7 +14,8 @@ that requires a SAT layer.  The planned design is DPLL(T): Boolean abstraction,
 SAT search, theory consistency checks, theory lemmas, and selected theory
 propagation.
 
-One safe exception is implemented for `or`: the parser computes equalities that
-all branches entail and adds them as consequences.  If those consequences
-contradict a disequality, the solver can return `unsat`; otherwise the formula
-remains `unsupported`.
+One safe exception is implemented for positive `or`: the parser computes branch
+literals, prunes branches inconsistent with surrounding EUF literals, and adds
+equalities common to the remaining satisfiable branches.  If every branch is
+inconsistent, or if the common equalities contradict a disequality, the solver
+can return `unsat`; otherwise the formula remains `unsupported`.
