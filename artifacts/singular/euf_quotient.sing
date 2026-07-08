@@ -1,0 +1,31 @@
+// Minimal EUF quotient sanity artifact for Singular.
+
+intvec parent = 1,2,3,4,5,6;
+
+proc Find(intvec parent, int x)
+{
+  int y = x;
+  while (parent[y] != y)
+  {
+    y = parent[y];
+  }
+  return(y);
+}
+
+proc Union(intvec parent, int a, int b)
+{
+  int ra = Find(parent, a);
+  int rb = Find(parent, b);
+  if (ra != rb)
+  {
+    parent[rb] = ra;
+  }
+  return(parent);
+}
+
+parent = Union(parent, 1, 2);
+parent = Union(parent, 3, 4);
+if (Find(parent, 1) != Find(parent, 2)) { ERROR("bad union 1"); }
+if (Find(parent, 3) != Find(parent, 4)) { ERROR("bad union 2"); }
+if (Find(parent, 1) == Find(parent, 3)) { ERROR("unexpected merge"); }
+"singular-euf-quotient-ok";

@@ -1,0 +1,7 @@
+format: jb-book
+root: index
+chapters:
+  - file: theory
+  - file: implementation
+  - file: benchmarking
+  - file: operations

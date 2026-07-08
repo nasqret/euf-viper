@@ -1,0 +1,7 @@
+/target/
+/results/
+/docs/book/_build/
+/.DS_Store
+*.log
+*.tmp
+*.sage.py

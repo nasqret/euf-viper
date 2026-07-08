@@ -1,0 +1,18 @@
+{
+  "title": "euf-viper",
+  "audience": "SMT solver developers and computational algebra researchers",
+  "outputs": ["html"],
+  "notebook_policy": "no executed notebooks in milestone 0",
+  "chapters": [
+    "index",
+    "theory",
+    "implementation",
+    "benchmarking",
+    "operations"
+  ],
+  "acceptance": [
+    "Rust tests pass",
+    "synthetic benchmark runs",
+    "book strict HTML build passes when jupyter-book is installed"
+  ]
+}
