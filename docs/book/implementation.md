@@ -13,6 +13,13 @@ The current pipeline keeps each soundness boundary explicit.
    congruence closure.
 8. If validation finds a theory conflict, add explanation clauses and refine.
 
+On Linux x86_64, step 8 uses incremental CaDiCaL refinement by default after
+an eager Kissat model is rejected. This is deliberately post-validation: eager
+UNSAT and EUF-valid SAT paths are unchanged. Set
+`EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` to restore the previous fallback.
+The default was promoted only after a targeted repeated profile, a repeated
+40-instance control, and a 7,503-instance paired WMI gate.
+
 The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail

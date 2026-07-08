@@ -114,6 +114,26 @@
 - Extended result analysis with per-family and QG-versus-non-QG coverage,
   median, correct-median, total, and correct-total timing. QG-classification is
   6,396/7,503 instances (85.24%); Yices leads both that stratum and non-QG.
+- Full 60-second campaign `139420`/`139421`/`139422` completed 30,012 rows with
+  zero wrong answers, disagreements, or execution errors. Coverage was
+  `euf-viper` 7,434, Z3 7,486, cvc5 7,471, and Yices2 7,500. `euf-viper` beat
+  Z3 on 5,581/7,433 common cases at a 1.585x geometric speedup, but its
+  5,915.88s common-case total lost to Z3's 3,685.61s because of the tail.
+- The four-solver oracle covered 7,500/7,503; the shared gaps are
+  `PEQ014_size10`, `PEQ014_size11`, and `PEQ018_size7`. Added restartable
+  continuation by result and solver identity. A new `euf-viper` revision must
+  rerun all 7,503 of its rows; only unchanged comparator rows may be retained.
+- Extended certificate validation to official SMT-LIB corpus inputs. Rodin
+  `smt3166111930664231918` verified an 8-clause base refutation, and TypeSafe
+  `z3.1184163` verified a 5-clause refutation with one independently replayed
+  EUF theory clause.
+- Accepted the post-invalid-model CaDiCaL refinement route after three gates.
+  Job `139433` measured 2.36x on the affected peg-solitaire case; job `139477`
+  kept control coverage at 39/40; full-corpus paired job `139497` plus strict
+  merge `139498` improved coverage from 6,873 to 6,886 and timeout-inclusive
+  total time from 2,647.98s to 2,638.97s. Common-correct aggregate speed was
+  1.0023x, geometric speed was 0.9978x, and there were zero wrong answers or
+  execution errors.
 
 ## Next Entry Template
 

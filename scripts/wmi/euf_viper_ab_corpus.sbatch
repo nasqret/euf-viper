@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=euf-viper-ab-corpus
+#SBATCH --partition=cpu_idle
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=01:00:00
+#SBATCH --output=results/wmi-ab-corpus-%j.out
+#SBATCH --error=results/wmi-ab-corpus-%j.err
+
+set -euo pipefail
+
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
+mkdir -p results
+
+BASELINE_BIN="${EUF_VIPER_BASELINE_BIN:?set EUF_VIPER_BASELINE_BIN}"
+CANDIDATE_BIN="${EUF_VIPER_CANDIDATE_BIN:-$PWD/target/release/euf-viper}"
+FULL_MANIFEST="${EUF_VIPER_AB_MANIFEST:-$PWD/benchmarks/smtlib-2025/qf_uf_sample40.jsonl}"
+TIMEOUT="${EUF_VIPER_AB_TIMEOUT:-5}"
+REPEATS="${EUF_VIPER_AB_REPEATS:-3}"
+WARMUPS="${EUF_VIPER_AB_WARMUPS:-1}"
+LIMIT="${EUF_VIPER_AB_LIMIT:-0}"
+SHARDS="${EUF_VIPER_AB_SHARDS:-1}"
+SHARD_INDEX="${SLURM_ARRAY_TASK_ID:-0}"
+RUN_ID="${EUF_VIPER_AB_RUN_ID:-${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}}"
+
+if [ "$SHARDS" -gt 1 ]; then
+  MANIFEST="results/wmi-ab-corpus-${RUN_ID}-manifest-${SHARD_INDEX}.jsonl"
+  scripts/bench/shard_manifest.py \
+    "$FULL_MANIFEST" \
+    --shards "$SHARDS" \
+    --index "$SHARD_INDEX" \
+    --out "$MANIFEST"
+  OUTPUT_PREFIX="results/wmi-ab-corpus-${RUN_ID}-shard-${SHARD_INDEX}"
+else
+  MANIFEST="$FULL_MANIFEST"
+  OUTPUT_PREFIX="results/wmi-ab-corpus-${RUN_ID}"
+fi
+
+ARGS=(
+  "$MANIFEST"
+  --baseline "$BASELINE_BIN"
+  --candidate "$CANDIDATE_BIN"
+  --baseline-env "EUF_VIPER_BACKEND=${EUF_VIPER_BASELINE_BACKEND:-auto}"
+  --candidate-env "EUF_VIPER_BACKEND=${EUF_VIPER_CANDIDATE_BACKEND:-auto}"
+  --baseline-env "EUF_VIPER_INVALID_MODEL_FALLBACK=${EUF_VIPER_BASELINE_INVALID_MODEL_FALLBACK:-varisat}"
+  --candidate-env "EUF_VIPER_INVALID_MODEL_FALLBACK=${EUF_VIPER_CANDIDATE_INVALID_MODEL_FALLBACK:-varisat}"
+  --baseline-env "EUF_VIPER_FINITE_EQUALITY_CHANNELING=${EUF_VIPER_BASELINE_FINITE_EQUALITY_CHANNELING:-value-only}"
+  --candidate-env "EUF_VIPER_FINITE_EQUALITY_CHANNELING=${EUF_VIPER_CANDIDATE_FINITE_EQUALITY_CHANNELING:-value-only}"
+  --baseline-env "EUF_VIPER_FINITE_PREDICATE_CHANNELING=${EUF_VIPER_BASELINE_FINITE_PREDICATE_CHANNELING:-0}"
+  --candidate-env "EUF_VIPER_FINITE_PREDICATE_CHANNELING=${EUF_VIPER_CANDIDATE_FINITE_PREDICATE_CHANNELING:-0}"
+  --baseline-env EUF_VIPER_AXIOM_ORDER=native
+  --candidate-env EUF_VIPER_AXIOM_ORDER=native
+  --timeout "$TIMEOUT"
+  --repeats "$REPEATS"
+  --warmups "$WARMUPS"
+  --out "${OUTPUT_PREFIX}.csv"
+  --summary "${OUTPUT_PREFIX}.json"
+)
+if [ "$LIMIT" -gt 0 ]; then
+  ARGS+=(--limit "$LIMIT")
+fi
+
+scripts/bench/compare_viper_ab.py "${ARGS[@]}"

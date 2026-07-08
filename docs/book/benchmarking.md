@@ -113,3 +113,30 @@ The dependency-chain smoke used prepare job `139382`, two array tasks under
 `139383`, and merge job `139384`. All stages completed. The merged eight-row
 sample had zero wrong answers, disagreements, missing rows, and execution
 errors; all four solvers covered 7/8 within two seconds.
+
+## Sixty-Second Campaign
+
+The full continuation at 60 seconds used prepare job `139420`, 64 array shards
+under `139421` with at most four active allocations, and strict merge job
+`139422`. Revision `9c7789339587a75014f5438125f96a6e7a3a739e` produced all
+30,012 expected rows with zero wrong answers, disagreements, or execution
+errors.
+
+| Solver | Correct | Coverage | Median time | Total time |
+|---|---:|---:|---:|---:|
+| euf-viper | 7,434 | 99.08% | 0.0666s | 10,082.63s |
+| Z3 4.16.0 | 7,486 | 99.77% | 0.1426s | 5,024.91s |
+| cvc5 1.3.4 | 7,471 | 99.57% | 0.2293s | 9,694.51s |
+| Yices 2.7.0 | 7,500 | 99.96% | 0.0278s | 1,640.91s |
+
+QG-classification accounts for 6,396 instances. On that stratum, `euf-viper`
+covered 6,383 and Yices covered all 6,396. On the 1,107 non-QG instances,
+coverage was 1,051 and 1,104 respectively. The all-solver oracle leaves only
+three expected-UNSAT PEQ instances unresolved.
+
+Competition-budget continuation uses `--resume-from` with
+`--retry-result timeout` and, after a solver change, `--retry-solver`. It writes
+a new result CSV containing only revision-compatible retained observations plus
+new measurements, so the 60-second campaign remains unchanged and the strict
+merge still validates a complete matrix. For a new `euf-viper` revision, the
+campaign retains 22,457 comparator rows and measures 7,555 rows.

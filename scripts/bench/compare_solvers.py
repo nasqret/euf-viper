@@ -75,7 +75,11 @@ def load_existing_results(
     path: Path,
     manifest_paths: set[str],
     solver_names: set[str],
+    retry_results: set[str] | None = None,
+    retry_solvers: set[str] | None = None,
 ) -> dict[tuple[str, str], dict]:
+    retry_results = retry_results or set()
+    retry_solvers = retry_solvers or set()
     observations: dict[tuple[str, str], dict] = {}
     with path.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
@@ -104,6 +108,8 @@ def load_existing_results(
                 raise SystemExit(
                     f"cannot resume {path}:{line_number}: malformed numeric field"
                 ) from exc
+            if solver in retry_solvers or record.get("result", "") in retry_results:
+                continue
             observations[key] = {
                 "result": record.get("result", ""),
                 "time_s": elapsed,
@@ -249,6 +255,9 @@ def main() -> int:
     parser.add_argument("--progress", type=Path)
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--resume-from", type=Path)
+    parser.add_argument("--retry-result", action="append", default=[])
+    parser.add_argument("--retry-solver", action="append", default=[])
     args = parser.parse_args()
     if args.no_z3 and args.z3:
         parser.error("--no-z3 cannot be combined with --z3")
@@ -256,6 +265,12 @@ def main() -> int:
         parser.error("--no-cvc5 cannot be combined with --cvc5")
     if args.no_yices and args.yices:
         parser.error("--no-yices cannot be combined with --yices")
+    if args.resume and args.resume_from:
+        parser.error("--resume and --resume-from are mutually exclusive")
+    if (args.retry_result or args.retry_solver) and not (
+        args.resume or args.resume_from
+    ):
+        parser.error("retry options require --resume or --resume-from")
 
     solvers: list[tuple[str, list[str]]] = []
     viper = solver_path(args.viper, "euf-viper")
@@ -287,16 +302,38 @@ def main() -> int:
         args.progress.parent.mkdir(parents=True, exist_ok=True)
 
     solver_names = [name for name, _ in solvers]
+    unknown_retry_solvers = set(args.retry_solver) - set(solver_names)
+    if unknown_retry_solvers:
+        parser.error(
+            f"unknown --retry-solver values: {sorted(unknown_retry_solvers)}"
+        )
     manifest_paths = {row["relative_path"] for row in rows}
     if len(manifest_paths) != len(rows):
         raise SystemExit("manifest contains duplicate relative_path values")
 
     observations: dict[tuple[str, str], dict] = {}
-    append = args.resume and args.out.exists()
-    if append:
+    resume_source = args.resume_from
+    if args.resume and args.out.exists():
+        resume_source = args.out
+    if (args.retry_result or args.retry_solver) and resume_source is None:
+        parser.error("retry options require an existing resume source")
+    if resume_source is not None:
+        if not resume_source.is_file():
+            raise SystemExit(f"resume source does not exist: {resume_source}")
         observations = load_existing_results(
-            args.out, manifest_paths, set(solver_names)
+            resume_source,
+            manifest_paths,
+            set(solver_names),
+            set(args.retry_result),
+            set(args.retry_solver),
         )
+    seeded_observations = len(observations)
+    append_in_place = (
+        resume_source == args.out
+        and not args.retry_result
+        and not args.retry_solver
+        and args.out.exists()
+    )
 
     started_at = utc_now()
     if args.progress:
@@ -331,11 +368,29 @@ def main() -> int:
             "stderr": stderr,
         }
 
-    mode = "a" if append else "w"
+    mode = "a" if append_in_place else "w"
     with args.out.open(mode, newline="", encoding="utf-8", buffering=1) as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDNAMES)
-        if not append:
+        if not append_in_place:
             writer.writeheader()
+            for row in rows:
+                relative_path = row["relative_path"]
+                for name in solver_names:
+                    observation = observations.get((relative_path, name))
+                    if observation is None:
+                        continue
+                    writer.writerow(
+                        {
+                            "id": row.get("id"),
+                            "relative_path": relative_path,
+                            "expected_status": row.get("status"),
+                            "solver": name,
+                            "result": observation["result"],
+                            "time_s": f'{observation["time_s"]:.9f}',
+                            "exit_code": observation["exit_code"],
+                            "stderr": observation["stderr"][:500],
+                        }
+                    )
 
         if args.jobs == 1:
             task_results = map(execute, tasks)
@@ -392,6 +447,10 @@ def main() -> int:
     payload = {
         "manifest": str(args.manifest),
         "timeout_s": args.timeout,
+        "resume_source": str(resume_source) if resume_source else None,
+        "seeded_observations": seeded_observations,
+        "retry_results": sorted(set(args.retry_result)),
+        "retry_solvers": sorted(set(args.retry_solver)),
         "instances": len(rows),
         "solvers": summary,
         "wrong_answers": wrong_answers,

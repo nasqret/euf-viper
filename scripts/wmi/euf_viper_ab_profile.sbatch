@@ -28,6 +28,8 @@ BASELINE_FINITE_EQUALITY_CHANNELING="${EUF_VIPER_BASELINE_FINITE_EQUALITY_CHANNE
 CANDIDATE_FINITE_EQUALITY_CHANNELING="${EUF_VIPER_CANDIDATE_FINITE_EQUALITY_CHANNELING:-all}"
 BASELINE_FINITE_PREDICATE_CHANNELING="${EUF_VIPER_BASELINE_FINITE_PREDICATE_CHANNELING:-0}"
 CANDIDATE_FINITE_PREDICATE_CHANNELING="${EUF_VIPER_CANDIDATE_FINITE_PREDICATE_CHANNELING:-1}"
+BASELINE_INVALID_MODEL_FALLBACK="${EUF_VIPER_BASELINE_INVALID_MODEL_FALLBACK:-varisat}"
+CANDIDATE_INVALID_MODEL_FALLBACK="${EUF_VIPER_CANDIDATE_INVALID_MODEL_FALLBACK:-varisat}"
 REPEATS="${EUF_VIPER_PROFILE_REPEATS:-3}"
 TIMEOUT="${EUF_VIPER_PROFILE_TIMEOUT:-10}"
 
@@ -52,6 +54,7 @@ for relative_path in "${CASES[@]}"; do
       kissat_mode="$BASELINE_KISSAT_MODE"
       finite_equality_channeling="$BASELINE_FINITE_EQUALITY_CHANNELING"
       finite_predicate_channeling="$BASELINE_FINITE_PREDICATE_CHANNELING"
+      invalid_model_fallback="$BASELINE_INVALID_MODEL_FALLBACK"
     else
       binary="$CANDIDATE_BIN"
       backend="$CANDIDATE_BACKEND"
@@ -59,6 +62,7 @@ for relative_path in "${CASES[@]}"; do
       kissat_mode="$CANDIDATE_KISSAT_MODE"
       finite_equality_channeling="$CANDIDATE_FINITE_EQUALITY_CHANNELING"
       finite_predicate_channeling="$CANDIDATE_FINITE_PREDICATE_CHANNELING"
+      invalid_model_fallback="$CANDIDATE_INVALID_MODEL_FALLBACK"
     fi
     for repeat in $(seq 1 "$REPEATS"); do
       echo "BEGIN label=$label repeat=$repeat path=$relative_path"
@@ -69,6 +73,7 @@ for relative_path in "${CASES[@]}"; do
         EUF_VIPER_FINITE_DOMAIN=1 \
         EUF_VIPER_FINITE_EQUALITY_CHANNELING="$finite_equality_channeling" \
         EUF_VIPER_FINITE_PREDICATE_CHANNELING="$finite_predicate_channeling" \
+        EUF_VIPER_INVALID_MODEL_FALLBACK="$invalid_model_fallback" \
         EUF_VIPER_PROFILE=1 \
         EUF_VIPER_AXIOM_ORDER=native \
         timeout "${TIMEOUT}s" "$binary" solve --stats "$input" 2>&1; then

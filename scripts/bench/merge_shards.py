@@ -17,6 +17,8 @@ def main() -> int:
     parser.add_argument("inputs", nargs="+", type=Path)
     parser.add_argument("--solver", action="append", dest="solvers", required=True)
     parser.add_argument("--timeout", type=float, required=True)
+    parser.add_argument("--resume-run-id")
+    parser.add_argument("--retry-solver", action="append", default=[])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     args = parser.parse_args()
@@ -92,6 +94,9 @@ def main() -> int:
     payload = {
         "manifest": str(args.manifest),
         "timeout_s": args.timeout,
+        "resume_run_id": args.resume_run_id,
+        "retry_results": ["timeout"] if args.resume_run_id else [],
+        "retry_solvers": sorted(set(args.retry_solver)),
         "instances": len(rows),
         "solvers": summary,
         "wrong_answers": wrong,

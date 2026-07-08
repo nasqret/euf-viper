@@ -14,6 +14,8 @@ AXIOM_ORDER="${EUF_VIPER_AXIOM_ORDER:-native}"
 AXIOM_SEED="${EUF_VIPER_AXIOM_SEED:-11400714819323198485}"
 LIMIT="${EUF_VIPER_CORPUS_LIMIT:-0}"
 SEED="${EUF_VIPER_CORPUS_SEED:-euf-viper-qf-uf-wmi-20260708}"
+RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
+RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
 
 cd "$LOCAL_ROOT"
 if [ "$REMOTE_HOST" = "$REMOTE" ] || \
@@ -37,6 +39,15 @@ for value in "$SHARDS" "$MAX_ACTIVE" "$JOBS"; do
 done
 if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
   echo "limit must be a non-negative integer" >&2
+  exit 1
+fi
+if [ -n "$RESUME_RUN_ID" ] && ! [[ "$RESUME_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+  echo "resume run id must be a positive integer" >&2
+  exit 1
+fi
+if [ -n "$RETRY_SOLVERS" ] && \
+  ! [[ "$RETRY_SOLVERS" =~ ^(euf-viper|z3|cvc5|yices2)(,(euf-viper|z3|cvc5|yices2))*$ ]]; then
+  echo "retry solvers must be a comma-separated solver list" >&2
   exit 1
 fi
 if ! [[ "$TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -82,16 +93,16 @@ PREP_JOB="$(ssh "$REMOTE_HOST" \
 RUN_ID="${PREP_JOB%%;*}"
 ARRAY_END="$((SHARDS - 1))"
 ARRAY_JOB="$(ssh "$REMOTE_HOST" \
-  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$RUN_ID --array=0-${ARRAY_END}%${MAX_ACTIVE} --time=$WALL_TIME --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT,EUF_VIPER_CORPUS_JOBS=$JOBS,EUF_VIPER_AXIOM_ORDER=$AXIOM_ORDER,EUF_VIPER_AXIOM_SEED=$AXIOM_SEED scripts/wmi/euf_viper_corpus_shard.sbatch")"
+  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$RUN_ID --array=0-${ARRAY_END}%${MAX_ACTIVE} --time=$WALL_TIME --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT,EUF_VIPER_CORPUS_JOBS=$JOBS,EUF_VIPER_AXIOM_ORDER=$AXIOM_ORDER,EUF_VIPER_AXIOM_SEED=$AXIOM_SEED,EUF_VIPER_CORPUS_RESUME_RUN_ID=$RESUME_RUN_ID,EUF_VIPER_CORPUS_RETRY_SOLVERS=$RETRY_SOLVERS scripts/wmi/euf_viper_corpus_shard.sbatch")"
 ARRAY_ID="${ARRAY_JOB%%;*}"
 MERGE_JOB="$(ssh "$REMOTE_HOST" \
-  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$ARRAY_ID --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT scripts/wmi/euf_viper_merge_shards.sbatch")"
+  "cd $REMOTE_ROOT && sbatch --parsable --dependency=afterok:$ARRAY_ID --export=ALL,EUF_VIPER_RUN_ID=$RUN_ID,EUF_VIPER_CORPUS_SHARDS=$SHARDS,EUF_VIPER_CORPUS_TIMEOUT=$TIMEOUT,EUF_VIPER_CORPUS_RESUME_RUN_ID=$RESUME_RUN_ID,EUF_VIPER_CORPUS_RETRY_SOLVERS=$RETRY_SOLVERS scripts/wmi/euf_viper_merge_shards.sbatch")"
 MERGE_ID="${MERGE_JOB%%;*}"
 
 METADATA="$(printf \
-  '{"run_id":"%s","revision":"%s","remote_root":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s"}' \
+  '{"run_id":"%s","revision":"%s","remote_root":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s","resume_run_id":"%s","retry_solvers":"%s"}' \
   "$RUN_ID" "$REVISION" "$REMOTE_ROOT" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$LIMIT" "$SEED" "$SHARDS" \
-  "$MAX_ACTIVE" "$TIMEOUT" "$JOBS" "$WALL_TIME" "$AXIOM_ORDER")"
+  "$MAX_ACTIVE" "$TIMEOUT" "$JOBS" "$WALL_TIME" "$AXIOM_ORDER" "$RESUME_RUN_ID" "$RETRY_SOLVERS")"
 printf '%s\n' "$METADATA" | ssh "$REMOTE_HOST" \
   "cat > $REMOTE_ROOT/results/qf-uf-campaign-${RUN_ID}.json"
 

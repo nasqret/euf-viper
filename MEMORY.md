@@ -27,6 +27,10 @@
 - Linux uses a namespaced Kissat 0.1 backend because Kissat 4 was slower on the
   measured WMI hard tail. CaDiCaL and Varisat remain available as alternate
   routes.
+- On Linux x86_64, an eager Kissat SAT assignment that fails full EUF model
+  validation now falls back to incremental CaDiCaL refinement. Full-corpus A/B
+  job `139497` improved coverage by 13 and timeout-inclusive total time by
+  0.34%. `EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` is the rollback control.
 - Finite predicate-table channeling is retained behind environment flags but is
   not enabled by default because WMI jobs `139240` and `139242` showed no hard
   tail gain.
@@ -43,6 +47,10 @@
 - Certificate code is behind the non-default `certificates` Cargo feature. The
   default release text section is byte-identical to pre-certificate commit
   `0bb34c2`, preserving the measured solver executable path.
+- Official-corpus certificate smoke passed on Rodin
+  `smt3166111930664231918` and TypeSafe `z3.1184163`; the latter required one
+  replayed EUF clause. Both exact DIMACS files and DRAT traces were accepted by
+  the independent checker.
 
 ## Local Canary Results
 
@@ -102,6 +110,15 @@
   respectively. There were no wrong answers or solver disagreements.
 - Jobs `139382` through `139384` validate the sharded prepare-array-merge chain
   on eight sampled instances with four solvers and strict completeness checks.
+- Jobs `139420` through `139422` completed the full 7,503-instance corpus at 60
+  seconds with 64 shards and four active allocations. Coverage was 7,434 for
+  `euf-viper`, 7,486 for Z3, 7,471 for cvc5, and 7,500 for Yices2, with no wrong
+  answers, disagreements, or execution errors. The complete prepare-to-merge
+  wall interval was 26m35s and peak shard MaxRSS was 5,413,416 KiB.
+- Jobs `139433`, `139477`, and `139497`/`139498` form the accepted invalid-model
+  fallback gate. The affected profile improved 2.36x, the 40-case control kept
+  39/40 coverage, and the full paired corpus improved 6,873 to 6,886 correct
+  with 1.0034x timeout-inclusive aggregate speed and no wrong answers.
 
 ## Research Position
 
@@ -113,8 +130,13 @@
   portfolio contribution, not an overall fastest-QF_UF claim.
 - The unresolved tail is concentrated in finite-model, pigeonhole-shaped
   families where one-hot CNF encounters hard resolution proofs.
-- The next mandatory comparator is Yices 2.7.0. Longer 60-second and
-  competition-budget campaigns must follow before publishing coverage claims.
+- The 60-second run leaves 69 `euf-viper`, 17 Z3, 32 cvc5, and 3 Yices2
+  timeouts. The all-solver oracle covers 7,500/7,503; `PEQ014_size10`,
+  `PEQ014_size11`, and `PEQ018_size7` are the shared UNSAT gaps.
+- The next mandatory experiment is the 1,200-second continuation. If the
+  `euf-viper` revision changes, it must retain only 22,457 unchanged comparator
+  rows, rerun all 7,503 `euf-viper` rows plus 52 comparator timeouts, and write
+  new outputs. Reusing old solver timings across revisions is forbidden.
 - Certificate work should pair SAT proof traces for the exact emitted CNF with
   a replayable manifest of EUF-derived clauses and finite-domain axioms.
 

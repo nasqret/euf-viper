@@ -21,6 +21,8 @@ SHARD_DIR="$PWD/benchmarks/smtlib-2025/shards-$RUN_ID"
 SHARD_MANIFEST="$SHARD_DIR/qf_uf_${INDEX}.jsonl"
 CAMPAIGN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl"
 OUT_PREFIX="results/qf-uf-corpus-${RUN_ID}-shard-${INDEX}"
+RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
+RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
 
 mkdir -p "$SHARD_DIR" results
 scripts/bench/shard_manifest.py \
@@ -29,14 +31,31 @@ scripts/bench/shard_manifest.py \
   --index "$INDEX" \
   --out "$SHARD_MANIFEST"
 
-scripts/bench/compare_solvers.py "$SHARD_MANIFEST" \
-  --viper "$PWD/target/release/euf-viper" \
-  --z3 "$PWD/third_party/solvers/bin/z3" \
-  --cvc5 "$PWD/third_party/solvers/bin/cvc5" \
-  --yices "$PWD/third_party/solvers/bin/yices-smt2" \
-  --timeout "$TIMEOUT" \
-  --jobs "$JOBS" \
-  --resume \
-  --out "${OUT_PREFIX}.csv" \
-  --summary "${OUT_PREFIX}.json" \
+ARGS=(
+  "$SHARD_MANIFEST"
+  --viper "$PWD/target/release/euf-viper"
+  --z3 "$PWD/third_party/solvers/bin/z3"
+  --cvc5 "$PWD/third_party/solvers/bin/cvc5"
+  --yices "$PWD/third_party/solvers/bin/yices-smt2"
+  --timeout "$TIMEOUT"
+  --jobs "$JOBS"
+  --out "${OUT_PREFIX}.csv"
+  --summary "${OUT_PREFIX}.json"
   --progress "${OUT_PREFIX}.progress.json"
+)
+if [ -n "$RESUME_RUN_ID" ]; then
+  ARGS+=(
+    --resume-from "results/qf-uf-corpus-${RESUME_RUN_ID}-shard-${INDEX}.csv"
+    --retry-result timeout
+  )
+  if [ -n "$RETRY_SOLVERS" ]; then
+    IFS=',' read -r -a retry_solver_names <<< "$RETRY_SOLVERS"
+    for solver in "${retry_solver_names[@]}"; do
+      ARGS+=(--retry-solver "$solver")
+    done
+  fi
+else
+  ARGS+=(--resume)
+fi
+
+scripts/bench/compare_solvers.py "${ARGS[@]}"

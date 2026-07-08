@@ -2753,6 +2753,27 @@ fn auto_prefers_cadical(app_count: usize, finite_added: usize, app_threshold: us
         || (finite_added > 0 && !cfg!(all(target_os = "linux", target_arch = "x86_64")))
 }
 
+fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
+    match setting {
+        Some("cadical-refine") => true,
+        Some("varisat") => false,
+        _ => cfg!(all(target_os = "linux", target_arch = "x86_64")),
+    }
+}
+
+fn use_cadical_refine_after_invalid_model() -> bool {
+    let setting = env::var("EUF_VIPER_INVALID_MODEL_FALLBACK").ok();
+    cadical_refine_after_invalid_model(setting.as_deref())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EagerSolveOutcome {
+    Solved(SolveResult),
+    InvalidTheoryModel,
+    #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
+    Unavailable,
+}
+
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
     let configuration = match env::var("EUF_VIPER_KISSAT_MODE").as_deref() {
@@ -2772,7 +2793,7 @@ fn solve_kissat_euf_once(
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
-) -> Option<SolveResult> {
+) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
     let variables = (0..cnf.var_count())
@@ -2809,7 +2830,7 @@ fn solve_kissat_euf_once(
     let result = solver.sat();
     profile_phase("kissat_solve", sat_start, 0);
     let Some(solution) = result else {
-        return Some(SolveResult::Unsat);
+        return EagerSolveOutcome::Solved(SolveResult::Unsat);
     };
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
@@ -2820,9 +2841,11 @@ fn solve_kissat_euf_once(
             None => 0,
         };
     }
-    theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-        .is_empty()
-        .then_some(SolveResult::Sat)
+    if theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment).is_empty() {
+        EagerSolveOutcome::Solved(SolveResult::Sat)
+    } else {
+        EagerSolveOutcome::InvalidTheoryModel
+    }
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -2843,12 +2866,16 @@ fn solve_kissat_euf_once(
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
-) -> Option<SolveResult> {
+) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
-    configure_kissat(&mut solver)?;
+    if configure_kissat(&mut solver).is_none() {
+        return EagerSolveOutcome::Unavailable;
+    }
     for clause in &cnf.clauses {
-        solver.add_clause(rustsat_clause(clause)).ok()?;
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
+            return EagerSolveOutcome::Unavailable;
+        }
     }
     profile_phase("kissat_base_load", load_start, cnf.clauses.len());
 
@@ -2857,7 +2884,9 @@ fn solve_kissat_euf_once(
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
     for clause in transitivity {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+            return EagerSolveOutcome::Unavailable;
+        }
     }
     profile_phase("kissat_transitivity_load", transitivity_load_start, 0);
 
@@ -2870,31 +2899,42 @@ fn solve_kissat_euf_once(
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
     for clause in congruence {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+            return EagerSolveOutcome::Unavailable;
+        }
     }
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
-    let result = solver.solve().ok()?;
+    let Ok(result) = solver.solve() else {
+        return EagerSolveOutcome::Unavailable;
+    };
     profile_phase("kissat_solve", sat_start, 0);
     match result {
-        RustSatResult::Unsat => return Some(SolveResult::Unsat),
-        RustSatResult::Interrupted => return None,
+        RustSatResult::Unsat => return EagerSolveOutcome::Solved(SolveResult::Unsat),
+        RustSatResult::Interrupted => return EagerSolveOutcome::Unavailable,
         RustSatResult::Sat => {}
     }
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
     for (var, value) in assignment.iter_mut().enumerate().skip(1) {
-        let literal = RustSatLit::from_ipasir(var as i32).ok()?;
-        *value = match solver.lit_val(literal).ok()? {
+        let Ok(literal) = RustSatLit::from_ipasir(var as i32) else {
+            return EagerSolveOutcome::Unavailable;
+        };
+        let Ok(literal_value) = solver.lit_val(literal) else {
+            return EagerSolveOutcome::Unavailable;
+        };
+        *value = match literal_value {
             TernaryVal::True => 1,
             TernaryVal::False => -1,
             TernaryVal::DontCare => 0,
         };
     }
-    theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-        .is_empty()
-        .then_some(SolveResult::Sat)
+    if theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment).is_empty() {
+        EagerSolveOutcome::Solved(SolveResult::Sat)
+    } else {
+        EagerSolveOutcome::InvalidTheoryModel
+    }
 }
 
 fn rustsat_clause(clause: &[i32]) -> RustSatClause {
@@ -3720,14 +3760,35 @@ fn solve_bool_problem(
             }
         }
         if backend == "kissat" || (backend == "auto" && !auto_uses_cadical) {
-            if let Some(result) = solve_kissat_euf_once(
+            let outcome = solve_kissat_euf_once(
                 &cnf,
                 arena,
                 bool_problem.true_term,
                 bool_problem.false_term,
                 eager_congruence,
-            ) {
+            );
+            if let EagerSolveOutcome::Solved(result) = outcome {
                 return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+            }
+            if outcome == EagerSolveOutcome::InvalidTheoryModel
+                && use_cadical_refine_after_invalid_model()
+            {
+                profile_measurement("invalid_model_cadical_refine", 1, 0);
+                if let Some((result, sat_calls, theory_lemmas)) = solve_cadical_euf_refining(
+                    &cnf,
+                    arena,
+                    bool_problem.true_term,
+                    bool_problem.false_term,
+                ) {
+                    return Some((
+                        result,
+                        cnf.var_count(),
+                        cnf.clauses.len(),
+                        0,
+                        sat_calls + 1,
+                        theory_lemmas,
+                    ));
+                }
             }
         }
         if backend == "cadical" {
@@ -4622,6 +4683,20 @@ mod tests {
         assert_eq!(
             auto_prefers_cadical(10, 1, 1_000),
             !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        );
+    }
+
+    #[test]
+    fn configures_invalid_model_fallback_with_platform_default() {
+        assert!(cadical_refine_after_invalid_model(Some("cadical-refine")));
+        assert!(!cadical_refine_after_invalid_model(Some("varisat")));
+        assert_eq!(
+            cadical_refine_after_invalid_model(None),
+            cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        );
+        assert_eq!(
+            cadical_refine_after_invalid_model(Some("unknown")),
+            cfg!(all(target_os = "linux", target_arch = "x86_64"))
         );
     }
 

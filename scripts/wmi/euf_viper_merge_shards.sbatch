@@ -14,22 +14,36 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 RUN_ID="${EUF_VIPER_RUN_ID:?set EUF_VIPER_RUN_ID}"
 SHARDS="${EUF_VIPER_CORPUS_SHARDS:?set EUF_VIPER_CORPUS_SHARDS}"
 TIMEOUT="${EUF_VIPER_CORPUS_TIMEOUT:?set EUF_VIPER_CORPUS_TIMEOUT}"
+RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
+RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
 CAMPAIGN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl"
 INPUTS=()
 for ((index = 0; index < SHARDS; index++)); do
   INPUTS+=("results/qf-uf-corpus-${RUN_ID}-shard-${index}.csv")
 done
 
-scripts/bench/merge_shards.py \
-  "$CAMPAIGN_MANIFEST" \
-  "${INPUTS[@]}" \
-  --solver euf-viper \
-  --solver z3 \
-  --solver cvc5 \
-  --solver yices2 \
-  --timeout "$TIMEOUT" \
-  --out "results/qf-uf-corpus-${RUN_ID}.csv" \
+ARGS=(
+  "$CAMPAIGN_MANIFEST"
+  "${INPUTS[@]}"
+  --solver euf-viper
+  --solver z3
+  --solver cvc5
+  --solver yices2
+  --timeout "$TIMEOUT"
+  --out "results/qf-uf-corpus-${RUN_ID}.csv"
   --summary "results/qf-uf-corpus-${RUN_ID}.json"
+)
+if [ -n "$RESUME_RUN_ID" ]; then
+  ARGS+=(--resume-run-id "$RESUME_RUN_ID")
+fi
+if [ -n "$RETRY_SOLVERS" ]; then
+  IFS=',' read -r -a retry_solver_names <<< "$RETRY_SOLVERS"
+  for solver in "${retry_solver_names[@]}"; do
+    ARGS+=(--retry-solver "$solver")
+  done
+fi
+
+scripts/bench/merge_shards.py "${ARGS[@]}"
 
 scripts/bench/analyze_results.py \
   "results/qf-uf-corpus-${RUN_ID}.csv" \

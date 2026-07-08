@@ -137,13 +137,27 @@ def pairwise_summary(
     first_wins = 0
     second_wins = 0
     ties = 0
+    first_only_correct = 0
+    second_only_correct = 0
+    either_correct = 0
+    first_only_paths = []
+    second_only_paths = []
     for relative_path, observations in by_path.items():
         if first not in observations or second not in observations:
             continue
         first_result = observations[first]
         second_result = observations[second]
         target = expected[relative_path]
-        if first_result["result"] != target or second_result["result"] != target:
+        first_correct = first_result["result"] == target
+        second_correct = second_result["result"] == target
+        either_correct += first_correct or second_correct
+        first_only_correct += first_correct and not second_correct
+        second_only_correct += second_correct and not first_correct
+        if first_correct and not second_correct:
+            first_only_paths.append(relative_path)
+        if second_correct and not first_correct:
+            second_only_paths.append(relative_path)
+        if not first_correct or not second_correct:
             continue
         first_time = first_result["time_s"]
         second_time = second_result["time_s"]
@@ -179,6 +193,12 @@ def pairwise_summary(
         "first_wins": first_wins,
         "second_wins": second_wins,
         "ties": ties,
+        "first_only_correct": first_only_correct,
+        "second_only_correct": second_only_correct,
+        "first_only_examples": sorted(first_only_paths)[:25],
+        "second_only_examples": sorted(second_only_paths)[:25],
+        "either_correct": either_correct,
+        "portfolio_coverage": either_correct / len(expected) if expected else None,
         "first_total_time_s": first_total,
         "second_total_time_s": second_total,
         "first_speedup_by_total": second_total / first_total if first_total else None,
@@ -229,22 +249,14 @@ def grouped_summaries(
     return payload
 
 
-def family_summaries(
-    solvers: list[str],
-    by_path: dict[str, dict[str, dict]],
-    expected: dict[str, str],
-) -> dict[str, dict]:
+def family_groups(expected: dict[str, str]) -> dict[str, list[str]]:
     families: dict[str, list[str]] = defaultdict(list)
     for relative_path in expected:
         families[family_name(relative_path)].append(relative_path)
-    return grouped_summaries(dict(families), solvers, by_path, expected)
+    return dict(families)
 
 
-def stratum_summaries(
-    solvers: list[str],
-    by_path: dict[str, dict[str, dict]],
-    expected: dict[str, str],
-) -> dict[str, dict]:
+def stratum_groups(expected: dict[str, str]) -> dict[str, list[str]]:
     groups = {"QG-classification": [], "non-QG": []}
     for relative_path in expected:
         group = (
@@ -253,7 +265,81 @@ def stratum_summaries(
             else "non-QG"
         )
         groups[group].append(relative_path)
-    return grouped_summaries(groups, solvers, by_path, expected)
+    return groups
+
+
+def grouped_pairwise_summaries(
+    groups: dict[str, list[str]],
+    solvers: list[str],
+    by_path: dict[str, dict[str, dict]],
+    expected: dict[str, str],
+) -> dict[str, list[dict]]:
+    payload = {}
+    for group, paths in sorted(groups.items()):
+        group_expected = {path: expected[path] for path in paths}
+        group_observations = {path: by_path[path] for path in paths if path in by_path}
+        payload[group] = [
+            pairwise_summary(
+                solvers[first], solvers[second], group_observations, group_expected
+            )
+            for first in range(len(solvers))
+            for second in range(first + 1, len(solvers))
+        ]
+    return payload
+
+
+def oracle_portfolio_summary(
+    solvers: list[str],
+    by_path: dict[str, dict[str, dict]],
+    expected: dict[str, str],
+) -> dict:
+    solved_paths = []
+    unsolved_paths = []
+    all_correct = 0
+    unique_paths: dict[str, list[str]] = {solver: [] for solver in solvers}
+    fastest_counts = Counter()
+    oracle_times = []
+    for relative_path, target in expected.items():
+        correct = [
+            solver
+            for solver in solvers
+            if solver in by_path.get(relative_path, {})
+            and by_path[relative_path][solver]["result"] == target
+        ]
+        if not correct:
+            unsolved_paths.append(relative_path)
+            continue
+        solved_paths.append(relative_path)
+        all_correct += len(correct) == len(solvers)
+        if len(correct) == 1:
+            unique_paths[correct[0]].append(relative_path)
+        fastest = min(
+            correct,
+            key=lambda solver: by_path[relative_path][solver]["time_s"],
+        )
+        fastest_counts[fastest] += 1
+        oracle_times.append(by_path[relative_path][fastest]["time_s"])
+    return {
+        "solved": len(solved_paths),
+        "coverage": len(solved_paths) / len(expected) if expected else None,
+        "all_solvers_correct": all_correct,
+        "unsolved": len(unsolved_paths),
+        "unsolved_paths": sorted(unsolved_paths),
+        "unique_correct": {
+            solver: {
+                "count": len(paths),
+                "examples": sorted(paths)[:25],
+            }
+            for solver, paths in unique_paths.items()
+        },
+        "fastest_correct": {
+            solver: fastest_counts[solver] for solver in solvers
+        },
+        "oracle_total_time_s": sum(oracle_times),
+        "oracle_median_time_s": (
+            statistics.median(oracle_times) if oracle_times else None
+        ),
+    }
 
 
 def main() -> int:
@@ -279,14 +365,25 @@ def main() -> int:
         all(solver in observations for solver in solvers)
         for observations in by_path.values()
     )
+    families = family_groups(expected)
+    strata = stratum_groups(expected)
     payload = {
         "source_csv": str(args.csv),
         "instances": len(expected),
         "complete_instances": complete_instances,
         "solvers": solver_data,
         "pairwise": pairwise,
-        "families": family_summaries(solvers, by_path, expected),
-        "strata": stratum_summaries(solvers, by_path, expected),
+        "oracle_portfolio": oracle_portfolio_summary(
+            solvers, by_path, expected
+        ),
+        "families": grouped_summaries(families, solvers, by_path, expected),
+        "family_pairwise": grouped_pairwise_summaries(
+            families, solvers, by_path, expected
+        ),
+        "strata": grouped_summaries(strata, solvers, by_path, expected),
+        "stratum_pairwise": grouped_pairwise_summaries(
+            strata, solvers, by_path, expected
+        ),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

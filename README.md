@@ -59,6 +59,29 @@ faster-than-Z3 head on common solved instances, but Yices2 decisively leads the
 current implementation. See the corresponding notes under
 `research-vault/06-results/`.
 
+The 60-second sharded campaign `139420`/`139421`/`139422` also completed every
+solver-instance row without a wrong answer, disagreement, or execution error:
+
+| Solver | Correct | Coverage | Median | Total time |
+|---|---:|---:|---:|---:|
+| euf-viper | 7,434 | 99.08% | 0.0666s | 10,082.63s |
+| Z3 4.16.0 | 7,486 | 99.77% | 0.1426s | 5,024.91s |
+| cvc5 1.3.4 | 7,471 | 99.57% | 0.2293s | 9,694.51s |
+| Yices 2.7.0 | 7,500 | 99.96% | 0.0278s | 1,640.91s |
+
+`euf-viper` wins 5,581/7,433 common cases against Z3 with a 1.585x geometric
+speedup, but loses on tail-inclusive total time. All four solvers time out on
+the same three PEQ instances. A 1,200-second continuation from a new
+`euf-viper` revision retains 22,457 unchanged comparator rows, reruns all 7,503
+`euf-viper` rows and 52 comparator timeouts, and writes a new immutable run.
+
+The first controlled post-campaign optimization replaces Varisat with CaDiCaL
+refinement only after Kissat returns a SAT assignment that fails EUF model
+validation. Full-corpus paired job `139497` improved two-second coverage from
+6,873 to 6,886 and timeout-inclusive total time by 0.34%, with zero wrong
+answers or execution errors. Linux x86_64 now uses this route by default;
+`EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` restores the prior behavior.
+
 ## Repository Map
 
 - `src/main.rs`: SMT-LIB parser, Boolean CNF encoder, SAT portfolio,
@@ -89,6 +112,7 @@ current implementation. See the corresponding notes under
 
 The evidence supports a fast-head QF_UF tier, not a global superiority claim.
 The hard tail is concentrated in finite-model and pigeonhole-shaped families.
-Yices 2.7.0 is now in the comparator and certificate v1 checks the exact SAT
-refutation plus all EUF clauses. Longer full-corpus budgets remain mandatory,
-and certificate v1 still trusts the SMT-to-base-CNF translation.
+Yices 2.7.0 is in the comparator, the 60-second campaign is complete, and
+certificate v1 checks the exact SAT refutation plus all EUF clauses. The
+competition-budget continuation remains pending, and certificate v1 still
+trusts the SMT-to-base-CNF translation.
