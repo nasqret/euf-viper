@@ -222,6 +222,36 @@
   `results/wmi/dynamic-ack-fx-full-141911/`. The result is accepted as an
   improvement over the preceding standalone binary, not as a fresh claim over
   Z3 or Yices; 60-second and 1,200-second reruns remain pending.
+- Added verified finite-domain symmetry breaking and parser string-ownership
+  cleanup. The portable `x86-64-v3` candidate passed hot gate
+  `142401`/`142405` and finite-tail gate `142406`/`142410`. Full paired array
+  `142412` and merge `142417` then improved coverage `6,891 -> 6,898`,
+  timeout-charged total `1.0059x`, common total `1.0078x`, and geometric speed
+  `1.0220x`, with zero wrong answers or execution errors.
+- Repeated the nine coverage-changing cases seven times on both WMI CPU
+  architectures. AMD job `142478` gave `3/9 -> 9/9` and `3.506x` all-total;
+  Intel job `142479` gave `1/9 -> 8/9` and `1.321x` all-total. Neither retained
+  the single apparent baseline-only timeout from the full one-repeat gate.
+- Added deterministic A/B opportunity analysis with exact coverage-only sets,
+  timeout neighborhoods, largest deltas, per-family aggregates, and experiment
+  selection. Seven focused tests and the real 7,503-instance schema passed.
+- Completed the fresh hash-pinned four-solver campaign `142480`/`142481`/
+  `142482`. All 30,012 rows completed with no wrong answers, disagreements,
+  errors, or failed shards. Coverage was euf-viper 6,874, Z3 7,123, cvc5
+  6,831, and Yices2 7,420. Euf-viper beat Z3 on 6,833 common solves by
+  `1.111x` aggregate and `2.035x` geometric speed, and beat cvc5 overall. It
+  remained `3.584x` slower than Yices2 on common aggregate time and had 555
+  pairwise coverage losses versus nine unique solves.
+- Audited current Yices2 and Kissat source plus recent Biere/SAT, finite-model,
+  symmetry, proof-complexity, and user-propagator literature. The research
+  program now separates low-risk head removal, native finite Hall/PB and orbit
+  reasoning, and an IPASIR-UP rollback e-graph.
+- Added a default-off same-binary `EUF_VIPER_DIRECT_ROOT_CNF=0|1` experiment.
+  Exhaustive three-atom assignment tests cover nested Boolean connectives and
+  atom-free constants; the release suite now has 38 passing Rust tests.
+- Separated long-campaign retry-by-result from retry-by-solver. An explicit
+  empty retry-result set with `euf-viper` now reruns exactly euf-viper and
+  preserves all comparator rows; 14 Python harness tests pass.
 
 ## Next Entry Template
 
