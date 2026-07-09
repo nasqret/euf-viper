@@ -1,3 +1,5 @@
+mod finite_analysis;
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -4498,6 +4500,7 @@ fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
     }
 
     if let Some(bool_problem) = &problem.bool_problem {
+        finite_analysis::profile_if_enabled(&problem.arena, bool_problem);
         if bool_problem.unsupported.is_empty() {
             if let Some((result, cnf_vars, cnf_clauses, search_nodes, sat_calls, theory_lemmas)) =
                 solve_bool_problem(&problem.arena, bool_problem, direct_root_cnf)
