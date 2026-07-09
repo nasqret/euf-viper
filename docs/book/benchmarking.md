@@ -184,3 +184,27 @@ geometric speedup was 0.8788x. The router was trained on this corpus, so a new
 benchmark release remains mandatory for a generalization claim. Streaming
 only an input prefix was rejected by `140012`/`140017` after it worsened the
 overhead gate.
+
+## Dynamic Ackermann Full Gate
+
+The 2026-07-09 iteration used targeted, stable-hot-path, hard-family, and full
+corpus gates. Unconditional completion and the pre-Fx full candidate were
+rejected before the final run. The accepted candidate binary has SHA-256
+`f45b51ec65c36ca3df63397ba22a078c0e8490041c5e504f68ff9c2982a77a2d`.
+
+Array `141911` and strict merge `141916` compared that binary against the
+previous accepted binary on all 7,503 instances at two seconds, one observation
+per configuration and instance:
+
+| Metric | Baseline | Candidate |
+|---|---:|---:|
+| Correct | 6,993 | 7,002 |
+| Timeout-inclusive total | 2,309.12s | 2,270.65s |
+| Common-correct total | 1,243.01s | 1,202.56s |
+| Pairwise wins | 1,610 | 5,356 |
+
+Coverage delta was +9. Candidate speedup was 1.0169x over all instances,
+1.0336x by common-correct aggregate, and 1.0961x geometrically. All 15,006
+observations were present; wrong-answer and execution-error lists were empty.
+The one-repeat run is an acceptance A/B, not a precision estimate, and it does
+not replace the older 60-second or 1,200-second four-solver campaigns.

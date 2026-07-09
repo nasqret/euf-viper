@@ -10,12 +10,25 @@ import re
 from pathlib import Path
 
 
-def result_paths(path: Path, solver: str, results: set[str]) -> set[str]:
+def result_paths(
+    path: Path,
+    solver: str,
+    results: set[str],
+    time_at_least: float | None,
+    time_at_most: float | None,
+) -> set[str]:
     selected = set()
     with path.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
-            if row["solver"] == solver and row["result"] in results:
-                selected.add(row["relative_path"])
+            if row["solver"] != solver:
+                continue
+            if results and row["result"] not in results:
+                continue
+            if time_at_least is not None and float(row["time_s"]) < time_at_least:
+                continue
+            if time_at_most is not None and float(row["time_s"]) > time_at_most:
+                continue
+            selected.add(row["relative_path"])
     return selected
 
 
@@ -29,15 +42,42 @@ def main() -> int:
     parser.add_argument("--result-csv", type=Path)
     parser.add_argument("--solver", default="euf-viper")
     parser.add_argument("--result", action="append", default=[])
+    parser.add_argument("--time-at-least", type=float)
+    parser.add_argument("--time-at-most", type=float)
     args = parser.parse_args()
 
-    if args.result and not args.result_csv:
-        parser.error("--result requires --result-csv")
+    if (
+        args.result
+        or args.time_at_least is not None
+        or args.time_at_most is not None
+    ) and not args.result_csv:
+        parser.error("result and time filters require --result-csv")
+    if args.time_at_least is not None and args.time_at_least < 0:
+        parser.error("--time-at-least must be nonnegative")
+    if args.time_at_most is not None and args.time_at_most < 0:
+        parser.error("--time-at-most must be nonnegative")
+    if (
+        args.time_at_least is not None
+        and args.time_at_most is not None
+        and args.time_at_least > args.time_at_most
+    ):
+        parser.error("--time-at-least cannot exceed --time-at-most")
 
     path_pattern = re.compile(args.path_regex) if args.path_regex else None
     observed_paths = (
-        result_paths(args.result_csv, args.solver, set(args.result))
-        if args.result_csv and args.result
+        result_paths(
+            args.result_csv,
+            args.solver,
+            set(args.result),
+            args.time_at_least,
+            args.time_at_most,
+        )
+        if args.result_csv
+        and (
+            args.result
+            or args.time_at_least is not None
+            or args.time_at_most is not None
+        )
         else None
     )
     selected = []

@@ -9,6 +9,7 @@ certificates = ["dep:serde", "dep:serde_json", "dep:sha2"]
 [dependencies]
 rustsat = "0.7.5"
 rustsat-cadical = { version = "0.7.5", features = ["quiet"] }
+rustc-hash = "2.1.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 sha2 = { version = "0.10", optional = true }
@@ -22,3 +23,7 @@ rustsat-kissat = { version = "0.7.5", features = ["quiet"] }
 
 [patch.crates-io]
 kissat = { path = "vendor/kissat" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

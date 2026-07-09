@@ -52,6 +52,33 @@
   replayed EUF clause. Both exact DIMACS files and DRAT traces were accepted by
   the independent checker.
 
+## 2026-07-09 Dynamic Ackermann Iteration
+
+- The accepted standalone candidate keeps the ordinary Tseitin/Kissat path
+  unchanged until a SAT assignment fails full EUF validation. For non-finite
+  shapes with at least 100,000 base clauses and at most 256 applications, it
+  then rebuilds direct assertion roots, emits full function and predicate
+  Ackermann axioms, adds bounded minimum-degree chordal fill, and retries
+  Kissat once before the existing CaDiCaL fallback.
+- `EUF_VIPER_FULL_ACKERMANN=on` forces completion and `off` disables the
+  dynamic route. `EUF_VIPER_CHORDAL_MAX_FILL` defaults to 1,000,000. These are
+  experiment and rollback controls; the default gate is structural.
+- Full paired WMI array `141911` and strict merge `141916` are the acceptance
+  evidence: 7,503 instances, 15,006 observations, two-second timeout, coverage
+  6,993 to 7,002, timeout-inclusive speedup 1.0169x, common aggregate speedup
+  1.0336x, geometric speedup 1.0961x, zero wrong answers, zero execution
+  errors. Candidate wins were 5,356 versus 1,610.
+- The exact accepted binary SHA-256 is
+  `f45b51ec65c36ca3df63397ba22a078c0e8490041c5e504f68ff9c2982a77a2d`.
+  The previous accepted baseline binary remains
+  `2f2b90b94fd05e1b45e4067834a6045f39f2c1b7ddd80b79575ff61f3ffe6ea5`.
+- Unconditional completion, cold-code-only, thin-LTO-only, and the pre-Fx full
+  candidate were rejected by controlled gates. Do not infer acceptance from a
+  targeted family win; preserve the full-corpus coverage plus all-speed gate.
+- The new two-second result is not a 60-second or 1,200-second comparator run.
+  The published competition-budget boundary remains 7,478 standalone solves
+  versus Z3 7,500 and Yices 7,503 until those campaigns are rerun.
+
 ## Local Canary Results
 
 - Warm rerun synthetic canaries:

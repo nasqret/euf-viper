@@ -182,6 +182,47 @@
   Sage and Julia state under temporary homes while exposing installed Julia
   packages through a read-through depot.
 
+## 2026-07-09
+
+- Revisited eager EUF after identifying the five unsolved Goel cases as sparse
+  transitivity/congruence instances rather than finite-domain pigeonholes.
+  Forced full Ackermannization solved all five in `140140`/`140144`, but still
+  lost to Z3 and Yices on that slice and was therefore treated only as a route
+  candidate.
+- Implemented full function and predicate Ackermann axioms plus minimum-degree
+  chordal fill of the equality graph. SAT remains accepted only after full EUF
+  validation; every added clause is a theory consequence, so eager UNSAT
+  remains sound. A bounded fill may abstain but cannot make SAT unsound.
+- Rejected unconditional up-front completion. Hard-35 gate `140191`/`140196`
+  raised coverage from 11 to 17 but regressed common aggregate and geometric
+  speed. Replaced it with a post-invalid-model route restricted to non-finite
+  inputs with at least 100,000 base clauses and at most 256 applications.
+- Dynamic gate `140413`/`140418` raised hard-35 coverage from 12 to 19 and
+  passed aggregate speed. Goel-773 gate `140673`/`140693` added six solves and
+  passed all speed metrics, but the pre-Fx full gate `140803`/`140808` lost six
+  solves and regressed all speed metrics, so that revision was rejected.
+- Rejected cold-code-only and thin-LTO-only variants after `141116`/`141121`,
+  `141708`/`141713`, and `141872`/`141877` failed at least one controlled speed
+  or coverage criterion. Retained cold annotations and thin LTO only in the
+  later combined candidate that passed the complete gate.
+- Switched internal hash tables to deterministic `FxHashMap`/`FxHashSet` and
+  built release binaries with one codegen unit plus thin LTO. Stable hot-path
+  gate `141883`/`141888` improved coverage 396 to 397, common aggregate speed
+  1.0419x, and geometric speed 1.0837x. Sorted-order hard gate
+  `141902`/`141907` recovered all original five Goel gaps and improved
+  timeout-inclusive total time 1.1746x.
+- Accepted exact-binary full-corpus array `141911` and strict merge `141916`.
+  Across 7,503 instances and 15,006 observations at two seconds, coverage
+  improved 6,993 to 7,002. Timeout-inclusive total speedup was 1.0169x,
+  common-correct aggregate speedup 1.0336x, and geometric speedup 1.0961x;
+  candidate wins were 5,356 versus 1,610. There were zero wrong answers and
+  zero execution errors. Candidate SHA-256 is
+  `f45b51ec65c36ca3df63397ba22a078c0e8490041c5e504f68ff9c2982a77a2d`.
+- Archived merged CSV/JSON and build/SLURM logs under ignored
+  `results/wmi/dynamic-ack-fx-full-141911/`. The result is accepted as an
+  improvement over the preceding standalone binary, not as a fresh claim over
+  Z3 or Yices; 60-second and 1,200-second reruns remain pending.
+
 ## Next Entry Template
 
 - Benchmark corpus:

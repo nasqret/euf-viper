@@ -1,5 +1,6 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use rustsat::solvers::{
     GetInternalStats, LimitConflicts, Solve as RustSatSolve, SolverResult as RustSatResult,
 };
@@ -13,7 +14,8 @@ use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver};
 use serde::Serialize;
 #[cfg(feature = "certificates")]
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
 use std::env;
 use std::fs;
 #[cfg(feature = "certificates")]
@@ -223,7 +225,7 @@ impl ParseCtx {
                     return Ok(());
                 }
                 self.ensure_bool_value_terms();
-                let mut mixed_env = HashMap::new();
+                let mut mixed_env = HashMap::default();
                 let aux_start = self.bool_assertions.len();
                 match self.parse_bool_expr(&items[1], &mut mixed_env) {
                     Ok(expr) => {
@@ -239,14 +241,14 @@ impl ParseCtx {
                             && term_limit > 0
                             && self.arena.terms.len() <= term_limit
                         {
-                            let mut env = HashMap::new();
+                            let mut env = HashMap::default();
                             self.collect_formula(&items[1], true, &mut env)?;
                         }
                     }
                     Err(err) => {
                         self.bool_assertions.truncate(aux_start);
                         self.bool_unsupported.push(err);
-                        let mut env = HashMap::new();
+                        let mut env = HashMap::default();
                         self.collect_formula(&items[1], true, &mut env)?;
                     }
                 }
@@ -313,7 +315,7 @@ impl ParseCtx {
 
                 self.ensure_bool_value_terms();
                 let sym = self.symbols.intern(name);
-                let mut env = HashMap::new();
+                let mut env = HashMap::default();
                 match self.parse_bool_expr(&items[4], &mut env) {
                     Ok(body) => {
                         self.fun_decls.insert(
@@ -507,7 +509,7 @@ impl ParseCtx {
             return Ok(analysis);
         }
 
-        let mut common_classes: HashMap<Vec<usize>, Vec<TermId>> = HashMap::new();
+        let mut common_classes: HashMap<Vec<usize>, Vec<TermId>> = HashMap::default();
         for term_id in 0..term_count {
             let signature = satisfiable_roots
                 .iter()
@@ -516,7 +518,7 @@ impl ParseCtx {
             common_classes.entry(signature).or_default().push(term_id);
         }
 
-        let mut existing = HashSet::new();
+        let mut existing = HashSet::default();
         for &(a, b) in &self.eqs {
             existing.insert(normalized_pair(a, b));
         }
@@ -1313,8 +1315,10 @@ impl<'a> ExplainingTheory<'a> {
     fn close_congruence(&mut self) {
         loop {
             let mut changed = false;
-            let mut signatures =
-                HashMap::<Signature, TermId>::with_capacity(self.arena.apps.len() * 2);
+            let mut signatures = HashMap::<Signature, TermId>::with_capacity_and_hasher(
+                self.arena.apps.len() * 2,
+                Default::default(),
+            );
             for &term_id in &self.arena.apps {
                 let term = &self.arena.terms[term_id];
                 let signature = Signature {
@@ -1346,7 +1350,7 @@ impl<'a> ExplainingTheory<'a> {
     }
 
     fn explain_equal(&self, a: TermId, b: TermId, literals: &mut HashSet<i32>) {
-        let mut expanded = HashSet::new();
+        let mut expanded = HashSet::default();
         self.explain_equal_inner(a, b, literals, &mut expanded);
     }
 
@@ -1476,7 +1480,7 @@ impl CnfProblem {
         Self {
             clauses: Vec::new(),
             var_atoms: vec![None],
-            atom_vars: HashMap::new(),
+            atom_vars: HashMap::default(),
             true_lit: None,
             finite_equalities_complete: false,
             finite_predicate_congruence_complete: false,
@@ -1522,8 +1526,55 @@ impl CnfProblem {
     }
 
     fn add_assertion(&mut self, expr: &BoolExpr) {
-        let lit = self.encode_expr(expr);
-        self.clauses.push(vec![lit]);
+        let literal = self.encode_expr(expr);
+        self.clauses.push(vec![literal]);
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn add_direct_assertion(&mut self, expr: &BoolExpr) {
+        match expr {
+            BoolExpr::Const(true) => {}
+            BoolExpr::Const(false) => self.clauses.push(Vec::new()),
+            BoolExpr::Atom(atom) => {
+                let literal = self.atom_lit(atom.clone());
+                self.clauses.push(vec![literal]);
+            }
+            BoolExpr::Not(child) => {
+                let literal = self.encode_expr(child);
+                self.clauses.push(vec![-literal]);
+            }
+            BoolExpr::And(children) => {
+                for child in children {
+                    self.add_direct_assertion(child);
+                }
+            }
+            BoolExpr::Or(children) => {
+                let clause = children
+                    .iter()
+                    .map(|child| self.encode_expr(child))
+                    .collect();
+                self.clauses.push(clause);
+            }
+            BoolExpr::Iff(children) => {
+                let Some((first, rest)) = children.split_first() else {
+                    return;
+                };
+                let first = self.encode_expr(first);
+                for child in rest {
+                    let child = self.encode_expr(child);
+                    self.clauses.push(vec![-first, child]);
+                    self.clauses.push(vec![first, -child]);
+                }
+            }
+            BoolExpr::Ite(cond, then_expr, else_expr) => {
+                let cond = self.encode_expr(cond);
+                let then_expr = self.encode_expr(then_expr);
+                let else_expr = self.encode_expr(else_expr);
+                self.clauses.push(vec![-cond, then_expr]);
+                self.clauses.push(vec![cond, else_expr]);
+            }
+        }
     }
 
     fn encode_expr(&mut self, expr: &BoolExpr) -> i32 {
@@ -1617,13 +1668,167 @@ impl CnfProblem {
     }
 }
 
+#[cold]
+#[inline(never)]
+fn add_full_ackermann_axioms(cnf: &mut CnfProblem, arena: &TermArena) -> usize {
+    let bool_functions = cnf
+        .var_atoms
+        .iter()
+        .filter_map(|atom| match atom {
+            Some(BoolAtomKey::BoolTerm(term)) => {
+                let application = &arena.terms[*term];
+                Some((application.fun, application.args.len()))
+            }
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    let mut groups = HashMap::<(SymId, usize), Vec<TermId>>::default();
+    for &term_id in &arena.apps {
+        let term = &arena.terms[term_id];
+        groups
+            .entry((term.fun, term.args.len()))
+            .or_default()
+            .push(term_id);
+    }
+
+    let start_clause_count = cnf.clauses.len();
+    for applications in groups.values() {
+        for left_index in 0..applications.len() {
+            let left_id = applications[left_index];
+            let left = &arena.terms[left_id];
+            for &right_id in &applications[(left_index + 1)..] {
+                let right = &arena.terms[right_id];
+                let mut conditions = Vec::with_capacity(left.args.len());
+                for (&left_arg, &right_arg) in left.args.iter().zip(&right.args) {
+                    if left_arg != right_arg {
+                        conditions.push(-cnf.atom_lit(BoolAtomKey::Eq(left_arg, right_arg)));
+                    }
+                }
+
+                if bool_functions.contains(&(left.fun, left.args.len())) {
+                    let left_bool = cnf.atom_lit(BoolAtomKey::BoolTerm(left_id));
+                    let right_bool = cnf.atom_lit(BoolAtomKey::BoolTerm(right_id));
+                    let mut forward = conditions.clone();
+                    forward.extend([-left_bool, right_bool]);
+                    cnf.clauses.push(forward);
+                    let mut backward = conditions;
+                    backward.extend([left_bool, -right_bool]);
+                    cnf.clauses.push(backward);
+                } else {
+                    conditions.push(cnf.atom_lit(BoolAtomKey::Eq(left_id, right_id)));
+                    cnf.clauses.push(conditions);
+                }
+            }
+        }
+    }
+    cnf.clauses.len() - start_clause_count
+}
+
+#[cold]
+#[inline(never)]
+fn add_sparse_transitivity_fill(
+    cnf: &mut CnfProblem,
+    term_count: usize,
+    max_fill_edges: usize,
+) -> Option<usize> {
+    let mut adjacency = vec![HashSet::<TermId>::default(); term_count];
+    for atom in cnf.var_atoms.iter().flatten() {
+        let BoolAtomKey::Eq(left, right) = atom else {
+            continue;
+        };
+        if left == right {
+            continue;
+        }
+        adjacency[*left].insert(*right);
+        adjacency[*right].insert(*left);
+    }
+
+    let mut active = adjacency
+        .iter()
+        .map(|neighbors| !neighbors.is_empty())
+        .collect::<Vec<_>>();
+    let mut degree = adjacency.iter().map(HashSet::len).collect::<Vec<_>>();
+    let mut queue = BinaryHeap::new();
+    for (vertex, &vertex_degree) in degree.iter().enumerate() {
+        if active[vertex] {
+            queue.push(Reverse((vertex_degree, vertex)));
+        }
+    }
+
+    let mut fill_edges = Vec::new();
+    while let Some(Reverse((queued_degree, vertex))) = queue.pop() {
+        if !active[vertex] || degree[vertex] != queued_degree {
+            continue;
+        }
+        let neighbors = adjacency[vertex]
+            .iter()
+            .copied()
+            .filter(|neighbor| active[*neighbor])
+            .collect::<Vec<_>>();
+        for left_index in 0..neighbors.len() {
+            let left = neighbors[left_index];
+            for &right in &neighbors[(left_index + 1)..] {
+                if adjacency[left].contains(&right) {
+                    continue;
+                }
+                if fill_edges.len() == max_fill_edges {
+                    return None;
+                }
+                adjacency[left].insert(right);
+                adjacency[right].insert(left);
+                degree[left] += 1;
+                degree[right] += 1;
+                queue.push(Reverse((degree[left], left)));
+                queue.push(Reverse((degree[right], right)));
+                fill_edges.push(normalized_pair(left, right));
+            }
+        }
+
+        active[vertex] = false;
+        for neighbor in neighbors {
+            degree[neighbor] -= 1;
+            queue.push(Reverse((degree[neighbor], neighbor)));
+        }
+    }
+
+    fill_edges.sort_unstable();
+    fill_edges.dedup();
+    for (left, right) in &fill_edges {
+        cnf.atom_lit(BoolAtomKey::Eq(*left, *right));
+    }
+    Some(fill_edges.len())
+}
+
+#[cold]
+#[inline(never)]
+fn add_full_ackermann_completion(cnf: &mut CnfProblem, arena: &TermArena) {
+    let ackermann_start = Instant::now();
+    let added = add_full_ackermann_axioms(cnf, arena);
+    profile_phase("full_ackermann", ackermann_start, added);
+
+    if cnf.finite_equalities_complete {
+        return;
+    }
+    let fill_start = Instant::now();
+    let max_fill_edges = env::var("EUF_VIPER_CHORDAL_MAX_FILL")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1_000_000usize);
+    let fill_edges = add_sparse_transitivity_fill(cnf, arena.terms.len(), max_fill_edges);
+    profile_phase(
+        "chordal_transitivity_fill",
+        fill_start,
+        fill_edges.unwrap_or(usize::MAX),
+    );
+}
+
 fn equality_transitivity_clauses(cnf: &CnfProblem, term_count: usize) -> Vec<Vec<i32>> {
     if cnf.finite_equalities_complete {
         return Vec::new();
     }
-    let mut equality_vars = HashMap::new();
+    let mut equality_vars = HashMap::default();
     let mut adjacency = vec![Vec::<(TermId, i32)>::new(); term_count];
-    let mut clauses = HashSet::new();
+    let mut clauses = HashSet::default();
     for (var, atom) in cnf.var_atoms.iter().enumerate().skip(1) {
         let Some(BoolAtomKey::Eq(left, right)) = atom else {
             continue;
@@ -1703,7 +1908,7 @@ fn add_finite_domain_axioms_with_options(
     equality_channeling: FiniteEqualityChanneling,
     predicate_channeling: bool,
 ) -> usize {
-    let mut disequality_edges = HashSet::new();
+    let mut disequality_edges = HashSet::default();
     for assertion in &bool_problem.assertions {
         collect_mandatory_disequalities(assertion, &mut disequality_edges);
     }
@@ -1713,19 +1918,19 @@ fn add_finite_domain_axioms_with_options(
     }
     let domain_set = domain.iter().copied().collect::<HashSet<_>>();
 
-    let mut covered_terms = HashSet::new();
+    let mut covered_terms = HashSet::default();
     for assertion in &bool_problem.assertions {
         collect_mandatory_coverages(assertion, &domain_set, &mut covered_terms);
     }
 
-    let mut function_arities: HashMap<SymId, usize> = HashMap::new();
+    let mut function_arities: HashMap<SymId, usize> = HashMap::default();
     for &term_id in &covered_terms {
         let term = &arena.terms[term_id];
         if !term.args.is_empty() && term.args.iter().all(|arg| domain_set.contains(arg)) {
             function_arities.insert(term.fun, term.args.len());
         }
     }
-    let mut closed_functions = HashSet::new();
+    let mut closed_functions = HashSet::default();
     for (function, arity) in function_arities {
         let Some(expected) = domain.len().checked_pow(arity as u32) else {
             continue;
@@ -1787,7 +1992,7 @@ fn add_finite_domain_axioms_with_options(
     original_predicates.sort_unstable();
     original_predicates.dedup();
 
-    let mut membership = HashMap::new();
+    let mut membership = HashMap::default();
     for &term in &ordered_finite_terms {
         for &value in &domain {
             let literal = cnf.atom_lit(BoolAtomKey::Eq(term, value));
@@ -1926,7 +2131,7 @@ fn add_finite_predicate_channeling(
     membership: &HashMap<(TermId, TermId), i32>,
     predicate_terms: &[TermId],
 ) -> (usize, bool) {
-    let mut clauses = HashSet::new();
+    let mut clauses = HashSet::default();
     let mut complete = true;
     for &term_id in predicate_terms {
         let term = &arena.terms[term_id];
@@ -2002,7 +2207,7 @@ fn largest_small_disequality_clique(
     edges: &HashSet<(TermId, TermId)>,
     arena: &TermArena,
 ) -> Vec<TermId> {
-    let mut degree = HashMap::<TermId, usize>::new();
+    let mut degree = HashMap::<TermId, usize>::default();
     for &(left, right) in edges {
         *degree.entry(left).or_default() += 1;
         *degree.entry(right).or_default() += 1;
@@ -2048,7 +2253,7 @@ fn collect_mandatory_coverages(
             let mut pairs = Vec::new();
             if flatten_equality_disjunction(expression, &mut pairs) {
                 let mut candidate = None;
-                let mut values = HashSet::new();
+                let mut values = HashSet::default();
                 for (left, right) in pairs {
                     let (term, value) = if domain.contains(&left) && !domain.contains(&right) {
                         (right, left)
@@ -2113,8 +2318,8 @@ fn domain_tuples_for_args(
 }
 
 fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>> {
-    let mut equality_vars = HashMap::new();
-    let mut bool_vars = HashMap::new();
+    let mut equality_vars = HashMap::default();
+    let mut bool_vars = HashMap::default();
     let mut equality_neighbors = vec![Vec::<(TermId, i32)>::new(); arena.terms.len()];
     for (var, atom) in cnf.var_atoms.iter().enumerate().skip(1) {
         match atom {
@@ -2137,7 +2342,7 @@ fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>
         neighbors.dedup_by_key(|(term, _)| *term);
     }
 
-    let mut clauses = HashSet::new();
+    let mut clauses = HashSet::default();
     let mode = env::var("EUF_VIPER_CONGRUENCE_MODE").unwrap_or_else(|_| "auto".to_owned());
     let canonical_values = canonical_value_terms(cnf, arena);
     let canonical_only = mode == "canonical"
@@ -2567,7 +2772,8 @@ impl<'a> DpllSolver<'a> {
         if true_root == false_root {
             return None;
         }
-        let mut diseq_roots = HashSet::with_capacity(diseqs.len() * 2);
+        let mut diseq_roots =
+            HashSet::with_capacity_and_hasher(diseqs.len() * 2, Default::default());
         for (a, b) in diseqs {
             let ra = uf.find(a);
             let rb = uf.find(b);
@@ -2704,13 +2910,13 @@ fn theory_conflict_clauses(
 
     let mut conflicts = Vec::new();
     if theory.equal(true_term, false_term) {
-        let mut reasons = HashSet::new();
+        let mut reasons = HashSet::default();
         theory.explain_equal(true_term, false_term, &mut reasons);
         conflicts.push(conflict_clause(reasons));
     }
     for (var, left, right) in false_equalities {
         if theory.equal(left, right) {
-            let mut reasons = HashSet::new();
+            let mut reasons = HashSet::default();
             reasons.insert(-(var as i32));
             theory.explain_equal(left, right, &mut reasons);
             conflicts.push(conflict_clause(reasons));
@@ -2766,10 +2972,28 @@ fn use_cadical_refine_after_invalid_model() -> bool {
     cadical_refine_after_invalid_model(setting.as_deref())
 }
 
+fn force_full_ackermann(setting: Option<&str>) -> bool {
+    matches!(setting, Some("1" | "on"))
+}
+
+#[cold]
+#[inline(never)]
+fn dynamic_full_ackermann_for_shape(
+    setting: Option<&str>,
+    cnf_clauses: usize,
+    app_count: usize,
+    finite_added: usize,
+) -> bool {
+    match setting {
+        Some("1" | "on" | "0" | "off") => false,
+        _ => finite_added == 0 && cnf_clauses >= 100_000 && app_count <= 256,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum EagerSolveOutcome {
     Solved(SolveResult),
-    InvalidTheoryModel,
+    InvalidTheoryModel(usize),
     #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
     Unavailable,
 }
@@ -2841,10 +3065,11 @@ fn solve_kissat_euf_once(
             None => 0,
         };
     }
-    if theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment).is_empty() {
+    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel
+        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
     }
 }
 
@@ -2930,10 +3155,11 @@ fn solve_kissat_euf_once(
             TernaryVal::DontCare => 0,
         };
     }
-    if theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment).is_empty() {
+    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel
+        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
     }
 }
 
@@ -3084,7 +3310,7 @@ fn solve_cadical_euf_refining(
         congruence.len(),
     );
     let canonical_values = canonical_value_terms(cnf, arena);
-    let mut congruence_groups = HashMap::<(TermId, i8), Vec<usize>>::new();
+    let mut congruence_groups = HashMap::<(TermId, i8), Vec<usize>>::default();
     let mut clause_groups = Vec::with_capacity(congruence.len());
     for (index, clause) in congruence.iter().enumerate() {
         let group = congruence_clause_group(clause, cnf, arena, &canonical_values);
@@ -3094,7 +3320,7 @@ fn solve_cadical_euf_refining(
         clause_groups.push(group);
     }
     let mut loaded_congruence = vec![false; congruence.len()];
-    let mut learned_theory = HashSet::<Vec<i32>>::new();
+    let mut learned_theory = HashSet::<Vec<i32>>::default();
     let max_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -3128,7 +3354,7 @@ fn solve_cadical_euf_refining(
             };
         }
 
-        let mut violated_groups = HashSet::new();
+        let mut violated_groups = HashSet::default();
         let mut violated_ungrouped = Vec::new();
         for (index, clause) in congruence.iter().enumerate() {
             if !loaded_congruence[index]
@@ -3231,7 +3457,7 @@ fn solve_varisat_euf(
     }
     profile_phase("varisat_congruence_load", congruence_load_start, 0);
 
-    let mut learned = HashSet::<Vec<i32>>::new();
+    let mut learned = HashSet::<Vec<i32>>::default();
     let max_theory_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -3320,7 +3546,7 @@ fn discover_certificate_theory_conflicts(
         solver.add_clause(&literals);
     }
 
-    let mut learned = HashSet::<Vec<i32>>::new();
+    let mut learned = HashSet::<Vec<i32>>::default();
     for round in 1..=max_rounds {
         match solver.solve() {
             Ok(false) => return Ok((round, learned.len())),
@@ -3711,6 +3937,33 @@ fn solve_problem(problem: Problem) -> SolveReport {
     }
 }
 
+#[cold]
+#[inline(never)]
+fn solve_dynamic_full_ackermann(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> (CnfProblem, EagerSolveOutcome) {
+    let direct_cnf_start = Instant::now();
+    let mut completed = CnfProblem::new();
+    for assertion in &bool_problem.assertions {
+        completed.add_direct_assertion(assertion);
+    }
+    profile_phase(
+        "dynamic_direct_cnf",
+        direct_cnf_start,
+        completed.clauses.len(),
+    );
+    add_full_ackermann_completion(&mut completed, arena);
+    let outcome = solve_kissat_euf_once(
+        &completed,
+        arena,
+        bool_problem.true_term,
+        bool_problem.false_term,
+        false,
+    );
+    (completed, outcome)
+}
+
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -3736,7 +3989,31 @@ fn solve_bool_problem(
         } else {
             0
         };
-        let eager_congruence = use_eager_congruence_for_first_pass(finite_added, &cnf, arena);
+        let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
+        let full_ackermann_forced = force_full_ackermann(full_ackermann_setting.as_deref());
+        if full_ackermann_forced {
+            add_full_ackermann_completion(&mut cnf, arena);
+        } else if !cnf.finite_equalities_complete
+            && matches!(
+                env::var("EUF_VIPER_CHORDAL_TRANSITIVITY").as_deref(),
+                Ok("1" | "on")
+            )
+        {
+            let fill_start = Instant::now();
+            let max_fill_edges = env::var("EUF_VIPER_CHORDAL_MAX_FILL")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(1_000_000usize);
+            let fill_edges =
+                add_sparse_transitivity_fill(&mut cnf, arena.terms.len(), max_fill_edges);
+            profile_phase(
+                "chordal_transitivity_fill",
+                fill_start,
+                fill_edges.unwrap_or(usize::MAX),
+            );
+        }
+        let eager_congruence = !full_ackermann_forced
+            && use_eager_congruence_for_first_pass(finite_added, &cnf, arena);
         profile_measurement(
             "eager_congruence_first_pass",
             u128::from(eager_congruence),
@@ -3767,28 +4044,61 @@ fn solve_bool_problem(
                 bool_problem.false_term,
                 eager_congruence,
             );
-            if let EagerSolveOutcome::Solved(result) = outcome {
-                return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
-            }
-            if outcome == EagerSolveOutcome::InvalidTheoryModel
-                && use_cadical_refine_after_invalid_model()
-            {
-                profile_measurement("invalid_model_cadical_refine", 1, 0);
-                if let Some((result, sat_calls, theory_lemmas)) = solve_cadical_euf_refining(
-                    &cnf,
-                    arena,
-                    bool_problem.true_term,
-                    bool_problem.false_term,
-                ) {
-                    return Some((
-                        result,
-                        cnf.var_count(),
-                        cnf.clauses.len(),
-                        0,
-                        sat_calls + 1,
-                        theory_lemmas,
-                    ));
+            match outcome {
+                EagerSolveOutcome::Solved(result) => {
+                    return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
                 }
+                EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
+                    let mut completed_cnf = None;
+                    let mut prior_sat_calls = 1;
+                    if dynamic_full_ackermann_for_shape(
+                        full_ackermann_setting.as_deref(),
+                        cnf.clauses.len(),
+                        arena.apps.len(),
+                        finite_added,
+                    ) {
+                        profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
+                        let (completed, completed_outcome) =
+                            solve_dynamic_full_ackermann(arena, bool_problem);
+                        prior_sat_calls += 1;
+                        match completed_outcome {
+                            EagerSolveOutcome::Solved(result) => {
+                                return Some((
+                                    result,
+                                    completed.var_count(),
+                                    completed.clauses.len(),
+                                    0,
+                                    prior_sat_calls,
+                                    0,
+                                ));
+                            }
+                            EagerSolveOutcome::InvalidTheoryModel(_) => {
+                                completed_cnf = Some(completed);
+                            }
+                            EagerSolveOutcome::Unavailable => {}
+                        }
+                    }
+                    if use_cadical_refine_after_invalid_model() {
+                        profile_measurement("invalid_model_cadical_refine", 1, 0);
+                        let fallback_cnf = completed_cnf.as_ref().unwrap_or(&cnf);
+                        if let Some((result, sat_calls, theory_lemmas)) = solve_cadical_euf_refining(
+                            fallback_cnf,
+                            arena,
+                            bool_problem.true_term,
+                            bool_problem.false_term,
+                        ) {
+                            return Some((
+                                result,
+                                fallback_cnf.var_count(),
+                                fallback_cnf.clauses.len(),
+                                0,
+                                sat_calls + prior_sat_calls,
+                                theory_lemmas,
+                            ));
+                        }
+                    }
+                }
+                EagerSolveOutcome::Unavailable => {}
             }
         }
         if backend == "cadical" {
@@ -3860,7 +4170,8 @@ fn congruence_closure(arena: &TermArena, uf: &mut UnionFind) -> (usize, usize) {
     loop {
         passes += 1;
         let mut changed = false;
-        let mut sigs: HashMap<Signature, TermId> = HashMap::with_capacity(arena.apps.len() * 2);
+        let mut sigs: HashMap<Signature, TermId> =
+            HashMap::with_capacity_and_hasher(arena.apps.len() * 2, Default::default());
         for &term_id in &arena.apps {
             let term = &arena.terms[term_id];
             let mut arg_roots = Vec::with_capacity(term.args.len());
@@ -4591,6 +4902,144 @@ mod tests {
         );
     }
 
+    #[test]
+    fn emits_direct_constraints_for_assertion_roots() {
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+
+        let mut conjunction = CnfProblem::new();
+        conjunction.add_direct_assertion(&BoolExpr::And(vec![
+            atom(0),
+            BoolExpr::Not(Box::new(atom(1))),
+        ]));
+        assert_eq!(conjunction.var_count(), 2);
+        assert_eq!(conjunction.clauses, vec![vec![1], vec![-2]]);
+
+        let mut equivalence = CnfProblem::new();
+        equivalence.add_direct_assertion(&BoolExpr::Iff(vec![atom(0), atom(1), atom(2)]));
+        assert_eq!(equivalence.var_count(), 3);
+        assert_eq!(
+            equivalence.clauses,
+            vec![vec![-1, 2], vec![1, -2], vec![-1, 3], vec![1, -3]]
+        );
+
+        let mut conditional = CnfProblem::new();
+        conditional.add_direct_assertion(&BoolExpr::Ite(
+            Box::new(atom(0)),
+            Box::new(atom(1)),
+            Box::new(atom(2)),
+        ));
+        assert_eq!(conditional.var_count(), 3);
+        assert_eq!(conditional.clauses, vec![vec![-1, 2], vec![1, 3]]);
+    }
+
+    #[test]
+    fn chordal_fill_makes_triangle_transitivity_complete_on_a_four_cycle() {
+        let mut cnf = CnfProblem::new();
+        let edge_01 = cnf.atom_lit(BoolAtomKey::Eq(0, 1));
+        let edge_12 = cnf.atom_lit(BoolAtomKey::Eq(1, 2));
+        let edge_23 = cnf.atom_lit(BoolAtomKey::Eq(2, 3));
+        let edge_03 = cnf.atom_lit(BoolAtomKey::Eq(0, 3));
+        assert!(equality_transitivity_clauses(&cnf, 4).is_empty());
+        assert_eq!(add_sparse_transitivity_fill(&mut cnf, 4, 1), Some(1));
+
+        let transitivity = equality_transitivity_clauses(&cnf, 4);
+        assert_eq!(transitivity.len(), 6);
+        let mut solver = VarisatSolver::new();
+        for clause in transitivity {
+            solver.add_clause(
+                &clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for literal in [edge_01, edge_12, edge_23, -edge_03] {
+            solver.add_clause(&[Lit::from_dimacs(literal as isize)]);
+        }
+        assert!(matches!(solver.solve(), Ok(false)));
+
+        let mut capped = CnfProblem::new();
+        capped.atom_lit(BoolAtomKey::Eq(0, 1));
+        capped.atom_lit(BoolAtomKey::Eq(1, 2));
+        capped.atom_lit(BoolAtomKey::Eq(2, 3));
+        capped.atom_lit(BoolAtomKey::Eq(0, 3));
+        assert_eq!(add_sparse_transitivity_fill(&mut capped, 4, 0), None);
+        assert_eq!(capped.var_count(), 4);
+    }
+
+    #[test]
+    fn full_ackermann_axioms_make_function_congruence_propositional() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        assert!(add_full_ackermann_axioms(&mut cnf, &problem.arena) > 0);
+
+        let mut solver = VarisatSolver::new();
+        for clause in &cnf.clauses {
+            solver.add_clause(
+                &clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for clause in equality_transitivity_clauses(&cnf, problem.arena.terms.len()) {
+            solver.add_clause(
+                &clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert!(matches!(solver.solve(), Ok(false)));
+    }
+
+    #[test]
+    fn full_ackermann_axioms_make_predicate_congruence_propositional() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun p (U) Bool)
+            (assert (= a b))
+            (assert (p a))
+            (assert (not (p b)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        assert!(add_full_ackermann_axioms(&mut cnf, &problem.arena) > 0);
+
+        let mut solver = VarisatSolver::new();
+        for clause in &cnf.clauses {
+            solver.add_clause(
+                &clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert!(matches!(solver.solve(), Ok(false)));
+    }
+
     fn solve_text(input: &str) -> SolveResult {
         solve_problem(parse_problem(input).unwrap()).result
     }
@@ -4826,6 +5275,30 @@ mod tests {
             cadical_refine_after_invalid_model(Some("unknown")),
             cfg!(all(target_os = "linux", target_arch = "x86_64"))
         );
+    }
+
+    #[test]
+    fn routes_dynamic_full_ackermann_after_invalid_models() {
+        assert!(!force_full_ackermann(None));
+        assert!(force_full_ackermann(Some("on")));
+        assert!(!force_full_ackermann(Some("off")));
+
+        assert!(dynamic_full_ackermann_for_shape(None, 100_000, 256, 0));
+        assert!(!dynamic_full_ackermann_for_shape(None, 99_999, 256, 0));
+        assert!(!dynamic_full_ackermann_for_shape(None, 100_000, 257, 0));
+        assert!(!dynamic_full_ackermann_for_shape(None, 100_000, 256, 1));
+        assert!(!dynamic_full_ackermann_for_shape(
+            Some("on"),
+            1_000_000,
+            1,
+            0
+        ));
+        assert!(!dynamic_full_ackermann_for_shape(
+            Some("off"),
+            1_000_000,
+            1,
+            0
+        ));
     }
 
     #[test]

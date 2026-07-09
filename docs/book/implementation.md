@@ -11,10 +11,12 @@ The current pipeline keeps each soundness boundary explicit.
 6. Solve with Kissat, CaDiCaL, or Varisat according to structural routing.
 7. Trust UNSAT from the sound clause set; validate SAT models with full EUF
    congruence closure.
-8. If validation finds a theory conflict, add explanation clauses and refine.
+8. If validation finds a theory conflict on a selected large sparse shape,
+   rebuild a compact direct-root CNF, complete it propositionally, and retry.
+9. Otherwise add explanation clauses and refine incrementally.
 
-On Linux x86_64, step 8 uses incremental CaDiCaL refinement by default after
-an eager Kissat model is rejected. This is deliberately post-validation: eager
+On Linux x86_64, step 9 uses incremental CaDiCaL refinement by default after
+the eager routes are exhausted. This is deliberately post-validation: eager
 UNSAT and EUF-valid SAT paths are unchanged. Set
 `EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` to restore the previous fallback.
 The default was promoted only after a targeted repeated profile, a repeated
@@ -24,6 +26,37 @@ The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail
 gate.
+
+## Dynamic Ackermann completion
+
+For two applications of the same uninterpreted function, the completion emits
+
+$$
+\left(\bigwedge_i a_i = b_i\right) \Longrightarrow
+f(a_1,\ldots,a_n)=f(b_1,\ldots,b_n).
+$$
+
+For Boolean-valued functions, the consequent is propositional equivalence.
+These are sound EUF consequences. Equality atoms form an undirected graph; a
+minimum-degree elimination adds bounded fill edges, after which triangle
+clauses encode transitivity over the chordal completion. This follows the
+sparse-transitivity approach of Bryant and Velev:
+https://arxiv.org/abs/cs/0008001.
+
+The route is deliberately cold. In automatic mode it is considered only after
+Kissat produced an EUF-invalid model, no finite-domain axioms were added, the
+base CNF has at least 100,000 clauses, and the term arena has at most 256
+applications. Root-level conjunction, equivalence, and conditional assertions
+are encoded directly in the rebuilt CNF. `EUF_VIPER_FULL_ACKERMANN=on` forces
+completion, `off` disables the dynamic route, and
+`EUF_VIPER_CHORDAL_MAX_FILL` bounds fill edges. If completion is capped or a
+SAT assignment remains invalid, the solver abstains from that result and
+continues to the validated fallback.
+
+Internal maps and sets use deterministic Fx hashing. Release builds use one
+codegen unit and thin LTO. These choices were accepted only as part of the
+exact full-corpus candidate; isolated cold-code and LTO variants failed earlier
+gates.
 
 ## Structural portfolio
 

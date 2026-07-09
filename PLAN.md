@@ -43,6 +43,11 @@ front tier of a coverage-oriented portfolio.
   candidate that fails coverage and speed gates.
 - [x] Add an opt-in structural Yices portfolio and pass a full 7,503-instance
   coverage and aggregate-speed gate.
+- [x] Add a post-validation dynamic Ackermann/chordal route and pass targeted,
+  hot-path, hard-family, and full 7,503-instance paired speed/coverage gates.
+- [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
+- [ ] Reduce the remaining finite-model tail without regressing a full-corpus
+  paired speed or coverage metric.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
 
@@ -69,4 +74,7 @@ adds 22 solves and Yices covers all 25 remaining gaps. No global superiority
 claim is allowed. The opt-in Yices-dependent portfolio reaches 7,503/7,503 and
 is 1.046x faster than direct Yices by paired aggregate time, but its geometric
 speed is 0.8788x and the router was trained on this corpus. It is not an
-independent solver victory.
+independent solver victory. The accepted 2026-07-09 standalone iteration
+improves the previous binary from 6,993 to 7,002 solves at two seconds while
+also passing all three speed metrics. Its 60-second and 1,200-second coverage
+remain unmeasured, so the older competition-budget boundary still governs.

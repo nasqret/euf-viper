@@ -101,6 +101,22 @@ Corpus workers write observations as futures complete, so one long-running
 early task cannot block checkpoint progress from later tasks. A/B merge output
 prints `n/a` when no common-correct timing population exists.
 
+Select a stable timing band or a timeout slice from an existing result CSV:
+
+```bash
+scripts/bench/filter_manifest.py \
+  benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
+  --result-csv results/qf-uf-corpus.csv \
+  --solver euf-viper --time-at-least 0.1 --time-at-most 1.0 \
+  --out results/qf-uf-stable.jsonl
+```
+
+The filter rejects negative or reversed bounds. A/B SLURM workers accept
+`EUF_VIPER_BASELINE_AXIOM_ORDER` and `EUF_VIPER_CANDIDATE_AXIOM_ORDER`; record
+both values with every campaign because axiom order changes SAT search. The
+accepted `141911` gate used `native` for the frozen baseline and `sorted` for
+the candidate, matching its CLI default.
+
 Train the structural portfolio candidate from a complete result matrix:
 
 ```bash

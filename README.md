@@ -122,6 +122,18 @@ validation. Full-corpus paired job `139497` improved two-second coverage from
 answers or execution errors. Linux x86_64 now uses this route by default;
 `EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` restores the prior behavior.
 
+The 2026-07-09 accepted iteration adds a colder, structurally gated route for
+large non-finite formulas whose first Kissat model fails EUF validation. It
+rebuilds root assertions directly, adds full Ackermann function and predicate
+axioms, completes the equality graph with bounded sparse chordal fill, and
+runs one fresh Kissat solve before the existing CaDiCaL fallback. Full-corpus
+paired WMI array `141911` plus strict merge `141916` improved two-second
+coverage from 6,993 to 7,002, timeout-inclusive total time by 1.0169x,
+common-correct aggregate time by 1.0336x, and geometric speed by 1.0961x. All
+15,006 observations completed with no wrong answer or execution error. This is
+an exact A/B result against the previous binary, not a new Z3 or Yices
+comparison and not yet a replacement for the 1,200-second campaign.
+
 Five controlled hard-tail alternatives were rejected or left unimplemented:
 raising the finite-domain cap solved 0/4 selected PEQ gaps, disabling finite
 routing reduced 69-case tail coverage from 12 to 8, sequential at-most-one
@@ -155,6 +167,9 @@ negative results and immutable WMI job identifiers are retained under
 - Congruence closure in proof-producing settings:
   https://arxiv.org/abs/1701.04391
 - Small proofs from congruence closure: https://arxiv.org/abs/2209.03398
+- Chordal completion for sparse transitivity constraints:
+  https://arxiv.org/abs/cs/0008001
+- Yices 2 architecture and performance: https://yices.csl.sri.com/papers/cav2014.pdf
 - DRAT-trim proof checker: https://github.com/marijnheule/drat-trim
 
 ## Current Boundary
@@ -165,4 +180,6 @@ At 1,200 seconds, Yices 2.7.0 covers all 7,503 instances, Z3 covers 7,500, and
 `euf-viper` covers 7,478. Certificate v1 checks the exact SAT refutation plus
 all EUF clauses but still trusts the SMT-to-base-CNF translation. The opt-in
 structural portfolio covers 7,503 and improves paired aggregate time over
-Yices by 1.046x, while depending on Yices and losing the geometric metric.
+Yices by 1.046x, while depending on Yices and losing the geometric metric. The
+new dynamic Ackermann route passes a full two-second standalone A/B gate, but
+its competition-budget coverage has not yet been remeasured.

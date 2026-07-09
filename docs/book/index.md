@@ -11,6 +11,9 @@ congruence-closure model validator with lazy theory-lemma fallback.
 At a two-second budget on 7,503 SMT-LIB 2025 QF_UF instances, `euf-viper` is
 faster than Z3 on most jointly solved inputs but has lower coverage. Yices2 is
 both faster and substantially more complete than the current implementation.
-The project is therefore positioned as a certifying portfolio tier while
-long-timeout experiments quantify the remaining niche.
+The 2026-07-09 dynamic Ackermann iteration improves the preceding standalone
+binary by nine solves and passes all full-corpus paired speed gates, but has not
+yet been rerun against the external solvers at long timeout. The project is
+therefore positioned as a certifying portfolio tier while long-timeout
+experiments quantify the remaining niche.
 ```
