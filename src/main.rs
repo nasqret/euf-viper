@@ -1885,7 +1885,27 @@ fn add_finite_domain_axioms(
     };
     let predicate_channeling =
         env::var("EUF_VIPER_FINITE_PREDICATE_CHANNELING").as_deref() == Ok("1");
-    add_finite_domain_axioms_with_options(
+    #[cfg(feature = "finite-symmetry")]
+    if arena.apps.len() >= 1_000 {
+        let symmetry_mode =
+            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
+        let symmetry_min_apps = env::var("EUF_VIPER_FINITE_SYMMETRY_MIN_APPS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(1_000);
+        if arena.apps.len() >= symmetry_min_apps
+            && matches!(symmetry_mode.as_str(), "1" | "constants" | "hybrid" | "lex")
+        {
+            return add_finite_domain_axioms_with_options::<true>(
+                cnf,
+                arena,
+                bool_problem,
+                equality_channeling,
+                predicate_channeling,
+            );
+        }
+    }
+    add_finite_domain_axioms_with_options::<false>(
         cnf,
         arena,
         bool_problem,
@@ -1901,7 +1921,381 @@ enum FiniteEqualityChanneling {
     All,
 }
 
-fn add_finite_domain_axioms_with_options(
+#[cfg(feature = "finite-symmetry")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum CanonicalBoolKey {
+    Const(bool),
+    Eq(TermId, TermId),
+    BoolTerm(TermId),
+    Not(usize),
+    And(Vec<usize>),
+    Or(Vec<usize>),
+    Iff(Vec<usize>),
+    Ite(usize, usize, usize),
+}
+
+#[cfg(feature = "finite-symmetry")]
+#[derive(Debug, Default)]
+struct CanonicalBoolInterner {
+    keys: HashMap<CanonicalBoolKey, usize>,
+}
+
+#[cfg(feature = "finite-symmetry")]
+impl CanonicalBoolInterner {
+    fn intern(&mut self, key: CanonicalBoolKey) -> usize {
+        if let Some(&id) = self.keys.get(&key) {
+            return id;
+        }
+        let id = self.keys.len();
+        self.keys.insert(key, id);
+        id
+    }
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn canonical_bool_id(
+    expression: &BoolExpr,
+    term_map: &[TermId],
+    interner: &mut CanonicalBoolInterner,
+) -> usize {
+    let key = match expression {
+        BoolExpr::Const(value) => CanonicalBoolKey::Const(*value),
+        BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+            let (left, right) = normalized_pair(term_map[*left], term_map[*right]);
+            CanonicalBoolKey::Eq(left, right)
+        }
+        BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => CanonicalBoolKey::BoolTerm(term_map[*term]),
+        BoolExpr::Not(child) => CanonicalBoolKey::Not(canonical_bool_id(child, term_map, interner)),
+        BoolExpr::And(children) => {
+            let mut children = children
+                .iter()
+                .map(|child| canonical_bool_id(child, term_map, interner))
+                .collect::<Vec<_>>();
+            children.sort_unstable();
+            CanonicalBoolKey::And(children)
+        }
+        BoolExpr::Or(children) => {
+            let mut children = children
+                .iter()
+                .map(|child| canonical_bool_id(child, term_map, interner))
+                .collect::<Vec<_>>();
+            children.sort_unstable();
+            CanonicalBoolKey::Or(children)
+        }
+        BoolExpr::Iff(children) => {
+            let mut children = children
+                .iter()
+                .map(|child| canonical_bool_id(child, term_map, interner))
+                .collect::<Vec<_>>();
+            children.sort_unstable();
+            CanonicalBoolKey::Iff(children)
+        }
+        BoolExpr::Ite(condition, then_expression, else_expression) => CanonicalBoolKey::Ite(
+            canonical_bool_id(condition, term_map, interner),
+            canonical_bool_id(then_expression, term_map, interner),
+            canonical_bool_id(else_expression, term_map, interner),
+        ),
+    };
+    interner.intern(key)
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn canonical_assertion_ids(
+    bool_problem: &BoolProblem,
+    term_map: &[TermId],
+    interner: &mut CanonicalBoolInterner,
+) -> Vec<usize> {
+    let mut assertions = bool_problem
+        .assertions
+        .iter()
+        .map(|assertion| canonical_bool_id(assertion, term_map, interner))
+        .collect::<Vec<_>>();
+    assertions.sort_unstable();
+    assertions
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn term_map_under_swap(arena: &TermArena, left: TermId, right: TermId) -> Option<Vec<TermId>> {
+    fn resolve(arena: &TermArena, term_id: TermId, mapped: &mut [TermId]) -> Option<TermId> {
+        if mapped[term_id] != TermId::MAX {
+            return Some(mapped[term_id]);
+        }
+        let term = &arena.terms[term_id];
+        if term.args.is_empty() {
+            mapped[term_id] = term_id;
+            return Some(term_id);
+        }
+        let args = term
+            .args
+            .iter()
+            .map(|arg| resolve(arena, *arg, mapped))
+            .collect::<Option<Vec<_>>>()?;
+        let mapped_id = *arena.interned.get(&TermKey {
+            fun: term.fun,
+            args,
+        })?;
+        mapped[term_id] = mapped_id;
+        Some(mapped_id)
+    }
+
+    let mut mapped = vec![TermId::MAX; arena.terms.len()];
+    mapped[left] = right;
+    mapped[right] = left;
+    for term_id in 0..arena.terms.len() {
+        resolve(arena, term_id, &mut mapped)?;
+    }
+    Some(mapped)
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn verified_domain_swap_maps(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    domain: &[TermId],
+) -> Option<Vec<Vec<TermId>>> {
+    if domain.len() < 2 {
+        return Some(Vec::new());
+    }
+    let identity = (0..arena.terms.len()).collect::<Vec<_>>();
+    let mut interner = CanonicalBoolInterner::default();
+    let baseline = canonical_assertion_ids(bool_problem, &identity, &mut interner);
+    let mut swap_maps = Vec::with_capacity(domain.len() - 1);
+    for pair in domain.windows(2) {
+        let term_map = term_map_under_swap(arena, pair[0], pair[1])?;
+        if canonical_assertion_ids(bool_problem, &term_map, &mut interner) != baseline {
+            return None;
+        }
+        swap_maps.push(term_map);
+    }
+    Some(swap_maps)
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn add_finite_constant_symmetry_breaking(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    domain: &[TermId],
+    covered_terms: &HashSet<TermId>,
+    membership: &HashMap<(TermId, TermId), i32>,
+) -> usize {
+    let mut constants = covered_terms
+        .iter()
+        .copied()
+        .filter(|term| arena.terms[*term].args.is_empty())
+        .collect::<Vec<_>>();
+    constants.sort_unstable();
+    if constants.is_empty() {
+        return 0;
+    }
+
+    let start_clause_count = cnf.clauses.len();
+    cnf.clauses
+        .push(vec![membership[&(constants[0], domain[0])]]);
+    for (constant_index, &constant) in constants.iter().enumerate() {
+        let highest_allowed = constant_index.min(domain.len() - 1);
+        for &value in &domain[(highest_allowed + 1)..] {
+            cnf.clauses.push(vec![-membership[&(constant, value)]]);
+        }
+        for value_index in 1..=highest_allowed {
+            let mut clause = Vec::with_capacity(constant_index + 1);
+            clause.push(-membership[&(constant, domain[value_index])]);
+            clause.extend(
+                constants[..constant_index]
+                    .iter()
+                    .map(|earlier| membership[&(*earlier, domain[value_index - 1])]),
+            );
+            cnf.clauses.push(clause);
+        }
+    }
+    cnf.clauses.len() - start_clause_count
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn finite_diagonal_terms(
+    arena: &TermArena,
+    domain: &[TermId],
+    covered_terms: &HashSet<TermId>,
+    closed_functions: &HashSet<SymId>,
+    rank: usize,
+) -> Option<Vec<TermId>> {
+    let mut candidates = closed_functions
+        .iter()
+        .copied()
+        .filter_map(|function| {
+            covered_terms.iter().find_map(|term_id| {
+                let term = &arena.terms[*term_id];
+                (term.fun == function && !term.args.is_empty())
+                    .then_some((function, term.args.len()))
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_unstable_by_key(|(function, _)| *function);
+    let &(function, arity) = candidates.get(rank)?;
+
+    let mut diagonal = Vec::with_capacity(domain.len());
+    for &value in domain {
+        let key = TermKey {
+            fun: function,
+            args: vec![value; arity],
+        };
+        let &term = arena.interned.get(&key)?;
+        if !covered_terms.contains(&term) {
+            return None;
+        }
+        diagonal.push(term);
+    }
+    Some(diagonal)
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn add_finite_diagonal_ordered_range(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    domain: &[TermId],
+    covered_terms: &HashSet<TermId>,
+    closed_functions: &HashSet<SymId>,
+    membership: &HashMap<(TermId, TermId), i32>,
+    rank: usize,
+) -> usize {
+    let Some(diagonal) =
+        finite_diagonal_terms(arena, domain, covered_terms, closed_functions, rank)
+    else {
+        return 0;
+    };
+
+    let start_clause_count = cnf.clauses.len();
+    for (input_index, &term) in diagonal.iter().enumerate() {
+        let first_forbidden = (input_index + 2).min(domain.len());
+        for &output in &domain[first_forbidden..] {
+            cnf.clauses.push(vec![-membership[&(term, output)]]);
+        }
+    }
+    cnf.clauses.len() - start_clause_count
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_hybrid_uses_diagonal(
+    symmetry_mode: &str,
+    domain_size: usize,
+    closed_function_count: usize,
+    has_predicates: bool,
+) -> bool {
+    symmetry_mode == "hybrid" && domain_size == 11 && closed_function_count == 3 && !has_predicates
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn add_lex_less_or_equal(cnf: &mut CnfProblem, comparison: &[(i32, i32)]) -> usize {
+    let comparison = comparison
+        .iter()
+        .copied()
+        .filter(|(left, right)| left != right)
+        .collect::<Vec<_>>();
+    let start_clause_count = cnf.clauses.len();
+    let mut equal_prefix: Option<i32> = None;
+    for (index, (left, right)) in comparison.iter().copied().enumerate() {
+        if let Some(prefix) = equal_prefix {
+            cnf.clauses.push(vec![-prefix, -left, right]);
+        } else {
+            cnf.clauses.push(vec![-left, right]);
+        }
+        if index + 1 == comparison.len() {
+            break;
+        }
+
+        let next_prefix = cnf.new_var(None);
+        if let Some(prefix) = equal_prefix {
+            cnf.clauses.push(vec![-next_prefix, prefix]);
+            cnf.clauses.push(vec![-next_prefix, -left, right]);
+            cnf.clauses.push(vec![-next_prefix, left, -right]);
+            cnf.clauses.push(vec![-prefix, -left, -right, next_prefix]);
+            cnf.clauses.push(vec![-prefix, left, right, next_prefix]);
+        } else {
+            cnf.clauses.push(vec![-next_prefix, -left, right]);
+            cnf.clauses.push(vec![-next_prefix, left, -right]);
+            cnf.clauses.push(vec![-left, -right, next_prefix]);
+            cnf.clauses.push(vec![left, right, next_prefix]);
+        }
+        equal_prefix = Some(next_prefix);
+    }
+    cnf.clauses.len() - start_clause_count
+}
+
+#[cold]
+#[inline(never)]
+#[cfg(feature = "finite-symmetry")]
+fn add_finite_table_lex_leaders(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    domain: &[TermId],
+    covered_terms: &HashSet<TermId>,
+    membership: &HashMap<(TermId, TermId), i32>,
+    priority_terms: &[TermId],
+    swap_maps: &[Vec<TermId>],
+) -> usize {
+    let mut terms = covered_terms.iter().copied().collect::<Vec<_>>();
+    terms.sort_unstable_by_key(|term| (!arena.terms[*term].args.is_empty(), *term));
+    if !priority_terms.is_empty() {
+        let priority = priority_terms.iter().copied().collect::<HashSet<_>>();
+        if priority.len() != priority_terms.len()
+            || !priority.iter().all(|term| covered_terms.contains(term))
+        {
+            return 0;
+        }
+        terms.retain(|term| !priority.contains(term));
+        let mut ordered = priority_terms.to_vec();
+        ordered.extend(terms);
+        terms = ordered;
+    }
+    if terms.is_empty() || swap_maps.is_empty() {
+        return 0;
+    }
+
+    let mut comparisons = Vec::with_capacity(swap_maps.len());
+    for term_map in swap_maps {
+        let mut comparison = Vec::with_capacity(terms.len() * domain.len());
+        for &term in &terms {
+            let mapped_term = term_map[term];
+            if !covered_terms.contains(&mapped_term) {
+                return 0;
+            }
+            for &value in domain {
+                let Some(&left) = membership.get(&(term, value)) else {
+                    return 0;
+                };
+                let Some(&right) = membership.get(&(mapped_term, term_map[value])) else {
+                    return 0;
+                };
+                // Negated one-hot bits make lower domain values lexicographically smaller.
+                comparison.push((-left, -right));
+            }
+        }
+        comparisons.push(comparison);
+    }
+
+    let start_clause_count = cnf.clauses.len();
+    for comparison in comparisons {
+        add_lex_less_or_equal(cnf, &comparison);
+    }
+    cnf.clauses.len() - start_clause_count
+}
+
+fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     cnf: &mut CnfProblem,
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -1913,7 +2307,19 @@ fn add_finite_domain_axioms_with_options(
         collect_mandatory_disequalities(assertion, &mut disequality_edges);
     }
     let domain = largest_small_disequality_clique(&disequality_edges, arena);
-    if domain.len() < 3 || domain.len() > 8 {
+    #[cfg(feature = "finite-symmetry")]
+    let max_domain = if FINITE_SYMMETRY {
+        env::var("EUF_VIPER_FINITE_DOMAIN_MAX")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(11)
+            .min(32)
+    } else {
+        8
+    };
+    #[cfg(not(feature = "finite-symmetry"))]
+    let max_domain = 8;
+    if domain.len() < 3 || domain.len() > max_domain {
         return 0;
     }
     let domain_set = domain.iter().copied().collect::<HashSet<_>>();
@@ -1951,6 +2357,25 @@ fn add_finite_domain_axioms_with_options(
     if closed_functions.is_empty() {
         return 0;
     }
+
+    #[cfg(feature = "finite-symmetry")]
+    let domain_swap_maps = if FINITE_SYMMETRY {
+        let symmetry_start = Instant::now();
+        let swap_maps = verified_domain_swap_maps(arena, bool_problem, &domain);
+        profile_phase(
+            "finite_symmetry_check",
+            symmetry_start,
+            usize::from(swap_maps.is_some()),
+        );
+        if domain.len() > 8 && swap_maps.is_none() {
+            return 0;
+        }
+        swap_maps
+    } else {
+        None
+    };
+    #[cfg(feature = "finite-symmetry")]
+    let domain_symmetry = domain_swap_maps.is_some();
 
     let mut finite_terms = domain_set.clone();
     finite_terms.extend(covered_terms.iter().copied());
@@ -2018,6 +2443,85 @@ fn add_finite_domain_axioms_with_options(
         for left in 0..values.len() {
             for right in (left + 1)..values.len() {
                 cnf.clauses.push(vec![-values[left], -values[right]]);
+            }
+        }
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    if domain_symmetry {
+        let symmetry_mode =
+            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
+        if finite_hybrid_uses_diagonal(
+            &symmetry_mode,
+            domain.len(),
+            closed_functions.len(),
+            !original_predicates.is_empty(),
+        ) {
+            let diagonal_clauses = add_finite_diagonal_ordered_range(
+                cnf,
+                arena,
+                &domain,
+                &covered_terms,
+                &closed_functions,
+                &membership,
+                1,
+            );
+            profile_measurement(
+                "finite_diagonal_ordered_range",
+                diagonal_clauses as u128,
+                domain.len(),
+            );
+            if let Some(diagonal) =
+                finite_diagonal_terms(arena, &domain, &covered_terms, &closed_functions, 1)
+            {
+                let lex_clauses = add_finite_table_lex_leaders(
+                    cnf,
+                    arena,
+                    &domain,
+                    &covered_terms,
+                    &membership,
+                    &diagonal,
+                    domain_swap_maps.as_deref().unwrap_or_default(),
+                );
+                profile_measurement(
+                    "finite_diagonal_lex_leaders",
+                    lex_clauses as u128,
+                    domain.len(),
+                );
+            }
+        } else {
+            let symmetry_clauses = add_finite_constant_symmetry_breaking(
+                cnf,
+                arena,
+                &domain,
+                &covered_terms,
+                &membership,
+            );
+            profile_measurement(
+                "finite_constant_symmetry",
+                symmetry_clauses as u128,
+                domain.len(),
+            );
+            let lex_min_domain = env::var("EUF_VIPER_FINITE_LEX_MIN_DOMAIN")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(8);
+            if matches!(symmetry_mode.as_str(), "hybrid" | "lex") && domain.len() >= lex_min_domain
+            {
+                let lex_clauses = add_finite_table_lex_leaders(
+                    cnf,
+                    arena,
+                    &domain,
+                    &covered_terms,
+                    &membership,
+                    &[],
+                    domain_swap_maps.as_deref().unwrap_or_default(),
+                );
+                profile_measurement(
+                    "finite_table_lex_leaders",
+                    lex_clauses as u128,
+                    domain.len(),
+                );
             }
         }
     }
@@ -3641,6 +4145,107 @@ fn write_cadical_drat(path: &Path, cnf: &CnfProblem) -> Result<(), String> {
 }
 
 #[cfg(feature = "certificates")]
+fn dump_eager_cnf(path: &str, output: &str) -> Result<i32, String> {
+    let input =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let problem = parse_problem(&input)?;
+    let bool_problem = problem
+        .bool_problem
+        .as_ref()
+        .ok_or_else(|| "DIMACS export requires a Boolean QF_UF assertion".to_owned())?;
+    if !bool_problem.unsupported.is_empty() {
+        return Err(format!(
+            "DIMACS export does not support: {}",
+            bool_problem.unsupported.join("; ")
+        ));
+    }
+
+    let mut cnf = CnfProblem::new();
+    for assertion in &bool_problem.assertions {
+        cnf.add_assertion(assertion);
+    }
+    let finite_added = add_finite_domain_axioms(&mut cnf, &problem.arena, bool_problem);
+    let eager_congruence = use_eager_congruence_for_first_pass(finite_added, &cnf, &problem.arena);
+    let transitivity = equality_transitivity_clauses(&cnf, problem.arena.terms.len());
+    let transitivity_count = transitivity.len();
+    cnf.clauses.extend(transitivity);
+    let congruence = if eager_congruence {
+        congruence_axiom_clauses(&cnf, &problem.arena)
+    } else {
+        Vec::new()
+    };
+    let congruence_count = congruence.len();
+    cnf.clauses.extend(congruence);
+    write_dimacs(Path::new(output), &cnf)?;
+    eprintln!("dimacs={output}");
+    eprintln!("variables={}", cnf.var_count());
+    eprintln!("clauses={}", cnf.clauses.len());
+    eprintln!("finite_domain_axioms={finite_added}");
+    eprintln!("transitivity_clauses={transitivity_count}");
+    eprintln!("congruence_clauses={congruence_count}");
+    Ok(0)
+}
+
+#[cfg(feature = "certificates")]
+fn solve_dimacs_file(path: &str) -> Result<i32, String> {
+    let input =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let mut clauses = Vec::new();
+    let mut current_clause = Vec::new();
+    let mut max_variable = 0usize;
+    for (line_index, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('c') || line.starts_with('p') {
+            continue;
+        }
+        for token in line.split_whitespace() {
+            if token == "%" {
+                break;
+            }
+            let literal = token.parse::<i32>().map_err(|error| {
+                format!(
+                    "invalid DIMACS token `{token}` on line {}: {error}",
+                    line_index + 1
+                )
+            })?;
+            if literal == 0 {
+                clauses.push(std::mem::take(&mut current_clause));
+            } else {
+                max_variable = max_variable.max(literal.unsigned_abs() as usize);
+                current_clause.push(literal);
+            }
+        }
+    }
+    if !current_clause.is_empty() {
+        return Err("DIMACS input ends before a clause-terminating zero".to_owned());
+    }
+
+    let mut solver = CadicalSolver::default();
+    configure_cadical(&mut solver, false)
+        .ok_or_else(|| "failed to configure CaDiCaL".to_owned())?;
+    for clause in &clauses {
+        solver
+            .add_clause(rustsat_clause(clause))
+            .map_err(|error| format!("failed to load DIMACS clause: {error}"))?;
+    }
+    let start = Instant::now();
+    let result = solver
+        .solve()
+        .map_err(|error| format!("CaDiCaL failed: {error}"))?;
+    let elapsed = start.elapsed();
+    let (status, exit_code) = match result {
+        RustSatResult::Sat => ("sat", 0),
+        RustSatResult::Unsat => ("unsat", 0),
+        RustSatResult::Interrupted => ("unknown", 3),
+    };
+    println!("{status}");
+    eprintln!("variables={max_variable}");
+    eprintln!("clauses={}", clauses.len());
+    eprintln!("elapsed_ns={}", elapsed.as_nanos());
+    Ok(exit_code)
+}
+
+#[cfg(feature = "certificates")]
 fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -4808,6 +5413,8 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
+  euf-viper dump-eager-cnf FILE --out PATH
+  euf-viper solve-dimacs FILE
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -4839,6 +5446,17 @@ fn run() -> Result<i32, String> {
         "stats" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             stats_file(file)
+        }
+        #[cfg(feature = "certificates")]
+        "dump-eager-cnf" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            let output = parse_required_flag(&args[3..], "--out")?;
+            dump_eager_cnf(file, output)
+        }
+        #[cfg(feature = "certificates")]
+        "solve-dimacs" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            solve_dimacs_file(file)
         }
         #[cfg(feature = "certificates")]
         "certify" => {
@@ -5164,6 +5782,345 @@ mod tests {
         assert_eq!(solve_text(input), SolveResult::Unsat);
     }
 
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn lex_leader_encoding_matches_boolean_vector_order() {
+        const WIDTH: usize = 3;
+        for negated in [false, true] {
+            for left_mask in 0..(1usize << WIDTH) {
+                for right_mask in 0..(1usize << WIDTH) {
+                    let mut cnf = CnfProblem::new();
+                    let left_variables = (0..WIDTH).map(|_| cnf.new_var(None)).collect::<Vec<_>>();
+                    let right_variables = (0..WIDTH).map(|_| cnf.new_var(None)).collect::<Vec<_>>();
+                    let comparison = left_variables
+                        .iter()
+                        .zip(&right_variables)
+                        .map(|(&left, &right)| {
+                            if negated {
+                                (-left, -right)
+                            } else {
+                                (left, right)
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    assert!(add_lex_less_or_equal(&mut cnf, &comparison) > 0);
+
+                    let left_bits = (0..WIDTH)
+                        .map(|bit| (left_mask & (1 << bit)) != 0)
+                        .collect::<Vec<_>>();
+                    let right_bits = (0..WIDTH)
+                        .map(|bit| (right_mask & (1 << bit)) != 0)
+                        .collect::<Vec<_>>();
+                    for (&variable, value) in left_variables.iter().zip(&left_bits) {
+                        cnf.clauses
+                            .push(vec![if *value { variable } else { -variable }]);
+                    }
+                    for (&variable, value) in right_variables.iter().zip(&right_bits) {
+                        cnf.clauses
+                            .push(vec![if *value { variable } else { -variable }]);
+                    }
+
+                    let mut solver = VarisatSolver::new();
+                    for clause in &cnf.clauses {
+                        solver.add_clause(
+                            &clause
+                                .iter()
+                                .map(|literal| Lit::from_dimacs(*literal as isize))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                    let logical_left = left_bits
+                        .iter()
+                        .map(|value| if negated { !value } else { *value })
+                        .collect::<Vec<_>>();
+                    let logical_right = right_bits
+                        .iter()
+                        .map(|value| if negated { !value } else { *value })
+                        .collect::<Vec<_>>();
+                    let expected = logical_left <= logical_right;
+                    assert!(matches!(solver.solve(), Ok(value) if value == expected));
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn diagonal_ordered_range_uses_one_closed_function() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun f (U U) U)
+            (assert (distinct a b c))
+            (assert (or (= (f a a) a) (= (f a a) b) (= (f a a) c)))
+            (assert (or (= (f a b) a) (= (f a b) b) (= (f a b) c)))
+            (assert (or (= (f a c) a) (= (f a c) b) (= (f a c) c)))
+            (assert (or (= (f b a) a) (= (f b a) b) (= (f b a) c)))
+            (assert (or (= (f b b) a) (= (f b b) b) (= (f b b) c)))
+            (assert (or (= (f b c) a) (= (f b c) b) (= (f b c) c)))
+            (assert (or (= (f c a) a) (= (f c a) b) (= (f c a) c)))
+            (assert (or (= (f c b) a) (= (f c b) b) (= (f c b) c)))
+            (assert (or (= (f c c) a) (= (f c c) b) (= (f c c) c)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut edges = HashSet::default();
+        for assertion in &bool_problem.assertions {
+            collect_mandatory_disequalities(assertion, &mut edges);
+        }
+        let domain = largest_small_disequality_clique(&edges, &problem.arena);
+        let domain_set = domain.iter().copied().collect::<HashSet<_>>();
+        let mut covered = HashSet::default();
+        for assertion in &bool_problem.assertions {
+            collect_mandatory_coverages(assertion, &domain_set, &mut covered);
+        }
+        assert_eq!(domain.len(), 3);
+        assert_eq!(covered.len(), 9);
+
+        let function = problem.arena.terms[*covered.iter().next().unwrap()].fun;
+        let closed_functions = [function].into_iter().collect::<HashSet<_>>();
+        let mut cnf = CnfProblem::new();
+        let mut membership = HashMap::default();
+        for &term in &covered {
+            for &value in &domain {
+                let literal = cnf.atom_lit(BoolAtomKey::Eq(term, value));
+                membership.insert((term, value), literal);
+            }
+        }
+        let diagonal_zero = problem.arena.interned[&TermKey {
+            fun: function,
+            args: vec![domain[0], domain[0]],
+        }];
+        assert_eq!(
+            add_finite_diagonal_ordered_range(
+                &mut cnf,
+                &problem.arena,
+                &domain,
+                &covered,
+                &closed_functions,
+                &membership,
+                0,
+            ),
+            1
+        );
+        assert_eq!(
+            cnf.clauses,
+            vec![vec![-membership[&(diagonal_zero, domain[2])]]]
+        );
+        let diagonal =
+            finite_diagonal_terms(&problem.arena, &domain, &covered, &closed_functions, 0).unwrap();
+        let swap_maps = verified_domain_swap_maps(&problem.arena, bool_problem, &domain).unwrap();
+        assert!(
+            add_finite_table_lex_leaders(
+                &mut cnf,
+                &problem.arena,
+                &domain,
+                &covered,
+                &membership,
+                &diagonal,
+                &swap_maps,
+            ) > 0
+        );
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn lex_minimal_unary_conjugates_satisfy_ordered_range() {
+        const PERMUTATIONS: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+
+        fn conjugate(function: &[usize; 3], permutation: &[usize; 3]) -> [usize; 3] {
+            let mut inverse = [0usize; 3];
+            for (value, image) in permutation.iter().copied().enumerate() {
+                inverse[image] = value;
+            }
+            std::array::from_fn(|image| permutation[function[inverse[image]]])
+        }
+
+        fn negated_one_hot(function: &[usize; 3]) -> Vec<bool> {
+            function
+                .iter()
+                .flat_map(|value| (0..3).map(move |candidate| candidate != *value))
+                .collect()
+        }
+
+        for code in 0usize..27 {
+            let mut quotient = code;
+            let function = std::array::from_fn(|_| {
+                let value = quotient % 3;
+                quotient /= 3;
+                value
+            });
+            let canonical = PERMUTATIONS
+                .iter()
+                .map(|permutation| conjugate(&function, permutation))
+                .min_by_key(negated_one_hot)
+                .unwrap();
+            assert!(
+                canonical
+                    .iter()
+                    .enumerate()
+                    .all(|(input, output)| *output <= (input + 1).min(2))
+            );
+        }
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn hybrid_diagonal_route_uses_only_the_measured_structure() {
+        assert!(finite_hybrid_uses_diagonal("hybrid", 11, 3, false));
+        assert!(!finite_hybrid_uses_diagonal("hybrid", 10, 3, false));
+        assert!(!finite_hybrid_uses_diagonal("hybrid", 11, 4, false));
+        assert!(!finite_hybrid_uses_diagonal("hybrid", 11, 3, true));
+        assert!(!finite_hybrid_uses_diagonal("lex", 11, 3, false));
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn negated_one_hot_lex_order_is_compatible_with_constant_restricted_growth() {
+        const PERMUTATIONS: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        const ADJACENT_SWAPS: [[usize; 3]; 2] = [[1, 0, 2], [0, 2, 1]];
+
+        fn permuted(values: &[usize], permutation: &[usize; 3]) -> Vec<usize> {
+            values.iter().map(|value| permutation[*value]).collect()
+        }
+
+        fn negated_one_hot(values: &[usize]) -> Vec<bool> {
+            values
+                .iter()
+                .flat_map(|value| (0..3).map(move |candidate| candidate != *value))
+                .collect()
+        }
+
+        for first in 0..3 {
+            for second in 0..3 {
+                for third in 0..3 {
+                    let values = [first, second, third];
+                    let canonical = PERMUTATIONS
+                        .iter()
+                        .map(|permutation| permuted(&values, permutation))
+                        .min_by_key(|candidate| negated_one_hot(candidate))
+                        .unwrap();
+                    assert_eq!(canonical[0], 0);
+                    for index in 1..canonical.len() {
+                        assert!(canonical[index] <= index);
+                        if canonical[index] > 0 {
+                            assert!(canonical[..index].contains(&(canonical[index] - 1)));
+                        }
+                    }
+
+                    let projection = negated_one_hot(&canonical);
+                    for swap in ADJACENT_SWAPS {
+                        let swapped = permuted(&canonical, &swap);
+                        assert!(projection <= negated_one_hot(&swapped));
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn verifies_domain_automorphisms_before_breaking_constant_symmetry() {
+        let symmetric = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (assert (distinct a b c))
+            (assert (or (= x a) (= x b) (= x c)))
+            (assert (or (= y a) (= y b) (= y c)))
+            (check-sat)
+        ";
+        let problem = parse_problem(symmetric).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut edges = HashSet::default();
+        let mut covered = HashSet::default();
+        for assertion in &bool_problem.assertions {
+            collect_mandatory_disequalities(assertion, &mut edges);
+        }
+        let domain = largest_small_disequality_clique(&edges, &problem.arena);
+        let domain_set = domain.iter().copied().collect::<HashSet<_>>();
+        for assertion in &bool_problem.assertions {
+            collect_mandatory_coverages(assertion, &domain_set, &mut covered);
+        }
+        assert_eq!(domain.len(), 3);
+        assert_eq!(covered.len(), 2);
+        let swap_maps = verified_domain_swap_maps(&problem.arena, bool_problem, &domain).unwrap();
+        assert_eq!(swap_maps.len(), domain.len() - 1);
+
+        let mut cnf = CnfProblem::new();
+        let mut membership = HashMap::default();
+        for &term in &covered {
+            for &value in &domain {
+                let literal = cnf.atom_lit(BoolAtomKey::Eq(term, value));
+                membership.insert((term, value), literal);
+            }
+        }
+        assert_eq!(
+            add_finite_constant_symmetry_breaking(
+                &mut cnf,
+                &problem.arena,
+                &domain,
+                &covered,
+                &membership,
+            ),
+            5
+        );
+        assert!(
+            add_finite_table_lex_leaders(
+                &mut cnf,
+                &problem.arena,
+                &domain,
+                &covered,
+                &membership,
+                &[],
+                &swap_maps,
+            ) > 0
+        );
+
+        let asymmetric = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun x () U)
+            (assert (distinct a b c))
+            (assert (or (= x a) (= x b) (= x c)))
+            (assert (= x a))
+            (check-sat)
+        ";
+        let problem = parse_problem(asymmetric).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut edges = HashSet::default();
+        for assertion in &bool_problem.assertions {
+            collect_mandatory_disequalities(assertion, &mut edges);
+        }
+        let domain = largest_small_disequality_clique(&edges, &problem.arena);
+        assert!(verified_domain_swap_maps(&problem.arena, bool_problem, &domain).is_none());
+    }
+
     #[test]
     fn validates_finite_first_pass_models_with_full_euf_fallback() {
         let input = "
@@ -5226,7 +6183,7 @@ mod tests {
             cnf.add_assertion(assertion);
         }
         assert!(
-            add_finite_domain_axioms_with_options(
+            add_finite_domain_axioms_with_options::<false>(
                 &mut cnf,
                 &problem.arena,
                 bool_problem,
