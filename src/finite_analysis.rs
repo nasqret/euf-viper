@@ -2,12 +2,25 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::{env, fmt};
 
 use super::{
-    BoolAtomKey, BoolExpr, BoolProblem, SymId, TermArena, TermId, collect_mandatory_coverages,
-    collect_mandatory_disequalities, largest_small_disequality_clique, normalized_pair,
+    BoolAtomKey, BoolExpr, BoolProblem, CnfProblem, SymId, TermArena, TermId,
+    collect_mandatory_coverages, collect_mandatory_disequalities, largest_small_disequality_clique,
+    normalized_pair,
 };
 
 const DENSITY_SCALE: u128 = 1_000_000;
 const GUARDED_CLIQUE_SEED_LIMIT: usize = 32;
+const DEFAULT_PERMUTATION_CLIQUE_LIMIT: usize = 4_096;
+const MAX_PERMUTATION_CLIQUE_LIMIT: usize = 65_536;
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PermutationSupportStats {
+    pub(crate) direct_edges: usize,
+    pub(crate) guarded_edges: usize,
+    pub(crate) candidate_edges: usize,
+    pub(crate) cliques: usize,
+    pub(crate) clauses: usize,
+    pub(crate) truncated: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FiniteAnalysis {
@@ -181,6 +194,156 @@ pub(crate) fn profile_if_enabled(arena: &TermArena, bool_problem: &BoolProblem) 
         return;
     }
     eprintln!("profile_finite_analysis {}", analyze(arena, bool_problem));
+}
+
+/// Adds the dual support side of a permutation-matrix encoding.
+///
+/// If `n` pairwise-disequal terms are each ranged over the same `n` values,
+/// injectivity implies that every value occurs.  The existing finite encoding
+/// already contains the row constraints and the pairwise disequalities; these
+/// clauses state the implied column support without changing the model set.
+pub(crate) fn add_permutation_support(
+    cnf: &mut CnfProblem,
+    bool_problem: &BoolProblem,
+    domain: &[TermId],
+    domain_set: &HashSet<TermId>,
+    finite_terms: &HashSet<TermId>,
+    mandatory_disequalities: &HashSet<(TermId, TermId)>,
+    membership: &HashMap<(TermId, TermId), i32>,
+) -> PermutationSupportStats {
+    if domain.len() < 2 {
+        return PermutationSupportStats::default();
+    }
+
+    let mut guarded_edges = HashSet::default();
+    let mut guarded_clause_count = 0;
+    for assertion in &bool_problem.assertions {
+        collect_guarded_disequalities(
+            assertion,
+            domain_set,
+            mandatory_disequalities,
+            &mut guarded_clause_count,
+            &mut guarded_edges,
+        );
+    }
+
+    let mut candidate_edges = mandatory_disequalities.clone();
+    candidate_edges.extend(guarded_edges.iter().copied());
+    candidate_edges.retain(|(left, right)| {
+        finite_terms.contains(left)
+            && finite_terms.contains(right)
+            && !domain_set.contains(left)
+            && !domain_set.contains(right)
+            && membership.contains_key(&(*left, domain[0]))
+            && membership.contains_key(&(*right, domain[0]))
+    });
+
+    let clique_limit = env::var("EUF_VIPER_FINITE_PERMUTATION_CLIQUE_LIMIT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_PERMUTATION_CLIQUE_LIMIT)
+        .min(MAX_PERMUTATION_CLIQUE_LIMIT);
+    let (cliques, truncated) = cliques_of_size(&candidate_edges, domain.len(), clique_limit);
+    let start_clause_count = cnf.clauses.len();
+    for clique in &cliques {
+        for &value in domain {
+            cnf.clauses.push(
+                clique
+                    .iter()
+                    .map(|term| membership[&(*term, value)])
+                    .collect(),
+            );
+        }
+    }
+
+    PermutationSupportStats {
+        direct_edges: mandatory_disequalities.len(),
+        guarded_edges: guarded_edges.len(),
+        candidate_edges: candidate_edges.len(),
+        cliques: cliques.len(),
+        clauses: cnf.clauses.len() - start_clause_count,
+        truncated,
+    }
+}
+
+fn cliques_of_size(
+    edges: &HashSet<(TermId, TermId)>,
+    target_size: usize,
+    limit: usize,
+) -> (Vec<Vec<TermId>>, bool) {
+    if target_size < 2 || limit == 0 {
+        return (Vec::new(), !edges.is_empty() && limit == 0);
+    }
+
+    let mut adjacency = HashMap::<TermId, HashSet<TermId>>::default();
+    for &(left, right) in edges {
+        adjacency.entry(left).or_default().insert(right);
+        adjacency.entry(right).or_default().insert(left);
+    }
+    let mut candidates = adjacency.keys().copied().collect::<Vec<_>>();
+    candidates.sort_unstable();
+
+    fn search(
+        adjacency: &HashMap<TermId, HashSet<TermId>>,
+        target_size: usize,
+        limit: usize,
+        current: &mut Vec<TermId>,
+        candidates: &[TermId],
+        output: &mut Vec<Vec<TermId>>,
+        truncated: &mut bool,
+    ) {
+        if current.len() == target_size {
+            if output.len() == limit {
+                *truncated = true;
+            } else {
+                output.push(current.clone());
+            }
+            return;
+        }
+        let needed = target_size - current.len();
+        if candidates.len() < needed || *truncated {
+            return;
+        }
+
+        for index in 0..=(candidates.len() - needed) {
+            let vertex = candidates[index];
+            let Some(neighbors) = adjacency.get(&vertex) else {
+                continue;
+            };
+            let next = candidates[(index + 1)..]
+                .iter()
+                .copied()
+                .filter(|candidate| neighbors.contains(candidate))
+                .collect::<Vec<_>>();
+            current.push(vertex);
+            search(
+                adjacency,
+                target_size,
+                limit,
+                current,
+                &next,
+                output,
+                truncated,
+            );
+            current.pop();
+            if *truncated {
+                return;
+            }
+        }
+    }
+
+    let mut output = Vec::new();
+    let mut truncated = false;
+    search(
+        &adjacency,
+        target_size,
+        limit,
+        &mut Vec::with_capacity(target_size),
+        &candidates,
+        &mut output,
+        &mut truncated,
+    );
+    (output, truncated)
 }
 
 fn closed_table_functions(
@@ -563,5 +726,83 @@ mod tests {
         let rendered = metrics.to_string();
         assert!(rendered.contains("guarded_disequality_edges=3"));
         assert!(rendered.contains("guarded_disequality_clique_lb=3"));
+    }
+
+    #[test]
+    fn enumerates_verified_cliques_deterministically_and_honors_the_cap() {
+        let triangle = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
+        assert_eq!(
+            cliques_of_size(&triangle, 3, 10),
+            (vec![vec![3, 4, 5]], false)
+        );
+
+        let complete_four = [(3, 4), (3, 5), (3, 6), (4, 5), (4, 6), (5, 6)]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let (cliques, truncated) = cliques_of_size(&complete_four, 3, 2);
+        assert_eq!(cliques, vec![vec![3, 4, 5], vec![3, 4, 6]]);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn adds_dual_value_support_for_a_verified_finite_injection() {
+        let domain = vec![0, 1, 2];
+        let domain_set = domain.iter().copied().collect::<HashSet<_>>();
+        let outputs = [3, 4, 5];
+        let finite_terms = domain
+            .iter()
+            .copied()
+            .chain(outputs)
+            .collect::<HashSet<_>>();
+        let mandatory_disequalities = [(0, 1), (0, 2), (1, 2)].into_iter().collect::<HashSet<_>>();
+        let guarded = |guard_left, guard_right, left, right| {
+            BoolExpr::Or(vec![
+                equality(guard_left, guard_right),
+                BoolExpr::Not(Box::new(equality(left, right))),
+            ])
+        };
+        let bool_problem = BoolProblem {
+            assertions: vec![BoolExpr::And(vec![
+                guarded(0, 1, 3, 4),
+                guarded(0, 2, 3, 5),
+                guarded(1, 2, 4, 5),
+            ])],
+            unsupported: Vec::new(),
+            true_term: 6,
+            false_term: 7,
+        };
+
+        let mut cnf = CnfProblem::new();
+        let mut membership = HashMap::default();
+        for term in outputs {
+            for &value in &domain {
+                membership.insert((term, value), cnf.atom_lit(BoolAtomKey::Eq(term, value)));
+            }
+        }
+        let stats = add_permutation_support(
+            &mut cnf,
+            &bool_problem,
+            &domain,
+            &domain_set,
+            &finite_terms,
+            &mandatory_disequalities,
+            &membership,
+        );
+
+        assert_eq!(
+            stats,
+            PermutationSupportStats {
+                direct_edges: 3,
+                guarded_edges: 3,
+                candidate_edges: 3,
+                cliques: 1,
+                clauses: 3,
+                truncated: false,
+            }
+        );
+        assert_eq!(
+            cnf.clauses,
+            vec![vec![1, 4, 7], vec![2, 5, 8], vec![3, 6, 9]]
+        );
     }
 }

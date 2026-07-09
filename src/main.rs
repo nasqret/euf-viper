@@ -2447,6 +2447,33 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
         }
     }
 
+    if env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref() == Ok("1") {
+        let stats = finite_analysis::add_permutation_support(
+            cnf,
+            bool_problem,
+            &domain,
+            &domain_set,
+            &finite_terms,
+            &disequality_edges,
+            &membership,
+        );
+        profile_measurement(
+            "finite_permutation_support",
+            stats.clauses as u128,
+            stats.cliques,
+        );
+        profile_measurement(
+            "finite_permutation_edges",
+            stats.candidate_edges as u128,
+            stats.guarded_edges,
+        );
+        profile_measurement(
+            "finite_permutation_truncated",
+            u128::from(stats.truncated),
+            stats.direct_edges,
+        );
+    }
+
     #[cfg(feature = "finite-symmetry")]
     if domain_symmetry {
         let symmetry_mode =
@@ -5162,6 +5189,10 @@ fn stats_file(path: &str) -> Result<i32, String> {
     if let Some(bool_problem) = &problem.bool_problem {
         println!("bool_assertions {}", bool_problem.assertions.len());
         println!("bool_unsupported {}", bool_problem.unsupported.len());
+        println!(
+            "finite_analysis {}",
+            finite_analysis::analyze(&problem.arena, bool_problem)
+        );
         for item in bool_problem.unsupported.iter().take(12) {
             println!("bool_unsupported_reason {item}");
         }
