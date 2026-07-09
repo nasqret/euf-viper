@@ -18,6 +18,7 @@ def main() -> int:
     parser.add_argument("--solver", action="append", dest="solvers", required=True)
     parser.add_argument("--timeout", type=float, required=True)
     parser.add_argument("--resume-run-id")
+    parser.add_argument("--retry-result", action="append", default=[])
     parser.add_argument("--retry-solver", action="append", default=[])
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
@@ -95,7 +96,7 @@ def main() -> int:
         "manifest": str(args.manifest),
         "timeout_s": args.timeout,
         "resume_run_id": args.resume_run_id,
-        "retry_results": ["timeout"] if args.resume_run_id else [],
+        "retry_results": sorted(set(args.retry_result)),
         "retry_solvers": sorted(set(args.retry_solver)),
         "instances": len(rows),
         "solvers": summary,

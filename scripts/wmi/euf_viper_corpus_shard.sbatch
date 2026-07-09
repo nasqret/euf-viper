@@ -23,6 +23,17 @@ CAMPAIGN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl"
 OUT_PREFIX="results/qf-uf-corpus-${RUN_ID}-shard-${INDEX}"
 RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
 RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
+if [ "${EUF_VIPER_CORPUS_RETRY_RESULTS+x}" = x ]; then
+  RETRY_RESULTS="$EUF_VIPER_CORPUS_RETRY_RESULTS"
+else
+  RETRY_RESULTS="timeout"
+fi
+
+if [ -n "$RETRY_RESULTS" ] && \
+  ! [[ "$RETRY_RESULTS" =~ ^[A-Za-z0-9._-]+(,[A-Za-z0-9._-]+)*$ ]]; then
+  echo "retry results must be a comma-separated shell-safe result list" >&2
+  exit 2
+fi
 
 mkdir -p "$SHARD_DIR" results
 scripts/bench/shard_manifest.py \
@@ -44,10 +55,13 @@ ARGS=(
   --progress "${OUT_PREFIX}.progress.json"
 )
 if [ -n "$RESUME_RUN_ID" ]; then
-  ARGS+=(
-    --resume-from "results/qf-uf-corpus-${RESUME_RUN_ID}-shard-${INDEX}.csv"
-    --retry-result timeout
-  )
+  ARGS+=(--resume-from "results/qf-uf-corpus-${RESUME_RUN_ID}-shard-${INDEX}.csv")
+  if [ -n "$RETRY_RESULTS" ]; then
+    IFS=',' read -r -a retry_result_names <<< "$RETRY_RESULTS"
+    for result in "${retry_result_names[@]}"; do
+      ARGS+=(--retry-result "$result")
+    done
+  fi
   if [ -n "$RETRY_SOLVERS" ]; then
     IFS=',' read -r -a retry_solver_names <<< "$RETRY_SOLVERS"
     for solver in "${retry_solver_names[@]}"; do
