@@ -16,6 +16,8 @@ LIMIT="${EUF_VIPER_CORPUS_LIMIT:-0}"
 SEED="${EUF_VIPER_CORPUS_SEED:-euf-viper-qf-uf-wmi-20260708}"
 RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
 RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
+SKIP_BUILD="${EUF_VIPER_CORPUS_SKIP_BUILD:-0}"
+EXPECTED_BINARY_SHA256="${EUF_VIPER_EXPECTED_BINARY_SHA256:-}"
 
 cd "$LOCAL_ROOT"
 if [ "$REMOTE_HOST" = "$REMOTE" ] || \
@@ -48,6 +50,19 @@ fi
 if [ -n "$RETRY_SOLVERS" ] && \
   ! [[ "$RETRY_SOLVERS" =~ ^(euf-viper|z3|cvc5|yices2)(,(euf-viper|z3|cvc5|yices2))*$ ]]; then
   echo "retry solvers must be a comma-separated solver list" >&2
+  exit 1
+fi
+if ! [[ "$SKIP_BUILD" =~ ^[01]$ ]]; then
+  echo "skip-build must be 0 or 1" >&2
+  exit 1
+fi
+if [ "$SKIP_BUILD" = 1 ] && [ -z "$EXPECTED_BINARY_SHA256" ]; then
+  echo "skip-build requires EUF_VIPER_EXPECTED_BINARY_SHA256" >&2
+  exit 1
+fi
+if [ -n "$EXPECTED_BINARY_SHA256" ] && \
+  ! [[ "$EXPECTED_BINARY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "expected binary SHA-256 must be 64 lowercase hexadecimal digits" >&2
   exit 1
 fi
 if ! [[ "$TIMEOUT" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -89,7 +104,7 @@ rsync -az --delete \
   ./ "$REMOTE_HOST:$REMOTE_ROOT/"
 
 PREP_JOB="$(ssh "$REMOTE_HOST" \
-  "cd $REMOTE_ROOT && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_GIT_REVISION=$REVISION,EUF_VIPER_CORPUS_LIMIT=$LIMIT,EUF_VIPER_CORPUS_SEED=$SEED scripts/wmi/euf_viper_prepare.sbatch")"
+  "cd $REMOTE_ROOT && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_GIT_REVISION=$REVISION,EUF_VIPER_CORPUS_LIMIT=$LIMIT,EUF_VIPER_CORPUS_SEED=$SEED,EUF_VIPER_CORPUS_SKIP_BUILD=$SKIP_BUILD,EUF_VIPER_EXPECTED_BINARY_SHA256=$EXPECTED_BINARY_SHA256 scripts/wmi/euf_viper_prepare.sbatch")"
 RUN_ID="${PREP_JOB%%;*}"
 ARRAY_END="$((SHARDS - 1))"
 ARRAY_JOB="$(ssh "$REMOTE_HOST" \
@@ -100,9 +115,10 @@ MERGE_JOB="$(ssh "$REMOTE_HOST" \
 MERGE_ID="${MERGE_JOB%%;*}"
 
 METADATA="$(printf \
-  '{"run_id":"%s","revision":"%s","remote_root":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s","resume_run_id":"%s","retry_solvers":"%s"}' \
+  '{"run_id":"%s","revision":"%s","remote_root":"%s","prepare_job":"%s","array_job":"%s","merge_job":"%s","instances_limit":%s,"sample_seed":"%s","shards":%s,"max_active":%s,"timeout_s":%s,"jobs_per_shard":%s,"wall_time":"%s","axiom_order":"%s","resume_run_id":"%s","retry_solvers":"%s","skip_build":%s,"expected_binary_sha256":"%s"}' \
   "$RUN_ID" "$REVISION" "$REMOTE_ROOT" "$RUN_ID" "$ARRAY_ID" "$MERGE_ID" "$LIMIT" "$SEED" "$SHARDS" \
-  "$MAX_ACTIVE" "$TIMEOUT" "$JOBS" "$WALL_TIME" "$AXIOM_ORDER" "$RESUME_RUN_ID" "$RETRY_SOLVERS")"
+  "$MAX_ACTIVE" "$TIMEOUT" "$JOBS" "$WALL_TIME" "$AXIOM_ORDER" "$RESUME_RUN_ID" "$RETRY_SOLVERS" \
+  "$SKIP_BUILD" "$EXPECTED_BINARY_SHA256")"
 printf '%s\n' "$METADATA" | ssh "$REMOTE_HOST" \
   "cat > $REMOTE_ROOT/results/qf-uf-campaign-${RUN_ID}.json"
 

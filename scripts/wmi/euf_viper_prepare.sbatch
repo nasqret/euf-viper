@@ -13,7 +13,20 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 mkdir -p results
 export PATH="$PWD/third_party/solvers/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
-cargo build --release
+SKIP_BUILD="${EUF_VIPER_CORPUS_SKIP_BUILD:-0}"
+EXPECTED_BINARY_SHA256="${EUF_VIPER_EXPECTED_BINARY_SHA256:-}"
+case "$SKIP_BUILD" in
+  0) cargo build --release ;;
+  1) test -x "$PWD/target/release/euf-viper" ;;
+  *) echo "EUF_VIPER_CORPUS_SKIP_BUILD must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ -n "$EXPECTED_BINARY_SHA256" ]; then
+  ACTUAL_BINARY_SHA256="$(sha256sum "$PWD/target/release/euf-viper" | awk '{print $1}')"
+  if [ "$ACTUAL_BINARY_SHA256" != "$EXPECTED_BINARY_SHA256" ]; then
+    echo "euf-viper SHA-256 mismatch: expected $EXPECTED_BINARY_SHA256, got $ACTUAL_BINARY_SHA256" >&2
+    exit 2
+  fi
+fi
 scripts/bench/install_solvers.sh "$PWD/third_party/solvers" \
   > "results/solvers-${SLURM_JOB_ID}.log" 2>&1
 scripts/bench/fetch_smtlib_qf_uf.sh "$PWD/benchmarks/smtlib-2025" \
@@ -41,5 +54,6 @@ test -x "$PWD/third_party/solvers/bin/yices-smt2"
 test -s "$CAMPAIGN_MANIFEST"
 
 printf 'revision=%s\n' "${EUF_VIPER_GIT_REVISION:-unknown}"
+printf 'binary_sha256=%s\n' "$(sha256sum "$PWD/target/release/euf-viper" | awk '{print $1}')"
 printf 'manifest=%s\n' "$CAMPAIGN_MANIFEST"
 printf 'manifest_rows=%s\n' "$(wc -l < "$CAMPAIGN_MANIFEST")"
