@@ -4457,7 +4457,25 @@ struct SolveReport {
     stats: SolveStats,
 }
 
-fn solve_problem(problem: Problem) -> SolveReport {
+const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
+
+fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
+    match value {
+        None | Some("0") => Ok(false),
+        Some("1") => Ok(true),
+        Some(_) => Err(format!("{name} must be 0 or 1")),
+    }
+}
+
+fn direct_root_cnf_enabled() -> Result<bool, String> {
+    match env::var(DIRECT_ROOT_CNF_ENV) {
+        Ok(value) => parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some(&value)),
+        Err(env::VarError::NotPresent) => parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{DIRECT_ROOT_CNF_ENV} must be 0 or 1")),
+    }
+}
+
+fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
     let stats_base = SolveStats {
         terms: problem.arena.terms.len(),
         apps: problem.arena.app_count(),
@@ -4482,7 +4500,7 @@ fn solve_problem(problem: Problem) -> SolveReport {
     if let Some(bool_problem) = &problem.bool_problem {
         if bool_problem.unsupported.is_empty() {
             if let Some((result, cnf_vars, cnf_clauses, search_nodes, sat_calls, theory_lemmas)) =
-                solve_bool_problem(&problem.arena, bool_problem)
+                solve_bool_problem(&problem.arena, bool_problem, direct_root_cnf)
             {
                 return SolveReport {
                     result,
@@ -4570,11 +4588,18 @@ fn solve_dynamic_full_ackermann(
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
+    direct_root_cnf: bool,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
-    for assertion in &bool_problem.assertions {
-        cnf.add_assertion(assertion);
+    if direct_root_cnf {
+        for assertion in &bool_problem.assertions {
+            cnf.add_direct_assertion(assertion);
+        }
+    } else {
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
     let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
@@ -5016,12 +5041,13 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
 }
 
 fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
+    let direct_root_cnf = direct_root_cnf_enabled()?;
     let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let start = Instant::now();
     let parse_start = Instant::now();
     let problem = parse_problem(&input)?;
     profile_phase("parse", parse_start, input.len());
-    let report = solve_problem(problem);
+    let report = solve_problem(problem, direct_root_cnf);
     let elapsed = start.elapsed();
     print_report(&report, elapsed, with_stats);
     Ok(match report.result {
@@ -5283,6 +5309,7 @@ fn gen_cmd(args: &[String]) -> Result<i32, String> {
 }
 
 fn bench_cmd(args: &[String]) -> Result<i32, String> {
+    let direct_root_cnf = direct_root_cnf_enabled()?;
     let cases = parse_flag_usize(args, "--cases", 20)?;
     let size = parse_flag_usize(args, "--size", 10_000)?;
     let mut total_terms = 0usize;
@@ -5296,7 +5323,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem(problem);
+        let report = solve_problem(problem, direct_root_cnf);
         let elapsed = start.elapsed();
         println!(
             "case={i} result={} elapsed_ns={} terms={} apps={} passes={} merges={}",
@@ -5321,6 +5348,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
 }
 
 fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
+    let direct_root_cnf = direct_root_cnf_enabled()?;
     let cases = parse_flag_usize(args, "--cases", 8)?;
     let branches = parse_flag_usize(args, "--branches", 512)?;
     let depth = parse_flag_usize(args, "--depth", 4)?;
@@ -5335,7 +5363,7 @@ fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem(problem);
+        let report = solve_problem(problem, direct_root_cnf);
         let elapsed = start.elapsed();
         println!(
             "or_case={i} kind={} result={} elapsed_ns={} terms={} eqs={} diseqs={} passes={} merges={}",
@@ -5520,6 +5548,178 @@ mod tests {
     }
 
     #[test]
+    fn direct_root_cnf_setting_is_strict_and_defaults_off() {
+        assert_eq!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, None), Ok(false));
+        assert_eq!(
+            parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some("0")),
+            Ok(false)
+        );
+        assert_eq!(
+            parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some("1")),
+            Ok(true)
+        );
+        assert_eq!(
+            parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some("true")),
+            Err(format!("{DIRECT_ROOT_CNF_ENV} must be 0 or 1"))
+        );
+        assert!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some(" 1")).is_err());
+    }
+
+    fn cnf_is_satisfiable(cnf: &CnfProblem) -> bool {
+        let mut solver = VarisatSolver::new();
+        for clause in &cnf.clauses {
+            solver.add_clause(
+                &clause
+                    .iter()
+                    .map(|literal| Lit::from_dimacs(*literal as isize))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        solver.solve().expect("Varisat should solve test CNF")
+    }
+
+    fn assertion_is_satisfiable(
+        expression: &BoolExpr,
+        direct_root_cnf: bool,
+        atom_assignment: &[bool],
+    ) -> bool {
+        let mut cnf = CnfProblem::new();
+        if direct_root_cnf {
+            cnf.add_direct_assertion(expression);
+        } else {
+            cnf.add_assertion(expression);
+        }
+        for (term, value) in atom_assignment.iter().copied().enumerate() {
+            let literal = cnf.atom_lit(BoolAtomKey::BoolTerm(term));
+            cnf.clauses
+                .push(vec![if value { literal } else { -literal }]);
+        }
+        cnf_is_satisfiable(&cnf)
+    }
+
+    fn assert_root_encodings_equivalent(expression: &BoolExpr, atom_count: usize) {
+        for assignment_bits in 0..(1usize << atom_count) {
+            let assignment = (0..atom_count)
+                .map(|bit| assignment_bits & (1 << bit) != 0)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                assertion_is_satisfiable(expression, true, &assignment),
+                assertion_is_satisfiable(expression, false, &assignment),
+                "root encodings differ for {expression:?} under {assignment:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_root_cnf_matches_tseitin_for_nested_boolean_formulas() {
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+        let formulas = vec![
+            BoolExpr::And(vec![
+                BoolExpr::Or(vec![atom(0), BoolExpr::Not(Box::new(atom(1)))]),
+                BoolExpr::Iff(vec![
+                    atom(2),
+                    BoolExpr::Ite(
+                        Box::new(atom(0)),
+                        Box::new(atom(1)),
+                        Box::new(BoolExpr::Not(Box::new(atom(2)))),
+                    ),
+                ]),
+            ]),
+            BoolExpr::Or(vec![
+                BoolExpr::And(vec![
+                    atom(0),
+                    BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                        atom(1),
+                        BoolExpr::Const(false),
+                    ]))),
+                ]),
+                BoolExpr::Ite(
+                    Box::new(atom(2)),
+                    Box::new(BoolExpr::Iff(vec![atom(0), atom(1)])),
+                    Box::new(BoolExpr::Const(false)),
+                ),
+            ]),
+            BoolExpr::Not(Box::new(BoolExpr::Iff(vec![
+                BoolExpr::Or(vec![atom(0), atom(1)]),
+                BoolExpr::Ite(
+                    Box::new(atom(2)),
+                    Box::new(BoolExpr::And(vec![atom(0), BoolExpr::Const(true)])),
+                    Box::new(BoolExpr::Not(Box::new(atom(1)))),
+                ),
+            ]))),
+            BoolExpr::Iff(vec![
+                BoolExpr::And(vec![
+                    atom(0),
+                    BoolExpr::Or(vec![atom(1), BoolExpr::Not(Box::new(atom(2)))]),
+                ]),
+                BoolExpr::Ite(
+                    Box::new(atom(1)),
+                    Box::new(atom(0)),
+                    Box::new(BoolExpr::Const(false)),
+                ),
+                BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                    BoolExpr::Const(false),
+                    atom(2),
+                ]))),
+            ]),
+            BoolExpr::Ite(
+                Box::new(BoolExpr::Or(vec![
+                    atom(0),
+                    BoolExpr::Not(Box::new(atom(1))),
+                ])),
+                Box::new(BoolExpr::Iff(vec![atom(1), atom(2)])),
+                Box::new(BoolExpr::And(vec![
+                    BoolExpr::Not(Box::new(atom(0))),
+                    BoolExpr::Or(vec![atom(1), atom(2)]),
+                ])),
+            ),
+        ];
+
+        for formula in &formulas {
+            assert_root_encodings_equivalent(formula, 3);
+        }
+    }
+
+    #[test]
+    fn direct_root_cnf_matches_tseitin_for_atom_free_constants() {
+        let formulas = vec![
+            BoolExpr::Const(true),
+            BoolExpr::Const(false),
+            BoolExpr::And(Vec::new()),
+            BoolExpr::Or(Vec::new()),
+            BoolExpr::Iff(Vec::new()),
+            BoolExpr::Iff(vec![BoolExpr::Const(false)]),
+            BoolExpr::Ite(
+                Box::new(BoolExpr::Const(false)),
+                Box::new(BoolExpr::Const(false)),
+                Box::new(BoolExpr::Const(true)),
+            ),
+        ];
+
+        for formula in &formulas {
+            assert_root_encodings_equivalent(formula, 0);
+        }
+    }
+
+    #[test]
+    fn direct_root_initial_solve_does_not_create_false_unsat() {
+        let input = "
+            (set-logic QF_UF)
+            (assert
+              (and true
+                   (or false (not false))
+                   (= true (ite false false true))))
+            (check-sat)
+        ";
+        for direct_root_cnf in [false, true] {
+            assert_eq!(
+                solve_problem(parse_problem(input).unwrap(), direct_root_cnf).result,
+                SolveResult::Sat
+            );
+        }
+    }
+
+    #[test]
     fn emits_direct_constraints_for_assertion_roots() {
         let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
 
@@ -5658,7 +5858,7 @@ mod tests {
     }
 
     fn solve_text(input: &str) -> SolveResult {
-        solve_problem(parse_problem(input).unwrap()).result
+        solve_problem(parse_problem(input).unwrap(), false).result
     }
 
     fn solve_text_varisat(input: &str) -> SolveResult {
@@ -6148,7 +6348,7 @@ mod tests {
         }
         assert!(add_finite_domain_axioms(&mut cnf, &problem.arena, bool_problem) > 0);
 
-        let report = solve_problem(problem);
+        let report = solve_problem(problem, false);
         assert_eq!(report.result, SolveResult::Unsat);
         assert!(report.stats.sat_calls >= 2);
     }
@@ -6361,7 +6561,7 @@ mod tests {
         ";
         let problem = parse_problem(input).unwrap();
         assert!(problem.contradiction);
-        assert_eq!(solve_problem(problem).result, SolveResult::Unsat);
+        assert_eq!(solve_problem(problem, false).result, SolveResult::Unsat);
     }
 
     #[test]
@@ -6386,7 +6586,7 @@ mod tests {
         assert!(problem.diseqs.is_empty());
         assert!(problem.unsupported.is_empty());
         assert!(!problem.contradiction);
-        assert_eq!(solve_problem(problem).result, SolveResult::Unsat);
+        assert_eq!(solve_problem(problem, false).result, SolveResult::Unsat);
     }
 
     #[test]
