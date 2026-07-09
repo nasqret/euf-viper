@@ -45,7 +45,6 @@ enum Sexp {
 #[derive(Debug, Default)]
 struct SymbolInterner {
     ids: HashMap<String, SymId>,
-    names: Vec<String>,
 }
 
 impl SymbolInterner {
@@ -53,9 +52,8 @@ impl SymbolInterner {
         if let Some(&id) = self.ids.get(text) {
             return id;
         }
-        let id = self.names.len() as SymId;
+        let id = self.ids.len() as SymId;
         self.ids.insert(text.to_owned(), id);
-        self.names.push(text.to_owned());
         id
     }
 }
@@ -4928,23 +4926,24 @@ fn tokenize(input: &str) -> Result<Vec<Tok>, String> {
 }
 
 fn parse_sexps(input: &str) -> Result<Vec<Sexp>, String> {
-    let toks = tokenize(input)?;
+    let mut toks = tokenize(input)?;
     let mut pos = 0;
     let mut sexps = Vec::new();
     while pos < toks.len() {
-        sexps.push(parse_one(&toks, &mut pos)?);
+        sexps.push(parse_one(&mut toks, &mut pos)?);
     }
     Ok(sexps)
 }
 
-fn parse_one(toks: &[Tok], pos: &mut usize) -> Result<Sexp, String> {
+fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
     if *pos >= toks.len() {
         return Err("unexpected end of token stream".to_owned());
     }
-    match &toks[*pos] {
+    let token = std::mem::replace(&mut toks[*pos], Tok::RParen);
+    match token {
         Tok::Atom(text) => {
             *pos += 1;
-            Ok(Sexp::Atom(text.clone()))
+            Ok(Sexp::Atom(text))
         }
         Tok::RParen => Err("unexpected ')'".to_owned()),
         Tok::LParen => {
