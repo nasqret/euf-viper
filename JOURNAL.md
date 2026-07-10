@@ -365,6 +365,10 @@
   failed all speed gates at `0.9962x`/`0.9923x`/`0.9835x`. Dense lookup stays
   in the research branch, while the accepted production binary remains
   `58efe9d`; next optimize only redundant checks for already interned terms.
+- Tested exact-term reuse with a borrowed per-function interning index in
+  `f7b52fb`. Isolated sample `143202` stayed 37/37 and was effectively flat:
+  all-total `0.99995x`, common-total `0.99987x`, geometric `1.00003x`. The
+  strict gate failed, so `d69792a` reverted it before broader campaigns.
 
 ## Next Entry Template
 

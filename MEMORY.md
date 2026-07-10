@@ -129,6 +129,10 @@
   against accepted pre-typed `58efe9d` still failed at
   0.9962x/0.9923x/0.9835x. Keep the accepted binary unchanged and optimize
   repeated application checks next.
+- Exact-term application reuse in `f7b52fb` preserved first-seen sort checking
+  but failed isolated sample `143202`: all-total 0.99995x, common-total
+  0.99987x, geometric 1.00003x at 37/37. It was reverted in `d69792a`; do not
+  spend production-baseline, hot, or full gates on it.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
   against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
   cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by

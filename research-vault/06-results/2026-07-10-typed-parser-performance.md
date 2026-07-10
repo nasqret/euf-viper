@@ -61,6 +61,20 @@ strict first-seen signature checking while avoiding redundant checks when the
 exact `(function, argument TermIds)` application was already validated and
 interned.
 
+## Rejected Exact-Term Reuse
+
+Commit `f7b52fb` replaced the composite interning map with a dense per-function
+index so exact argument slices could be queried without allocation. It skipped
+signature checks only for an already validated `(function, argument TermIds)`
+hit; first-seen malformed applications remained rejected, and 99 all-feature
+release tests passed. Its WMI binary SHA-256 was
+`009462d5d6982e943f08b23669101ce7aa836c9ac455fcf77593df3beaad7872`.
+
+Five-repeat isolated sample `143202` kept 37/37 coverage. Geometric speed was
+effectively flat at 1.00003x, while all-total and common-total failed the strict
+gate at 0.99995x and 0.99987x. The change was reverted in `d69792a` without a
+production-baseline, hot-400, or full-corpus run.
+
 ## Artifacts
 
 - Initial typed sample: `results/wmi/typed-sorts-sample40-142943/`.
@@ -68,6 +82,8 @@ interned.
 - Dense lookup isolation: `results/wmi/dense-fun-decls-sample40-143178/`.
 - Dense typed versus accepted pre-typed:
   `results/wmi/typed-dense-vs-pretyped-sample40-143188/`.
+- Rejected exact-term reuse:
+  `results/wmi/exact-term-reuse-sample40-143202/`.
 
 ## Decision
 
