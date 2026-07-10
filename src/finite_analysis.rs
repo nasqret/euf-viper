@@ -236,6 +236,19 @@ pub(crate) fn add_permutation_support(
         );
     }
     let guarded_vertices = edge_vertices(&guarded_edges);
+    if !permutation_support_structurally_selected(
+        mode,
+        closed_table_functions,
+        domain.len(),
+        guarded_vertices,
+    ) {
+        return PermutationSupportStats {
+            direct_edges: mandatory_disequalities.len(),
+            guarded_edges: guarded_edges.len(),
+            ..PermutationSupportStats::default()
+        };
+    }
+
     let mut candidate_edges = mandatory_disequalities.clone();
     candidate_edges.extend(guarded_edges.iter().copied());
     candidate_edges.retain(|(left, right)| {
@@ -247,14 +260,9 @@ pub(crate) fn add_permutation_support(
             && membership.contains_key(&(*right, domain[0]))
     });
 
-    let selected = permutation_support_selected(
-        mode,
-        closed_table_functions,
-        domain.len(),
-        guarded_vertices,
-        &candidate_edges,
-    );
-    if !selected {
+    if mode == PermutationSupportMode::Focused
+        && !candidate_graph_has_clique_core(&candidate_edges, domain.len())
+    {
         return PermutationSupportStats {
             direct_edges: mandatory_disequalities.len(),
             guarded_edges: guarded_edges.len(),
@@ -293,20 +301,15 @@ pub(crate) fn add_permutation_support(
     }
 }
 
-fn permutation_support_selected(
+fn permutation_support_structurally_selected(
     mode: PermutationSupportMode,
     closed_table_functions: usize,
     domain_size: usize,
     guarded_vertices: usize,
-    candidate_edges: &HashSet<(TermId, TermId)>,
 ) -> bool {
-    match mode {
-        PermutationSupportMode::All => true,
-        PermutationSupportMode::Focused => {
-            (closed_table_functions == 1 || (domain_size >= 2 && guarded_vertices == domain_size))
-                && candidate_graph_has_clique_core(candidate_edges, domain_size)
-        }
-    }
+    mode == PermutationSupportMode::All
+        || closed_table_functions == 1
+        || (domain_size >= 2 && guarded_vertices == domain_size)
 }
 
 fn candidate_graph_has_clique_core(edges: &HashSet<(TermId, TermId)>, target_size: usize) -> bool {
@@ -855,13 +858,6 @@ mod tests {
             .collect::<HashSet<_>>();
 
         assert!(candidate_graph_has_clique_core(&complete_four, 4));
-        assert!(permutation_support_selected(
-            PermutationSupportMode::Focused,
-            1,
-            4,
-            0,
-            &complete_four,
-        ));
     }
 
     #[test]
@@ -871,13 +867,6 @@ mod tests {
             .collect::<HashSet<_>>();
 
         assert!(!candidate_graph_has_clique_core(&almost_complete_four, 4));
-        assert!(!permutation_support_selected(
-            PermutationSupportMode::Focused,
-            1,
-            4,
-            0,
-            &almost_complete_four,
-        ));
     }
 
     #[test]
@@ -890,13 +879,6 @@ mod tests {
         assert!(!candidate_graph_has_clique_core(
             &complete_bipartite_two_by_three,
             4
-        ));
-        assert!(!permutation_support_selected(
-            PermutationSupportMode::Focused,
-            1,
-            4,
-            0,
-            &complete_bipartite_two_by_three,
         ));
     }
 
@@ -944,7 +926,7 @@ mod tests {
             3,
             &mandatory_disequalities,
             &membership,
-            PermutationSupportMode::All,
+            PermutationSupportMode::Focused,
         );
 
         assert_eq!(
@@ -966,7 +948,7 @@ mod tests {
     }
 
     #[test]
-    fn all_support_bypasses_focused_structural_selection() {
+    fn focused_structural_rejection_skips_candidates_while_all_proceeds() {
         let domain = vec![0, 1, 2];
         let domain_set = domain.iter().copied().collect::<HashSet<_>>();
         let outputs = [3, 4, 5];
@@ -1003,8 +985,18 @@ mod tests {
             &membership,
             PermutationSupportMode::Focused,
         );
-        assert_eq!(focused.candidate_edges, 3);
-        assert!(!focused.selected);
+        assert_eq!(
+            focused,
+            PermutationSupportStats {
+                direct_edges: 3,
+                guarded_edges: 0,
+                candidate_edges: 0,
+                cliques: 0,
+                clauses: 0,
+                selected: false,
+                truncated: false,
+            }
+        );
         assert!(focused_cnf.clauses.is_empty());
 
         let mut all_cnf = CnfProblem::new();
@@ -1039,34 +1031,29 @@ mod tests {
 
     #[test]
     fn focused_support_keeps_the_existing_structural_selector() {
-        let triangle = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
-        assert!(permutation_support_selected(
+        assert!(permutation_support_structurally_selected(
             PermutationSupportMode::All,
             4,
             7,
             49,
-            &HashSet::default(),
         ));
-        assert!(permutation_support_selected(
+        assert!(permutation_support_structurally_selected(
             PermutationSupportMode::Focused,
             1,
             3,
             0,
-            &triangle,
         ));
-        assert!(permutation_support_selected(
+        assert!(permutation_support_structurally_selected(
             PermutationSupportMode::Focused,
             7,
             3,
             3,
-            &triangle,
         ));
-        assert!(!permutation_support_selected(
+        assert!(!permutation_support_structurally_selected(
             PermutationSupportMode::Focused,
             3,
             3,
             2,
-            &triangle,
         ));
     }
 }
