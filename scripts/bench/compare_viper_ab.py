@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
+import platform
 import statistics
 import subprocess
 import time
@@ -26,6 +28,43 @@ FIELDNAMES = [
     "exit_code",
     "stderr",
 ]
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def artifact_metadata(
+    manifest: Path,
+    baseline: Path,
+    candidate: Path,
+    timeout_s: float,
+    warmups: int,
+    environment: dict[str, str] | None = None,
+    hostname: str | None = None,
+) -> dict:
+    environment = os.environ if environment is None else environment
+    hashes = {
+        path: sha256_file(path)
+        for path in {manifest.resolve(), baseline.resolve(), candidate.resolve()}
+    }
+    return {
+        "manifest_sha256": hashes[manifest.resolve()],
+        "baseline_sha256": hashes[baseline.resolve()],
+        "candidate_sha256": hashes[candidate.resolve()],
+        "timeout_s": timeout_s,
+        "warmups": warmups,
+        "runtime_host": hostname if hostname is not None else platform.node(),
+        "git_revision": environment.get("EUF_VIPER_GIT_REVISION"),
+        "slurm_job_id": environment.get("SLURM_JOB_ID"),
+        "slurm_array_job_id": environment.get("SLURM_ARRAY_JOB_ID"),
+        "slurm_array_task_id": environment.get("SLURM_ARRAY_TASK_ID"),
+        "slurm_node_list": environment.get("SLURM_JOB_NODELIST"),
+    }
 
 
 def parse_environment(values: list[str]) -> dict[str, str]:
@@ -268,6 +307,13 @@ def main() -> int:
             "candidate": str(args.candidate),
             "baseline_env": args.baseline_env,
             "candidate_env": args.candidate_env,
+            **artifact_metadata(
+                args.manifest,
+                args.baseline,
+                args.candidate,
+                args.timeout,
+                args.warmups,
+            ),
         }
     )
     args.summary.parent.mkdir(parents=True, exist_ok=True)
