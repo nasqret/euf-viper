@@ -79,6 +79,51 @@
   The published competition-budget boundary remains 7,478 standalone solves
   versus Z3 7,500 and Yices 7,503 until those campaigns are rerun.
 
+## 2026-07-10 Controlled Routing Checkpoint
+
+- Direct-root CNF is promoted by commit `50edc7d`. Full paired gate
+  `142591`/`142596` improved coverage 6,825 to 6,843, all-total 1.0060x,
+  common-total 1.0098x, and geometric speed 1.0264x. Keep
+  `EUF_VIPER_DIRECT_ROOT_CNF=0` as rollback.
+- The WMI A/B harness had continued to force the obsolete `varisat`
+  invalid-model fallback. Commit `94c86c0` aligns new WMI gates with the
+  promoted Linux `cadical-refine` default. Every old result remains
+  interpretable through its recorded environment, but it is not a production
+  promotion result unless that configuration is explicit.
+- Unconditional scoped-let restoration is rejected: full gate
+  `142745`/`142750` lost one net solve and measured 0.9963x geometric speed.
+  The predeclared `EUF_VIPER_SCOPED_LET=auto` route selects scoped restoration
+  at 512 lexical lets and keeps the cloned parser below it.
+- Scoped-let auto passed production targeted `142892`, sample `142895`,
+  hot-400 `142918`/`142926`, and full `142952`/`142996` gates. The full result
+  was coverage 7,219 to 7,249, all-total 1.0337x, common-total 1.0165x, and
+  geometric 1.0072x, with no baseline-only cases, wrong answers, or errors.
+  Binary SHA-256 is
+  `4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`.
+  Repeated c2n1/c3n1 confirmation jobs are `143029`/`143033` and
+  `143034`/`143039`.
+- The finite permutation clique-core prefilter passed its repeated 151-case
+  gate `142796`/`142800` but failed hot-400 `142867`/`142871`: coverage
+  321 to 319 and every speed metric below 0.98x. Stop; do not launch a full
+  gate or default-enable focused finite support.
+- Broad equality facts are rejected. Production sample `142898` measured
+  0.9763x common and 0.9337x geometric speed. Hard-hit `142899`/`142907`
+  added 18 solves but still regressed common/geometric speed.
+- A path-independent prospective selector,
+  `guarded_disequality_clauses > 0`, covers 55/7,503 instances. Five-repeat
+  full-population gate `142947`/`142951` improved coverage 18 to 29,
+  all-total 1.2086x, common-total 1.4738x, and geometric 1.4191x with no
+  losses or errors. Implement only as explicit `guarded-facts` until its
+  actual routed full gate passes; fresh equality atoms must remain disabled.
+- Typed sort tracking is the soundness prerequisite for definitional
+  substitution. Initial sample `142943` failed speed because it traversed
+  valid assertions twice. Commit `991d700` defers diagnostics to parse-error
+  paths; job `143080` is its fresh sample gate. Do not implement substitution
+  on an untyped arena and do not promote typed parsing before its speed gates.
+- Fresh four-solver two-second campaign `143049`/`143051`/`143052` is running
+  against exact scoped binary commit `58efe9d` and the SHA-256 above. No new
+  Z3 or Yices2 superiority claim is allowed before the strict merge completes.
+
 ## Local Canary Results
 
 - Warm rerun synthetic canaries:
