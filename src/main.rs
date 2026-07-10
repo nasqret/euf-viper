@@ -32,6 +32,11 @@ use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
 type SymId = u32;
 type TermId = usize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SortId(u32);
+
+const BOOL_SORT: SortId = SortId(0);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Tok {
     LParen,
@@ -61,6 +66,44 @@ impl SymbolInterner {
     }
 }
 
+#[derive(Debug)]
+struct SortTable {
+    ids: HashMap<SymId, SortId>,
+    names: Vec<String>,
+}
+
+impl Default for SortTable {
+    fn default() -> Self {
+        Self {
+            ids: HashMap::default(),
+            names: vec!["Bool".to_owned()],
+        }
+    }
+}
+
+impl SortTable {
+    fn declare(&mut self, sym: SymId, name: &str) -> Result<SortId, String> {
+        if name == "Bool" {
+            return Err("cannot redeclare built-in sort `Bool`".to_owned());
+        }
+        if self.ids.contains_key(&sym) {
+            return Err(format!("sort `{name}` is already declared"));
+        }
+        let id = SortId(self.names.len() as u32);
+        self.ids.insert(sym, id);
+        self.names.push(name.to_owned());
+        Ok(id)
+    }
+
+    fn get(&self, sym: SymId) -> Option<SortId> {
+        self.ids.get(&sym).copied()
+    }
+
+    fn name(&self, sort: SortId) -> &str {
+        &self.names[sort.0 as usize]
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct TermKey {
     fun: SymId,
@@ -71,6 +114,7 @@ struct TermKey {
 struct Term {
     fun: SymId,
     args: Vec<TermId>,
+    sort: SortId,
 }
 
 #[derive(Debug, Default)]
@@ -81,9 +125,10 @@ struct TermArena {
 }
 
 impl TermArena {
-    fn intern(&mut self, fun: SymId, args: Vec<TermId>) -> TermId {
+    fn intern_typed(&mut self, fun: SymId, args: Vec<TermId>, sort: SortId) -> TermId {
         let key = TermKey { fun, args };
         if let Some(&id) = self.interned.get(&key) {
+            debug_assert_eq!(self.terms[id].sort, sort);
             return id;
         }
         let id = self.terms.len();
@@ -93,9 +138,15 @@ impl TermArena {
         self.terms.push(Term {
             fun: key.fun,
             args: key.args.clone(),
+            sort,
         });
         self.interned.insert(key, id);
         id
+    }
+
+    #[cfg(test)]
+    fn intern(&mut self, fun: SymId, args: Vec<TermId>) -> TermId {
+        self.intern_typed(fun, args, SortId(u32::MAX))
     }
 
     fn app_count(&self) -> usize {
@@ -105,12 +156,34 @@ impl TermArena {
 
 #[derive(Debug)]
 struct Problem {
+    sorts: SortTable,
+    fun_decls: HashMap<SymId, FunDecl>,
     arena: TermArena,
     eqs: Vec<(TermId, TermId)>,
     diseqs: Vec<(TermId, TermId)>,
     unsupported: Vec<String>,
     bool_problem: Option<BoolProblem>,
     contradiction: bool,
+}
+
+impl Problem {
+    fn terms_are_well_sorted(&self) -> bool {
+        self.arena.terms.iter().all(|term| {
+            if term.sort.0 as usize >= self.sorts.names.len() {
+                return false;
+            }
+            let Some(decl) = self.fun_decls.get(&term.fun) else {
+                return false;
+            };
+            decl.result_sort == term.sort
+                && decl.arg_sorts.len() == term.args.len()
+                && term
+                    .args
+                    .iter()
+                    .zip(&decl.arg_sorts)
+                    .all(|(&arg, &sort)| self.arena.terms[arg].sort == sort)
+        })
+    }
 }
 
 #[derive(Debug, Default)]
@@ -121,8 +194,8 @@ struct BranchLiterals {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FunDecl {
-    result_is_bool: bool,
-    arity: usize,
+    arg_sorts: Vec<SortId>,
+    result_sort: SortId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -202,6 +275,7 @@ struct OrAnalysis {
 #[derive(Debug, Default)]
 struct ParseCtx {
     symbols: SymbolInterner,
+    sorts: SortTable,
     arena: TermArena,
     eqs: Vec<(TermId, TermId)>,
     diseqs: Vec<(TermId, TermId)>,
@@ -239,6 +313,8 @@ impl ParseCtx {
                 }
             });
         Problem {
+            sorts: self.sorts,
+            fun_decls: self.fun_decls,
             arena: self.arena,
             eqs: self.eqs,
             diseqs: self.diseqs,
@@ -250,6 +326,231 @@ impl ParseCtx {
 
     fn add_unsupported(&mut self, msg: impl Into<String>) {
         self.unsupported.push(msg.into());
+    }
+
+    fn parse_sort(&mut self, sexp: &Sexp, context: &str) -> Result<SortId, String> {
+        let Some(name) = atom_text(sexp) else {
+            return Err(format!("{context} is not a sort symbol"));
+        };
+        if name == "Bool" {
+            return Ok(BOOL_SORT);
+        }
+        let sym = self.symbols.intern(name);
+        self.sorts
+            .get(sym)
+            .ok_or_else(|| format!("unknown sort `{name}` in {context}"))
+    }
+
+    fn declare_function(
+        &mut self,
+        name: &str,
+        arg_sorts: Vec<SortId>,
+        result_sort: SortId,
+    ) -> Result<SymId, String> {
+        let sym = self.symbols.intern(name);
+        if self.fun_decls.contains_key(&sym) {
+            return Err(format!("function `{name}` is already declared"));
+        }
+        self.fun_decls.insert(
+            sym,
+            FunDecl {
+                arg_sorts,
+                result_sort,
+            },
+        );
+        Ok(sym)
+    }
+
+    fn sort_mismatch(&self, context: &str, expected: SortId, found: SortId) -> String {
+        format!(
+            "sort mismatch in {context}: expected `{}`, found `{}`",
+            self.sorts.name(expected),
+            self.sorts.name(found)
+        )
+    }
+
+    fn validate_expected_sort(
+        &self,
+        context: &str,
+        found: Option<SortId>,
+        expected: SortId,
+    ) -> Result<(), String> {
+        if let Some(found) = found
+            && found != expected
+        {
+            return Err(self.sort_mismatch(context, expected, found));
+        }
+        Ok(())
+    }
+
+    fn validate_expr_sort(
+        &mut self,
+        sexp: &Sexp,
+        env: &HashMap<String, Option<SortId>>,
+    ) -> Result<Option<SortId>, String> {
+        match sexp {
+            Sexp::Atom(atom) => {
+                if matches!(atom.as_str(), "true" | "false") {
+                    return Ok(Some(BOOL_SORT));
+                }
+                if let Some(sort) = env.get(atom) {
+                    return Ok(*sort);
+                }
+                let sym = self.symbols.intern(atom);
+                let Some(decl) = self.fun_decls.get(&sym) else {
+                    return Ok(None);
+                };
+                if !decl.arg_sorts.is_empty() {
+                    return Err(format!(
+                        "arity mismatch in application `{atom}`: expected {} arguments, found 0",
+                        decl.arg_sorts.len()
+                    ));
+                }
+                Ok(Some(decl.result_sort))
+            }
+            Sexp::List(items) => {
+                if items.is_empty() {
+                    return Ok(None);
+                }
+                let Some(head) = atom_text(&items[0]) else {
+                    return Ok(None);
+                };
+                match head {
+                    "!" => {
+                        let Some(payload) = items.get(1) else {
+                            return Ok(None);
+                        };
+                        self.validate_expr_sort(payload, env)
+                    }
+                    "and" | "or" => {
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            self.validate_expected_sort(
+                                &format!("`{head}` argument"),
+                                sort,
+                                BOOL_SORT,
+                            )?;
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    "not" => {
+                        if items.len() != 2 {
+                            return Ok(None);
+                        }
+                        let sort = self.validate_expr_sort(&items[1], env)?;
+                        self.validate_expected_sort("`not` argument", sort, BOOL_SORT)?;
+                        Ok(Some(BOOL_SORT))
+                    }
+                    "=>" | "xor" => {
+                        if items.len() < 3 {
+                            return Ok(None);
+                        }
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            self.validate_expected_sort(
+                                &format!("`{head}` argument"),
+                                sort,
+                                BOOL_SORT,
+                            )?;
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    "=" | "distinct" => {
+                        if items.len() < 3 {
+                            return Ok(None);
+                        }
+                        let mut expected = None;
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            if let Some(sort) = sort {
+                                if let Some(expected) = expected {
+                                    if sort != expected {
+                                        return Err(self.sort_mismatch(
+                                            if head == "=" { "equality" } else { "distinct" },
+                                            expected,
+                                            sort,
+                                        ));
+                                    }
+                                } else {
+                                    expected = Some(sort);
+                                }
+                            }
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    "ite" => {
+                        if items.len() != 4 {
+                            return Ok(None);
+                        }
+                        let condition = self.validate_expr_sort(&items[1], env)?;
+                        self.validate_expected_sort("ite condition", condition, BOOL_SORT)?;
+                        let then_sort = self.validate_expr_sort(&items[2], env)?;
+                        let else_sort = self.validate_expr_sort(&items[3], env)?;
+                        if let (Some(then_sort), Some(else_sort)) = (then_sort, else_sort)
+                            && then_sort != else_sort
+                        {
+                            return Err(self.sort_mismatch("ite branches", then_sort, else_sort));
+                        }
+                        Ok(then_sort.or(else_sort))
+                    }
+                    "let" => {
+                        if items.len() != 3 {
+                            return Ok(None);
+                        }
+                        let Sexp::List(binding_list) = &items[1] else {
+                            return Ok(None);
+                        };
+                        let mut parsed = Vec::with_capacity(binding_list.len());
+                        for binding in binding_list {
+                            let Sexp::List(pair) = binding else {
+                                return Ok(None);
+                            };
+                            if pair.len() != 2 {
+                                return Ok(None);
+                            }
+                            let Some(name) = atom_text(&pair[0]) else {
+                                return Ok(None);
+                            };
+                            parsed.push((name.to_owned(), self.validate_expr_sort(&pair[1], env)?));
+                        }
+                        let mut local = env.clone();
+                        for (name, sort) in parsed {
+                            local.insert(name, sort);
+                        }
+                        self.validate_expr_sort(&items[2], &local)
+                    }
+                    _ => {
+                        let sym = self.symbols.intern(head);
+                        let Some(decl) = self.fun_decls.get(&sym).cloned() else {
+                            return Ok(None);
+                        };
+                        let args = &items[1..];
+                        if args.len() != decl.arg_sorts.len() {
+                            return Err(format!(
+                                "arity mismatch in application `{head}`: expected {} arguments, found {}",
+                                decl.arg_sorts.len(),
+                                args.len()
+                            ));
+                        }
+                        for (index, (arg, expected)) in args.iter().zip(&decl.arg_sorts).enumerate()
+                        {
+                            let found = self.validate_expr_sort(arg, env)?;
+                            self.validate_expected_sort(
+                                &format!("application `{head}` argument {}", index + 1),
+                                found,
+                                *expected,
+                            )?;
+                        }
+                        Ok(Some(decl.result_sort))
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_assertion_sort(&mut self, sexp: &Sexp) -> Result<(), String> {
+        let sort = self.validate_expr_sort(sexp, &HashMap::default())?;
+        self.validate_expected_sort("assertion", sort, BOOL_SORT)
     }
 
     fn parse_command(&mut self, sexp: &Sexp) -> Result<(), String> {
@@ -268,6 +569,7 @@ impl ParseCtx {
                     self.add_unsupported("assert command with arity other than 1");
                     return Ok(());
                 }
+                self.validate_assertion_sort(&items[1])?;
                 self.ensure_bool_value_terms();
                 let mut mixed_env = HashMap::default();
                 let aux_start = self.bool_assertions.len();
@@ -298,43 +600,56 @@ impl ParseCtx {
                 }
             }
             "declare-fun" => {
-                if let Some(name) = items.get(1).and_then(atom_text) {
-                    let sym = self.symbols.intern(name);
-                    let arity = items
-                        .get(2)
-                        .and_then(|arg_sorts| match arg_sorts {
-                            Sexp::List(sorts) => Some(sorts.len()),
-                            Sexp::Atom(_) => None,
-                        })
-                        .unwrap_or(0);
-                    let result_is_bool = items.get(3).and_then(atom_text) == Some("Bool");
-                    self.fun_decls.insert(
-                        sym,
-                        FunDecl {
-                            result_is_bool,
-                            arity,
-                        },
+                if items.len() != 4 {
+                    return Err(
+                        "declare-fun command must have name, arguments, and result sort".to_owned(),
                     );
                 }
+                let Some(name) = atom_text(&items[1]) else {
+                    return Err("declare-fun name is not a symbol".to_owned());
+                };
+                let Sexp::List(arg_sort_exprs) = &items[2] else {
+                    return Err(format!("argument sorts for `{name}` are not a list"));
+                };
+                let mut arg_sorts = Vec::with_capacity(arg_sort_exprs.len());
+                for (index, sort) in arg_sort_exprs.iter().enumerate() {
+                    arg_sorts.push(
+                        self.parse_sort(sort, &format!("argument {} of `{name}`", index + 1))?,
+                    );
+                }
+                let result_sort = self.parse_sort(&items[3], &format!("result of `{name}`"))?;
+                self.declare_function(name, arg_sorts, result_sort)?;
             }
             "declare-const" => {
-                if let Some(name) = items.get(1).and_then(atom_text) {
-                    let sym = self.symbols.intern(name);
-                    let result_is_bool = items.get(2).and_then(atom_text) == Some("Bool");
-                    self.fun_decls.insert(
-                        sym,
-                        FunDecl {
-                            result_is_bool,
-                            arity: 0,
-                        },
-                    );
-                    if !result_is_bool {
-                        self.arena.intern(sym, Vec::new());
-                    }
+                if items.len() != 3 {
+                    return Err("declare-const command must have a name and sort".to_owned());
+                }
+                let Some(name) = atom_text(&items[1]) else {
+                    return Err("declare-const name is not a symbol".to_owned());
+                };
+                let result_sort = self.parse_sort(&items[2], &format!("result of `{name}`"))?;
+                let sym = self.declare_function(name, Vec::new(), result_sort)?;
+                if result_sort != BOOL_SORT {
+                    self.arena.intern_typed(sym, Vec::new(), result_sort);
                 }
             }
-            "set-logic" | "set-option" | "set-info" | "declare-sort" | "check-sat" | "exit"
-            | "get-model" | "get-value" => {}
+            "declare-sort" => {
+                if items.len() != 3 {
+                    return Err("declare-sort command must have a name and arity".to_owned());
+                }
+                let Some(name) = atom_text(&items[1]) else {
+                    return Err("declare-sort name is not a symbol".to_owned());
+                };
+                if atom_text(&items[2]) != Some("0") {
+                    return Err(format!(
+                        "sort `{name}` must have arity 0 in the QF_UF parser"
+                    ));
+                }
+                let sym = self.symbols.intern(name);
+                self.sorts.declare(sym, name)?;
+            }
+            "set-logic" | "set-option" | "set-info" | "check-sat" | "exit" | "get-model"
+            | "get-value" => {}
             "define-fun" => {
                 if items.len() != 5 {
                     self.add_unsupported("define-fun with unexpected arity");
@@ -357,18 +672,16 @@ impl ParseCtx {
                     return Ok(());
                 }
 
+                self.validate_assertion_sort(&items[4])?;
+
                 self.ensure_bool_value_terms();
-                let sym = self.symbols.intern(name);
+                if self.fun_decls.contains_key(&self.symbols.intern(name)) {
+                    return Err(format!("function `{name}` is already declared"));
+                }
                 let mut env = HashMap::default();
                 match self.parse_bool_expr(&items[4], &mut env) {
                     Ok(body) => {
-                        self.fun_decls.insert(
-                            sym,
-                            FunDecl {
-                                result_is_bool: true,
-                                arity: 0,
-                            },
-                        );
+                        let sym = self.declare_function(name, Vec::new(), BOOL_SORT)?;
                         self.bool_definitions.insert(sym, body);
                     }
                     Err(err) => {
@@ -646,6 +959,7 @@ impl ParseCtx {
                         if terms.len() < 2 {
                             return Ok(false);
                         }
+                        self.ensure_terms_same_sort("equality", &terms)?;
                         let first = terms[0];
                         for &term in &terms[1..] {
                             lits.eqs.push((first, term));
@@ -654,16 +968,19 @@ impl ParseCtx {
                     }
                     "=" if !polarity && items.len() == 3 => {
                         let terms = self.parse_terms(&items[1..], env)?;
+                        self.ensure_terms_same_sort("equality", &terms)?;
                         lits.diseqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
                     "distinct" if !polarity && items.len() == 3 => {
                         let terms = self.parse_terms(&items[1..], env)?;
+                        self.ensure_terms_same_sort("distinct", &terms)?;
                         lits.eqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
                     "distinct" if polarity => {
                         let terms = self.parse_terms(&items[1..], env)?;
+                        self.ensure_terms_same_sort("distinct", &terms)?;
                         for i in 0..terms.len() {
                             for j in (i + 1)..terms.len() {
                                 lits.diseqs.push((terms[i], terms[j]));
@@ -711,7 +1028,7 @@ impl ParseCtx {
                         if let Some(body) = self.bool_definitions.get(&sym).cloned() {
                             Ok(body)
                         } else if self.is_bool_symbol(sym, 0) {
-                            Ok(self.bool_app_expr(sym, Vec::new()))
+                            self.bool_app_expr(sym, name, Vec::new())
                         } else {
                             Err(format!("non-Boolean atom `{name}` used as a formula"))
                         }
@@ -820,7 +1137,7 @@ impl ParseCtx {
                             for child in &items[1..] {
                                 args.push(self.parse_argument_term(child, env)?);
                             }
-                            Ok(self.bool_app_expr(sym, args))
+                            self.bool_app_expr(sym, head, args)
                         } else {
                             Err(format!("formula headed by `{head}` is not Boolean"))
                         }
@@ -847,8 +1164,13 @@ impl ParseCtx {
                 let mut conjuncts = Vec::with_capacity(values.len().saturating_sub(1));
                 for value in &values[1..] {
                     let BindingValue::Term(term) = value else {
-                        return Err("mixed Bool/data equality is not supported".to_owned());
+                        return Err(self.sort_mismatch(
+                            "equality",
+                            self.arena.terms[*first].sort,
+                            BOOL_SORT,
+                        ));
                     };
+                    self.ensure_same_term_sort("equality", *first, *term)?;
                     conjuncts.push(BoolExpr::Atom(BoolAtomKey::Eq(*first, *term)));
                 }
                 Ok(if conjuncts.len() == 1 {
@@ -862,7 +1184,14 @@ impl ParseCtx {
                 exprs.push(first.clone());
                 for value in &values[1..] {
                     let BindingValue::Bool(expr) = value else {
-                        return Err("mixed Bool/data equality is not supported".to_owned());
+                        let BindingValue::Term(term) = value else {
+                            unreachable!();
+                        };
+                        return Err(self.sort_mismatch(
+                            "equality",
+                            BOOL_SORT,
+                            self.arena.terms[*term].sort,
+                        ));
                     };
                     exprs.push(expr.clone());
                 }
@@ -884,14 +1213,16 @@ impl ParseCtx {
             values.push(self.parse_bool_or_term(arg, env)?);
         }
         match &values[0] {
-            BindingValue::Term(_) => {
+            BindingValue::Term(first) => {
+                let expected = self.arena.terms[*first].sort;
                 let mut terms = Vec::with_capacity(values.len());
                 for value in values {
                     let BindingValue::Term(term) = value else {
-                        return Err("mixed Bool/data distinct is not supported".to_owned());
+                        return Err(self.sort_mismatch("distinct", expected, BOOL_SORT));
                     };
                     terms.push(term);
                 }
+                self.ensure_terms_same_sort("distinct", &terms)?;
                 let mut conjuncts = Vec::new();
                 for i in 0..terms.len() {
                     for j in (i + 1)..terms.len() {
@@ -906,7 +1237,14 @@ impl ParseCtx {
                 let mut exprs = Vec::with_capacity(values.len());
                 for value in values {
                     let BindingValue::Bool(expr) = value else {
-                        return Err("mixed Bool/data distinct is not supported".to_owned());
+                        let BindingValue::Term(term) = value else {
+                            unreachable!();
+                        };
+                        return Err(self.sort_mismatch(
+                            "distinct",
+                            BOOL_SORT,
+                            self.arena.terms[term].sort,
+                        ));
                     };
                     exprs.push(expr);
                 }
@@ -939,7 +1277,11 @@ impl ParseCtx {
                 if let Some(body) = self.bool_definitions.get(&sym).cloned() {
                     Ok(BindingValue::Bool(body))
                 } else if self.is_bool_symbol(sym, 0) {
-                    Ok(BindingValue::Bool(self.bool_app_expr(sym, Vec::new())))
+                    Ok(BindingValue::Bool(self.bool_app_expr(
+                        sym,
+                        atom,
+                        Vec::new(),
+                    )?))
                 } else {
                     Ok(BindingValue::Term(self.parse_typed_term(sexp, env)?))
                 }
@@ -994,6 +1336,14 @@ impl ParseCtx {
     ) -> Result<TermId, String> {
         match sexp {
             Sexp::Atom(atom) => {
+                if matches!(atom.as_str(), "true" | "false") {
+                    let (true_term, false_term) = self.ensure_bool_value_terms();
+                    return Ok(if atom == "true" {
+                        true_term
+                    } else {
+                        false_term
+                    });
+                }
                 if let Some(value) = env.get(atom).cloned() {
                     return match value {
                         BindingValue::Term(term) => Ok(term),
@@ -1001,10 +1351,7 @@ impl ParseCtx {
                     };
                 }
                 let sym = self.symbols.intern(atom);
-                if self.is_bool_symbol(sym, 0) {
-                    return Ok(self.arena.intern(sym, Vec::new()));
-                }
-                Ok(self.arena.intern(sym, Vec::new()))
+                self.intern_application(sym, atom, Vec::new())
             }
             Sexp::List(items) => {
                 if items.is_empty() {
@@ -1038,11 +1385,13 @@ impl ParseCtx {
                     let cond = self.parse_bool_expr(&items[1], env)?;
                     let then_term = self.parse_typed_term(&items[2], env)?;
                     let else_term = self.parse_typed_term(&items[3], env)?;
+                    self.ensure_same_term_sort("ite branches", then_term, else_term)?;
                     if then_term == else_term {
                         return Ok(then_term);
                     }
 
-                    let ite_term = self.fresh_internal_term("ite");
+                    let ite_term =
+                        self.fresh_internal_term("ite", self.arena.terms[then_term].sort);
                     let then_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, then_term));
                     let else_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, else_term));
                     self.bool_assertions.push(BoolExpr::Or(vec![
@@ -1057,7 +1406,7 @@ impl ParseCtx {
                 for child in &items[1..] {
                     args.push(self.parse_argument_term(child, env)?);
                 }
-                Ok(self.arena.intern(fun, args))
+                self.intern_application(fun, head, args)
             }
         }
     }
@@ -1103,7 +1452,69 @@ impl ParseCtx {
     fn is_bool_symbol(&self, sym: SymId, arity: usize) -> bool {
         self.fun_decls
             .get(&sym)
-            .is_some_and(|decl| decl.result_is_bool && decl.arity == arity)
+            .is_some_and(|decl| decl.result_sort == BOOL_SORT && decl.arg_sorts.len() == arity)
+    }
+
+    fn application_result_sort(
+        &self,
+        fun: SymId,
+        name: &str,
+        args: &[TermId],
+    ) -> Result<SortId, String> {
+        let Some(decl) = self.fun_decls.get(&fun) else {
+            return Err(format!("undeclared function `{name}`"));
+        };
+        if args.len() != decl.arg_sorts.len() {
+            return Err(format!(
+                "arity mismatch in application `{name}`: expected {} arguments, found {}",
+                decl.arg_sorts.len(),
+                args.len()
+            ));
+        }
+        for (index, (&arg, &expected)) in args.iter().zip(&decl.arg_sorts).enumerate() {
+            let found = self.arena.terms[arg].sort;
+            if found != expected {
+                return Err(self.sort_mismatch(
+                    &format!("application `{name}` argument {}", index + 1),
+                    expected,
+                    found,
+                ));
+            }
+        }
+        Ok(decl.result_sort)
+    }
+
+    fn intern_application(
+        &mut self,
+        fun: SymId,
+        name: &str,
+        args: Vec<TermId>,
+    ) -> Result<TermId, String> {
+        let result_sort = self.application_result_sort(fun, name, &args)?;
+        Ok(self.arena.intern_typed(fun, args, result_sort))
+    }
+
+    fn ensure_same_term_sort(
+        &self,
+        context: &str,
+        left: TermId,
+        right: TermId,
+    ) -> Result<(), String> {
+        let expected = self.arena.terms[left].sort;
+        let found = self.arena.terms[right].sort;
+        if expected != found {
+            return Err(self.sort_mismatch(context, expected, found));
+        }
+        Ok(())
+    }
+
+    fn ensure_terms_same_sort(&self, context: &str, terms: &[TermId]) -> Result<(), String> {
+        if let Some((&first, rest)) = terms.split_first() {
+            for &term in rest {
+                self.ensure_same_term_sort(context, first, term)?;
+            }
+        }
+        Ok(())
     }
 
     fn parse_argument_term(
@@ -1117,9 +1528,21 @@ impl ParseCtx {
         }
     }
 
-    fn bool_app_expr(&mut self, fun: SymId, args: Vec<TermId>) -> BoolExpr {
-        let term = self.arena.intern(fun, args);
-        BoolExpr::Atom(BoolAtomKey::BoolTerm(term))
+    fn bool_app_expr(
+        &mut self,
+        fun: SymId,
+        name: &str,
+        args: Vec<TermId>,
+    ) -> Result<BoolExpr, String> {
+        let term = self.intern_application(fun, name, args)?;
+        if self.arena.terms[term].sort != BOOL_SORT {
+            return Err(self.sort_mismatch(
+                &format!("formula application `{name}`"),
+                BOOL_SORT,
+                self.arena.terms[term].sort,
+            ));
+        }
+        Ok(BoolExpr::Atom(BoolAtomKey::BoolTerm(term)))
     }
 
     fn materialize_bool_expr(&mut self, expr: BoolExpr) -> TermId {
@@ -1130,7 +1553,7 @@ impl ParseCtx {
             }
             BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => term,
             expr => {
-                let term = self.fresh_internal_term("bool_expr");
+                let term = self.fresh_internal_term("bool_expr", BOOL_SORT);
                 self.bool_assertions.push(BoolExpr::Iff(vec![
                     BoolExpr::Atom(BoolAtomKey::BoolTerm(term)),
                     expr,
@@ -1144,13 +1567,13 @@ impl ParseCtx {
         if let Some(terms) = self.bool_value_terms {
             return terms;
         }
-        let true_term = self.fresh_internal_term("true");
-        let false_term = self.fresh_internal_term("false");
+        let true_term = self.fresh_internal_term("true", BOOL_SORT);
+        let false_term = self.fresh_internal_term("false", BOOL_SORT);
         self.bool_value_terms = Some((true_term, false_term));
         (true_term, false_term)
     }
 
-    fn fresh_internal_term(&mut self, kind: &str) -> TermId {
+    fn fresh_internal_term(&mut self, kind: &str, sort: SortId) -> TermId {
         loop {
             let name = format!("@euf_viper_{kind}_{}", self.fresh_internal_counter);
             self.fresh_internal_counter += 1;
@@ -1158,7 +1581,14 @@ impl ParseCtx {
                 continue;
             }
             let sym = self.symbols.intern(&name);
-            return self.arena.intern(sym, Vec::new());
+            self.fun_decls.insert(
+                sym,
+                FunDecl {
+                    arg_sorts: Vec::new(),
+                    result_sort: sort,
+                },
+            );
+            return self.arena.intern_typed(sym, Vec::new(), sort);
         }
     }
 
@@ -1173,6 +1603,7 @@ impl ParseCtx {
             return Ok(());
         }
         let terms = self.parse_terms(args, env)?;
+        self.ensure_terms_same_sort("equality", &terms)?;
         if polarity {
             let first = terms[0];
             for &term in &terms[1..] {
@@ -1196,6 +1627,7 @@ impl ParseCtx {
             return Ok(());
         }
         let terms = self.parse_terms(args, env)?;
+        self.ensure_terms_same_sort("distinct", &terms)?;
         if polarity {
             for i in 0..terms.len() {
                 for j in (i + 1)..terms.len() {
@@ -1227,46 +1659,16 @@ impl ParseCtx {
         sexp: &Sexp,
         env: &mut HashMap<String, TermId>,
     ) -> Result<TermId, String> {
-        match sexp {
-            Sexp::Atom(atom) => {
-                if let Some(&id) = env.get(atom) {
-                    return Ok(id);
-                }
-                let sym = self.symbols.intern(atom);
-                Ok(self.arena.intern(sym, Vec::new()))
-            }
-            Sexp::List(items) => {
-                if items.is_empty() {
-                    return Err("empty term list".to_owned());
-                }
-                let Some(head) = atom_text(&items[0]) else {
-                    return Err("term head is not a symbol".to_owned());
-                };
-                if head == "!" {
-                    if items.len() < 2 {
-                        return Err("annotation without a payload".to_owned());
-                    }
-                    return self.parse_term(&items[1], env);
-                }
-                if head == "let" {
-                    if items.len() != 3 {
-                        return Err("let term with unexpected arity".to_owned());
-                    }
-                    if self.scoped_let_selected {
-                        let bindings = self.parse_let_bindings(&items[1], env)?;
-                        let mut scope = ScopedBindings::new(env, bindings);
-                        return self.parse_term(&items[2], scope.env());
-                    }
-                    let mut local = self.extend_let_env(&items[1], env)?;
-                    return self.parse_term(&items[2], &mut local);
-                }
-                let fun = self.symbols.intern(head);
-                let mut args = Vec::with_capacity(items.len().saturating_sub(1));
-                for child in &items[1..] {
-                    args.push(self.parse_term(child, env)?);
-                }
-                Ok(self.arena.intern(fun, args))
-            }
+        if matches!(sexp, Sexp::List(items) if items.is_empty()) {
+            return Err("empty term list".to_owned());
+        }
+        let mut mixed_env = env
+            .iter()
+            .map(|(name, &term)| (name.clone(), BindingValue::Term(term)))
+            .collect::<HashMap<_, _>>();
+        match self.parse_bool_or_term(sexp, &mut mixed_env)? {
+            BindingValue::Term(term) => Ok(term),
+            BindingValue::Bool(expr) => Ok(self.materialize_bool_expr(expr)),
         }
     }
 
@@ -5098,6 +5500,7 @@ fn solve_problem_with_eq_abstraction(
     direct_root_cnf: bool,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> SolveReport {
+    debug_assert!(problem.terms_are_well_sorted());
     let stats_base = SolveStats {
         terms: problem.arena.terms.len(),
         apps: problem.arena.app_count(),
@@ -6806,6 +7209,12 @@ mod tests {
         sexps.pop().unwrap()
     }
 
+    fn parse_test_declarations(ctx: &mut ParseCtx, input: &str) {
+        for sexp in parse_sexps(input).unwrap() {
+            ctx.parse_command(&sexp).unwrap();
+        }
+    }
+
     fn solve_text_with_eq_abstraction(
         input: &str,
         direct_root_cnf: bool,
@@ -6978,9 +7387,171 @@ mod tests {
     }
 
     #[test]
+    fn preserves_sort_identity_and_full_zero_arity_signatures() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun a () U)
+             (declare-const b V)
+             (declare-fun p () Bool)
+             (declare-fun f (U Bool) V)
+             (declare-fun is-v (V) Bool)",
+        );
+
+        let u = ctx.sorts.get(ctx.symbols.ids["U"]).unwrap();
+        let v = ctx.sorts.get(ctx.symbols.ids["V"]).unwrap();
+        assert_ne!(u, v);
+        assert_ne!(u, BOOL_SORT);
+        assert_ne!(v, BOOL_SORT);
+
+        let a_decl = &ctx.fun_decls[&ctx.symbols.ids["a"]];
+        assert!(a_decl.arg_sorts.is_empty());
+        assert_eq!(a_decl.result_sort, u);
+        let b_decl = &ctx.fun_decls[&ctx.symbols.ids["b"]];
+        assert!(b_decl.arg_sorts.is_empty());
+        assert_eq!(b_decl.result_sort, v);
+        let f_decl = &ctx.fun_decls[&ctx.symbols.ids["f"]];
+        assert_eq!(f_decl.arg_sorts, vec![u, BOOL_SORT]);
+        assert_eq!(f_decl.result_sort, v);
+
+        let mut env = HashMap::default();
+        let a = ctx
+            .parse_typed_term(&parse_one_sexp("a"), &mut env)
+            .unwrap();
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut env)
+            .unwrap();
+        let f_a_p = ctx
+            .parse_typed_term(&parse_one_sexp("(f a p)"), &mut env)
+            .unwrap();
+        ctx.parse_bool_expr(&parse_one_sexp("(is-v (f a p))"), &mut env)
+            .unwrap();
+
+        assert_eq!(ctx.arena.terms[a].sort, u);
+        assert_eq!(ctx.arena.terms[b].sort, v);
+        assert_eq!(ctx.arena.terms[f_a_p].sort, v);
+        assert!(
+            ctx.arena
+                .terms
+                .iter()
+                .all(|term| matches!(term.sort, BOOL_SORT) || term.sort == u || term.sort == v)
+        );
+        let problem = ctx.finish();
+        assert!(problem.terms_are_well_sorted());
+        assert_eq!(problem.sorts.names, vec!["Bool", "U", "V"]);
+        assert_eq!(
+            problem.fun_decls[&problem.arena.terms[a].fun].result_sort,
+            u
+        );
+    }
+
+    #[test]
+    fn rejects_cross_sort_equality_and_ite_branches() {
+        let equality = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-sort V 0)
+            (declare-fun a () U)
+            (declare-fun b () V)
+            (assert (= a b))
+            (check-sat)
+        ";
+        assert_eq!(
+            parse_problem_with_scoped_let_mode(equality, ScopedLetMode::Off).unwrap_err(),
+            "sort mismatch in equality: expected `U`, found `V`"
+        );
+
+        let ite = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-sort V 0)
+            (declare-fun p () Bool)
+            (declare-fun a () U)
+            (declare-fun b () V)
+            (assert (= a (ite p a b)))
+            (check-sat)
+        ";
+        assert_eq!(
+            parse_problem_with_scoped_let_mode(ite, ScopedLetMode::Off).unwrap_err(),
+            "sort mismatch in ite branches: expected `U`, found `V`"
+        );
+    }
+
+    #[test]
+    fn rejects_function_arity_and_argument_sort_mismatches() {
+        let declarations = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-sort V 0)
+            (declare-fun a () U)
+            (declare-fun b () V)
+            (declare-fun p () Bool)
+            (declare-fun f (U Bool) U)
+        ";
+        let cases = [
+            (
+                "(assert (= (f a) a))",
+                "arity mismatch in application `f`: expected 2 arguments, found 1",
+            ),
+            (
+                "(assert (= (f b p) a))",
+                "sort mismatch in application `f` argument 1: expected `U`, found `V`",
+            ),
+            (
+                "(assert (= (f a a) a))",
+                "sort mismatch in application `f` argument 2: expected `Bool`, found `U`",
+            ),
+        ];
+
+        for (assertion, expected) in cases {
+            let input = format!("{declarations}\n{assertion}\n(check-sat)");
+            assert_eq!(
+                parse_problem_with_scoped_let_mode(&input, ScopedLetMode::Off).unwrap_err(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn typed_bool_arguments_preserve_let_and_ite_semantics() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-sort V 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun a () U)
+            (declare-fun f (Bool U) V)
+            (declare-fun g (V) U)
+            (assert p)
+            (assert (not q))
+            (assert (= (g (f (ite p true false) a)) a))
+            (assert (distinct (g (f (let ((flag q)) flag) a)) a))
+            (check-sat)
+        ";
+
+        for mode in [ScopedLetMode::Off, ScopedLetMode::On] {
+            assert_eq!(
+                solve_text_with_scoped_let_mode(input, mode),
+                SolveResult::Sat
+            );
+        }
+    }
+
+    #[test]
     fn term_let_scopes_support_nested_shadowing() {
         for scoped_let_selected in [false, true] {
             let mut ctx = ParseCtx::new(scoped_let_selected);
+            parse_test_declarations(
+                &mut ctx,
+                "(declare-sort U 0)
+                 (declare-fun outer () U)
+                 (declare-fun middle () U)
+                 (declare-fun inner () U)
+                 (declare-fun pair (U U) U)",
+            );
             let mut env = HashMap::default();
             let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
             let middle = ctx.parse_term(&parse_one_sexp("middle"), &mut env).unwrap();
@@ -7000,6 +7571,12 @@ mod tests {
     fn term_let_rhs_values_use_the_pre_let_environment() {
         for scoped_let_selected in [false, true] {
             let mut ctx = ParseCtx::new(scoped_let_selected);
+            parse_test_declarations(
+                &mut ctx,
+                "(declare-sort U 0)
+                 (declare-fun outer () U)
+                 (declare-fun replacement () U)",
+            );
             let mut env = HashMap::default();
             let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
             ctx.parse_term(&parse_one_sexp("replacement"), &mut env)
@@ -7017,6 +7594,12 @@ mod tests {
     fn mixed_let_scopes_bind_boolean_and_term_values() {
         for scoped_let_selected in [false, true] {
             let mut ctx = ParseCtx::new(scoped_let_selected);
+            parse_test_declarations(
+                &mut ctx,
+                "(declare-sort U 0)
+                 (declare-fun a () U)
+                 (declare-fun b () U)",
+            );
             let mut env = HashMap::default();
             let expression = parse_one_sexp("(let ((x a) (p (= a b))) (and (= x a) p))");
 
@@ -7043,6 +7626,14 @@ mod tests {
     fn nested_let_errors_restore_term_and_mixed_environments() {
         for scoped_let_selected in [false, true] {
             let mut ctx = ParseCtx::new(scoped_let_selected);
+            parse_test_declarations(
+                &mut ctx,
+                "(declare-sort U 0)
+                 (declare-fun original () U)
+                 (declare-fun shadow () U)
+                 (declare-fun value () U)
+                 (declare-fun inner () U)",
+            );
             let mut term_env = HashMap::default();
             let original = ctx
                 .parse_term(&parse_one_sexp("original"), &mut term_env)
