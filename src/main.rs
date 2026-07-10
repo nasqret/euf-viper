@@ -4761,8 +4761,8 @@ fn equality_abstraction_assertions(
 
 fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
     match value {
-        None | Some("0") => Ok(false),
-        Some("1") => Ok(true),
+        None | Some("1") => Ok(true),
+        Some("0") => Ok(false),
         Some(_) => Err(format!("{name} must be 0 or 1")),
     }
 }
@@ -5883,8 +5883,8 @@ mod tests {
     }
 
     #[test]
-    fn direct_root_cnf_setting_is_strict_and_defaults_off() {
-        assert_eq!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, None), Ok(false));
+    fn direct_root_cnf_setting_is_strict_and_defaults_on() {
+        assert_eq!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, None), Ok(true));
         assert_eq!(
             parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some("0")),
             Ok(false)
