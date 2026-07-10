@@ -213,10 +213,18 @@ struct ParseCtx {
     bool_value_terms: Option<(TermId, TermId)>,
     fresh_internal_counter: usize,
     preprocess_branch_intersections: bool,
+    scoped_let_selected: bool,
     contradiction: bool,
 }
 
 impl ParseCtx {
+    fn new(scoped_let_selected: bool) -> Self {
+        Self {
+            scoped_let_selected,
+            ..Self::default()
+        }
+    }
+
     fn finish(self) -> Problem {
         let bool_problem = (!self.bool_assertions.is_empty() || !self.bool_unsupported.is_empty())
             .then(|| {
@@ -452,10 +460,13 @@ impl ParseCtx {
                     "let" => {
                         if items.len() != 3 {
                             self.add_unsupported("let formula with unexpected arity");
-                        } else {
+                        } else if self.scoped_let_selected {
                             let bindings = self.parse_let_bindings(&items[1], env)?;
                             let mut scope = ScopedBindings::new(env, bindings);
                             self.collect_formula(&items[2], polarity, scope.env())?;
+                        } else {
+                            let mut local = self.extend_let_env(&items[1], env)?;
+                            self.collect_formula(&items[2], polarity, &mut local)?;
                         }
                     }
                     "or" if polarity => {
@@ -661,9 +672,19 @@ impl ParseCtx {
                         Ok(true)
                     }
                     "let" if items.len() == 3 => {
-                        let bindings = self.parse_let_bindings(&items[1], env)?;
-                        let mut scope = ScopedBindings::new(env, bindings);
-                        self.collect_branch_literals_into(&items[2], polarity, scope.env(), lits)
+                        if self.scoped_let_selected {
+                            let bindings = self.parse_let_bindings(&items[1], env)?;
+                            let mut scope = ScopedBindings::new(env, bindings);
+                            self.collect_branch_literals_into(
+                                &items[2],
+                                polarity,
+                                scope.env(),
+                                lits,
+                            )
+                        } else {
+                            let mut local = self.extend_let_env(&items[1], env)?;
+                            self.collect_branch_literals_into(&items[2], polarity, &mut local, lits)
+                        }
                     }
                     _ => Ok(false),
                 }
@@ -778,10 +799,13 @@ impl ParseCtx {
                     "let" => {
                         if items.len() != 3 {
                             Err("let formula with unexpected arity".to_owned())
-                        } else {
+                        } else if self.scoped_let_selected {
                             let bindings = self.parse_mixed_let_bindings(&items[1], env)?;
                             let mut scope = ScopedBindings::new(env, bindings);
                             self.parse_bool_expr(&items[2], scope.env())
+                        } else {
+                            let mut local = self.extend_mixed_let_env(&items[1], env)?;
+                            self.parse_bool_expr(&items[2], &mut local)
                         }
                     }
                     _ => {
@@ -999,9 +1023,13 @@ impl ParseCtx {
                     if items.len() != 3 {
                         return Err("let term with unexpected arity".to_owned());
                     }
-                    let bindings = self.parse_mixed_let_bindings(&items[1], env)?;
-                    let mut scope = ScopedBindings::new(env, bindings);
-                    return self.parse_typed_term(&items[2], scope.env());
+                    if self.scoped_let_selected {
+                        let bindings = self.parse_mixed_let_bindings(&items[1], env)?;
+                        let mut scope = ScopedBindings::new(env, bindings);
+                        return self.parse_typed_term(&items[2], scope.env());
+                    }
+                    let mut local = self.extend_mixed_let_env(&items[1], env)?;
+                    return self.parse_typed_term(&items[2], &mut local);
                 }
                 if head == "ite" {
                     if items.len() != 4 {
@@ -1057,6 +1085,19 @@ impl ParseCtx {
             parsed.push((name.to_owned(), value));
         }
         Ok(parsed)
+    }
+
+    fn extend_mixed_let_env(
+        &mut self,
+        bindings: &Sexp,
+        env: &mut HashMap<String, BindingValue>,
+    ) -> Result<HashMap<String, BindingValue>, String> {
+        let parsed = self.parse_mixed_let_bindings(bindings, env)?;
+        let mut local = env.clone();
+        for (name, value) in parsed {
+            local.insert(name, value);
+        }
+        Ok(local)
     }
 
     fn is_bool_symbol(&self, sym: SymId, arity: usize) -> bool {
@@ -1211,9 +1252,13 @@ impl ParseCtx {
                     if items.len() != 3 {
                         return Err("let term with unexpected arity".to_owned());
                     }
-                    let bindings = self.parse_let_bindings(&items[1], env)?;
-                    let mut scope = ScopedBindings::new(env, bindings);
-                    return self.parse_term(&items[2], scope.env());
+                    if self.scoped_let_selected {
+                        let bindings = self.parse_let_bindings(&items[1], env)?;
+                        let mut scope = ScopedBindings::new(env, bindings);
+                        return self.parse_term(&items[2], scope.env());
+                    }
+                    let mut local = self.extend_let_env(&items[1], env)?;
+                    return self.parse_term(&items[2], &mut local);
                 }
                 let fun = self.symbols.intern(head);
                 let mut args = Vec::with_capacity(items.len().saturating_sub(1));
@@ -1248,6 +1293,19 @@ impl ParseCtx {
             parsed.push((name.to_owned(), value));
         }
         Ok(parsed)
+    }
+
+    fn extend_let_env(
+        &mut self,
+        bindings: &Sexp,
+        env: &mut HashMap<String, TermId>,
+    ) -> Result<HashMap<String, TermId>, String> {
+        let parsed = self.parse_let_bindings(bindings, env)?;
+        let mut local = env.clone();
+        for (name, value) in parsed {
+            local.insert(name, value);
+        }
+        Ok(local)
     }
 }
 
@@ -4677,12 +4735,78 @@ struct SolveReport {
 }
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
+const SCOPED_LET_ENV: &str = "EUF_VIPER_SCOPED_LET";
 const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
 const EQ_ABSTRACTION_FRESH_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_FRESH";
 const EQ_ABSTRACTION_MAX_FACTS_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_MAX_FACTS";
 const EQ_ABSTRACTION_MAX_FRESH_FACTS_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_MAX_FRESH_FACTS";
 const DEFAULT_EQ_ABSTRACTION_MAX_FACTS: usize = 4_096;
 const DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS: usize = 256;
+const SCOPED_LET_AUTO_THRESHOLD: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopedLetMode {
+    Off,
+    Auto,
+    On,
+}
+
+impl ScopedLetMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Auto => "auto",
+            Self::On => "on",
+        }
+    }
+}
+
+fn parse_scoped_let_mode(value: Option<&str>) -> Result<ScopedLetMode, String> {
+    match value {
+        None | Some("auto") => Ok(ScopedLetMode::Auto),
+        Some("off") => Ok(ScopedLetMode::Off),
+        Some("on") => Ok(ScopedLetMode::On),
+        Some(_) => Err(format!("{SCOPED_LET_ENV} must be off, auto, or on")),
+    }
+}
+
+fn selected_scoped_let_mode() -> Result<ScopedLetMode, String> {
+    match env::var(SCOPED_LET_ENV) {
+        Ok(value) => parse_scoped_let_mode(Some(&value)),
+        Err(env::VarError::NotPresent) => parse_scoped_let_mode(None),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(format!("{SCOPED_LET_ENV} must be off, auto, or on"))
+        }
+    }
+}
+
+fn bounded_lexical_let_count(input: &str) -> usize {
+    input
+        .as_bytes()
+        .windows(b"(let".len())
+        .filter(|window| *window == b"(let")
+        .take(SCOPED_LET_AUTO_THRESHOLD)
+        .count()
+}
+
+fn scoped_let_selected(mode: ScopedLetMode, bounded_let_count: usize) -> bool {
+    match mode {
+        ScopedLetMode::Off => false,
+        ScopedLetMode::Auto => bounded_let_count >= SCOPED_LET_AUTO_THRESHOLD,
+        ScopedLetMode::On => true,
+    }
+}
+
+fn profile_scoped_let(mode: ScopedLetMode, bounded_let_count: usize, selected: bool) {
+    if env::var_os("EUF_VIPER_PROFILE").is_some() {
+        eprintln!(
+            "profile_scoped_let_mode={} bounded_let_count={} selected={}",
+            mode.as_str(),
+            bounded_let_count,
+            usize::from(selected),
+        );
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EqAbstractionMode {
@@ -5520,8 +5644,19 @@ fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
 }
 
 fn parse_problem(input: &str) -> Result<Problem, String> {
+    parse_problem_with_scoped_let_mode(input, selected_scoped_let_mode()?)
+}
+
+fn parse_problem_with_scoped_let_mode(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<Problem, String> {
+    let bounded_let_count = bounded_lexical_let_count(input);
+    let scoped_let_selected = scoped_let_selected(scoped_let_mode, bounded_let_count);
+    profile_scoped_let(scoped_let_mode, bounded_let_count, scoped_let_selected);
+
     let sexps = parse_sexps(input)?;
-    let mut ctx = ParseCtx::default();
+    let mut ctx = ParseCtx::new(scoped_let_selected);
     ctx.preprocess_branch_intersections = sexps
         .iter()
         .filter(|sexp| {
@@ -6103,6 +6238,48 @@ mod tests {
     }
 
     #[test]
+    fn scoped_let_mode_is_strict_and_defaults_auto() {
+        assert_eq!(parse_scoped_let_mode(None), Ok(ScopedLetMode::Auto));
+        assert_eq!(parse_scoped_let_mode(Some("off")), Ok(ScopedLetMode::Off));
+        assert_eq!(parse_scoped_let_mode(Some("auto")), Ok(ScopedLetMode::Auto));
+        assert_eq!(parse_scoped_let_mode(Some("on")), Ok(ScopedLetMode::On));
+
+        // Invalid values are clear configuration errors, matching strict local settings.
+        assert_eq!(
+            parse_scoped_let_mode(Some("true")),
+            Err(format!("{SCOPED_LET_ENV} must be off, auto, or on"))
+        );
+        assert!(parse_scoped_let_mode(Some(" on")).is_err());
+    }
+
+    #[test]
+    fn scoped_let_auto_selection_has_an_exact_bounded_threshold() {
+        let below = "(let ".repeat(SCOPED_LET_AUTO_THRESHOLD - 1);
+        let at = "(let ".repeat(SCOPED_LET_AUTO_THRESHOLD);
+        let above = "(let ".repeat(SCOPED_LET_AUTO_THRESHOLD + 1);
+
+        assert_eq!(
+            bounded_lexical_let_count(&below),
+            SCOPED_LET_AUTO_THRESHOLD - 1
+        );
+        assert_eq!(bounded_lexical_let_count(&at), SCOPED_LET_AUTO_THRESHOLD);
+        assert_eq!(bounded_lexical_let_count(&above), SCOPED_LET_AUTO_THRESHOLD);
+        assert!(!scoped_let_selected(
+            ScopedLetMode::Auto,
+            bounded_lexical_let_count(&below)
+        ));
+        assert!(scoped_let_selected(
+            ScopedLetMode::Auto,
+            bounded_lexical_let_count(&at)
+        ));
+        assert!(!scoped_let_selected(
+            ScopedLetMode::Off,
+            SCOPED_LET_AUTO_THRESHOLD
+        ));
+        assert!(scoped_let_selected(ScopedLetMode::On, 0));
+    }
+
+    #[test]
     fn equality_abstraction_mode_defaults_off_and_is_conservative_on_unknown_values() {
         assert_eq!(parse_eq_abstraction_mode(None), EqAbstractionMode::Off);
         assert_eq!(
@@ -6617,6 +6794,14 @@ mod tests {
         solve_problem(parse_problem(input).unwrap(), false).result
     }
 
+    fn solve_text_with_scoped_let_mode(input: &str, mode: ScopedLetMode) -> SolveResult {
+        solve_problem(
+            parse_problem_with_scoped_let_mode(input, mode).unwrap(),
+            false,
+        )
+        .result
+    }
+
     fn parse_one_sexp(input: &str) -> Sexp {
         let mut sexps = parse_sexps(input).unwrap();
         assert_eq!(sexps.len(), 1);
@@ -6767,108 +6952,144 @@ mod tests {
     }
 
     #[test]
+    fn clone_and_scoped_let_paths_preserve_sat_and_unsat_semantics() {
+        let sat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (assert (let ((x a)) (= x a)))
+            (check-sat)
+        ";
+        let unsat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (let ((x (f a)) (y (f b))) (and (= a b) (distinct x y))))
+            (check-sat)
+        ";
+
+        for mode in [ScopedLetMode::Off, ScopedLetMode::On] {
+            assert_eq!(solve_text_with_scoped_let_mode(sat, mode), SolveResult::Sat);
+            assert_eq!(
+                solve_text_with_scoped_let_mode(unsat, mode),
+                SolveResult::Unsat
+            );
+        }
+    }
+
+    #[test]
     fn term_let_scopes_support_nested_shadowing() {
-        let mut ctx = ParseCtx::default();
-        let mut env = HashMap::default();
-        let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
-        let middle = ctx.parse_term(&parse_one_sexp("middle"), &mut env).unwrap();
-        let inner = ctx.parse_term(&parse_one_sexp("inner"), &mut env).unwrap();
-        env.insert("x".to_owned(), outer);
+        for scoped_let_selected in [false, true] {
+            let mut ctx = ParseCtx::new(scoped_let_selected);
+            let mut env = HashMap::default();
+            let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
+            let middle = ctx.parse_term(&parse_one_sexp("middle"), &mut env).unwrap();
+            let inner = ctx.parse_term(&parse_one_sexp("inner"), &mut env).unwrap();
+            env.insert("x".to_owned(), outer);
 
-        let expression = parse_one_sexp("(let ((x middle)) (pair (let ((x inner)) x) x))");
-        let result = ctx.parse_term(&expression, &mut env).unwrap();
+            let expression = parse_one_sexp("(let ((x middle)) (pair (let ((x inner)) x) x))");
+            let result = ctx.parse_term(&expression, &mut env).unwrap();
 
-        assert_eq!(ctx.arena.terms[result].args, vec![inner, middle]);
-        assert_eq!(env.get("x"), Some(&outer));
-        assert_eq!(env.len(), 1);
+            assert_eq!(ctx.arena.terms[result].args, vec![inner, middle]);
+            assert_eq!(env.get("x"), Some(&outer));
+            assert_eq!(env.len(), 1);
+        }
     }
 
     #[test]
     fn term_let_rhs_values_use_the_pre_let_environment() {
-        let mut ctx = ParseCtx::default();
-        let mut env = HashMap::default();
-        let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
-        ctx.parse_term(&parse_one_sexp("replacement"), &mut env)
-            .unwrap();
-        env.insert("x".to_owned(), outer);
+        for scoped_let_selected in [false, true] {
+            let mut ctx = ParseCtx::new(scoped_let_selected);
+            let mut env = HashMap::default();
+            let outer = ctx.parse_term(&parse_one_sexp("outer"), &mut env).unwrap();
+            ctx.parse_term(&parse_one_sexp("replacement"), &mut env)
+                .unwrap();
+            env.insert("x".to_owned(), outer);
 
-        let expression = parse_one_sexp("(let ((x replacement) (y x)) y)");
-        assert_eq!(ctx.parse_term(&expression, &mut env).unwrap(), outer);
-        assert_eq!(env.get("x"), Some(&outer));
-        assert!(!env.contains_key("y"));
+            let expression = parse_one_sexp("(let ((x replacement) (y x)) y)");
+            assert_eq!(ctx.parse_term(&expression, &mut env).unwrap(), outer);
+            assert_eq!(env.get("x"), Some(&outer));
+            assert!(!env.contains_key("y"));
+        }
     }
 
     #[test]
     fn mixed_let_scopes_bind_boolean_and_term_values() {
-        let mut ctx = ParseCtx::default();
-        let mut env = HashMap::default();
-        let expression = parse_one_sexp("(let ((x a) (p (= a b))) (and (= x a) p))");
+        for scoped_let_selected in [false, true] {
+            let mut ctx = ParseCtx::new(scoped_let_selected);
+            let mut env = HashMap::default();
+            let expression = parse_one_sexp("(let ((x a) (p (= a b))) (and (= x a) p))");
 
-        let result = ctx.parse_bool_expr(&expression, &mut env).unwrap();
-        let a = ctx
-            .parse_typed_term(&parse_one_sexp("a"), &mut env)
-            .unwrap();
-        let b = ctx
-            .parse_typed_term(&parse_one_sexp("b"), &mut env)
-            .unwrap();
+            let result = ctx.parse_bool_expr(&expression, &mut env).unwrap();
+            let a = ctx
+                .parse_typed_term(&parse_one_sexp("a"), &mut env)
+                .unwrap();
+            let b = ctx
+                .parse_typed_term(&parse_one_sexp("b"), &mut env)
+                .unwrap();
 
-        assert_eq!(
-            result,
-            BoolExpr::And(vec![
-                BoolExpr::Atom(BoolAtomKey::Eq(a, a)),
-                BoolExpr::Atom(BoolAtomKey::Eq(a, b)),
-            ])
-        );
-        assert!(env.is_empty());
+            assert_eq!(
+                result,
+                BoolExpr::And(vec![
+                    BoolExpr::Atom(BoolAtomKey::Eq(a, a)),
+                    BoolExpr::Atom(BoolAtomKey::Eq(a, b)),
+                ])
+            );
+            assert!(env.is_empty());
+        }
     }
 
     #[test]
     fn nested_let_errors_restore_term_and_mixed_environments() {
-        let mut ctx = ParseCtx::default();
-        let mut term_env = HashMap::default();
-        let original = ctx
-            .parse_term(&parse_one_sexp("original"), &mut term_env)
-            .unwrap();
-        term_env.insert("x".to_owned(), original);
+        for scoped_let_selected in [false, true] {
+            let mut ctx = ParseCtx::new(scoped_let_selected);
+            let mut term_env = HashMap::default();
+            let original = ctx
+                .parse_term(&parse_one_sexp("original"), &mut term_env)
+                .unwrap();
+            term_env.insert("x".to_owned(), original);
 
-        let term_expression = parse_one_sexp(
-            "(let ((x shadow) (outer_new value))
-               (let ((x inner) (inner_new value)) ()))",
-        );
-        assert_eq!(
-            ctx.parse_term(&term_expression, &mut term_env),
-            Err("empty term list".to_owned())
-        );
-        assert_eq!(term_env.get("x"), Some(&original));
-        assert!(!term_env.contains_key("outer_new"));
-        assert!(!term_env.contains_key("inner_new"));
-        assert_eq!(term_env.len(), 1);
+            let term_expression = parse_one_sexp(
+                "(let ((x shadow) (outer_new value))
+                   (let ((x inner) (inner_new value)) ()))",
+            );
+            assert_eq!(
+                ctx.parse_term(&term_expression, &mut term_env),
+                Err("empty term list".to_owned())
+            );
+            assert_eq!(term_env.get("x"), Some(&original));
+            assert!(!term_env.contains_key("outer_new"));
+            assert!(!term_env.contains_key("inner_new"));
+            assert_eq!(term_env.len(), 1);
 
-        let mut mixed_env = HashMap::default();
-        mixed_env.insert("x".to_owned(), BindingValue::Term(original));
-        mixed_env.insert(
-            "keep".to_owned(),
-            BindingValue::Bool(BoolExpr::Const(false)),
-        );
-        let mixed_expression = parse_one_sexp(
-            "(let ((x shadow) (keep true) (outer_new true))
-               (let ((x inner) (inner_new false)) (not)))",
-        );
-        assert_eq!(
-            ctx.parse_bool_expr(&mixed_expression, &mut mixed_env),
-            Err("not with arity other than 1".to_owned())
-        );
-        assert!(matches!(
-            mixed_env.get("x"),
-            Some(BindingValue::Term(term)) if *term == original
-        ));
-        assert!(matches!(
-            mixed_env.get("keep"),
-            Some(BindingValue::Bool(BoolExpr::Const(false)))
-        ));
-        assert!(!mixed_env.contains_key("outer_new"));
-        assert!(!mixed_env.contains_key("inner_new"));
-        assert_eq!(mixed_env.len(), 2);
+            let mut mixed_env = HashMap::default();
+            mixed_env.insert("x".to_owned(), BindingValue::Term(original));
+            mixed_env.insert(
+                "keep".to_owned(),
+                BindingValue::Bool(BoolExpr::Const(false)),
+            );
+            let mixed_expression = parse_one_sexp(
+                "(let ((x shadow) (keep true) (outer_new true))
+                   (let ((x inner) (inner_new false)) (not)))",
+            );
+            assert_eq!(
+                ctx.parse_bool_expr(&mixed_expression, &mut mixed_env),
+                Err("not with arity other than 1".to_owned())
+            );
+            assert!(matches!(
+                mixed_env.get("x"),
+                Some(BindingValue::Term(term)) if *term == original
+            ));
+            assert!(matches!(
+                mixed_env.get("keep"),
+                Some(BindingValue::Bool(BoolExpr::Const(false)))
+            ));
+            assert!(!mixed_env.contains_key("outer_new"));
+            assert!(!mixed_env.contains_key("inner_new"));
+            assert_eq!(mixed_env.len(), 2);
+        }
     }
 
     #[test]
