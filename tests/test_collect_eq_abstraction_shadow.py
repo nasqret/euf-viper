@@ -43,6 +43,11 @@ if mode == "failure":
     print("synthetic solver failure", file=sys.stderr)
     raise SystemExit(payload.get("exit_code", 7))
 
+print(payload.get("result", "sat"))
+if not payload.get("applicable", True):
+    print(f"elapsed_ns={payload.get('elapsed_ns', 100)}", file=sys.stderr)
+    raise SystemExit(0)
+
 values = {
     "star_edges": payload.get("star_edges", 0),
     "nodes": payload.get("nodes", 10),
@@ -52,7 +57,6 @@ values = {
     "classes": payload.get("classes", 3),
     "partition_terms": payload.get("partition_terms", 5),
 }
-print(payload.get("result", "sat"))
 print(
     f"profile_eq_abstraction_ns={payload.get('eq_ns', 5)} "
     f"count={values['star_edges']}",
@@ -109,8 +113,9 @@ def success_record(
     elapsed_ns: int = 100,
     wall_ns: int = 120,
     infeasible: bool = False,
+    applicable: bool = True,
 ) -> dict:
-    return {
+    record = {
         "schema_version": 1,
         "id": manifest_line,
         "manifest_line": manifest_line,
@@ -120,6 +125,7 @@ def success_record(
         "status": "ok",
         "solver_result": "sat",
         "exit_code": 0,
+        "applicable": applicable,
         "wall_time_ns": wall_ns,
         "eq_abstraction_ns": eq_ns,
         "solver_elapsed_ns": elapsed_ns,
@@ -133,6 +139,16 @@ def success_record(
         "cap_reason": cap_reason,
         "infeasible": infeasible,
     }
+    if not applicable:
+        record.update({field: 0 for field in COLLECTOR.AGGREGATE_FIELDS})
+        record.update(
+            {
+                "eq_abstraction_ns": 0,
+                "cap_reason": "none",
+                "infeasible": False,
+            }
+        )
+    return record
 
 
 def timeout_record(relative_path: str, *, manifest_line: int = 1) -> dict:
@@ -158,6 +174,7 @@ class ProfileParserTests(unittest.TestCase):
         self.assertEqual(
             parsed,
             {
+                "applicable": True,
                 "eq_abstraction_ns": 17,
                 "solver_elapsed_ns": 101,
                 "star_edges": 2,
@@ -172,6 +189,21 @@ class ProfileParserTests(unittest.TestCase):
             },
         )
 
+    def test_absent_profile_is_a_non_applicable_no_op(self) -> None:
+        parsed = COLLECTOR.parse_profile(
+            "profile_parse_ns=11 count=3\nelapsed_ns=37\n"
+        )
+
+        self.assertEqual(parsed["applicable"], False)
+        self.assertEqual(parsed["solver_elapsed_ns"], 37)
+        self.assertEqual(parsed["eq_abstraction_ns"], 0)
+        self.assertEqual(
+            {field: parsed[field] for field in COLLECTOR.AGGREGATE_FIELDS},
+            {field: 0 for field in COLLECTOR.AGGREGATE_FIELDS},
+        )
+        self.assertEqual(parsed["cap_reason"], "none")
+        self.assertEqual(parsed["infeasible"], False)
+
     def test_rejects_missing_duplicate_and_malformed_profile_records(self) -> None:
         valid = valid_profile()
         malformed = [
@@ -184,6 +216,7 @@ class ProfileParserTests(unittest.TestCase):
             valid.replace("mode=shadow", "mode=facts"),
             valid.replace("cap_reason=none", "cap_reason=unexpected"),
             valid.replace("elapsed_ns=101", "elapsed_ns=bad"),
+            "profile_parse_ns=11 count=3",
         ]
 
         for profile in malformed:
@@ -214,10 +247,20 @@ class ManifestAndTelemetryValidationTests(unittest.TestCase):
     def test_rejects_malformed_telemetry_records(self) -> None:
         missing_metric = success_record("a.smt2")
         del missing_metric["memo_hits"]
+        missing_applicable = success_record("missing-applicable.smt2")
+        del missing_applicable["applicable"]
+        invalid_no_op = success_record("invalid-no-op.smt2", applicable=False)
+        invalid_no_op["nodes"] = 1
         bad_timeout = timeout_record("b.smt2")
         bad_timeout["status"] = "failure"
 
-        for record in [missing_metric, bad_timeout, ["not", "an", "object"]]:
+        for record in [
+            missing_metric,
+            missing_applicable,
+            invalid_no_op,
+            bad_timeout,
+            ["not", "an", "object"],
+        ]:
             with self.subTest(record=record):
                 with self.assertRaises(COLLECTOR.TelemetryError):
                     COLLECTOR.validate_telemetry_record(record, "test")
@@ -245,6 +288,10 @@ class CollectorCliTests(unittest.TestCase):
                     "infeasible": True,
                 },
                 "a/ok.smt2": {"eq_ns": 5, "elapsed_ns": 100},
+                "aa/non-applicable.smt2": {
+                    "applicable": False,
+                    "elapsed_ns": 50,
+                },
                 "b/timeout.smt2": {"mode": "timeout"},
                 "c/failure.smt2": {"mode": "failure", "exit_code": 7},
                 "d/malformed.smt2": {"mode": "malformed"},
@@ -292,7 +339,7 @@ class CollectorCliTests(unittest.TestCase):
             )
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertIn("successful=2 failed=3 timeouts=1", completed.stdout)
+            self.assertIn("successful=3 failed=3 timeouts=1", completed.stdout)
             records = [
                 json.loads(line)
                 for line in output.read_text(encoding="utf-8").splitlines()
@@ -313,14 +360,26 @@ class CollectorCliTests(unittest.TestCase):
                     "d/malformed.smt2": "malformed_profile",
                 },
             )
+            no_op = next(
+                record
+                for record in records
+                if record["relative_path"] == "aa/non-applicable.smt2"
+            )
+            self.assertEqual(no_op["status"], "ok")
+            self.assertEqual(no_op["applicable"], False)
+            self.assertEqual(no_op["eq_abstraction_ns"], 0)
+            self.assertEqual(no_op["cap_reason"], "none")
+            self.assertEqual(no_op["infeasible"], False)
 
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 summary["counts"],
                 {
-                    "manifest_instances": 5,
-                    "successful_instances": 2,
+                    "manifest_instances": 6,
+                    "successful_instances": 3,
                     "failed_instances": 3,
+                    "applicable_instances": 2,
+                    "non_applicable_instances": 1,
                     "timeout_instances": 1,
                     "star_edge_hit_instances": 1,
                     "capped_instances": 1,
@@ -337,13 +396,13 @@ class CollectorCliTests(unittest.TestCase):
                 summary["aggregate_overhead"]["eq_abstraction_ns"], 20
             )
             self.assertEqual(
-                summary["aggregate_overhead"]["solver_elapsed_ns"], 400
+                summary["aggregate_overhead"]["solver_elapsed_ns"], 450
             )
-            self.assertEqual(
+            self.assertAlmostEqual(
                 summary["aggregate_overhead"][
                     "eq_abstraction_fraction_of_solver_elapsed"
                 ],
-                0.05,
+                20 / 450,
             )
 
 

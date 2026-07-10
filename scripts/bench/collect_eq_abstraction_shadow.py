@@ -146,13 +146,16 @@ def read_manifest(path: Path) -> list[dict]:
 
 
 def parse_profile(stderr: str) -> dict:
-    """Parse one complete c958c9e equality-abstraction profile record."""
+    """Parse one complete c958c9e profile or a fast-path no-op record."""
     measurements: dict[str, tuple[int, int]] = {}
     mode_record: tuple[str, str, bool] | None = None
     solver_elapsed_ns: int | None = None
+    saw_eq_abstraction_profile = False
 
     for line_number, raw_line in enumerate(stderr.splitlines(), start=1):
         line = raw_line.strip()
+        if line.startswith("profile_eq_abstraction"):
+            saw_eq_abstraction_profile = True
         if line.startswith("profile_eq_abstraction_mode"):
             match = MODE_RE.fullmatch(line)
             if match is None:
@@ -203,6 +206,19 @@ def parse_profile(stderr: str) -> dict:
                 raise ProfileOutputError("duplicate solver elapsed_ns record on stderr")
             solver_elapsed_ns = int(match.group(1))
 
+    if solver_elapsed_ns is None:
+        raise ProfileOutputError("missing solver elapsed_ns record; run solve with --stats")
+    if not saw_eq_abstraction_profile:
+        parsed = {
+            "applicable": False,
+            "eq_abstraction_ns": 0,
+            "solver_elapsed_ns": solver_elapsed_ns,
+        }
+        parsed.update({field: 0 for field in AGGREGATE_FIELDS})
+        parsed["cap_reason"] = "none"
+        parsed["infeasible"] = False
+        return parsed
+
     missing = [label for label in PROFILE_LABELS if label not in measurements]
     if missing:
         raise ProfileOutputError(
@@ -217,11 +233,10 @@ def parse_profile(stderr: str) -> dict:
         )
     if cap_reason not in CAP_REASONS:
         raise ProfileOutputError(f"unknown equality-abstraction cap reason {cap_reason!r}")
-    if solver_elapsed_ns is None:
-        raise ProfileOutputError("missing solver elapsed_ns record; run solve with --stats")
 
     primary_elapsed, _ = measurements["eq_abstraction"]
     parsed = {
+        "applicable": True,
         "eq_abstraction_ns": primary_elapsed,
         "solver_elapsed_ns": solver_elapsed_ns,
     }
@@ -495,6 +510,9 @@ def validate_telemetry_record(record: object, context: str) -> dict:
             raise TelemetryError(f"{context}: invalid solver_result")
         if record.get("exit_code") != 0:
             raise TelemetryError(f"{context}: successful row must have exit_code 0")
+        applicable = record.get("applicable")
+        if not isinstance(applicable, bool):
+            raise TelemetryError(f"{context}: applicable must be a boolean")
         _require_nonnegative_int(record, "eq_abstraction_ns", context)
         _require_nonnegative_int(record, "solver_elapsed_ns", context)
         for field in AGGREGATE_FIELDS:
@@ -504,6 +522,25 @@ def validate_telemetry_record(record: object, context: str) -> dict:
             raise TelemetryError(f"{context}: invalid cap_reason {cap_reason!r}")
         if not isinstance(record.get("infeasible"), bool):
             raise TelemetryError(f"{context}: infeasible must be a boolean")
+        if not applicable:
+            nonzero_fields = [
+                field
+                for field in ("eq_abstraction_ns", *AGGREGATE_FIELDS)
+                if record[field] != 0
+            ]
+            if nonzero_fields:
+                raise TelemetryError(
+                    f"{context}: non-applicable row has nonzero metrics: "
+                    + ", ".join(nonzero_fields)
+                )
+            if cap_reason != "none":
+                raise TelemetryError(
+                    f"{context}: non-applicable row must have cap_reason 'none'"
+                )
+            if record["infeasible"]:
+                raise TelemetryError(
+                    f"{context}: non-applicable row cannot be infeasible"
+                )
     else:
         kind = record.get("failure_kind")
         if not isinstance(kind, str) or not kind:
@@ -591,6 +628,8 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
 
     successful = [record for record in ordered if record["status"] == "ok"]
     failed = [record for record in ordered if record["status"] != "ok"]
+    applicable = [record for record in successful if record["applicable"]]
+    non_applicable = [record for record in successful if not record["applicable"]]
     hits = [record for record in successful if record["star_edges"] > 0]
     capped = [record for record in successful if record["cap_reason"] != "none"]
     infeasible = [record for record in successful if record["infeasible"]]
@@ -619,6 +658,8 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
             "manifest_instances": len(ordered),
             "successful_instances": len(successful),
             "failed_instances": len(failed),
+            "applicable_instances": len(applicable),
+            "non_applicable_instances": len(non_applicable),
             "timeout_instances": failure_counts.get("timeout", 0),
             "star_edge_hit_instances": len(hits),
             "capped_instances": len(capped),
