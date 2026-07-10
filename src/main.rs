@@ -18,6 +18,7 @@ use serde::Serialize;
 #[cfg(feature = "certificates")]
 use sha2::{Digest, Sha256};
 use std::cmp::Reverse;
+use std::collections::hash_map::Entry;
 use std::collections::{BinaryHeap, VecDeque};
 use std::env;
 use std::fs;
@@ -311,6 +312,8 @@ struct ParseCtx {
     contradiction: bool,
     #[cfg(test)]
     assertion_sort_validations: usize,
+    #[cfg(test)]
+    application_signature_checks: usize,
 }
 
 impl ParseCtx {
@@ -1484,43 +1487,68 @@ impl ParseCtx {
             .is_some_and(|decl| decl.result_sort == BOOL_SORT && decl.arg_sorts.len() == arity)
     }
 
-    fn application_result_sort(
-        &self,
-        fun: SymId,
-        name: &str,
-        args: &[TermId],
-    ) -> Result<SortId, String> {
-        let Some(decl) = self.fun_decls.get(fun) else {
-            return Err(format!("undeclared function `{name}`"));
-        };
-        if args.len() != decl.arg_sorts.len() {
-            return Err(format!(
-                "arity mismatch in application `{name}`: expected {} arguments, found {}",
-                decl.arg_sorts.len(),
-                args.len()
-            ));
-        }
-        for (index, (&arg, &expected)) in args.iter().zip(&decl.arg_sorts).enumerate() {
-            let found = self.arena.terms[arg].sort;
-            if found != expected {
-                return Err(self.sort_mismatch(
-                    &format!("application `{name}` argument {}", index + 1),
-                    expected,
-                    found,
-                ));
-            }
-        }
-        Ok(decl.result_sort)
-    }
-
     fn intern_application(
         &mut self,
         fun: SymId,
         name: &str,
         args: Vec<TermId>,
     ) -> Result<TermId, String> {
-        let result_sort = self.application_result_sort(fun, name, &args)?;
-        Ok(self.arena.intern_typed(fun, args, result_sort))
+        let sorts = &self.sorts;
+        let fun_decls = &self.fun_decls;
+        #[cfg(test)]
+        let application_signature_checks = &mut self.application_signature_checks;
+        let TermArena {
+            terms,
+            interned,
+            apps,
+        } = &mut self.arena;
+
+        match interned.entry(TermKey { fun, args }) {
+            Entry::Occupied(entry) => Ok(*entry.get()),
+            Entry::Vacant(entry) => {
+                #[cfg(test)]
+                {
+                    *application_signature_checks += 1;
+                }
+
+                let args = &entry.key().args;
+                let Some(decl) = fun_decls.get(fun) else {
+                    return Err(format!("undeclared function `{name}`"));
+                };
+                if args.len() != decl.arg_sorts.len() {
+                    return Err(format!(
+                        "arity mismatch in application `{name}`: expected {} arguments, found {}",
+                        decl.arg_sorts.len(),
+                        args.len()
+                    ));
+                }
+                for (index, (&arg, &expected)) in args.iter().zip(&decl.arg_sorts).enumerate() {
+                    let found = terms[arg].sort;
+                    if found != expected {
+                        return Err(format!(
+                            "sort mismatch in application `{name}` argument {}: expected `{}`, found `{}`",
+                            index + 1,
+                            sorts.name(expected),
+                            sorts.name(found)
+                        ));
+                    }
+                }
+
+                let id = terms.len();
+                let term_fun = entry.key().fun;
+                let term_args = entry.key().args.clone();
+                if !term_args.is_empty() {
+                    apps.push(id);
+                }
+                terms.push(Term {
+                    fun: term_fun,
+                    args: term_args,
+                    sort: decl.result_sort,
+                });
+                entry.insert(id);
+                Ok(id)
+            }
+        }
     }
 
     fn ensure_same_term_sort(
@@ -7781,7 +7809,7 @@ mod tests {
         assert_eq!(ctx.fun_decls.get(g).unwrap().arg_sorts, vec![BOOL_SORT]);
         assert_eq!(ctx.fun_decls.slots.len(), g as usize + 1);
         assert_eq!(
-            ctx.application_result_sort(interior_gap, "interior-gap", &[]),
+            ctx.intern_application(interior_gap, "interior-gap", Vec::new()),
             Err("undeclared function `interior-gap`".to_owned())
         );
 
@@ -7790,6 +7818,110 @@ mod tests {
         assert!(problem.fun_decls.get(interior_gap).is_none());
         assert_eq!(problem.fun_decls.get(f).unwrap().result_sort, BOOL_SORT);
         assert_eq!(problem.fun_decls.get(g).unwrap().result_sort, BOOL_SORT);
+    }
+
+    #[test]
+    fn repeated_application_hits_skip_signature_revalidation() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let a = ctx
+            .parse_typed_term(&parse_one_sexp("a"), &mut HashMap::default())
+            .unwrap();
+        ctx.application_signature_checks = 0;
+
+        let first = ctx.intern_application(f, "f", vec![a]).unwrap();
+        let term_count = ctx.arena.terms.len();
+        let app_count = ctx.arena.apps.len();
+        let interned_count = ctx.arena.interned.len();
+        assert_eq!(ctx.application_signature_checks, 1);
+
+        let repeated = ctx.intern_application(f, "f", vec![a]).unwrap();
+        assert_eq!(repeated, first);
+        assert_eq!(ctx.application_signature_checks, 1);
+        assert_eq!(ctx.arena.terms.len(), term_count);
+        assert_eq!(ctx.arena.apps.len(), app_count);
+        assert_eq!(ctx.arena.interned.len(), interned_count);
+        assert_eq!(
+            ctx.arena.interned.get(&TermKey {
+                fun: f,
+                args: vec![a],
+            }),
+            Some(&first)
+        );
+    }
+
+    #[test]
+    fn first_seen_application_errors_preserve_diagnostics() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun b () V)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut HashMap::default())
+            .unwrap();
+        ctx.application_signature_checks = 0;
+
+        assert_eq!(
+            ctx.intern_application(f, "f", Vec::new()).unwrap_err(),
+            "arity mismatch in application `f`: expected 1 arguments, found 0"
+        );
+        assert_eq!(
+            ctx.intern_application(f, "f", vec![b]).unwrap_err(),
+            "sort mismatch in application `f` argument 1: expected `U`, found `V`"
+        );
+        assert_eq!(ctx.application_signature_checks, 2);
+    }
+
+    #[test]
+    fn first_seen_application_errors_do_not_mutate_the_arena() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun b () V)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut HashMap::default())
+            .unwrap();
+        let terms_before = ctx
+            .arena
+            .terms
+            .iter()
+            .map(|term| (term.fun, term.args.clone(), term.sort))
+            .collect::<Vec<_>>();
+        let apps_before = ctx.arena.apps.clone();
+        let interned_before = ctx.arena.interned.clone();
+
+        ctx.intern_application(f, "f", Vec::new()).unwrap_err();
+        ctx.intern_application(f, "f", vec![b]).unwrap_err();
+
+        assert_eq!(
+            ctx.arena
+                .terms
+                .iter()
+                .map(|term| (term.fun, term.args.clone(), term.sort))
+                .collect::<Vec<_>>(),
+            terms_before
+        );
+        assert_eq!(ctx.arena.apps, apps_before);
+        assert_eq!(ctx.arena.interned, interned_before);
     }
 
     #[test]
