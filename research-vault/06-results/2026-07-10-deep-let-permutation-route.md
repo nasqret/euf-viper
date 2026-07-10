@@ -59,6 +59,22 @@ Four cases favored baseline, all narrowly. The largest candidate regression
 was `NEQ027_size8.smt2`, from 0.4251 to 0.4345 seconds. The aggregate gain is
 not driven by timeout substitution.
 
+## Two-Second Boundary
+
+Five-repeat job `143438` used the same binary, environment, manifest, and sole
+mode difference at the main corpus timeout:
+
+| Instances | Coverage | All-total | Common-total | Geometric | Candidate-only |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 17 | 9 -> 12 | 1.2357x | 1.1934x | 1.1670x | 3 |
+
+The candidate-only cases were `NEQ027_size10.smt2`,
+`NEQ027_size11.smt2`, and `NEQ031_size10.smt2`. Every candidate repeat solved
+and every baseline repeat timed out on all three. There were no baseline-only
+cases, wrong answers, or execution errors. Thus the route is expected to add
+three solves at the headline timeout, but this remains a selected-population
+result until the automatic implementation passes the complete corpus.
+
 ## Interpretation
 
 The route combines two previously separate observations:
@@ -93,6 +109,12 @@ to gate exhaustively.
   `72be29e448d8e2de09dea04c902fc7fff731e90c2a10f27119f3cd10e580fdea`.
 - Summary SHA-256:
   `9722e94da69d4961c7b9d7e85403b41fa2f5990b89dd5cf9ecaae5864778d881`.
+- Two-second raw rows:
+  `results/wmi/deep-let-focused-2s-143438/wmi-ab-corpus-143438.csv`.
+- Two-second raw CSV SHA-256:
+  `be4905472199574928ceb582c2933f07bdf122959c4ac19b1bed86affab05284`.
+- Two-second summary SHA-256:
+  `e9ba6d58f6c743c88d3345ba4ec9575d2ac81bac2a53478ea069c97534b8fe51`.
 
 ## Decision
 

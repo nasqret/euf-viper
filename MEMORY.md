@@ -178,6 +178,11 @@
   `NEQ027_size11` fell from 56.39s to 1.16s median. Do not enable focused mode
   globally; implement the conjunction on accepted source, then rerun sample,
   hot, and complete-corpus gates.
+- The same route's five-repeat two-second gate `143438` improved deep-let
+  coverage 9 to 12 and passed all speed metrics at 1.2357x all-total, 1.1934x
+  common-total, and 1.1670x geometric. It added three stable solves with no
+  loss. This is the strongest next production candidate, but it is not a
+  full-corpus result.
 
 ## Local Canary Results
 

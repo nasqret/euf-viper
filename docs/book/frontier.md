@@ -67,6 +67,11 @@ common-total, and geometric speed by `1.6475x`, `1.6475x`, and `1.8109x`.
 automatic-route implementation, not global activation or promotion; sample,
 hot, and full gates remain mandatory.
 
+At the two-second boundary, five-repeat job `143438` improved this population's
+coverage from 9 to 12 and passed all/common/geometric speed at
+`1.2357x`/`1.1934x`/`1.1670x`. The three gains were stable in every repeat and
+there was no baseline-only case. This is still selected-population evidence.
+
 ## Current Comparator
 
 **[M]** Campaign `142480` used revision

@@ -107,9 +107,10 @@ front tier of a coverage-oriented portfolio.
   router because independent all-time gain is only `1.00010x` before overhead.
 - [ ] Implement and promote the deep-let focused-permutation conjunction.
   Same-binary selected-population gate `143412` passed at 17/17 coverage with
-  1.6475x all/common-total and 1.8109x geometric speed. Restore accepted source,
-  implement the exact automatic route, then require repeat, sample, hot-400,
-  and complete-corpus gates before promotion.
+  1.6475x all/common-total and 1.8109x geometric speed. Two-second boundary
+  `143438` added three stable solves and passed all speed metrics. Restore
+  accepted source, implement the exact automatic route, then require repeat,
+  sample, hot-400, and complete-corpus gates before promotion.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
@@ -175,6 +176,8 @@ target-family win is evidence for routing, not evidence for promotion.
   17/17 coverage and improved all/common/geometric speed by
   1.6475x/1.6475x/1.8109x. Implement the conjunction on accepted source; do not
   infer a global win until automatic-route sample, hot, and full gates pass.
+  Five-repeat two-second gate `143438` separately improved coverage `9 -> 12`
+  and all/common/geometric speed by 1.2357x/1.1934x/1.1670x with no loss.
 
 - **Finite permutation support, focused:** passed repeated boundary gate
   `142578`, finite gate `142581`, hot-400 `142597`, and cross-architecture gate

@@ -422,6 +422,11 @@
   1.8109x, 13 candidate wins, four baseline wins, zero wrong answers or
   errors. `NEQ027_size11` improved from 56.39s to 1.16s median. Proceed to an
   automatic deep-let route only after restoring the accepted source lineage.
+- Five-repeat two-second boundary `143438` then improved coverage `9 -> 12`,
+  all-total `1.2357x`, common-total `1.1934x`, and geometric speed `1.1670x`.
+  `NEQ027_size10`, `NEQ027_size11`, and `NEQ031_size10` were candidate-only in
+  all five repeats; there were no baseline-only cases, wrong answers, or
+  errors.
 
 ## Next Entry Template
 
