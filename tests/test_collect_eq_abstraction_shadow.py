@@ -36,17 +36,9 @@ if os.environ.get("EUF_VIPER_PROFILE") != "1":
 
 payload = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
 mode = payload.get("mode", "ok")
-if mode == "timeout":
-    time.sleep(payload.get("sleep", 2.0))
-    raise SystemExit(0)
 if mode == "failure":
     print("synthetic solver failure", file=sys.stderr)
     raise SystemExit(payload.get("exit_code", 7))
-
-print(payload.get("result", "sat"))
-if not payload.get("applicable", True):
-    print(f"elapsed_ns={payload.get('elapsed_ns', 100)}", file=sys.stderr)
-    raise SystemExit(0)
 
 values = {
     "star_edges": payload.get("star_edges", 0),
@@ -57,31 +49,59 @@ values = {
     "classes": payload.get("classes", 3),
     "partition_terms": payload.get("partition_terms", 5),
 }
-print(
-    f"profile_eq_abstraction_ns={payload.get('eq_ns', 5)} "
-    f"count={values['star_edges']}",
-    file=sys.stderr,
-)
-for label, field in [
-    ("nodes", "nodes"),
-    ("memo_entries", "memo_entries"),
-    ("memo_hits", "memo_hits"),
-    ("work", "work"),
-    ("classes", "classes"),
-    ("partition_terms", "partition_terms"),
-]:
-    if mode == "malformed" and label == "partition_terms":
-        continue
+
+
+def emit_profile(partial=False, malformed=False):
     print(
-        f"profile_eq_abstraction_{label}_ns=0 count={values[field]}",
+        f"profile_eq_abstraction_ns={payload.get('eq_ns', 5)} "
+        f"count={values['star_edges']}",
         file=sys.stderr,
+        flush=True,
     )
-print(
-    "profile_eq_abstraction_mode=shadow "
-    f"cap_reason={payload.get('cap_reason', 'none')} "
-    f"infeasible={int(payload.get('infeasible', False))}",
-    file=sys.stderr,
-)
+    if partial:
+        return
+    for label, field in [
+        ("nodes", "nodes"),
+        ("memo_entries", "memo_entries"),
+        ("memo_hits", "memo_hits"),
+        ("work", "work"),
+        ("classes", "classes"),
+        ("partition_terms", "partition_terms"),
+    ]:
+        if malformed and label == "partition_terms":
+            continue
+        print(
+            f"profile_eq_abstraction_{label}_ns=0 count={values[field]}",
+            file=sys.stderr,
+            flush=True,
+        )
+    print(
+        "profile_eq_abstraction_mode=shadow "
+        f"cap_reason={payload.get('cap_reason', 'none')} "
+        f"infeasible={int(payload.get('infeasible', False))}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+if mode == "timeout_non_applicable":
+    time.sleep(payload.get("sleep", 2.0))
+    raise SystemExit(0)
+if mode == "timeout_complete":
+    emit_profile()
+    time.sleep(payload.get("sleep", 2.0))
+    raise SystemExit(0)
+if mode == "timeout_partial":
+    emit_profile(partial=True)
+    time.sleep(payload.get("sleep", 2.0))
+    raise SystemExit(0)
+
+print(payload.get("result", "sat"))
+if not payload.get("applicable", True):
+    print(f"elapsed_ns={payload.get('elapsed_ns', 100)}", file=sys.stderr)
+    raise SystemExit(0)
+
+emit_profile(malformed=mode == "malformed")
 print(f"elapsed_ns={payload.get('elapsed_ns', 100)}", file=sys.stderr)
 """
 
@@ -125,6 +145,7 @@ def success_record(
         "status": "ok",
         "solver_result": "sat",
         "exit_code": 0,
+        "profile_available": True,
         "applicable": applicable,
         "wall_time_ns": wall_ns,
         "eq_abstraction_ns": eq_ns,
@@ -164,6 +185,8 @@ def timeout_record(relative_path: str, *, manifest_line: int = 1) -> dict:
         "message": "timed out",
         "exit_code": 124,
         "wall_time_ns": 200,
+        "profile_available": False,
+        "profile_error": "partial equality profile",
     }
 
 
@@ -188,6 +211,15 @@ class ProfileParserTests(unittest.TestCase):
                 "infeasible": False,
             },
         )
+
+    def test_equality_profile_does_not_require_solver_elapsed(self) -> None:
+        profile = valid_profile().replace("\nelapsed_ns=101", "")
+
+        parsed = COLLECTOR.parse_equality_profile(profile)
+
+        self.assertEqual(parsed["applicable"], True)
+        self.assertEqual(parsed["star_edges"], 2)
+        self.assertNotIn("solver_elapsed_ns", parsed)
 
     def test_absent_profile_is_a_non_applicable_no_op(self) -> None:
         parsed = COLLECTOR.parse_profile(
@@ -247,17 +279,23 @@ class ManifestAndTelemetryValidationTests(unittest.TestCase):
     def test_rejects_malformed_telemetry_records(self) -> None:
         missing_metric = success_record("a.smt2")
         del missing_metric["memo_hits"]
+        missing_profile_available = success_record("missing-profile-flag.smt2")
+        del missing_profile_available["profile_available"]
         missing_applicable = success_record("missing-applicable.smt2")
         del missing_applicable["applicable"]
         invalid_no_op = success_record("invalid-no-op.smt2", applicable=False)
         invalid_no_op["nodes"] = 1
+        conflicting_profile = success_record("conflicting-profile.smt2")
+        conflicting_profile["profile_error"] = "unexpected diagnostic"
         bad_timeout = timeout_record("b.smt2")
         bad_timeout["status"] = "failure"
 
         for record in [
             missing_metric,
+            missing_profile_available,
             missing_applicable,
             invalid_no_op,
+            conflicting_profile,
             bad_timeout,
             ["not", "an", "object"],
         ]:
@@ -292,7 +330,16 @@ class CollectorCliTests(unittest.TestCase):
                     "applicable": False,
                     "elapsed_ns": 50,
                 },
-                "b/timeout.smt2": {"mode": "timeout"},
+                "b/timeout-non-applicable.smt2": {
+                    "mode": "timeout_non_applicable"
+                },
+                "bb/timeout-hit.smt2": {
+                    "mode": "timeout_complete",
+                    "star_edges": 6,
+                    "cap_reason": "entries",
+                    "eq_ns": 25,
+                },
+                "bc/timeout-partial.smt2": {"mode": "timeout_partial"},
                 "c/failure.smt2": {"mode": "failure", "exit_code": 7},
                 "d/malformed.smt2": {"mode": "malformed"},
             }
@@ -339,7 +386,7 @@ class CollectorCliTests(unittest.TestCase):
             )
 
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertIn("successful=3 failed=3 timeouts=1", completed.stdout)
+            self.assertIn("successful=3 failed=5 timeouts=3", completed.stdout)
             records = [
                 json.loads(line)
                 for line in output.read_text(encoding="utf-8").splitlines()
@@ -355,7 +402,9 @@ class CollectorCliTests(unittest.TestCase):
             self.assertEqual(
                 failures,
                 {
-                    "b/timeout.smt2": "timeout",
+                    "b/timeout-non-applicable.smt2": "timeout",
+                    "bb/timeout-hit.smt2": "timeout",
+                    "bc/timeout-partial.smt2": "timeout",
                     "c/failure.smt2": "nonzero_exit",
                     "d/malformed.smt2": "malformed_profile",
                 },
@@ -371,27 +420,71 @@ class CollectorCliTests(unittest.TestCase):
             self.assertEqual(no_op["cap_reason"], "none")
             self.assertEqual(no_op["infeasible"], False)
 
+            records_by_path = {
+                record["relative_path"]: record for record in records
+            }
+            timeout_no_op = records_by_path["b/timeout-non-applicable.smt2"]
+            self.assertEqual(timeout_no_op["status"], "timeout")
+            self.assertEqual(timeout_no_op["profile_available"], True)
+            self.assertEqual(timeout_no_op["applicable"], False)
+            self.assertEqual(timeout_no_op["eq_abstraction_ns"], 0)
+            self.assertNotIn("solver_result", timeout_no_op)
+            self.assertNotIn("solver_elapsed_ns", timeout_no_op)
+
+            timeout_hit = records_by_path["bb/timeout-hit.smt2"]
+            self.assertEqual(timeout_hit["status"], "timeout")
+            self.assertEqual(timeout_hit["profile_available"], True)
+            self.assertEqual(timeout_hit["applicable"], True)
+            self.assertEqual(timeout_hit["star_edges"], 6)
+            self.assertEqual(timeout_hit["cap_reason"], "entries")
+            self.assertNotIn("solver_result", timeout_hit)
+            self.assertNotIn("solver_elapsed_ns", timeout_hit)
+
+            timeout_partial = records_by_path["bc/timeout-partial.smt2"]
+            self.assertEqual(timeout_partial["status"], "timeout")
+            self.assertEqual(timeout_partial["profile_available"], False)
+            self.assertIn("missing equality-abstraction", timeout_partial["profile_error"])
+            self.assertNotIn("star_edges", timeout_partial)
+
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertEqual(
                 summary["counts"],
                 {
-                    "manifest_instances": 6,
+                    "manifest_instances": 8,
                     "successful_instances": 3,
-                    "failed_instances": 3,
-                    "applicable_instances": 2,
-                    "non_applicable_instances": 1,
-                    "timeout_instances": 1,
-                    "star_edge_hit_instances": 1,
-                    "capped_instances": 1,
+                    "failed_instances": 5,
+                    "profiled_instances": 5,
+                    "unprofiled_instances": 3,
+                    "applicable_instances": 3,
+                    "non_applicable_instances": 2,
+                    "timeout_instances": 3,
+                    "star_edge_hit_instances": 2,
+                    "capped_instances": 2,
                     "infeasible_instances": 1,
                 },
             )
-            self.assertEqual(summary["star_edges"]["hit_paths"], ["z/hit.smt2"])
-            self.assertEqual(summary["caps"]["counts"], {"work": 1})
+            self.assertEqual(
+                summary["star_edges"]["hit_paths"],
+                ["bb/timeout-hit.smt2", "z/hit.smt2"],
+            )
+            timeout_summary_hit = next(
+                hit
+                for hit in summary["star_edges"]["hits"]
+                if hit["relative_path"] == "bb/timeout-hit.smt2"
+            )
+            self.assertEqual(timeout_summary_hit["status"], "timeout")
+            self.assertEqual(summary["star_edges"]["total"], 10)
+            self.assertEqual(summary["caps"]["counts"], {"entries": 1, "work": 1})
+            self.assertEqual(
+                summary["caps"]["paths_by_reason"]["entries"],
+                ["bb/timeout-hit.smt2"],
+            )
             self.assertEqual(
                 summary["failures"]["counts"],
-                {"malformed_profile": 1, "nonzero_exit": 1, "timeout": 1},
+                {"malformed_profile": 1, "nonzero_exit": 1, "timeout": 3},
             )
+            self.assertEqual(summary["metric_totals"]["eq_abstraction_ns"], 45)
+            self.assertEqual(summary["metric_totals"]["star_edges"], 10)
             self.assertEqual(
                 summary["aggregate_overhead"]["eq_abstraction_ns"], 20
             )

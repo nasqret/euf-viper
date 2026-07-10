@@ -48,6 +48,13 @@ AGGREGATE_FIELDS = (
     "classes",
     "partition_terms",
 )
+PROFILE_FIELDS = (
+    "applicable",
+    "eq_abstraction_ns",
+    *AGGREGATE_FIELDS,
+    "cap_reason",
+    "infeasible",
+)
 MEASUREMENT_RE = re.compile(
     r"^profile_([a-z][a-z0-9_]*)_ns=(0|[1-9][0-9]*) "
     r"count=(0|[1-9][0-9]*)$"
@@ -145,11 +152,10 @@ def read_manifest(path: Path) -> list[dict]:
     return entries
 
 
-def parse_profile(stderr: str) -> dict:
-    """Parse one complete c958c9e profile or a fast-path no-op record."""
+def parse_equality_profile(stderr: str) -> dict:
+    """Parse equality telemetry without requiring a completed solve."""
     measurements: dict[str, tuple[int, int]] = {}
     mode_record: tuple[str, str, bool] | None = None
-    solver_elapsed_ns: int | None = None
     saw_eq_abstraction_profile = False
 
     for line_number, raw_line in enumerate(stderr.splitlines(), start=1):
@@ -196,23 +202,10 @@ def parse_profile(stderr: str) -> dict:
             measurements[label] = (elapsed_ns, count)
             continue
 
-        if line.startswith("elapsed_ns="):
-            match = ELAPSED_RE.fullmatch(line)
-            if match is None:
-                raise ProfileOutputError(
-                    f"malformed solver elapsed_ns record on stderr line {line_number}"
-                )
-            if solver_elapsed_ns is not None:
-                raise ProfileOutputError("duplicate solver elapsed_ns record on stderr")
-            solver_elapsed_ns = int(match.group(1))
-
-    if solver_elapsed_ns is None:
-        raise ProfileOutputError("missing solver elapsed_ns record; run solve with --stats")
     if not saw_eq_abstraction_profile:
         parsed = {
             "applicable": False,
             "eq_abstraction_ns": 0,
-            "solver_elapsed_ns": solver_elapsed_ns,
         }
         parsed.update({field: 0 for field in AGGREGATE_FIELDS})
         parsed["cap_reason"] = "none"
@@ -238,13 +231,39 @@ def parse_profile(stderr: str) -> dict:
     parsed = {
         "applicable": True,
         "eq_abstraction_ns": primary_elapsed,
-        "solver_elapsed_ns": solver_elapsed_ns,
     }
     for label in PROFILE_LABELS:
         parsed[COUNT_FIELDS[label]] = measurements[label][1]
     parsed["cap_reason"] = cap_reason
     parsed["infeasible"] = infeasible
     return parsed
+
+
+def parse_solver_elapsed(stderr: str) -> int:
+    """Parse the final elapsed_ns record emitted by a completed --stats solve."""
+    solver_elapsed_ns: int | None = None
+    for line_number, raw_line in enumerate(stderr.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line.startswith("elapsed_ns="):
+            continue
+        match = ELAPSED_RE.fullmatch(line)
+        if match is None:
+            raise ProfileOutputError(
+                f"malformed solver elapsed_ns record on stderr line {line_number}"
+            )
+        if solver_elapsed_ns is not None:
+            raise ProfileOutputError("duplicate solver elapsed_ns record on stderr")
+        solver_elapsed_ns = int(match.group(1))
+    if solver_elapsed_ns is None:
+        raise ProfileOutputError("missing solver elapsed_ns record; run solve with --stats")
+    return solver_elapsed_ns
+
+
+def parse_profile(stderr: str) -> dict:
+    """Parse equality telemetry and elapsed time from a completed solve."""
+    profile = parse_equality_profile(stderr)
+    profile["solver_elapsed_ns"] = parse_solver_elapsed(stderr)
+    return profile
 
 
 def parse_solver_result(stdout: str) -> str:
@@ -308,6 +327,14 @@ def _excerpt(value: str | bytes | None, limit: int = 2_000) -> str:
     return value if len(value) <= limit else value[:limit] + "..."
 
 
+def _output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(encoding="utf-8", errors="replace")
+    return value
+
+
 def _failure_record(
     identity: dict,
     kind: str,
@@ -317,6 +344,8 @@ def _failure_record(
     exit_code: int | None = None,
     stdout: str | bytes | None = None,
     stderr: str | bytes | None = None,
+    profile: dict | None = None,
+    profile_error: str | None = None,
 ) -> dict:
     record = dict(identity)
     record.update(
@@ -325,8 +354,13 @@ def _failure_record(
             "failure_kind": kind,
             "message": message,
             "wall_time_ns": wall_time_ns,
+            "profile_available": profile is not None,
         }
     )
+    if profile is not None:
+        record.update(profile)
+    if profile_error is not None:
+        record["profile_error"] = profile_error
     if exit_code is not None:
         record["exit_code"] = exit_code
     stdout_excerpt = _excerpt(stdout)
@@ -381,6 +415,13 @@ def collect_instance(
         )
     except subprocess.TimeoutExpired as exc:
         wall_time_ns = time.perf_counter_ns() - started_ns
+        stderr = _output_text(exc.stderr)
+        profile = None
+        profile_error = None
+        try:
+            profile = parse_equality_profile(stderr)
+        except ProfileOutputError as profile_exc:
+            profile_error = str(profile_exc)
         return _failure_record(
             identity,
             "timeout",
@@ -388,7 +429,9 @@ def collect_instance(
             wall_time_ns=wall_time_ns,
             exit_code=124,
             stdout=exc.stdout,
-            stderr=exc.stderr,
+            stderr=stderr,
+            profile=profile,
+            profile_error=profile_error,
         )
     except OSError as exc:
         wall_time_ns = time.perf_counter_ns() - started_ns
@@ -423,6 +466,7 @@ def collect_instance(
             exit_code=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
+            profile_error=str(exc),
         )
 
     record = dict(identity)
@@ -432,6 +476,7 @@ def collect_instance(
             "solver_result": solver_result,
             "exit_code": completed.returncode,
             "wall_time_ns": wall_time_ns,
+            "profile_available": True,
         }
     )
     record.update(profile)
@@ -501,20 +546,24 @@ def validate_telemetry_record(record: object, context: str) -> dict:
         raise TelemetryError(f"{context}: resolved_path must be a non-empty string")
     _require_nonnegative_int(record, "manifest_line", context)
     _require_nonnegative_int(record, "wall_time_ns", context)
+    profile_available = record.get("profile_available")
+    if not isinstance(profile_available, bool):
+        raise TelemetryError(f"{context}: profile_available must be a boolean")
+    profile_error = record.get("profile_error")
+    if profile_error is not None and (
+        not isinstance(profile_error, str) or not profile_error
+    ):
+        raise TelemetryError(f"{context}: profile_error must be a non-empty string")
 
-    status = record.get("status")
-    if status not in {"ok", "timeout", "failure"}:
-        raise TelemetryError(f"{context}: invalid status {status!r}")
-    if status == "ok":
-        if record.get("solver_result") not in RESULTS:
-            raise TelemetryError(f"{context}: invalid solver_result")
-        if record.get("exit_code") != 0:
-            raise TelemetryError(f"{context}: successful row must have exit_code 0")
+    if profile_available:
+        if profile_error is not None:
+            raise TelemetryError(
+                f"{context}: profiled row cannot also have profile_error"
+            )
         applicable = record.get("applicable")
         if not isinstance(applicable, bool):
             raise TelemetryError(f"{context}: applicable must be a boolean")
         _require_nonnegative_int(record, "eq_abstraction_ns", context)
-        _require_nonnegative_int(record, "solver_elapsed_ns", context)
         for field in AGGREGATE_FIELDS:
             _require_nonnegative_int(record, field, context)
         cap_reason = record.get("cap_reason")
@@ -542,6 +591,25 @@ def validate_telemetry_record(record: object, context: str) -> dict:
                     f"{context}: non-applicable row cannot be infeasible"
                 )
     else:
+        unexpected = [field for field in PROFILE_FIELDS if field in record]
+        if unexpected:
+            raise TelemetryError(
+                f"{context}: unprofiled row has profile fields: "
+                + ", ".join(unexpected)
+            )
+
+    status = record.get("status")
+    if status not in {"ok", "timeout", "failure"}:
+        raise TelemetryError(f"{context}: invalid status {status!r}")
+    if status == "ok":
+        if not profile_available:
+            raise TelemetryError(f"{context}: successful row must have a profile")
+        if record.get("solver_result") not in RESULTS:
+            raise TelemetryError(f"{context}: invalid solver_result")
+        if record.get("exit_code") != 0:
+            raise TelemetryError(f"{context}: successful row must have exit_code 0")
+        _require_nonnegative_int(record, "solver_elapsed_ns", context)
+    else:
         kind = record.get("failure_kind")
         if not isinstance(kind, str) or not kind:
             raise TelemetryError(f"{context}: failure_kind must be a non-empty string")
@@ -549,6 +617,10 @@ def validate_telemetry_record(record: object, context: str) -> dict:
             raise TelemetryError(f"{context}: timeout row must have failure_kind timeout")
         if status == "failure" and kind == "timeout":
             raise TelemetryError(f"{context}: timeout failure must use status timeout")
+        if status == "timeout" and not profile_available and profile_error is None:
+            raise TelemetryError(
+                f"{context}: unprofiled timeout must include profile_error"
+            )
         if not isinstance(record.get("message"), str) or not record["message"]:
             raise TelemetryError(f"{context}: failure message must be a non-empty string")
     return record
@@ -628,11 +700,13 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
 
     successful = [record for record in ordered if record["status"] == "ok"]
     failed = [record for record in ordered if record["status"] != "ok"]
-    applicable = [record for record in successful if record["applicable"]]
-    non_applicable = [record for record in successful if not record["applicable"]]
-    hits = [record for record in successful if record["star_edges"] > 0]
-    capped = [record for record in successful if record["cap_reason"] != "none"]
-    infeasible = [record for record in successful if record["infeasible"]]
+    profiled = [record for record in ordered if record["profile_available"]]
+    unprofiled = [record for record in ordered if not record["profile_available"]]
+    applicable = [record for record in profiled if record["applicable"]]
+    non_applicable = [record for record in profiled if not record["applicable"]]
+    hits = [record for record in profiled if record["star_edges"] > 0]
+    capped = [record for record in profiled if record["cap_reason"] != "none"]
+    infeasible = [record for record in profiled if record["infeasible"]]
 
     cap_counts = Counter(record["cap_reason"] for record in capped)
     cap_paths: dict[str, list[str]] = defaultdict(list)
@@ -647,8 +721,13 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
     solver_elapsed_ns = sum(record["solver_elapsed_ns"] for record in successful)
     wall_time_ns = sum(record["wall_time_ns"] for record in successful)
     metric_totals = {
-        field: sum(record[field] for record in successful)
-        for field in AGGREGATE_FIELDS
+        "eq_abstraction_ns": sum(
+            record["eq_abstraction_ns"] for record in profiled
+        ),
+        **{
+            field: sum(record[field] for record in profiled)
+            for field in AGGREGATE_FIELDS
+        },
     }
 
     payload = {
@@ -658,6 +737,8 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
             "manifest_instances": len(ordered),
             "successful_instances": len(successful),
             "failed_instances": len(failed),
+            "profiled_instances": len(profiled),
+            "unprofiled_instances": len(unprofiled),
             "applicable_instances": len(applicable),
             "non_applicable_instances": len(non_applicable),
             "timeout_instances": failure_counts.get("timeout", 0),
@@ -677,6 +758,7 @@ def build_summary(records: Sequence[dict], source: dict) -> dict:
                     "relative_path": record["relative_path"],
                     "resolved_path": record["resolved_path"],
                     "star_edges": record["star_edges"],
+                    "status": record["status"],
                 }
                 for record in hits
             ],
