@@ -413,6 +413,15 @@
   `results/wmi/four-solver-60s-143248/`. Submitted the hash-pinned
   1,200-second timeout-only continuation as prep `143382`, array `143383`, and
   merge `143384`; it is running and no final result is claimed.
+- Reconsidered the rejected focused-permutation technique as a conjunction
+  with the promoted lexical-let selector. The exact selector population is 17
+  NEQ files with at least 512 `(let` forms. Historical two-second rows
+  projected 1.145x all-total and two added solves on that population.
+- Current exact-binary job `143412` confirmed the interaction at three repeats
+  and 60 seconds: coverage 17/17 -> 17/17, all/common-total 1.6475x, geometric
+  1.8109x, 13 candidate wins, four baseline wins, zero wrong answers or
+  errors. `NEQ027_size11` improved from 56.39s to 1.16s median. Proceed to an
+  automatic deep-let route only after restoring the accepted source lineage.
 
 ## Next Entry Template
 

@@ -171,6 +171,13 @@
   solved rows from `143248` and reruns 71 timeout observations. Prep verified
   source `58efe9d`, binary SHA-256 `4d543113...`, and 7,503 manifest rows. It
   is running; do not infer final coverage from the older competition campaign.
+- Focused permutation support is again an implementation candidate only under
+  the existing scoped-let structural selector. Same-binary WMI `143412` gated
+  all 17 files with at least 512 lexical lets: coverage stayed 17/17,
+  all/common-total improved 1.6475x, geometric speed improved 1.8109x, and
+  `NEQ027_size11` fell from 56.39s to 1.16s median. Do not enable focused mode
+  globally; implement the conjunction on accepted source, then rerun sample,
+  hot, and complete-corpus gates.
 
 ## Local Canary Results
 

@@ -105,6 +105,11 @@ front tier of a coverage-oriented portfolio.
 - [x] Evaluate PGO globally and through a source-SHA-folded structural route.
   Reject global PGO for coverage and aggregate regressions; reject an external
   router because independent all-time gain is only `1.00010x` before overhead.
+- [ ] Implement and promote the deep-let focused-permutation conjunction.
+  Same-binary selected-population gate `143412` passed at 17/17 coverage with
+  1.6475x all/common-total and 1.8109x geometric speed. Restore accepted source,
+  implement the exact automatic route, then require repeat, sample, hot-400,
+  and complete-corpus gates before promotion.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
@@ -155,6 +160,21 @@ gate, hot-path gate, hard-tail gate, and complete 7,503-instance gate. A
 target-family win is evidence for routing, not evidence for promotion.
 
 ### Live 2026-07-10 Candidates
+
+- **Base-CNF lazy-first EUF:** source audit shows current model-cuts refinement
+  still loads all equality-transitivity clauses and is reached only after the
+  eager first call. A default-off CaDiCaL mode will omit generic transitivity
+  and congruence initially, learn only validator-explained EUF cuts, and
+  abstain to the existing fallback on saturation. Forced Goel, control,
+  sample, hot, and full gates are specified in
+  `research-vault/02-design/2026-07-10-base-cnf-lazy-first.md`; implementation
+  waits for the current finite-route gate and rejected-parser revert.
+
+- **Deep-let focused permutation:** exact same-binary gate `143412` on all 17
+  files selected by the existing `>=512` lexical-let threshold preserved
+  17/17 coverage and improved all/common/geometric speed by
+  1.6475x/1.6475x/1.8109x. Implement the conjunction on accepted source; do not
+  infer a global win until automatic-route sample, hot, and full gates pass.
 
 - **Finite permutation support, focused:** passed repeated boundary gate
   `142578`, finite gate `142581`, hot-400 `142597`, and cross-architecture gate

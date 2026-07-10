@@ -59,6 +59,14 @@ only `1.00010x` on the control before routing overhead. It is not promoted.
 The detailed evidence is in
 `research-vault/06-results/2026-07-10-pgo-and-long-timeout.md`.
 
+**[M]** A separate same-binary gate re-tested focused permutation support only
+on the complete population selected by the promoted `>=512` lexical-let
+threshold. Job `143412` preserved 17/17 coverage and improved all-total,
+common-total, and geometric speed by `1.6475x`, `1.6475x`, and `1.8109x`.
+`NEQ027_size11.smt2` improved from 56.39s to 1.16s median. This justifies an
+automatic-route implementation, not global activation or promotion; sample,
+hot, and full gates remain mandatory.
+
 ## Current Comparator
 
 **[M]** Campaign `142480` used revision
