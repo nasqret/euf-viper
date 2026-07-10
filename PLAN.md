@@ -89,7 +89,8 @@ front tier of a coverage-oriented portfolio.
   Cross-architecture `143228` confirmed the production loss, and an entry-API
   reuse path failed isolated `143232`. Global-get `143239` improved aggregate
   speed but failed geometric speed and was reverted; unique-term post-parse
-  validation is next.
+  validation then failed aggregate speed in `143244`. Revert it before testing
+  dense sort-symbol indexing as an independent candidate.
 - [x] Implement and reject non-default equality `guarded-facts`. Sample
   `143160` passed narrowly, but current-baseline selected-population gate
   `143161` stayed 29/29 and regressed all three speed metrics. Scoped-let had

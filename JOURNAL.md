@@ -384,6 +384,11 @@
   `143241` by `1.0337x`/`1.0167x`. Seven-repeat sample `143239` still failed
   geometric speed at `0.9955x` while aggregate metrics passed
   `1.0011x`/`1.0021x`; `6973ed4` reverted it.
+- Unique-term post-parse validation `5f67b6f` preserved strict diagnostics and
+  improved worst-10 profile `143246` by `1.0127x` parse and `1.0159x`
+  end-to-end. Seven-repeat sample `143244` stayed 37/37 and measured 1.0017x
+  geometric speed, but all-total/common-total regressed to
+  `0.9931x`/`0.9865x`; reject before broader gates.
 
 ## Next Entry Template
 

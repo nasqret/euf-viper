@@ -120,6 +120,21 @@ all-total/common-total to 1.0011x/1.0021x, but geometric speed failed at
 the operation count more substantially: validate argument sorts once over
 unique interned applications after parsing, not once per syntax occurrence.
 
+## Rejected Unique-Term Validation
+
+Commit `5f67b6f` moved argument-sort checking from every syntax occurrence to a
+single post-parse pass over unique interned applications. Immediate undeclared
+function and arity errors remained unchanged; malformed argument sorts were
+rejected before solving with their original diagnostics. All 98 all-feature
+release tests passed. Its WMI binary SHA-256 was
+`43e702ba413ad9f57d408a6575db26b4b3381111fd45423e45446b7140b81ba7`.
+
+Worst-10 profile `143246` improved parse by 1.0127x and end-to-end geometric
+speed by 1.0159x. Seven-repeat sample `143244` stayed 37/37 and improved
+geometric speed to 1.0017x, but heavy QG regressions pulled all-total and
+common-total down to 0.9931x and 0.9865x. The strict gate rejects the candidate;
+no production-baseline, hot-400, or full-corpus run is justified.
+
 ## Artifacts
 
 - Initial typed sample: `results/wmi/typed-sorts-sample40-142943/`.
@@ -142,6 +157,9 @@ unique interned applications after parsing, not once per syntax occurrence.
 - Rejected global-get fast path:
   `results/wmi/get-fast-profile-worst10-143241/` and
   `results/wmi/get-fast-sample40-143239/`.
+- Rejected unique-term validation:
+  `results/wmi/unique-sort-profile-worst10-143246/` and
+  `results/wmi/unique-sort-sample40-143244/`.
 
 ## Decision
 

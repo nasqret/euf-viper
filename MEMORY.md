@@ -146,6 +146,10 @@
   `143239` failed geometric speed at 0.9955x despite 1.0011x/1.0021x aggregate
   speed. `6973ed4` reverted it. Next validate sorts once per unique interned
   application rather than once per syntax occurrence.
+- Unique-term validation `5f67b6f` improved worst-10 parse/end-to-end profile
+  `143246` by 1.0127x/1.0159x and sample geometric speed by 1.0017x, but sample
+  `143244` regressed all-total/common-total to 0.9931x/0.9865x. Reject before
+  broader gates; dense SortTable indexing is the next independent hypothesis.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
   against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
   cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by
