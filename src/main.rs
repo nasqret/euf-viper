@@ -131,6 +131,10 @@ impl TermArena {
             debug_assert_eq!(self.terms[id].sort, sort);
             return id;
         }
+        self.insert_new_typed(key, sort)
+    }
+
+    fn insert_new_typed(&mut self, key: TermKey, sort: SortId) -> TermId {
         let id = self.terms.len();
         if !key.args.is_empty() {
             self.apps.push(id);
@@ -311,6 +315,8 @@ struct ParseCtx {
     contradiction: bool,
     #[cfg(test)]
     assertion_sort_validations: usize,
+    #[cfg(test)]
+    application_signature_checks: usize,
 }
 
 impl ParseCtx {
@@ -1519,8 +1525,16 @@ impl ParseCtx {
         name: &str,
         args: Vec<TermId>,
     ) -> Result<TermId, String> {
-        let result_sort = self.application_result_sort(fun, name, &args)?;
-        Ok(self.arena.intern_typed(fun, args, result_sort))
+        let key = TermKey { fun, args };
+        if let Some(&term) = self.arena.interned.get(&key) {
+            return Ok(term);
+        }
+        #[cfg(test)]
+        {
+            self.application_signature_checks += 1;
+        }
+        let result_sort = self.application_result_sort(fun, name, &key.args)?;
+        Ok(self.arena.insert_new_typed(key, result_sort))
     }
 
     fn ensure_same_term_sort(
@@ -7790,6 +7804,68 @@ mod tests {
         assert!(problem.fun_decls.get(interior_gap).is_none());
         assert_eq!(problem.fun_decls.get(f).unwrap().result_sort, BOOL_SORT);
         assert_eq!(problem.fun_decls.get(g).unwrap().result_sort, BOOL_SORT);
+    }
+
+    #[test]
+    fn repeated_application_hits_skip_signature_revalidation_with_global_interner() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let a = ctx
+            .parse_typed_term(&parse_one_sexp("a"), &mut HashMap::default())
+            .unwrap();
+        ctx.application_signature_checks = 0;
+
+        let first = ctx.intern_application(f, "f", vec![a]).unwrap();
+        let term_count = ctx.arena.terms.len();
+        let app_count = ctx.arena.apps.len();
+        let interned_count = ctx.arena.interned.len();
+        assert_eq!(ctx.application_signature_checks, 1);
+
+        let repeated = ctx.intern_application(f, "f", vec![a]).unwrap();
+        assert_eq!(repeated, first);
+        assert_eq!(ctx.application_signature_checks, 1);
+        assert_eq!(ctx.arena.terms.len(), term_count);
+        assert_eq!(ctx.arena.apps.len(), app_count);
+        assert_eq!(ctx.arena.interned.len(), interned_count);
+    }
+
+    #[test]
+    fn global_interner_fast_path_does_not_insert_first_seen_sort_errors() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun b () V)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut HashMap::default())
+            .unwrap();
+        let term_count = ctx.arena.terms.len();
+        let app_count = ctx.arena.apps.len();
+        let interned_count = ctx.arena.interned.len();
+
+        assert_eq!(
+            ctx.intern_application(f, "f", Vec::new()).unwrap_err(),
+            "arity mismatch in application `f`: expected 1 arguments, found 0"
+        );
+        assert_eq!(
+            ctx.intern_application(f, "f", vec![b]).unwrap_err(),
+            "sort mismatch in application `f` argument 1: expected `U`, found `V`"
+        );
+        assert_eq!(ctx.arena.terms.len(), term_count);
+        assert_eq!(ctx.arena.apps.len(), app_count);
+        assert_eq!(ctx.arena.interned.len(), interned_count);
     }
 
     #[test]
