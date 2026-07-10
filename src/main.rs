@@ -1,3 +1,4 @@
+mod eq_abstraction;
 mod finite_analysis;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -4644,6 +4645,87 @@ struct SolveReport {
 }
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
+const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EqAbstractionMode {
+    Off,
+    Shadow,
+    Facts,
+}
+
+impl EqAbstractionMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Shadow => "shadow",
+            Self::Facts => "facts",
+        }
+    }
+}
+
+fn parse_eq_abstraction_mode(value: Option<&str>) -> EqAbstractionMode {
+    match value {
+        Some("shadow") => EqAbstractionMode::Shadow,
+        Some("facts") => EqAbstractionMode::Facts,
+        None | Some("off") | Some(_) => EqAbstractionMode::Off,
+    }
+}
+
+fn selected_eq_abstraction_mode() -> EqAbstractionMode {
+    let setting = env::var(EQ_ABSTRACTION_ENV).ok();
+    parse_eq_abstraction_mode(setting.as_deref())
+}
+
+fn equality_abstraction_assertions(
+    assertions: &[BoolExpr],
+    mode: EqAbstractionMode,
+) -> Vec<BoolExpr> {
+    if mode == EqAbstractionMode::Off {
+        return Vec::new();
+    }
+
+    let start = Instant::now();
+    let outcome = eq_abstraction::analyze(assertions);
+    profile_measurement(
+        "eq_abstraction",
+        start.elapsed().as_nanos(),
+        outcome.star_edges.len(),
+    );
+    profile_measurement("eq_abstraction_nodes", 0, outcome.metrics.nodes);
+    profile_measurement(
+        "eq_abstraction_memo_entries",
+        0,
+        outcome.metrics.memo_entries,
+    );
+    profile_measurement("eq_abstraction_memo_hits", 0, outcome.metrics.memo_hits);
+    profile_measurement("eq_abstraction_work", 0, outcome.metrics.work);
+    profile_measurement("eq_abstraction_classes", 0, outcome.metrics.classes);
+    profile_measurement(
+        "eq_abstraction_partition_terms",
+        0,
+        outcome.metrics.partition_terms,
+    );
+    if env::var_os("EUF_VIPER_PROFILE").is_some() {
+        eprintln!(
+            "profile_eq_abstraction_mode={} cap_reason={} infeasible={}",
+            mode.as_str(),
+            outcome
+                .cap_reason
+                .map_or("none", eq_abstraction::CapReason::as_str),
+            usize::from(outcome.infeasible),
+        );
+    }
+
+    if mode != EqAbstractionMode::Facts || outcome.cap_reason.is_some() {
+        return Vec::new();
+    }
+    outcome
+        .star_edges
+        .into_iter()
+        .map(|(left, right)| BoolExpr::Atom(BoolAtomKey::Eq(left, right)))
+        .collect()
+}
 
 fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
     match value {
@@ -4662,6 +4744,14 @@ fn direct_root_cnf_enabled() -> Result<bool, String> {
 }
 
 fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
+    solve_problem_with_eq_abstraction(problem, direct_root_cnf, selected_eq_abstraction_mode())
+}
+
+fn solve_problem_with_eq_abstraction(
+    problem: Problem,
+    direct_root_cnf: bool,
+    eq_abstraction_mode: EqAbstractionMode,
+) -> SolveReport {
     let stats_base = SolveStats {
         terms: problem.arena.terms.len(),
         apps: problem.arena.app_count(),
@@ -4687,7 +4777,12 @@ fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
         finite_analysis::profile_if_enabled(&problem.arena, bool_problem);
         if bool_problem.unsupported.is_empty() {
             if let Some((result, cnf_vars, cnf_clauses, search_nodes, sat_calls, theory_lemmas)) =
-                solve_bool_problem(&problem.arena, bool_problem, direct_root_cnf)
+                solve_bool_problem(
+                    &problem.arena,
+                    bool_problem,
+                    direct_root_cnf,
+                    eq_abstraction_mode,
+                )
             {
                 return SolveReport {
                     result,
@@ -4750,10 +4845,14 @@ fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
 fn solve_dynamic_full_ackermann(
     arena: &TermArena,
     bool_problem: &BoolProblem,
+    learned_assertions: &[BoolExpr],
 ) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
     for assertion in &bool_problem.assertions {
+        completed.add_direct_assertion(assertion);
+    }
+    for assertion in learned_assertions {
         completed.add_direct_assertion(assertion);
     }
     profile_phase(
@@ -4776,15 +4875,24 @@ fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     direct_root_cnf: bool,
+    eq_abstraction_mode: EqAbstractionMode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    let learned_assertions =
+        equality_abstraction_assertions(&bool_problem.assertions, eq_abstraction_mode);
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     if direct_root_cnf {
         for assertion in &bool_problem.assertions {
             cnf.add_direct_assertion(assertion);
         }
+        for assertion in &learned_assertions {
+            cnf.add_direct_assertion(assertion);
+        }
     } else {
         for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        for assertion in &learned_assertions {
             cnf.add_assertion(assertion);
         }
     }
@@ -4876,7 +4984,7 @@ fn solve_bool_problem(
                     ) {
                         profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
                         let (completed, completed_outcome) =
-                            solve_dynamic_full_ackermann(arena, bool_problem);
+                            solve_dynamic_full_ackermann(arena, bool_problem, &learned_assertions);
                         prior_sat_calls += 1;
                         match completed_outcome {
                             EagerSolveOutcome::Solved(result) => {
@@ -5760,6 +5868,27 @@ mod tests {
         assert!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some(" 1")).is_err());
     }
 
+    #[test]
+    fn equality_abstraction_mode_defaults_off_and_is_conservative_on_unknown_values() {
+        assert_eq!(parse_eq_abstraction_mode(None), EqAbstractionMode::Off);
+        assert_eq!(
+            parse_eq_abstraction_mode(Some("off")),
+            EqAbstractionMode::Off
+        );
+        assert_eq!(
+            parse_eq_abstraction_mode(Some("shadow")),
+            EqAbstractionMode::Shadow
+        );
+        assert_eq!(
+            parse_eq_abstraction_mode(Some("facts")),
+            EqAbstractionMode::Facts
+        );
+        assert_eq!(
+            parse_eq_abstraction_mode(Some("on")),
+            EqAbstractionMode::Off
+        );
+    }
+
     fn cnf_is_satisfiable(cnf: &CnfProblem) -> bool {
         let mut solver = VarisatSolver::new();
         for clause in &cnf.clauses {
@@ -6054,6 +6183,21 @@ mod tests {
 
     fn solve_text(input: &str) -> SolveResult {
         solve_problem(parse_problem(input).unwrap(), false).result
+    }
+
+    fn solve_text_with_eq_abstraction(
+        input: &str,
+        direct_root_cnf: bool,
+        mode: EqAbstractionMode,
+    ) -> SolveResult {
+        solve_problem_with_eq_abstraction(parse_problem(input).unwrap(), direct_root_cnf, mode)
+            .result
+    }
+
+    fn learned_equality_fact_count(input: &str, mode: EqAbstractionMode) -> usize {
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        equality_abstraction_assertions(&bool_problem.assertions, mode).len()
     }
 
     fn solve_text_varisat(input: &str) -> SolveResult {
@@ -7110,6 +7254,130 @@ mod tests {
     fn generated_diamond_and_pruned_or_are_unsat() {
         assert_eq!(solve_text(&gen_diamond(8, 4)), SolveResult::Unsat);
         assert_eq!(solve_text(&gen_pruned_or(8)), SolveResult::Unsat);
+    }
+
+    #[test]
+    fn equality_abstraction_facts_preserve_representative_sat_answers() {
+        let declarations = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun d () U)
+        ";
+        let cases = [
+            (
+                format!(
+                    "{declarations}
+                    (assert (or (and (= a b) (= b c))
+                                (and (= a d) (= d c))))
+                    (assert (distinct a c))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                1,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (= a b))
+                    (assert (= b c))
+                    (assert (distinct a c))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                2,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (= (= a b) true))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                1,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (not (= (= a b) false)))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                1,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (ite (= a b) true false))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                1,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (not (ite (= a b) false true)))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Unsat,
+                1,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (or (= a b) (= c d)))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Sat,
+                0,
+            ),
+            (
+                format!(
+                    "{declarations}
+                    (assert (= (= a b) false))
+                    (assert (distinct a b))
+                    (check-sat)"
+                ),
+                SolveResult::Sat,
+                0,
+            ),
+        ];
+
+        for (input, expected, expected_facts) in cases {
+            assert_eq!(
+                learned_equality_fact_count(&input, EqAbstractionMode::Shadow),
+                0
+            );
+            assert_eq!(
+                learned_equality_fact_count(&input, EqAbstractionMode::Facts),
+                expected_facts
+            );
+            for direct_root_cnf in [false, true] {
+                let off =
+                    solve_text_with_eq_abstraction(&input, direct_root_cnf, EqAbstractionMode::Off);
+                let shadow = solve_text_with_eq_abstraction(
+                    &input,
+                    direct_root_cnf,
+                    EqAbstractionMode::Shadow,
+                );
+                let facts = solve_text_with_eq_abstraction(
+                    &input,
+                    direct_root_cnf,
+                    EqAbstractionMode::Facts,
+                );
+                assert_eq!(off, expected);
+                assert_eq!(shadow, off);
+                assert_eq!(facts, off);
+            }
+        }
     }
 
     #[test]
