@@ -4678,6 +4678,11 @@ struct SolveReport {
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
 const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
+const EQ_ABSTRACTION_FRESH_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_FRESH";
+const EQ_ABSTRACTION_MAX_FACTS_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_MAX_FACTS";
+const EQ_ABSTRACTION_MAX_FRESH_FACTS_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_MAX_FRESH_FACTS";
+const DEFAULT_EQ_ABSTRACTION_MAX_FACTS: usize = 4_096;
+const DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EqAbstractionMode {
@@ -4709,10 +4714,193 @@ fn selected_eq_abstraction_mode() -> EqAbstractionMode {
     parse_eq_abstraction_mode(setting.as_deref())
 }
 
-fn equality_abstraction_assertions(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EqAbstractionFactConfig {
+    allow_fresh: bool,
+    max_facts: usize,
+    max_fresh_facts: usize,
+}
+
+impl Default for EqAbstractionFactConfig {
+    fn default() -> Self {
+        Self {
+            allow_fresh: false,
+            max_facts: DEFAULT_EQ_ABSTRACTION_MAX_FACTS,
+            max_fresh_facts: DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS,
+        }
+    }
+}
+
+fn parse_eq_abstraction_fresh(value: Option<&str>) -> bool {
+    value == Some("1")
+}
+
+fn parse_eq_abstraction_quota(value: Option<&str>, default: usize) -> usize {
+    let Some(value) = value else {
+        return default;
+    };
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return default;
+    }
+    value.parse().unwrap_or(default)
+}
+
+fn selected_eq_abstraction_fact_config() -> EqAbstractionFactConfig {
+    let fresh = env::var(EQ_ABSTRACTION_FRESH_ENV).ok();
+    let max_facts = env::var(EQ_ABSTRACTION_MAX_FACTS_ENV).ok();
+    let max_fresh_facts = env::var(EQ_ABSTRACTION_MAX_FRESH_FACTS_ENV).ok();
+    EqAbstractionFactConfig {
+        allow_fresh: parse_eq_abstraction_fresh(fresh.as_deref()),
+        max_facts: parse_eq_abstraction_quota(
+            max_facts.as_deref(),
+            DEFAULT_EQ_ABSTRACTION_MAX_FACTS,
+        ),
+        max_fresh_facts: parse_eq_abstraction_quota(
+            max_fresh_facts.as_deref(),
+            DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS,
+        ),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EqAbstractionIntegrationRollbackReason {
+    MaxFacts,
+    MaxFreshFacts,
+}
+
+impl EqAbstractionIntegrationRollbackReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MaxFacts => "max_facts",
+            Self::MaxFreshFacts => "max_fresh_facts",
+        }
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct EqAbstractionFactIntegration {
+    duplicate_units: usize,
+    accepted_existing_facts: usize,
+    accepted_fresh_facts: usize,
+    rollback_reason: Option<EqAbstractionIntegrationRollbackReason>,
+    rollback_count: usize,
+    accepted_edges: Vec<(TermId, TermId)>,
+}
+
+impl EqAbstractionFactIntegration {
+    fn profile(&self) {
+        profile_measurement("eq_abstraction_duplicate_units", 0, self.duplicate_units);
+        profile_measurement(
+            "eq_abstraction_accepted_existing_facts",
+            0,
+            self.accepted_existing_facts,
+        );
+        profile_measurement(
+            "eq_abstraction_accepted_fresh_facts",
+            0,
+            self.accepted_fresh_facts,
+        );
+        profile_measurement(
+            "eq_abstraction_integration_rollbacks",
+            0,
+            usize::from(self.rollback_reason.is_some()),
+        );
+        if env::var_os("EUF_VIPER_PROFILE").is_some() {
+            eprintln!(
+                "profile_eq_abstraction_integration_rollback_reason={} count={}",
+                self.rollback_reason
+                    .map_or("none", |reason| reason.as_str()),
+                self.rollback_count,
+            );
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ClassifiedEqualityFact {
+    Existing {
+        edge: (TermId, TermId),
+        literal: i32,
+    },
+    Fresh {
+        edge: (TermId, TermId),
+    },
+}
+
+fn integrate_equality_abstraction_facts(
+    cnf: &mut CnfProblem,
+    candidate_edges: &[(TermId, TermId)],
+    config: EqAbstractionFactConfig,
+) -> EqAbstractionFactIntegration {
+    let unit_literals = cnf
+        .clauses
+        .iter()
+        .filter_map(|clause| match clause.as_slice() {
+            [literal] => Some(*literal),
+            _ => None,
+        })
+        .collect::<HashSet<_>>();
+    let mut integration = EqAbstractionFactIntegration::default();
+    let mut selected = Vec::with_capacity(candidate_edges.len());
+    let mut fresh_count = 0usize;
+
+    for &(left, right) in candidate_edges {
+        let edge = normalized_pair(left, right);
+        let atom = BoolAtomKey::Eq(edge.0, edge.1);
+        if let Some(&literal) = cnf.atom_vars.get(&atom) {
+            if unit_literals.contains(&literal) {
+                integration.duplicate_units += 1;
+            } else {
+                selected.push(ClassifiedEqualityFact::Existing { edge, literal });
+            }
+        } else if config.allow_fresh {
+            selected.push(ClassifiedEqualityFact::Fresh { edge });
+            fresh_count += 1;
+        }
+    }
+
+    let rollback = if selected.len() > config.max_facts {
+        Some((
+            EqAbstractionIntegrationRollbackReason::MaxFacts,
+            selected.len(),
+        ))
+    } else if fresh_count > config.max_fresh_facts {
+        Some((
+            EqAbstractionIntegrationRollbackReason::MaxFreshFacts,
+            fresh_count,
+        ))
+    } else {
+        None
+    };
+    if let Some((reason, count)) = rollback {
+        integration.rollback_reason = Some(reason);
+        integration.rollback_count = count;
+        return integration;
+    }
+
+    integration.accepted_edges.reserve(selected.len());
+    for fact in selected {
+        match fact {
+            ClassifiedEqualityFact::Existing { edge, literal } => {
+                cnf.clauses.push(vec![literal]);
+                integration.accepted_existing_facts += 1;
+                integration.accepted_edges.push(edge);
+            }
+            ClassifiedEqualityFact::Fresh { edge } => {
+                let literal = cnf.atom_lit(BoolAtomKey::Eq(edge.0, edge.1));
+                cnf.clauses.push(vec![literal]);
+                integration.accepted_fresh_facts += 1;
+                integration.accepted_edges.push(edge);
+            }
+        }
+    }
+    integration
+}
+
+fn equality_abstraction_fact_candidates(
     assertions: &[BoolExpr],
     mode: EqAbstractionMode,
-) -> Vec<BoolExpr> {
+) -> Vec<(TermId, TermId)> {
     if mode == EqAbstractionMode::Off {
         return Vec::new();
     }
@@ -4738,6 +4926,14 @@ fn equality_abstraction_assertions(
         0,
         outcome.metrics.partition_terms,
     );
+    let mut seen_edges = HashSet::default();
+    let normalized_edges = outcome
+        .star_edges
+        .iter()
+        .map(|&(left, right)| normalized_pair(left, right))
+        .filter(|edge| seen_edges.insert(*edge))
+        .collect::<Vec<_>>();
+    profile_measurement("eq_abstraction_candidate_edges", 0, normalized_edges.len());
     if env::var_os("EUF_VIPER_PROFILE").is_some() {
         eprintln!(
             "profile_eq_abstraction_mode={} cap_reason={} infeasible={}",
@@ -4752,11 +4948,7 @@ fn equality_abstraction_assertions(
     if mode != EqAbstractionMode::Facts || outcome.cap_reason.is_some() {
         return Vec::new();
     }
-    outcome
-        .star_edges
-        .into_iter()
-        .map(|(left, right)| BoolExpr::Atom(BoolAtomKey::Eq(left, right)))
-        .collect()
+    normalized_edges
 }
 
 fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
@@ -4877,15 +5069,17 @@ fn solve_problem_with_eq_abstraction(
 fn solve_dynamic_full_ackermann(
     arena: &TermArena,
     bool_problem: &BoolProblem,
-    learned_assertions: &[BoolExpr],
+    accepted_equality_facts: &[(TermId, TermId)],
 ) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
     for assertion in &bool_problem.assertions {
         completed.add_direct_assertion(assertion);
     }
-    for assertion in learned_assertions {
-        completed.add_direct_assertion(assertion);
+    for &(left, right) in accepted_equality_facts {
+        let (left, right) = normalized_pair(left, right);
+        let literal = completed.atom_lit(BoolAtomKey::Eq(left, right));
+        completed.clauses.push(vec![literal]);
     }
     profile_phase(
         "dynamic_direct_cnf",
@@ -4909,26 +5103,31 @@ fn solve_bool_problem(
     direct_root_cnf: bool,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
-    let learned_assertions =
-        equality_abstraction_assertions(&bool_problem.assertions, eq_abstraction_mode);
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     if direct_root_cnf {
         for assertion in &bool_problem.assertions {
             cnf.add_direct_assertion(assertion);
         }
-        for assertion in &learned_assertions {
-            cnf.add_direct_assertion(assertion);
-        }
     } else {
         for assertion in &bool_problem.assertions {
             cnf.add_assertion(assertion);
         }
-        for assertion in &learned_assertions {
-            cnf.add_assertion(assertion);
-        }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
+    let candidate_edges =
+        equality_abstraction_fact_candidates(&bool_problem.assertions, eq_abstraction_mode);
+    let accepted_equality_facts = if eq_abstraction_mode == EqAbstractionMode::Facts {
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &candidate_edges,
+            selected_eq_abstraction_fact_config(),
+        );
+        integration.profile();
+        integration.accepted_edges
+    } else {
+        Vec::new()
+    };
     let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
     if matches!(
         backend.as_str(),
@@ -5015,8 +5214,11 @@ fn solve_bool_problem(
                         finite_added,
                     ) {
                         profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
-                        let (completed, completed_outcome) =
-                            solve_dynamic_full_ackermann(arena, bool_problem, &learned_assertions);
+                        let (completed, completed_outcome) = solve_dynamic_full_ackermann(
+                            arena,
+                            bool_problem,
+                            &accepted_equality_facts,
+                        );
                         prior_sat_calls += 1;
                         match completed_outcome {
                             EagerSolveOutcome::Solved(result) => {
@@ -5921,6 +6123,172 @@ mod tests {
         );
     }
 
+    #[test]
+    fn equality_abstraction_fact_settings_are_strict_and_bounded_by_default() {
+        assert!(!parse_eq_abstraction_fresh(None));
+        assert!(!parse_eq_abstraction_fresh(Some("0")));
+        assert!(parse_eq_abstraction_fresh(Some("1")));
+        assert!(!parse_eq_abstraction_fresh(Some("01")));
+        assert!(!parse_eq_abstraction_fresh(Some("on")));
+
+        assert_eq!(
+            parse_eq_abstraction_quota(None, DEFAULT_EQ_ABSTRACTION_MAX_FACTS),
+            DEFAULT_EQ_ABSTRACTION_MAX_FACTS
+        );
+        assert_eq!(parse_eq_abstraction_quota(Some("0"), 17), 0);
+        assert_eq!(parse_eq_abstraction_quota(Some("23"), 17), 23);
+        assert_eq!(parse_eq_abstraction_quota(Some(" 23"), 17), 17);
+        assert_eq!(parse_eq_abstraction_quota(Some("+23"), 17), 17);
+        assert_eq!(parse_eq_abstraction_quota(Some("invalid"), 17), 17);
+        assert_eq!(
+            EqAbstractionFactConfig::default(),
+            EqAbstractionFactConfig {
+                allow_fresh: false,
+                max_facts: 4_096,
+                max_fresh_facts: 256,
+            }
+        );
+    }
+
+    #[test]
+    fn equality_abstraction_suppresses_existing_positive_units() {
+        let mut cnf = CnfProblem::new();
+        let equality = cnf.atom_lit(BoolAtomKey::Eq(2, 7));
+        cnf.clauses.push(vec![equality]);
+        let clauses_before = cnf.clauses.clone();
+        let vars_before = cnf.var_count();
+
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &[(7, 2)],
+            EqAbstractionFactConfig::default(),
+        );
+
+        assert_eq!(integration.duplicate_units, 1);
+        assert_eq!(integration.accepted_existing_facts, 0);
+        assert_eq!(integration.accepted_fresh_facts, 0);
+        assert!(integration.accepted_edges.is_empty());
+        assert_eq!(integration.rollback_reason, None);
+        assert_eq!(cnf.clauses, clauses_before);
+        assert_eq!(cnf.var_count(), vars_before);
+    }
+
+    #[test]
+    fn equality_abstraction_strengthens_a_materialized_equality_atom() {
+        let mut cnf = CnfProblem::new();
+        let equality = cnf.atom_lit(BoolAtomKey::Eq(2, 7));
+        let guard = cnf.atom_lit(BoolAtomKey::BoolTerm(9));
+        cnf.clauses.push(vec![-guard, equality]);
+        let clauses_before = cnf.clauses.len();
+        let vars_before = cnf.var_count();
+
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &[(7, 2)],
+            EqAbstractionFactConfig::default(),
+        );
+
+        assert_eq!(integration.duplicate_units, 0);
+        assert_eq!(integration.accepted_existing_facts, 1);
+        assert_eq!(integration.accepted_fresh_facts, 0);
+        assert_eq!(integration.accepted_edges, vec![(2, 7)]);
+        assert_eq!(cnf.clauses.len(), clauses_before + 1);
+        assert_eq!(cnf.clauses.last(), Some(&vec![equality]));
+        assert_eq!(cnf.var_count(), vars_before);
+    }
+
+    #[test]
+    fn equality_abstraction_fresh_atoms_require_exact_opt_in() {
+        let mut default_cnf = CnfProblem::new();
+        let default_integration = integrate_equality_abstraction_facts(
+            &mut default_cnf,
+            &[(7, 2)],
+            EqAbstractionFactConfig::default(),
+        );
+        assert_eq!(default_integration.accepted_fresh_facts, 0);
+        assert!(default_integration.accepted_edges.is_empty());
+        assert_eq!(default_cnf.var_count(), 0);
+        assert!(default_cnf.clauses.is_empty());
+
+        let mut opted_in_cnf = CnfProblem::new();
+        let opted_in = integrate_equality_abstraction_facts(
+            &mut opted_in_cnf,
+            &[(7, 2)],
+            EqAbstractionFactConfig {
+                allow_fresh: true,
+                ..EqAbstractionFactConfig::default()
+            },
+        );
+        let equality = opted_in_cnf.atom_vars[&BoolAtomKey::Eq(2, 7)];
+        assert_eq!(opted_in.accepted_existing_facts, 0);
+        assert_eq!(opted_in.accepted_fresh_facts, 1);
+        assert_eq!(opted_in.accepted_edges, vec![(2, 7)]);
+        assert_eq!(opted_in_cnf.var_count(), 1);
+        assert_eq!(opted_in_cnf.clauses, vec![vec![equality]]);
+    }
+
+    #[test]
+    fn equality_abstraction_total_cap_rolls_back_all_selected_facts() {
+        let mut cnf = CnfProblem::new();
+        let first = cnf.atom_lit(BoolAtomKey::Eq(0, 1));
+        let second = cnf.atom_lit(BoolAtomKey::Eq(2, 3));
+        cnf.clauses.push(vec![first, second]);
+        let clauses_before = cnf.clauses.clone();
+        let vars_before = cnf.var_count();
+
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &[(0, 1), (2, 3)],
+            EqAbstractionFactConfig {
+                max_facts: 1,
+                ..EqAbstractionFactConfig::default()
+            },
+        );
+
+        assert_eq!(
+            integration.rollback_reason,
+            Some(EqAbstractionIntegrationRollbackReason::MaxFacts)
+        );
+        assert_eq!(integration.rollback_count, 2);
+        assert_eq!(integration.accepted_existing_facts, 0);
+        assert!(integration.accepted_edges.is_empty());
+        assert_eq!(cnf.clauses, clauses_before);
+        assert_eq!(cnf.var_count(), vars_before);
+    }
+
+    #[test]
+    fn equality_abstraction_fresh_cap_rolls_back_without_materializing_atoms() {
+        let mut cnf = CnfProblem::new();
+        let existing = cnf.atom_lit(BoolAtomKey::Eq(0, 1));
+        let guard = cnf.atom_lit(BoolAtomKey::BoolTerm(6));
+        cnf.clauses.push(vec![existing, guard]);
+        let clauses_before = cnf.clauses.clone();
+        let vars_before = cnf.var_count();
+
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &[(0, 1), (2, 3), (4, 5)],
+            EqAbstractionFactConfig {
+                allow_fresh: true,
+                max_facts: 3,
+                max_fresh_facts: 1,
+            },
+        );
+
+        assert_eq!(
+            integration.rollback_reason,
+            Some(EqAbstractionIntegrationRollbackReason::MaxFreshFacts)
+        );
+        assert_eq!(integration.rollback_count, 2);
+        assert_eq!(integration.accepted_existing_facts, 0);
+        assert_eq!(integration.accepted_fresh_facts, 0);
+        assert!(integration.accepted_edges.is_empty());
+        assert_eq!(cnf.clauses, clauses_before);
+        assert_eq!(cnf.var_count(), vars_before);
+        assert!(!cnf.atom_vars.contains_key(&BoolAtomKey::Eq(2, 3)));
+        assert!(!cnf.atom_vars.contains_key(&BoolAtomKey::Eq(4, 5)));
+    }
+
     fn cnf_is_satisfiable(cnf: &CnfProblem) -> bool {
         let mut solver = VarisatSolver::new();
         for clause in &cnf.clauses {
@@ -6055,6 +6423,38 @@ mod tests {
         for formula in &formulas {
             assert_root_encodings_equivalent(formula, 0);
         }
+    }
+
+    #[test]
+    fn equality_fact_integration_has_direct_root_tseitin_parity() {
+        let equality_expr = BoolExpr::Atom(BoolAtomKey::Eq(7, 2));
+        let expression = BoolExpr::Iff(vec![equality_expr, BoolExpr::Const(true)]);
+        let mut integrations = Vec::new();
+
+        for direct_root_cnf in [false, true] {
+            let mut cnf = CnfProblem::new();
+            if direct_root_cnf {
+                cnf.add_direct_assertion(&expression);
+            } else {
+                cnf.add_assertion(&expression);
+            }
+            let integration = integrate_equality_abstraction_facts(
+                &mut cnf,
+                &[(7, 2)],
+                EqAbstractionFactConfig::default(),
+            );
+            let equality = cnf.atom_vars[&BoolAtomKey::Eq(2, 7)];
+
+            assert_eq!(integration.accepted_existing_facts, 1);
+            assert_eq!(integration.accepted_fresh_facts, 0);
+            assert!(cnf.clauses.iter().any(|clause| clause == &[equality]));
+            assert!(cnf_is_satisfiable(&cnf));
+            cnf.clauses.push(vec![-equality]);
+            assert!(!cnf_is_satisfiable(&cnf));
+            integrations.push(integration);
+        }
+
+        assert_eq!(integrations[0], integrations[1]);
     }
 
     #[test]
@@ -6232,10 +6632,46 @@ mod tests {
             .result
     }
 
-    fn learned_equality_fact_count(input: &str, mode: EqAbstractionMode) -> usize {
+    fn equality_abstraction_fact_candidate_count(input: &str, mode: EqAbstractionMode) -> usize {
         let problem = parse_problem(input).unwrap();
         let bool_problem = problem.bool_problem.as_ref().unwrap();
-        equality_abstraction_assertions(&bool_problem.assertions, mode).len()
+        equality_abstraction_fact_candidates(&bool_problem.assertions, mode).len()
+    }
+
+    #[test]
+    fn dynamic_full_ackermann_rebuild_preserves_accepted_equality_facts() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (assert (= (= a b) true))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let candidates = equality_abstraction_fact_candidates(
+            &bool_problem.assertions,
+            EqAbstractionMode::Facts,
+        );
+        assert_eq!(candidates.len(), 1);
+
+        let mut initial_cnf = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            initial_cnf.add_assertion(assertion);
+        }
+        let integration = integrate_equality_abstraction_facts(
+            &mut initial_cnf,
+            &candidates,
+            EqAbstractionFactConfig::default(),
+        );
+        assert_eq!(integration.accepted_existing_facts, 1);
+
+        let (completed, _) =
+            solve_dynamic_full_ackermann(&problem.arena, bool_problem, &integration.accepted_edges);
+        let edge = integration.accepted_edges[0];
+        let equality = completed.atom_vars[&BoolAtomKey::Eq(edge.0, edge.1)];
+        assert!(completed.clauses.iter().any(|clause| clause == &[equality]));
     }
 
     fn solve_text_varisat(input: &str) -> SolveResult {
@@ -7496,11 +7932,11 @@ mod tests {
 
         for (input, expected, expected_facts) in cases {
             assert_eq!(
-                learned_equality_fact_count(&input, EqAbstractionMode::Shadow),
+                equality_abstraction_fact_candidate_count(&input, EqAbstractionMode::Shadow),
                 0
             );
             assert_eq!(
-                learned_equality_fact_count(&input, EqAbstractionMode::Facts),
+                equality_abstraction_fact_candidate_count(&input, EqAbstractionMode::Facts),
                 expected_facts
             );
             for direct_root_cnf in [false, true] {
