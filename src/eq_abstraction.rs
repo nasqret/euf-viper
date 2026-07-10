@@ -202,14 +202,20 @@ fn expr_pointer(expr: &BoolExpr) -> usize {
     std::ptr::from_ref(expr) as usize
 }
 
-fn child_count(expr: &BoolExpr) -> usize {
-    match expr {
-        BoolExpr::Const(_) | BoolExpr::Atom(_) => 0,
-        BoolExpr::Not(_) => 1,
-        BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => {
-            children.len()
+#[derive(Clone, Copy)]
+enum AssociativeKind {
+    And,
+    Or,
+}
+
+impl AssociativeKind {
+    fn children<'a>(self, expr: &'a BoolExpr) -> Option<&'a [BoolExpr]> {
+        match (self, expr) {
+            (Self::And, BoolExpr::And(children)) | (Self::Or, BoolExpr::Or(children)) => {
+                Some(children)
+            }
+            _ => None,
         }
-        BoolExpr::Ite(_, _, _) => 3,
     }
 }
 
@@ -260,27 +266,16 @@ impl Interner {
             }
 
             if !expanded {
-                let count = child_count(expr);
-                let frame_count = count.checked_add(1).ok_or(CapReason::Arithmetic)?;
+                let children = self.children_for_interning(expr, budget)?;
+                let frame_count = children.len().checked_add(1).ok_or(CapReason::Arithmetic)?;
                 ensure_entry_capacity(stack.len(), frame_count, self.max_entries)?;
                 budget.spend(frame_count)?;
                 stack.push((expr, true));
-                match expr {
-                    BoolExpr::Const(_) | BoolExpr::Atom(_) => {}
-                    BoolExpr::Not(child) => stack.push((child, false)),
-                    BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => {
-                        stack.extend(children.iter().rev().map(|child| (child, false)));
-                    }
-                    BoolExpr::Ite(cond, then_expr, else_expr) => {
-                        stack.push((else_expr, false));
-                        stack.push((then_expr, false));
-                        stack.push((cond, false));
-                    }
-                }
+                stack.extend(children.into_iter().rev().map(|child| (child, false)));
                 continue;
             }
 
-            let node = self.node_for_expr(expr)?;
+            let node = self.node_for_expr(expr, budget)?;
             let id = if let Some(&id) = self.structural.get(&node) {
                 id
             } else {
@@ -296,7 +291,80 @@ impl Interner {
         Ok(())
     }
 
-    fn node_for_expr(&self, expr: &BoolExpr) -> Result<Node, CapReason> {
+    fn direct_children<'a>(
+        &self,
+        children: &'a [BoolExpr],
+    ) -> Result<Vec<&'a BoolExpr>, CapReason> {
+        ensure_entry_capacity(0, children.len(), self.max_entries)?;
+        let mut result = Vec::new();
+        result
+            .try_reserve_exact(children.len())
+            .map_err(|_| CapReason::Entries)?;
+        result.extend(children);
+        Ok(result)
+    }
+
+    fn associative_children<'a>(
+        &self,
+        children: &'a [BoolExpr],
+        kind: AssociativeKind,
+        budget: &mut Budget,
+    ) -> Result<Vec<&'a BoolExpr>, CapReason> {
+        ensure_entry_capacity(0, children.len(), self.max_entries)?;
+        let mut pending = Vec::new();
+        pending
+            .try_reserve_exact(children.len())
+            .map_err(|_| CapReason::Entries)?;
+        pending.extend(children.iter().rev());
+
+        let mut flattened = Vec::new();
+        while let Some(child) = pending.pop() {
+            budget.spend(1)?;
+            let frontier = pending
+                .len()
+                .checked_add(flattened.len())
+                .ok_or(CapReason::Arithmetic)?;
+            if let Some(nested) = kind.children(child) {
+                ensure_entry_capacity(frontier, nested.len(), self.max_entries)?;
+                pending
+                    .try_reserve(nested.len())
+                    .map_err(|_| CapReason::Entries)?;
+                pending.extend(nested.iter().rev());
+            } else {
+                ensure_entry_capacity(frontier, 1, self.max_entries)?;
+                flattened.try_reserve(1).map_err(|_| CapReason::Entries)?;
+                flattened.push(child);
+            }
+        }
+        Ok(flattened)
+    }
+
+    fn children_for_interning<'a>(
+        &self,
+        expr: &'a BoolExpr,
+        budget: &mut Budget,
+    ) -> Result<Vec<&'a BoolExpr>, CapReason> {
+        match expr {
+            BoolExpr::Const(_) | BoolExpr::Atom(_) => Ok(Vec::new()),
+            BoolExpr::Not(child) => {
+                ensure_entry_capacity(0, 1, self.max_entries)?;
+                Ok(vec![child])
+            }
+            BoolExpr::And(children) => {
+                self.associative_children(children, AssociativeKind::And, budget)
+            }
+            BoolExpr::Or(children) => {
+                self.associative_children(children, AssociativeKind::Or, budget)
+            }
+            BoolExpr::Iff(children) => self.direct_children(children),
+            BoolExpr::Ite(cond, then_expr, else_expr) => {
+                ensure_entry_capacity(0, 3, self.max_entries)?;
+                Ok(vec![cond, then_expr, else_expr])
+            }
+        }
+    }
+
+    fn node_for_expr(&self, expr: &BoolExpr, budget: &mut Budget) -> Result<Node, CapReason> {
         let child_id = |child: &BoolExpr| {
             self.pointer_ids
                 .get(&expr_pointer(child))
@@ -316,14 +384,14 @@ impl Interner {
             BoolExpr::Atom(atom) => Node::Atom(atom.clone()),
             BoolExpr::Not(child) => Node::Not(child_id(child)?),
             BoolExpr::And(children) => Node::And(
-                children
-                    .iter()
+                self.associative_children(children, AssociativeKind::And, budget)?
+                    .into_iter()
                     .map(child_id)
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             BoolExpr::Or(children) => Node::Or(
-                children
-                    .iter()
+                self.associative_children(children, AssociativeKind::Or, budget)?
+                    .into_iter()
                     .map(child_id)
                     .collect::<Result<Vec<_>, _>>()?,
             ),
@@ -951,6 +1019,39 @@ mod tests {
         BoolExpr::Atom(BoolAtomKey::BoolTerm(term))
     }
 
+    fn associative_expr(kind: AssociativeKind, children: Vec<BoolExpr>) -> BoolExpr {
+        match kind {
+            AssociativeKind::And => BoolExpr::And(children),
+            AssociativeKind::Or => BoolExpr::Or(children),
+        }
+    }
+
+    fn equality_chain(length: usize) -> Vec<BoolExpr> {
+        (0..length).map(|term| eq(term, term + 1)).collect()
+    }
+
+    fn nested_associative(
+        kind: AssociativeKind,
+        mut children: Vec<BoolExpr>,
+        nest_left: bool,
+    ) -> BoolExpr {
+        assert!(children.len() >= 2);
+        if nest_left {
+            let mut children = children.into_iter();
+            let mut expression = children.next().unwrap();
+            for child in children {
+                expression = associative_expr(kind, vec![expression, child]);
+            }
+            expression
+        } else {
+            let mut expression = children.pop().unwrap();
+            while let Some(child) = children.pop() {
+                expression = associative_expr(kind, vec![child, expression]);
+            }
+            expression
+        }
+    }
+
     fn generous_limits() -> Limits {
         Limits {
             max_work: 20_000_000,
@@ -1048,6 +1149,118 @@ mod tests {
         let mut output = Vec::new();
         visit(0, size, &mut Vec::new(), &mut output);
         output
+    }
+
+    fn evaluate_formula(
+        expression: &BoolExpr,
+        equality: &[Vec<bool>],
+        bool_values: &[bool],
+    ) -> bool {
+        match expression {
+            BoolExpr::Const(value) => *value,
+            BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => equality[*left][*right],
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => bool_values[*term],
+            BoolExpr::Not(child) => !evaluate_formula(child, equality, bool_values),
+            BoolExpr::And(children) => children
+                .iter()
+                .all(|child| evaluate_formula(child, equality, bool_values)),
+            BoolExpr::Or(children) => children
+                .iter()
+                .any(|child| evaluate_formula(child, equality, bool_values)),
+            BoolExpr::Iff(children) => {
+                let Some((first, rest)) = children.split_first() else {
+                    return true;
+                };
+                let first = evaluate_formula(first, equality, bool_values);
+                rest.iter()
+                    .all(|child| evaluate_formula(child, equality, bool_values) == first)
+            }
+            BoolExpr::Ite(condition, then_expression, else_expression) => {
+                if evaluate_formula(condition, equality, bool_values) {
+                    evaluate_formula(then_expression, equality, bool_values)
+                } else {
+                    evaluate_formula(else_expression, equality, bool_values)
+                }
+            }
+        }
+    }
+
+    fn bounded_oracle_formulas() -> Vec<BoolExpr> {
+        let leaves = vec![
+            BoolExpr::Const(false),
+            BoolExpr::Const(true),
+            eq(0, 0),
+            eq(0, 1),
+            eq(1, 2),
+            bool_term(0),
+            bool_term(1),
+        ];
+        let mut formulas = vec![
+            BoolExpr::And(Vec::new()),
+            BoolExpr::Or(Vec::new()),
+            BoolExpr::Iff(Vec::new()),
+        ];
+        formulas.extend(leaves.iter().cloned());
+        for child in &leaves {
+            formulas.push(BoolExpr::Not(Box::new(child.clone())));
+            formulas.push(BoolExpr::And(vec![child.clone()]));
+            formulas.push(BoolExpr::Or(vec![child.clone()]));
+            formulas.push(BoolExpr::Iff(vec![child.clone()]));
+        }
+        for left in &leaves {
+            for right in &leaves {
+                formulas.push(BoolExpr::And(vec![left.clone(), right.clone()]));
+                formulas.push(BoolExpr::Or(vec![left.clone(), right.clone()]));
+                formulas.push(BoolExpr::Iff(vec![left.clone(), right.clone()]));
+            }
+        }
+        for first in &leaves {
+            for second in &leaves {
+                for third in &leaves {
+                    formulas.push(BoolExpr::Iff(vec![
+                        first.clone(),
+                        second.clone(),
+                        third.clone(),
+                    ]));
+                    formulas.push(BoolExpr::Ite(
+                        Box::new(first.clone()),
+                        Box::new(second.clone()),
+                        Box::new(third.clone()),
+                    ));
+                }
+            }
+        }
+
+        let compounds = vec![
+            BoolExpr::And(vec![eq(0, 1), bool_term(0)]),
+            BoolExpr::Or(vec![eq(1, 2), BoolExpr::Not(Box::new(bool_term(1)))]),
+            BoolExpr::Iff(vec![eq(0, 2), bool_term(0)]),
+            BoolExpr::Ite(
+                Box::new(bool_term(1)),
+                Box::new(eq(0, 1)),
+                Box::new(BoolExpr::Const(false)),
+            ),
+            BoolExpr::And(vec![BoolExpr::Const(false), eq(0, 1)]),
+        ];
+        for first in &compounds {
+            for second in &compounds {
+                for third in &compounds {
+                    formulas.push(BoolExpr::Iff(vec![
+                        first.clone(),
+                        second.clone(),
+                        third.clone(),
+                    ]));
+                }
+            }
+        }
+        formulas
+    }
+
+    fn assert_atomic_rollback(outcome: &Outcome) {
+        assert!(outcome.cap_reason.is_some());
+        assert!(outcome.star_edges.is_empty());
+        assert!(!outcome.infeasible);
+        assert_eq!(outcome.partition, Partition::empty());
     }
 
     fn partition_engine() -> Evaluator {
@@ -1275,6 +1488,180 @@ mod tests {
         assert_eq!(outcome.cap_reason, None);
         assert!(outcome.star_edges.is_empty());
         assert_eq!(outcome.partition, Partition::empty());
+    }
+
+    #[test]
+    fn associative_interning_canonicalizes_flat_left_and_right_nesting() {
+        const LENGTH: usize = 768;
+
+        for kind in [AssociativeKind::And, AssociativeKind::Or] {
+            let formulas = vec![
+                associative_expr(kind, equality_chain(LENGTH)),
+                nested_associative(kind, equality_chain(LENGTH), true),
+                nested_associative(kind, equality_chain(LENGTH), false),
+            ];
+            let limits = generous_limits();
+            let mut budget = Budget::new(limits.max_work);
+            let mut interner = Interner::new(limits.max_entries);
+            interner.intern_assertions(&formulas, &mut budget).unwrap();
+
+            assert!(interner.roots.iter().all(|root| *root == interner.roots[0]));
+            let children = match (&interner.nodes[interner.roots[0]], kind) {
+                (Node::And(children), AssociativeKind::And)
+                | (Node::Or(children), AssociativeKind::Or) => children,
+                (node, _) => panic!("unexpected canonical root: {node:?}"),
+            };
+            assert_eq!(children.len(), LENGTH);
+            assert_eq!(interner.nodes.len(), LENGTH + 1);
+            for (term, &child) in children.iter().enumerate() {
+                assert_eq!(
+                    interner.nodes[child],
+                    Node::Atom(BoolAtomKey::Eq(term, term + 1))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn associative_chains_keep_facts_uncapped_and_work_near_linear() {
+        const SMALL: usize = 384;
+        const LARGE: usize = 768;
+
+        for kind in [AssociativeKind::And, AssociativeKind::Or] {
+            let name = match kind {
+                AssociativeKind::And => "and",
+                AssociativeKind::Or => "or",
+            };
+            let expressions = vec![
+                associative_expr(kind, equality_chain(LARGE)),
+                nested_associative(kind, equality_chain(LARGE), true),
+                nested_associative(kind, equality_chain(LARGE), false),
+            ];
+            let outcomes = expressions
+                .into_iter()
+                .map(|expression| analyze(&[expression]))
+                .collect::<Vec<_>>();
+
+            for outcome in &outcomes {
+                assert_eq!(outcome.cap_reason, None, "{name} chain capped");
+                assert!(!outcome.infeasible);
+                assert_eq!(outcome.star_edges, outcomes[0].star_edges);
+                assert_eq!(outcome.partition, outcomes[0].partition);
+            }
+            match kind {
+                AssociativeKind::And => {
+                    let expected = (1..=LARGE).map(|term| (0, term)).collect::<Vec<_>>();
+                    assert_eq!(outcomes[0].star_edges, expected);
+                }
+                AssociativeKind::Or => assert!(outcomes[0].star_edges.is_empty()),
+            }
+
+            for (nest_left, large) in [true, false].into_iter().zip(&outcomes[1..]) {
+                let small = analyze(&[nested_associative(kind, equality_chain(SMALL), nest_left)]);
+                assert_eq!(small.cap_reason, None);
+                assert!(
+                    large.metrics.work.saturating_mul(2) <= small.metrics.work.saturating_mul(5),
+                    "{name} nesting work grew too quickly: {} -> {}",
+                    small.metrics.work,
+                    large.metrics.work
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_implication_oracle_validates_emitted_equalities_and_rollback() {
+        const TERM_COUNT: usize = 3;
+        const BOOL_COUNT: usize = 2;
+
+        let equalities = enumerate_partitions(TERM_COUNT)
+            .iter()
+            .map(|partition| relation(partition, TERM_COUNT))
+            .collect::<Vec<_>>();
+        let bool_assignments = (0..(1usize << BOOL_COUNT))
+            .map(|bits| {
+                (0..BOOL_COUNT)
+                    .map(|bit| bits & (1 << bit) != 0)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let formulas = bounded_oracle_formulas();
+        assert!(formulas.len() >= 900);
+
+        for (formula_index, formula) in formulas.iter().enumerate() {
+            for polarity in [false, true] {
+                let assertion = if polarity {
+                    formula.clone()
+                } else {
+                    BoolExpr::Not(Box::new(formula.clone()))
+                };
+                let outcome = analyze_with_limits(&[assertion], generous_limits());
+                assert_eq!(
+                    outcome.cap_reason, None,
+                    "oracle formula {formula_index} capped at polarity {polarity}: {formula:?}"
+                );
+
+                let mut satisfying_models = 0usize;
+                for equality in &equalities {
+                    for bool_values in &bool_assignments {
+                        if evaluate_formula(formula, equality, bool_values) != polarity {
+                            continue;
+                        }
+                        satisfying_models += 1;
+                        for &(left, right) in &outcome.star_edges {
+                            assert!(
+                                equality[left][right],
+                                "formula {formula_index} emitted {left}={right} at polarity \
+                                 {polarity}, but model {equality:?} with booleans \
+                                 {bool_values:?} satisfies {formula:?}"
+                            );
+                        }
+                    }
+                }
+                if outcome.infeasible {
+                    assert_eq!(
+                        satisfying_models, 0,
+                        "formula {formula_index} was marked infeasible at polarity {polarity}: \
+                         {formula:?}"
+                    );
+                }
+            }
+        }
+
+        let assertions = equality_chain(3);
+        let uncapped = analyze_with_limits(&assertions, generous_limits());
+        assert_eq!(uncapped.star_edges, vec![(0, 1), (0, 2), (0, 3)]);
+        for max_work in 0..uncapped.metrics.work {
+            let outcome = analyze_with_limits(
+                &assertions,
+                Limits {
+                    max_work,
+                    ..generous_limits()
+                },
+            );
+            assert_eq!(outcome.cap_reason, Some(CapReason::Work));
+            assert_atomic_rollback(&outcome);
+        }
+
+        let entry_capped = analyze_with_limits(
+            &assertions,
+            Limits {
+                max_entries: uncapped.metrics.nodes * 2 - 1,
+                ..generous_limits()
+            },
+        );
+        assert_eq!(entry_capped.cap_reason, Some(CapReason::Entries));
+        assert_atomic_rollback(&entry_capped);
+
+        let star_capped = analyze_with_limits(
+            &assertions,
+            Limits {
+                max_star_edges: uncapped.star_edges.len() - 1,
+                ..generous_limits()
+            },
+        );
+        assert_eq!(star_capped.cap_reason, Some(CapReason::StarEdges));
+        assert_atomic_rollback(&star_capped);
     }
 
     #[test]
