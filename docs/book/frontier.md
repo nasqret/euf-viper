@@ -1,5 +1,21 @@
 # Research Frontier
 
+## Active Correctness Blocker
+
+The accepted binary incorrectly reports SAT for a formula requiring three
+distinct Boolean arguments. Boolean-valued terms used only as UF arguments are
+not guaranteed to receive `BoolTerm` atoms, and backend `DontCare` assignments
+can also be skipped by validation. The immediate research order is therefore:
+
+1. restore the accepted source lineage;
+2. atomize all Boolean data terms and require total theory assignments;
+3. pass differential and WMI correctness gates;
+4. only then resume performance promotion.
+
+The exact corpus campaigns remain useful paired timing evidence, but they do
+not establish general soundness. See the dedicated soundness chapter for the
+counterexample and repair contract.
+
 This chapter records the 2026-07-10 program for testing whether `euf-viper`
 can eventually outperform the established QF_UF solvers. It is a research
 contract, not a superiority claim.

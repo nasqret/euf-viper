@@ -362,3 +362,19 @@
   instances in their 2026 experiment.
 - The equational diamond family is a key DPLL(T) stressor; common-branch EUF
   consequences are a high-priority preprocessor target.
+
+## Critical Soundness Correction (2026-07-10)
+
+- The accepted source `58efe9d` and exact WMI binary
+  `4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`
+  are unsound for parser-supported Boolean-as-data formulas. Three unasserted
+  Boolean constants used as arguments to `f : Bool -> U`, with three distinct
+  outputs, are reported SAT although Z3 and cvc5 correctly report UNSAT.
+- Root cause: Boolean terms used only as UF data need not receive `BoolTerm`
+  atoms, while theory validation traverses only represented CNF atoms.
+  CaDiCaL `DontCare` values mapped to zero create a second total-model hazard.
+- The 7,503-instance results remain exact-corpus timing evidence because they
+  have zero observed mismatches. They do not establish general soundness.
+- Restore the accepted source lineage, atomize all Boolean data terms, require
+  total theory assignments, and rerun correctness gates before promoting any
+  performance route or restoring soundness claims.

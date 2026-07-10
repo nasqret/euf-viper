@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: implementation candidate after the deep-let finite gate. No source
-change or performance claim yet.
+Status: blocked by the confirmed Boolean-as-data soundness defect and total
+assignment incompleteness. No source change or performance claim yet.
 
 ## Observation
 
@@ -29,6 +29,12 @@ encoding.
 
 ## Soundness Boundary
 
+The existing validator does not yet satisfy the premise below for all
+parser-supported inputs. Boolean terms used only as UF arguments can be absent
+from `CnfProblem.var_atoms`, and CaDiCaL `DontCare` values are currently mapped
+to zero and ignored. Those global defects must be repaired before this lazy
+experiment can be sound.
+
 Let $B$ be the Boolean base CNF and let each learned clause $L_i$ be an EUF
 consequence returned by the existing explanation engine.
 
@@ -40,7 +46,9 @@ consequence returned by the existing explanation engine.
 - A repeated cut, round limit, interruption, or solver error abstains and uses
   the existing fallback. It does not become SAT or UNSAT.
 
-The experiment changes clause timing, not the trusted validator.
+After the global repair, the experiment changes clause timing, not the trusted
+validator. Finite preprocessing clauses remain loaded; `none` means no generic
+EUF transitivity or congruence axioms, not a literally pure base CNF.
 
 ## Minimal Implementation
 
@@ -53,6 +61,8 @@ The experiment changes clause timing, not the trusted validator.
    automatically route finite instances to this experiment.
 5. Record SAT calls, validation calls/time, cuts generated/added/duplicate,
    cut widths, and whether transitivity or congruence was loaded eagerly.
+6. Make fallback and every abstention reason observable; fallback is not a
+   correctness repair unless it uses the same total Boolean model contract.
 
 ## Correctness Tests
 
@@ -65,12 +75,19 @@ The experiment changes clause timing, not the trusted validator.
 - Random small formulas differential-tested against both current refinement
   and Z3, including SAT and UNSAT cases.
 - The CNF variable count must not grow merely to support the lazy mode.
+- Unasserted Boolean terms used as UF arguments must be atomized and the
+  three-value Boolean pigeonhole fixture must return UNSAT on every path.
+- Relevant `DontCare` values and short assignments must fail closed.
 
 ## Performance Gates
 
-1. **Forced Goel-12:** accepted binary versus the same source with lazy-first,
-   three alternating repeats. Require no loss, no wrong answer, and all-total,
-   common-total, and geometric ratios above one.
+1. **Forced Goel-12:** same candidate binary in both arms, comparing
+   model-cuts plus transitivity with lazy model-cuts plus no generic axioms,
+   for three alternating repeats. Require no loss, no wrong answer, no
+   fallback or relevant `DontCare`, and zero eagerly loaded generic axioms in
+   the lazy arm. Because all targets may time out in the baseline, use coverage
+   and timeout-charged total here; measure common and geometric ratios on the
+   nearby controls.
 2. **Goel controls:** include nearby cases already solved quickly by the
    accepted path. Reject a route that shifts timeouts into the easy boundary.
 3. **Sample 40:** require unchanged coverage and all three ratios above one.

@@ -427,6 +427,21 @@
   `NEQ027_size10`, `NEQ027_size11`, and `NEQ031_size10` were candidate-only in
   all five repeats; there were no baseline-only cases, wrong answers, or
   errors.
+- Confirmed a critical Boolean-as-data soundness defect in both the current
+  local build and exact accepted WMI binary. The formula with `p,q,r : Bool`,
+  `f : Bool -> U`, and three distinct values `f(p),f(q),f(r)` is UNSAT, but
+  euf-viper returns SAT while Z3 and cvc5 return UNSAT. Added the permanent
+  fixture and incident record. Broad soundness claims are revoked.
+- Audited lazy-first refinement. Its model-cut logic is viable only after
+  atomizing all Boolean data terms and rejecting or safely completing
+  theory-relevant CaDiCaL `DontCare` assignments. Finite preprocessing remains
+  loaded, fallback must expose its reason, and current certificates are
+  independent eager reconstructions rather than exact lazy-path proofs.
+- Completed the hard-tail mechanism audit. The next measured mechanisms after
+  correctness are verified domain-7 orbit breaking over 261 exact one-table
+  cases, Boolean-DAG hash-consing over 174 large closed-table cases, and a
+  conflict-only partial-trail rollback e-graph over the 39 large non-table
+  equality graphs. Each has a strict targeted gate before broader testing.
 
 ## Next Entry Template
 

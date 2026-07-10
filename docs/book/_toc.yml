@@ -2,6 +2,7 @@ format: jb-book
 root: index
 chapters:
   - file: theory
+  - file: soundness
   - file: implementation
   - file: benchmarking
   - file: frontier

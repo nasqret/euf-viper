@@ -162,6 +162,13 @@ target-family win is evidence for routing, not evidence for promotion.
 
 ### Live 2026-07-10 Candidates
 
+- **Correctness repair, mandatory first:** atomize every Boolean-valued term
+  used as data, require total assignments for all theory-relevant atoms, and
+  fail closed on short or relevant `DontCare` models. The accepted binary has
+  a confirmed SAT-for-UNSAT counterexample, so no performance candidate can be
+  promoted until backend regressions, differential tests, and WMI correctness
+  gates pass.
+
 - **Base-CNF lazy-first EUF:** source audit shows current model-cuts refinement
   still loads all equality-transitivity clauses and is reached only after the
   eager first call. A default-off CaDiCaL mode will omit generic transitivity
@@ -178,6 +185,17 @@ target-family win is evidence for routing, not evidence for promotion.
   infer a global win until automatic-route sample, hot, and full gates pass.
   Five-repeat two-second gate `143438` separately improved coverage `9 -> 12`
   and all/common/geometric speed by 1.2357x/1.1934x/1.1670x with no loss.
+
+- **Domain-7 orbit breaking:** first verify whole-formula automorphisms and
+  exact one-table canonization. The initial 261-case gate contains five of the
+  ten closed-table 60-second timeouts and 421.54 seconds of common excess.
+- **Boolean-DAG hash-consing:** telemetry must show at least 25% projected CNF
+  reduction on 8/10 closed-table timeout formulas before a solving gate over
+  the 174 structurally selected large formulas.
+- **Partial-trail rollback e-graph:** after lazy complete-model refinement is
+  sound, test conflict-only IPASIR-UP observation on 39 large non-table graph
+  formulas. Propagation and decision control remain forbidden until the
+  conflict-only stage passes.
 
 - **Finite permutation support, focused:** passed repeated boundary gate
   `142578`, finite gate `142581`, hot-400 `142597`, and cross-architecture gate
@@ -202,6 +220,13 @@ target-family win is evidence for routing, not evidence for promotion.
   lexical-let threshold now decides whether the scoped path is used.
 
 ## Current Limitation
+
+The accepted binary has a confirmed general soundness defect for unasserted
+Boolean values used as uninterpreted-function arguments. It returns SAT for a
+three-value Boolean pigeonhole formula that Z3 and cvc5 return UNSAT. Existing
+corpus runs have zero observed mismatches and remain useful timing evidence,
+but no general soundness or superiority claim is valid until the defect is
+fixed and all correctness gates pass.
 
 At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a
 0.0278s median versus `euf-viper` at 7,478/7,503 and 0.0910s. On 7,478 common
