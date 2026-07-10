@@ -289,6 +289,8 @@ struct ParseCtx {
     preprocess_branch_intersections: bool,
     scoped_let_selected: bool,
     contradiction: bool,
+    #[cfg(test)]
+    assertion_sort_validations: usize,
 }
 
 impl ParseCtx {
@@ -549,6 +551,10 @@ impl ParseCtx {
     }
 
     fn validate_assertion_sort(&mut self, sexp: &Sexp) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            self.assertion_sort_validations += 1;
+        }
         let sort = self.validate_expr_sort(sexp, &HashMap::default())?;
         self.validate_expected_sort("assertion", sort, BOOL_SORT)
     }
@@ -569,7 +575,6 @@ impl ParseCtx {
                     self.add_unsupported("assert command with arity other than 1");
                     return Ok(());
                 }
-                self.validate_assertion_sort(&items[1])?;
                 self.ensure_bool_value_terms();
                 let mut mixed_env = HashMap::default();
                 let aux_start = self.bool_assertions.len();
@@ -593,6 +598,7 @@ impl ParseCtx {
                     }
                     Err(err) => {
                         self.bool_assertions.truncate(aux_start);
+                        self.validate_assertion_sort(&items[1])?;
                         self.bool_unsupported.push(err);
                         let mut env = HashMap::default();
                         self.collect_formula(&items[1], true, &mut env)?;
@@ -672,19 +678,22 @@ impl ParseCtx {
                     return Ok(());
                 }
 
-                self.validate_assertion_sort(&items[4])?;
-
                 self.ensure_bool_value_terms();
-                if self.fun_decls.contains_key(&self.symbols.intern(name)) {
-                    return Err(format!("function `{name}` is already declared"));
-                }
+                let already_declared = self.fun_decls.contains_key(&self.symbols.intern(name));
                 let mut env = HashMap::default();
                 match self.parse_bool_expr(&items[4], &mut env) {
                     Ok(body) => {
+                        if already_declared {
+                            return Err(format!("function `{name}` is already declared"));
+                        }
                         let sym = self.declare_function(name, Vec::new(), BOOL_SORT)?;
                         self.bool_definitions.insert(sym, body);
                     }
                     Err(err) => {
+                        self.validate_assertion_sort(&items[4])?;
+                        if already_declared {
+                            return Err(format!("function `{name}` is already declared"));
+                        }
                         self.add_unsupported(format!("define-fun `{name}`: {err}"));
                         self.bool_unsupported
                             .push(format!("define-fun `{name}`: {err}"));
@@ -7445,6 +7454,22 @@ mod tests {
             problem.fun_decls[&problem.arena.terms[a].fun].result_sort,
             u
         );
+    }
+
+    #[test]
+    fn skips_diagnostic_sort_validation_for_valid_boolean_forms() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun b () U)
+             (declare-fun p () Bool)
+             (define-fun same () Bool (= a b))
+             (assert (and p (same)))",
+        );
+
+        assert_eq!(ctx.assertion_sort_validations, 0);
     }
 
     #[test]
