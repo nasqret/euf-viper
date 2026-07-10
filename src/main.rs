@@ -104,12 +104,6 @@ impl SortTable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct TermKey {
-    fun: SymId,
-    args: Vec<TermId>,
-}
-
 #[derive(Debug, Clone)]
 struct Term {
     fun: SymId,
@@ -120,27 +114,43 @@ struct Term {
 #[derive(Debug, Default)]
 struct TermArena {
     terms: Vec<Term>,
-    interned: HashMap<TermKey, TermId>,
+    interned: Vec<Option<HashMap<Vec<TermId>, TermId>>>,
     apps: Vec<TermId>,
 }
 
 impl TermArena {
+    #[inline]
+    fn lookup(&self, fun: SymId, args: &[TermId]) -> Option<TermId> {
+        self.interned
+            .get(fun as usize)?
+            .as_ref()?
+            .get(args)
+            .copied()
+    }
+
     fn intern_typed(&mut self, fun: SymId, args: Vec<TermId>, sort: SortId) -> TermId {
-        let key = TermKey { fun, args };
-        if let Some(&id) = self.interned.get(&key) {
+        if let Some(id) = self.lookup(fun, &args) {
             debug_assert_eq!(self.terms[id].sort, sort);
             return id;
         }
+        self.insert_new_typed(fun, args, sort)
+    }
+
+    fn insert_new_typed(&mut self, fun: SymId, args: Vec<TermId>, sort: SortId) -> TermId {
+        debug_assert!(self.lookup(fun, &args).is_none());
         let id = self.terms.len();
-        if !key.args.is_empty() {
+        if !args.is_empty() {
             self.apps.push(id);
         }
-        self.terms.push(Term {
-            fun: key.fun,
-            args: key.args.clone(),
-            sort,
-        });
-        self.interned.insert(key, id);
+        let key_args = args.clone();
+        self.terms.push(Term { fun, args, sort });
+        let index = fun as usize;
+        if self.interned.len() <= index {
+            self.interned.resize_with(index + 1, || None);
+        }
+        self.interned[index]
+            .get_or_insert_with(HashMap::default)
+            .insert(key_args, id);
         id
     }
 
@@ -311,6 +321,8 @@ struct ParseCtx {
     contradiction: bool,
     #[cfg(test)]
     assertion_sort_validations: usize,
+    #[cfg(test)]
+    application_signature_checks: usize,
 }
 
 impl ParseCtx {
@@ -1519,8 +1531,15 @@ impl ParseCtx {
         name: &str,
         args: Vec<TermId>,
     ) -> Result<TermId, String> {
+        if let Some(term) = self.arena.lookup(fun, &args) {
+            return Ok(term);
+        }
+        #[cfg(test)]
+        {
+            self.application_signature_checks += 1;
+        }
         let result_sort = self.application_result_sort(fun, name, &args)?;
-        Ok(self.arena.intern_typed(fun, args, result_sort))
+        Ok(self.arena.insert_new_typed(fun, args, result_sort))
     }
 
     fn ensure_same_term_sort(
@@ -2570,10 +2589,7 @@ fn term_map_under_swap(arena: &TermArena, left: TermId, right: TermId) -> Option
             .iter()
             .map(|arg| resolve(arena, *arg, mapped))
             .collect::<Option<Vec<_>>>()?;
-        let mapped_id = *arena.interned.get(&TermKey {
-            fun: term.fun,
-            args,
-        })?;
+        let mapped_id = arena.lookup(term.fun, &args)?;
         mapped[term_id] = mapped_id;
         Some(mapped_id)
     }
@@ -2680,11 +2696,8 @@ fn finite_diagonal_terms(
 
     let mut diagonal = Vec::with_capacity(domain.len());
     for &value in domain {
-        let key = TermKey {
-            fun: function,
-            args: vec![value; arity],
-        };
-        let &term = arena.interned.get(&key)?;
+        let args = vec![value; arity];
+        let term = arena.lookup(function, &args)?;
         if !covered_terms.contains(&term) {
             return None;
         }
@@ -3158,11 +3171,7 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
             continue;
         }
         for tuple in domain_tuples_for_args(&domain, &domain_set, &term.args) {
-            let key = TermKey {
-                fun: term.fun,
-                args: tuple.clone(),
-            };
-            let Some(&canonical) = arena.interned.get(&key) else {
+            let Some(canonical) = arena.lookup(term.fun, &tuple) else {
                 continue;
             };
             if canonical == term_id {
@@ -3209,11 +3218,7 @@ fn add_finite_predicate_channeling(
             continue;
         }
         for tuple in domain_tuples_for_args(domain, domain_set, &term.args) {
-            let key = TermKey {
-                fun: term.fun,
-                args: tuple.clone(),
-            };
-            let Some(&canonical) = arena.interned.get(&key) else {
+            let Some(canonical) = arena.lookup(term.fun, &tuple) else {
                 complete = false;
                 continue;
             };
@@ -3465,11 +3470,7 @@ fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>
             if arguments == left.args {
                 continue;
             }
-            let key = TermKey {
-                fun: left.fun,
-                args: arguments,
-            };
-            let Some(&right_id) = arena.interned.get(&key) else {
+            let Some(right_id) = arena.lookup(left.fun, &arguments) else {
                 continue;
             };
             if right_id == left_id {
@@ -7793,6 +7794,65 @@ mod tests {
     }
 
     #[test]
+    fn repeated_valid_applications_reuse_the_validated_term() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let a = ctx
+            .parse_typed_term(&parse_one_sexp("a"), &mut HashMap::default())
+            .unwrap();
+        ctx.application_signature_checks = 0;
+
+        let first = ctx.intern_application(f, "f", vec![a]).unwrap();
+        let term_count = ctx.arena.terms.len();
+        assert_eq!(ctx.application_signature_checks, 1);
+
+        let repeated = ctx.intern_application(f, "f", vec![a]).unwrap();
+        assert_eq!(repeated, first);
+        assert_eq!(ctx.arena.lookup(f, &[a]), Some(first));
+        assert_eq!(ctx.arena.terms.len(), term_count);
+        assert_eq!(ctx.application_signature_checks, 1);
+    }
+
+    #[test]
+    fn malformed_first_seen_applications_are_not_interned() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun b () V)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut HashMap::default())
+            .unwrap();
+        let term_count = ctx.arena.terms.len();
+        ctx.application_signature_checks = 0;
+
+        assert_eq!(
+            ctx.intern_application(f, "f", Vec::new()).unwrap_err(),
+            "arity mismatch in application `f`: expected 1 arguments, found 0"
+        );
+        assert!(ctx.arena.lookup(f, &[]).is_none());
+        assert_eq!(
+            ctx.intern_application(f, "f", vec![b]).unwrap_err(),
+            "sort mismatch in application `f` argument 1: expected `U`, found `V`"
+        );
+        assert!(ctx.arena.lookup(f, &[b]).is_none());
+        assert_eq!(ctx.arena.terms.len(), term_count);
+        assert_eq!(ctx.application_signature_checks, 2);
+    }
+
+    #[test]
     fn skips_diagnostic_sort_validation_for_valid_boolean_forms() {
         let mut ctx = ParseCtx::new(false);
         parse_test_declarations(
@@ -8210,10 +8270,10 @@ mod tests {
                 membership.insert((term, value), literal);
             }
         }
-        let diagonal_zero = problem.arena.interned[&TermKey {
-            fun: function,
-            args: vec![domain[0], domain[0]],
-        }];
+        let diagonal_zero = problem
+            .arena
+            .lookup(function, &[domain[0], domain[0]])
+            .unwrap();
         assert_eq!(
             add_finite_diagonal_ordered_range(
                 &mut cnf,
