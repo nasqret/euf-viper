@@ -116,8 +116,10 @@ target-family win is evidence for routing, not evidence for promotion.
   cases. Hot-400 and full-corpus gates remain required before defaulting.
 - **Direct-root CNF:** passed hot-400 `142549`, but failed the clean finite-tail
   speed gate `142554`; full-corpus gate `142591` is the decision experiment.
-- **Model-directed CaDiCaL cuts:** implementation and 51-test validation are
-  complete; hard-Goel gate `142586` is active.
+- **Model-directed CaDiCaL cuts:** explicit refinement gate `142586` improved
+  common and geometric speed slightly at equal coverage. Auto-routing gate
+  `142628` lost four Goel solves and is rejected; keep the mode default-off and
+  preserve dynamic Ackermannization.
 - **Equality abstraction:** Yices source mapping and exact meet/join semantics
   are complete. Implement fact-only shadow/facts modes before substitution.
 - **Streaming parser:** design is complete. The first isolated optimization is

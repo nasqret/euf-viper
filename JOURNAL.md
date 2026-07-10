@@ -276,6 +276,11 @@
 - Added default-off model-directed CaDiCaL refinement. It preserves one solver
   instance and adds only deduplicated clauses from rejected complete EUF
   models; the all-feature suite now has 52 passing Rust tests.
+- Explicit CaDiCaL-refine gate `142586` kept hard-Goel coverage `12/35` and
+  improved common/geometric speed `1.013x`/`1.016x`. The actual auto-routing
+  gate `142628` then lost four solves and regressed all speed metrics, so
+  replacing dynamic Ackermannization was rejected. Model cuts remain
+  default-off as a reference strategy for future partial-trail propagation.
 
 ## Next Entry Template
 
