@@ -108,6 +108,22 @@ Every candidate remains default-off until it passes the same-binary targeted
 gate, hot-path gate, hard-tail gate, and complete 7,503-instance gate. A
 target-family win is evidence for routing, not evidence for promotion.
 
+### Live 2026-07-10 Candidates
+
+- **Finite permutation support, focused:** passed repeated boundary gate
+  `142578` and complete finite-family gate `142581`. The latter improved
+  coverage `126 -> 128` and all three speed metrics with no baseline-only
+  cases. Hot-400 and full-corpus gates remain required before defaulting.
+- **Direct-root CNF:** passed hot-400 `142549`, but failed the clean finite-tail
+  speed gate `142554`; full-corpus gate `142591` is the decision experiment.
+- **Model-directed CaDiCaL cuts:** implementation and 51-test validation are
+  complete; hard-Goel gate `142586` is active.
+- **Equality abstraction:** Yices source mapping and exact meet/join semantics
+  are complete. Implement fact-only shadow/facts modes before substitution.
+- **Streaming parser:** design is complete. The first isolated optimization is
+  scoped `let` environments, because one 1.14 MB tail file performs roughly
+  eleven million binding copies in the legacy frontend.
+
 ## Current Limitation
 
 At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a

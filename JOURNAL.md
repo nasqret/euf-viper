@@ -253,6 +253,30 @@
   empty retry-result set with `euf-viper` now reruns exactly euf-viper and
   preserves all comparator rows; 14 Python harness tests pass.
 
+## 2026-07-10
+
+- Added read-only finite-domain telemetry and a deterministic corpus analyzer.
+  All 151 NEQ/PEQ/SEQ instances produced complete structural records with zero
+  failures; 40 have a guarded clique at least as large as the domain.
+- Implemented the missing injection-to-permutation consequence: for every
+  verified domain-sized disequality clique, emit one implied support clause per
+  value. Yices2 2.7.0 source has range and symmetry logic but no corresponding
+  injection, Hall, or dual-support recognizer.
+- Rejected uniform activation after it lost `PEQ013_size7` despite a net
+  coverage gain. Seven-repeat boundaries confirmed large NEQ gains and stable
+  multi-table PEQ regressions.
+- Added a formula-structural focused policy. Repeated gate `142578` gave
+  `1.821x` all-total and `1.334x` geometric speed. Complete finite gate
+  `142581` improved coverage `126 -> 128`, all-total `1.043x`, common-total
+  `1.047x`, and geometric speed `1.070x`, with no baseline-only cases, wrong
+  answers, or execution errors.
+- Direct-root CNF passed hot-400 but failed its clean 20-case finite-tail speed
+  gate (`0.993x` aggregate, `0.983x` geometric). It remains experimental while
+  full-corpus gate `142591` decides the global tradeoff.
+- Added default-off model-directed CaDiCaL refinement. It preserves one solver
+  instance and adds only deduplicated clauses from rejected complete EUF
+  models; the all-feature suite now has 52 passing Rust tests.
+
 ## Next Entry Template
 
 - Benchmark corpus:
