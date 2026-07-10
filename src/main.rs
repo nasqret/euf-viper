@@ -157,7 +157,7 @@ impl TermArena {
 #[derive(Debug)]
 struct Problem {
     sorts: SortTable,
-    fun_decls: HashMap<SymId, FunDecl>,
+    fun_decls: FunDeclTable,
     arena: TermArena,
     eqs: Vec<(TermId, TermId)>,
     diseqs: Vec<(TermId, TermId)>,
@@ -172,7 +172,7 @@ impl Problem {
             if term.sort.0 as usize >= self.sorts.names.len() {
                 return false;
             }
-            let Some(decl) = self.fun_decls.get(&term.fun) else {
+            let Some(decl) = self.fun_decls.get(term.fun) else {
                 return false;
             };
             decl.result_sort == term.sort
@@ -196,6 +196,26 @@ struct BranchLiterals {
 struct FunDecl {
     arg_sorts: Vec<SortId>,
     result_sort: SortId,
+}
+
+#[derive(Debug, Default)]
+struct FunDeclTable {
+    slots: Vec<Option<FunDecl>>,
+}
+
+impl FunDeclTable {
+    #[inline]
+    fn get(&self, sym: SymId) -> Option<&FunDecl> {
+        self.slots.get(sym as usize).and_then(Option::as_ref)
+    }
+
+    fn insert(&mut self, sym: SymId, decl: FunDecl) {
+        let index = sym as usize;
+        if self.slots.len() <= index {
+            self.slots.resize_with(index + 1, || None);
+        }
+        self.slots[index] = Some(decl);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -282,7 +302,7 @@ struct ParseCtx {
     unsupported: Vec<String>,
     bool_assertions: Vec<BoolExpr>,
     bool_unsupported: Vec<String>,
-    fun_decls: HashMap<SymId, FunDecl>,
+    fun_decls: FunDeclTable,
     bool_definitions: HashMap<SymId, BoolExpr>,
     bool_value_terms: Option<(TermId, TermId)>,
     fresh_internal_counter: usize,
@@ -350,7 +370,7 @@ impl ParseCtx {
         result_sort: SortId,
     ) -> Result<SymId, String> {
         let sym = self.symbols.intern(name);
-        if self.fun_decls.contains_key(&sym) {
+        if self.fun_decls.get(sym).is_some() {
             return Err(format!("function `{name}` is already declared"));
         }
         self.fun_decls.insert(
@@ -399,7 +419,7 @@ impl ParseCtx {
                     return Ok(*sort);
                 }
                 let sym = self.symbols.intern(atom);
-                let Some(decl) = self.fun_decls.get(&sym) else {
+                let Some(decl) = self.fun_decls.get(sym) else {
                     return Ok(None);
                 };
                 if !decl.arg_sorts.is_empty() {
@@ -523,7 +543,7 @@ impl ParseCtx {
                     }
                     _ => {
                         let sym = self.symbols.intern(head);
-                        let Some(decl) = self.fun_decls.get(&sym).cloned() else {
+                        let Some(decl) = self.fun_decls.get(sym).cloned() else {
                             return Ok(None);
                         };
                         let args = &items[1..];
@@ -679,7 +699,7 @@ impl ParseCtx {
                 }
 
                 self.ensure_bool_value_terms();
-                let already_declared = self.fun_decls.contains_key(&self.symbols.intern(name));
+                let already_declared = self.fun_decls.get(self.symbols.intern(name)).is_some();
                 let mut env = HashMap::default();
                 match self.parse_bool_expr(&items[4], &mut env) {
                     Ok(body) => {
@@ -1460,7 +1480,7 @@ impl ParseCtx {
 
     fn is_bool_symbol(&self, sym: SymId, arity: usize) -> bool {
         self.fun_decls
-            .get(&sym)
+            .get(sym)
             .is_some_and(|decl| decl.result_sort == BOOL_SORT && decl.arg_sorts.len() == arity)
     }
 
@@ -1470,7 +1490,7 @@ impl ParseCtx {
         name: &str,
         args: &[TermId],
     ) -> Result<SortId, String> {
-        let Some(decl) = self.fun_decls.get(&fun) else {
+        let Some(decl) = self.fun_decls.get(fun) else {
             return Err(format!("undeclared function `{name}`"));
         };
         if args.len() != decl.arg_sorts.len() {
@@ -7700,13 +7720,13 @@ mod tests {
         assert_ne!(u, BOOL_SORT);
         assert_ne!(v, BOOL_SORT);
 
-        let a_decl = &ctx.fun_decls[&ctx.symbols.ids["a"]];
+        let a_decl = ctx.fun_decls.get(ctx.symbols.ids["a"]).unwrap();
         assert!(a_decl.arg_sorts.is_empty());
         assert_eq!(a_decl.result_sort, u);
-        let b_decl = &ctx.fun_decls[&ctx.symbols.ids["b"]];
+        let b_decl = ctx.fun_decls.get(ctx.symbols.ids["b"]).unwrap();
         assert!(b_decl.arg_sorts.is_empty());
         assert_eq!(b_decl.result_sort, v);
-        let f_decl = &ctx.fun_decls[&ctx.symbols.ids["f"]];
+        let f_decl = ctx.fun_decls.get(ctx.symbols.ids["f"]).unwrap();
         assert_eq!(f_decl.arg_sorts, vec![u, BOOL_SORT]);
         assert_eq!(f_decl.result_sort, v);
 
@@ -7736,9 +7756,40 @@ mod tests {
         assert!(problem.terms_are_well_sorted());
         assert_eq!(problem.sorts.names, vec!["Bool", "U", "V"]);
         assert_eq!(
-            problem.fun_decls[&problem.arena.terms[a].fun].result_sort,
+            problem
+                .fun_decls
+                .get(problem.arena.terms[a].fun)
+                .unwrap()
+                .result_sort,
             u
         );
+    }
+
+    #[test]
+    fn dense_function_declarations_preserve_unset_symbol_slots() {
+        let mut ctx = ParseCtx::new(false);
+        let leading_gap = ctx.symbols.intern("leading-gap");
+        let f = ctx.declare_function("f", Vec::new(), BOOL_SORT).unwrap();
+        let interior_gap = ctx.symbols.intern("interior-gap");
+        let g = ctx
+            .declare_function("g", vec![BOOL_SORT], BOOL_SORT)
+            .unwrap();
+
+        assert!(ctx.fun_decls.get(leading_gap).is_none());
+        assert!(ctx.fun_decls.get(interior_gap).is_none());
+        assert_eq!(ctx.fun_decls.get(f).unwrap().arg_sorts, Vec::new());
+        assert_eq!(ctx.fun_decls.get(g).unwrap().arg_sorts, vec![BOOL_SORT]);
+        assert_eq!(ctx.fun_decls.slots.len(), g as usize + 1);
+        assert_eq!(
+            ctx.application_result_sort(interior_gap, "interior-gap", &[]),
+            Err("undeclared function `interior-gap`".to_owned())
+        );
+
+        let problem = ctx.finish();
+        assert!(problem.fun_decls.get(leading_gap).is_none());
+        assert!(problem.fun_decls.get(interior_gap).is_none());
+        assert_eq!(problem.fun_decls.get(f).unwrap().result_sort, BOOL_SORT);
+        assert_eq!(problem.fun_decls.get(g).unwrap().result_sort, BOOL_SORT);
     }
 
     #[test]
