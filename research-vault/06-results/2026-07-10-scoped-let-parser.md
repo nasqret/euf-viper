@@ -2,9 +2,10 @@
 
 Date: 2026-07-10
 
-Status: unconditional activation failed the full-corpus gate. The predeclared
-structural `auto` route passed production-config targeted and sample gates;
-hot-400 gate `142918`/`142926` is running.
+Status: unconditional activation failed. The predeclared structural `auto`
+route passed production-config targeted, sample, hot-400, and complete-corpus
+gates. Its 30 coverage-changing cases are being repeated on both WMI CPU
+classes before final promotion.
 
 ## Problem
 
@@ -77,16 +78,31 @@ the promoted Linux `cadical-refine` fallback, repeated gates gave:
 Both had zero wrong answers, execution errors, or baseline-only cases. This is
 sufficient to advance to hot-400, not to default promotion.
 
+Hot-400 `142918`/`142926` preserved 354/354 coverage and narrowly passed every
+speed criterion: 1.000004x all-total, 1.000005x common-total, and 1.00024x
+geometric speed.
+
+The complete 7,503-instance gate `142952`/`142996` was decisive:
+
+| Coverage | All-total | Common-total | Geometric | Baseline wins | Candidate wins |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 7,219 -> 7,249 | 1.0337x | 1.0165x | 1.0072x | 3,577 | 3,642 |
+
+The route added 30 solves with no baseline-only cases, wrong answers, or
+execution errors. The exact coverage-change population is frozen in
+`results/scoped-let-auto-coverage30.jsonl` and its WMI-remapped counterpart.
+
 ## Artifacts
 
 - `results/wmi/scoped-let-neq027-142743/`.
 - `results/wmi/scoped-let-sample40-142744/`.
 - Full gate: `results/wmi/scoped-let-full-142745/`.
 - Routed production gates: `results/wmi/scoped-let-auto-*` once archived.
+- Routed full gate: `results/wmi/scoped-let-auto-full-142952/`.
 
 ## Decision
 
-Reject unconditional activation. Keep the scoped implementation behind
-`EUF_VIPER_SCOPED_LET=off|auto|on`; promote `auto` only if targeted, sample,
-hot, and complete paired gates preserve coverage and keep all three speed
-metrics at least 1.0.
+Reject unconditional activation. Provisionally promote `auto`, which has now
+passed targeted, sample, hot, and complete paired gates. Keep strict `off` and
+`on` rollback/diagnostic modes. Finalize promotion after the 30 coverage gains
+survive repeated checks on both WMI CPU classes.

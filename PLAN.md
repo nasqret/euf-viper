@@ -68,13 +68,17 @@ front tier of a coverage-oriented portfolio.
 - [x] Complete scoped-`let` full gate `142745`/`142750`; reject unconditional
   activation after a one-solve coverage loss and `0.996x` geometric speed.
 - [ ] Gate the predeclared `>=512` lexical-let automatic route through targeted,
-  sample, hot, and complete paired campaigns; production targeted `142892` and
-  sample `142895` passed, and hot-400 `142918`/`142926` is running.
+  sample, hot, and complete paired campaigns. All passed through full
+  `142952`/`142996`; repeat the 30 coverage gains on c2n1 and c3n1 before
+  checking this item complete.
 - [x] Re-run and reject the clique-core finite-support policy: repeated finite
   gate `142796` passed, but hot-400 `142867`/`142871` lost two solves and
   regressed every speed metric, so no full gate was launched.
 - [ ] Gate compact typed-sort tracking against its pre-sort parent before
   implementing definitional substitution.
+- [ ] Implement and gate non-default equality `guarded-facts`; its frozen
+  55-instance route population passed `142947`/`142951` with +11 solves and
+  every speed metric above 1.20x.
 - [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.

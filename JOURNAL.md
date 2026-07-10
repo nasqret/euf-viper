@@ -322,6 +322,15 @@
 - Added `off|auto|on` scoped-let routing at the predeclared 512-let threshold.
   Production-config deep gate `142892` added one solve and sample gate `142895`
   held 37/37 while passing all three speed criteria. Hot-400 is running.
+- Scoped-let auto then passed hot-400 `142918`/`142926` and complete corpus
+  `142952`/`142996`. The full gate improved coverage `7,219 -> 7,249`,
+  all-total `1.0337x`, common-total `1.0165x`, and geometric speed `1.0072x`,
+  with no losses or errors. All 30 gains are being repeated on c2n1 and c3n1.
+- Broad equality facts remained rejected, but the frozen
+  `guarded_disequality_clauses > 0` selector covered only 55/7,503 instances.
+  Five-repeat gate `142947`/`142951` improved coverage `18 -> 29`, all-total
+  `1.2086x`, common-total `1.4738x`, and geometric speed `1.4191x`, with no
+  losses or errors. An explicit non-default routed mode is being implemented.
 - Added compact typed-sort tracking for terms and full function signatures as
   the soundness prerequisite for definitional substitution. Cross-sort
   equality and application errors are rejected; 90 all-feature release tests
