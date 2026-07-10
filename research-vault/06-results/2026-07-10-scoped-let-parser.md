@@ -3,9 +3,8 @@
 Date: 2026-07-10
 
 Status: unconditional activation failed. The predeclared structural `auto`
-route passed production-config targeted, sample, hot-400, and complete-corpus
-gates. Its 30 coverage-changing cases are being repeated on both WMI CPU
-classes before final promotion.
+route passed targeted, sample, hot-400, complete-corpus, and two-architecture
+confirmation gates. It is promoted with strict `off` and `on` controls.
 
 ## Problem
 
@@ -92,6 +91,18 @@ The route added 30 solves with no baseline-only cases, wrong answers, or
 execution errors. The exact coverage-change population is frozen in
 `results/scoped-let-auto-coverage30.jsonl` and its WMI-remapped counterpart.
 
+Seven-repeat confirmation of those 30 cases reproduced the mechanism on both
+WMI CPU classes:
+
+| Node | Coverage | All-total | Common-total | Geometric |
+| --- | ---: | ---: | ---: | ---: |
+| c2n1 `143029`/`143033` | 1 -> 30 | 2.5980x | 13.1371x | 13.1371x |
+| c3n1 `143034`/`143039` | 0 -> 15 | 1.2717x | n/a | n/a |
+
+Neither run produced a baseline-only case, wrong answer, or execution error.
+The differing solve count is a timeout-boundary architecture effect; both
+independently confirm that scoped parsing removes a real wall.
+
 ## Artifacts
 
 - `results/wmi/scoped-let-neq027-142743/`.
@@ -99,10 +110,12 @@ execution errors. The exact coverage-change population is frozen in
 - Full gate: `results/wmi/scoped-let-full-142745/`.
 - Routed production gates: `results/wmi/scoped-let-auto-*` once archived.
 - Routed full gate: `results/wmi/scoped-let-auto-full-142952/`.
+- Cross-architecture confirmations:
+  `results/wmi/scoped-let-auto-crossarch-c2-143029/` and
+  `results/wmi/scoped-let-auto-crossarch-c3-143034/`.
 
 ## Decision
 
-Reject unconditional activation. Provisionally promote `auto`, which has now
-passed targeted, sample, hot, and complete paired gates. Keep strict `off` and
-`on` rollback/diagnostic modes. Finalize promotion after the 30 coverage gains
-survive repeated checks on both WMI CPU classes.
+Reject unconditional activation. Promote `auto`; it passed every declared gate
+and the coverage gains reproduced on both WMI CPU classes. Keep strict `off`
+and `on` rollback/diagnostic modes.

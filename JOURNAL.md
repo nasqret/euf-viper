@@ -326,6 +326,13 @@
   `142952`/`142996`. The full gate improved coverage `7,219 -> 7,249`,
   all-total `1.0337x`, common-total `1.0165x`, and geometric speed `1.0072x`,
   with no losses or errors. All 30 gains are being repeated on c2n1 and c3n1.
+- Seven-repeat confirmations completed: c2n1 `143029`/`143033` recovered 29
+  additional solves and improved all-total `2.598x`; c3n1
+  `143034`/`143039` recovered 15 and improved all-total `1.272x`. Neither had
+  a baseline-only case. Scoped-let `auto` is promoted.
+- Deferred typed-sort diagnostics to parse-error paths in commit `991d700`.
+  Sample gate `143080` recovered all-total/common speed to `1.0023x`/`1.0038x`
+  but geometric speed remained `0.9971x`; typed parsing is not promoted yet.
 - Broad equality facts remained rejected, but the frozen
   `guarded_disequality_clauses > 0` selector covered only 55/7,503 instances.
   Five-repeat gate `142947`/`142951` improved coverage `18 -> 29`, all-total

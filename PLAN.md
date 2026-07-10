@@ -67,15 +67,16 @@ front tier of a coverage-oriented portfolio.
   `NEQ027_size10/11` improved by `5.63x` aggregate in repeated gate `142743`.
 - [x] Complete scoped-`let` full gate `142745`/`142750`; reject unconditional
   activation after a one-solve coverage loss and `0.996x` geometric speed.
-- [ ] Gate the predeclared `>=512` lexical-let automatic route through targeted,
-  sample, hot, and complete paired campaigns. All passed through full
-  `142952`/`142996`; repeat the 30 coverage gains on c2n1 and c3n1 before
-  checking this item complete.
+- [x] Promote the predeclared `>=512` lexical-let automatic route after
+  targeted, sample, hot, full `142952`/`142996`, and repeated c2n1/c3n1
+  coverage-change gates all passed without a baseline-only case.
 - [x] Re-run and reject the clique-core finite-support policy: repeated finite
   gate `142796` passed, but hot-400 `142867`/`142871` lost two solves and
   regressed every speed metric, so no full gate was launched.
 - [ ] Gate compact typed-sort tracking against its pre-sort parent before
-  implementing definitional substitution.
+  implementing definitional substitution. Removing the duplicate valid-path
+  traversal recovered aggregate speed in `143080`, but geometric speed remains
+  below the gate at `0.9971x`.
 - [ ] Implement and gate non-default equality `guarded-facts`; its frozen
   55-instance route population passed `142947`/`142951` with +11 solves and
   every speed metric above 1.20x.

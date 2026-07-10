@@ -100,8 +100,9 @@
   geometric 1.0072x, with no baseline-only cases, wrong answers, or errors.
   Binary SHA-256 is
   `4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`.
-  Repeated c2n1/c3n1 confirmation jobs are `143029`/`143033` and
-  `143034`/`143039`.
+  Repeated c2n1 `143029`/`143033` and c3n1 `143034`/`143039` confirmations
+  added 29 and 15 solves respectively, improved all-total 2.598x and 1.272x,
+  and produced no baseline-only cases. The route is promoted.
 - The finite permutation clique-core prefilter passed its repeated 151-case
   gate `142796`/`142800` but failed hot-400 `142867`/`142871`: coverage
   321 to 319 and every speed metric below 0.98x. Stop; do not launch a full
@@ -118,8 +119,10 @@
 - Typed sort tracking is the soundness prerequisite for definitional
   substitution. Initial sample `142943` failed speed because it traversed
   valid assertions twice. Commit `991d700` defers diagnostics to parse-error
-  paths; job `143080` is its fresh sample gate. Do not implement substitution
-  on an untyped arena and do not promote typed parsing before its speed gates.
+  paths. Sample gate `143080` recovered all-total/common speed to
+  1.0023x/1.0038x but geometric speed stayed at 0.9971x. Do not implement
+  substitution on an untyped arena and do not promote typed parsing before all
+  speed gates pass.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` is running
   against exact scoped binary commit `58efe9d` and the SHA-256 above. No new
   Z3 or Yices2 superiority claim is allowed before the strict merge completes.
