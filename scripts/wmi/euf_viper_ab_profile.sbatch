@@ -22,6 +22,8 @@ BASELINE_BACKEND="${EUF_VIPER_BASELINE_BACKEND:-auto}"
 CANDIDATE_BACKEND="${EUF_VIPER_CANDIDATE_BACKEND:-auto}"
 BASELINE_DIRECT_ROOT_CNF="${EUF_VIPER_BASELINE_DIRECT_ROOT_CNF:-0}"
 CANDIDATE_DIRECT_ROOT_CNF="${EUF_VIPER_CANDIDATE_DIRECT_ROOT_CNF:-1}"
+BASELINE_SCOPED_LET="${EUF_VIPER_BASELINE_SCOPED_LET:-auto}"
+CANDIDATE_SCOPED_LET="${EUF_VIPER_CANDIDATE_SCOPED_LET:-auto}"
 BASELINE_CADICAL_MODE="${EUF_VIPER_BASELINE_CADICAL_MODE:-plain}"
 CANDIDATE_CADICAL_MODE="${EUF_VIPER_CANDIDATE_CADICAL_MODE:-plain}"
 BASELINE_CADICAL_SEARCH_MODE="${EUF_VIPER_BASELINE_CADICAL_SEARCH_MODE:-auto}"
@@ -81,6 +83,7 @@ for relative_path in "${CASES[@]}"; do
       binary="$BASELINE_BIN"
       backend="$BASELINE_BACKEND"
       direct_root_cnf="$BASELINE_DIRECT_ROOT_CNF"
+      scoped_let="$BASELINE_SCOPED_LET"
       cadical_mode="$BASELINE_CADICAL_MODE"
       cadical_search_mode="$BASELINE_CADICAL_SEARCH_MODE"
       cadical_options="$BASELINE_CADICAL_OPTIONS"
@@ -104,6 +107,7 @@ for relative_path in "${CASES[@]}"; do
       binary="$CANDIDATE_BIN"
       backend="$CANDIDATE_BACKEND"
       direct_root_cnf="$CANDIDATE_DIRECT_ROOT_CNF"
+      scoped_let="$CANDIDATE_SCOPED_LET"
       cadical_mode="$CANDIDATE_CADICAL_MODE"
       cadical_search_mode="$CANDIDATE_CADICAL_SEARCH_MODE"
       cadical_options="$CANDIDATE_CADICAL_OPTIONS"
@@ -129,6 +133,7 @@ for relative_path in "${CASES[@]}"; do
       if env \
         EUF_VIPER_BACKEND="$backend" \
         EUF_VIPER_DIRECT_ROOT_CNF="$direct_root_cnf" \
+        EUF_VIPER_SCOPED_LET="$scoped_let" \
         EUF_VIPER_CADICAL_MODE="$cadical_mode" \
         EUF_VIPER_CADICAL_SEARCH_MODE="$cadical_search_mode" \
         EUF_VIPER_CADICAL_OPTIONS="$cadical_options" \

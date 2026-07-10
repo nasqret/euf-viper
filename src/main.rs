@@ -4782,9 +4782,7 @@ fn selected_scoped_let_mode() -> Result<ScopedLetMode, String> {
 
 fn bounded_lexical_let_count(input: &str) -> usize {
     input
-        .as_bytes()
-        .windows(b"(let".len())
-        .filter(|window| *window == b"(let")
+        .match_indices("(let")
         .take(SCOPED_LET_AUTO_THRESHOLD)
         .count()
 }
