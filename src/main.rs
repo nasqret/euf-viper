@@ -2447,15 +2447,23 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
         }
     }
 
-    if env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref() == Ok("1") {
+    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
+    {
+        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
+        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
+        _ => None,
+    };
+    if let Some(permutation_support_mode) = permutation_support_mode {
         let stats = finite_analysis::add_permutation_support(
             cnf,
             bool_problem,
             &domain,
             &domain_set,
             &finite_terms,
+            closed_functions.len(),
             &disequality_edges,
             &membership,
+            permutation_support_mode,
         );
         profile_measurement(
             "finite_permutation_support",
@@ -2471,6 +2479,11 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
             "finite_permutation_truncated",
             u128::from(stats.truncated),
             stats.direct_edges,
+        );
+        profile_measurement(
+            "finite_permutation_selected",
+            u128::from(stats.selected),
+            closed_functions.len(),
         );
     }
 

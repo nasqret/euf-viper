@@ -19,7 +19,14 @@ pub(crate) struct PermutationSupportStats {
     pub(crate) candidate_edges: usize,
     pub(crate) cliques: usize,
     pub(crate) clauses: usize,
+    pub(crate) selected: bool,
     pub(crate) truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PermutationSupportMode {
+    All,
+    Focused,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,8 +215,10 @@ pub(crate) fn add_permutation_support(
     domain: &[TermId],
     domain_set: &HashSet<TermId>,
     finite_terms: &HashSet<TermId>,
+    closed_table_functions: usize,
     mandatory_disequalities: &HashSet<(TermId, TermId)>,
     membership: &HashMap<(TermId, TermId), i32>,
+    mode: PermutationSupportMode,
 ) -> PermutationSupportStats {
     if domain.len() < 2 {
         return PermutationSupportStats::default();
@@ -225,6 +234,17 @@ pub(crate) fn add_permutation_support(
             &mut guarded_clause_count,
             &mut guarded_edges,
         );
+    }
+    let guarded_vertices = edge_vertices(&guarded_edges);
+    let selected =
+        permutation_support_selected(mode, closed_table_functions, domain.len(), guarded_vertices);
+    if !selected {
+        return PermutationSupportStats {
+            direct_edges: mandatory_disequalities.len(),
+            guarded_edges: guarded_edges.len(),
+            selected: false,
+            ..PermutationSupportStats::default()
+        };
     }
 
     let mut candidate_edges = mandatory_disequalities.clone();
@@ -262,8 +282,20 @@ pub(crate) fn add_permutation_support(
         candidate_edges: candidate_edges.len(),
         cliques: cliques.len(),
         clauses: cnf.clauses.len() - start_clause_count,
+        selected: true,
         truncated,
     }
+}
+
+fn permutation_support_selected(
+    mode: PermutationSupportMode,
+    closed_table_functions: usize,
+    domain_size: usize,
+    guarded_vertices: usize,
+) -> bool {
+    mode == PermutationSupportMode::All
+        || closed_table_functions == 1
+        || (domain_size >= 2 && guarded_vertices == domain_size)
 }
 
 fn cliques_of_size(
@@ -785,8 +817,10 @@ mod tests {
             &domain,
             &domain_set,
             &finite_terms,
+            3,
             &mandatory_disequalities,
             &membership,
+            PermutationSupportMode::All,
         );
 
         assert_eq!(
@@ -797,6 +831,7 @@ mod tests {
                 candidate_edges: 3,
                 cliques: 1,
                 clauses: 3,
+                selected: true,
                 truncated: false,
             }
         );
@@ -804,5 +839,39 @@ mod tests {
             cnf.clauses,
             vec![vec![1, 4, 7], vec![2, 5, 8], vec![3, 6, 9]]
         );
+    }
+
+    #[test]
+    fn focused_support_selects_single_tables_and_single_injections() {
+        assert!(permutation_support_selected(
+            PermutationSupportMode::All,
+            4,
+            7,
+            49,
+        ));
+        assert!(permutation_support_selected(
+            PermutationSupportMode::Focused,
+            1,
+            8,
+            64,
+        ));
+        assert!(permutation_support_selected(
+            PermutationSupportMode::Focused,
+            7,
+            10,
+            10,
+        ));
+        assert!(!permutation_support_selected(
+            PermutationSupportMode::Focused,
+            3,
+            8,
+            64,
+        ));
+        assert!(!permutation_support_selected(
+            PermutationSupportMode::Focused,
+            4,
+            7,
+            49,
+        ));
     }
 }
