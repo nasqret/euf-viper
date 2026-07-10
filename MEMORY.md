@@ -123,9 +123,12 @@
   1.0023x/1.0038x but geometric speed stayed at 0.9971x. Do not implement
   substitution on an untyped arena and do not promote typed parsing before all
   speed gates pass.
-- Fresh four-solver two-second campaign `143049`/`143051`/`143052` is running
-  against exact scoped binary commit `58efe9d` and the SHA-256 above. No new
-  Z3 or Yices2 superiority claim is allowed before the strict merge completes.
+- Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
+  against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
+  cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by
+  1.119x aggregate and 2.083x geometric speed, but Z3 adds 228 net solves.
+  Yices2 adds 486 net solves and is about 3.46x faster on common aggregate.
+  No overall Z3 or Yices2 superiority claim is allowed.
 
 ## Local Canary Results
 

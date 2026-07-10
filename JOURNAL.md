@@ -333,6 +333,12 @@
 - Deferred typed-sort diagnostics to parse-error paths in commit `991d700`.
   Sample gate `143080` recovered all-total/common speed to `1.0023x`/`1.0038x`
   but geometric speed remained `0.9971x`; typed parsing is not promoted yet.
+- Completed fresh exact-binary four-solver campaign
+  `143049`/`143051`/`143052`. Coverage was euf-viper 6,948, Z3 7,176, cvc5
+  6,926, and Yices2 7,434, with no wrong answers, disagreements, or errors.
+  Against Z3 on 6,907 common solves, euf-viper was `1.119x` faster by total and
+  `2.083x` geometrically, but Z3 added 228 net solves. Yices added 486 net
+  solves and remained about `3.46x` faster by common aggregate time.
 - Broad equality facts remained rejected, but the frozen
   `guarded_disequality_clauses > 0` selector covered only 55/7,503 instances.
   Five-repeat gate `142947`/`142951` improved coverage `18 -> 29`, all-total

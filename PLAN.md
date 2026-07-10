@@ -58,6 +58,10 @@ front tier of a coverage-oriented portfolio.
   using the exact promoted binary SHA-256. The solver beats cvc5 overall and
   beats Z3 by `1.111x` common-total and `2.035x` geometric speed, but trails Z3
   by 249 solves and Yices2 by 546 solves.
+- [x] Re-run the exact promoted scoped-let binary in four-solver campaign
+  `143049`/`143051`/`143052`: euf-viper 6,948, Z3 7,176, cvc5 6,926, Yices2
+  7,434; euf-viper keeps a `1.119x`/`2.083x` common-total/geometric edge over
+  Z3 but trails its coverage by 228 and Yices2 by 486.
 - [x] Promote direct-root CNF after full gate `142591` improved coverage
   `6,825 -> 6,843`, all-total `1.006x`, common-total `1.010x`, and geometric
   speed `1.026x` with zero wrong answers or execution errors.
@@ -168,11 +172,11 @@ independent solver victory. The accepted 2026-07-09 standalone iteration
 improves the previous binary from 6,993 to 7,002 solves at two seconds while
 also passing all three speed metrics. Its 60-second and 1,200-second coverage
 remain unmeasured, so the older competition-budget boundary still governs.
-The newer finite-symmetry/parser binary has passed a paired full-corpus gate
-against its immediate predecessor and a fresh four-solver campaign. At two
-seconds it solves 6,874 instances versus Z3's 7,123, cvc5's 6,831, and Yices2's
-7,420. On 6,833 common euf-viper/Z3 solves it is `1.111x` faster by aggregate
-and `2.035x` geometrically, but Z3's extra coverage still wins timeout-charged
-total time. Yices2 remains `3.584x` faster on common aggregate time and adds
-555 pairwise solves. Long-timeout campaigns remain pending, so no overall Z3
-or Yices2 superiority claim is allowed.
+The promoted direct-root/scoped-let binary has passed paired full-corpus gates
+and fresh four-solver campaign `143049`. At two seconds it solves 6,948 versus
+Z3's 7,176, cvc5's 6,926, and Yices2's 7,434. On 6,907 common euf-viper/Z3
+solves it is `1.119x` faster by aggregate and `2.083x` geometrically, but Z3's
+228 net coverage advantage still wins timeout-charged total time. Yices2 is
+about `3.46x` faster on common aggregate time and adds 486 net solves.
+Long-timeout campaigns remain pending, so no overall Z3 or Yices2 superiority
+claim is allowed.
