@@ -1500,17 +1500,42 @@ impl ParseCtx {
                 args.len()
             ));
         }
-        for (index, (&arg, &expected)) in args.iter().zip(&decl.arg_sorts).enumerate() {
-            let found = self.arena.terms[arg].sort;
-            if found != expected {
-                return Err(self.sort_mismatch(
-                    &format!("application `{name}` argument {}", index + 1),
-                    expected,
-                    found,
+        Ok(decl.result_sort)
+    }
+
+    fn validate_application_signatures(&self) -> Result<(), String> {
+        for &term_id in &self.arena.apps {
+            let term = &self.arena.terms[term_id];
+            let name = || {
+                self.symbols
+                    .ids
+                    .iter()
+                    .find_map(|(name, &sym)| (sym == term.fun).then_some(name.as_str()))
+                    .unwrap_or("<internal>")
+            };
+            let Some(decl) = self.fun_decls.get(term.fun) else {
+                return Err(format!("undeclared function `{}`", name()));
+            };
+            if term.args.len() != decl.arg_sorts.len() {
+                return Err(format!(
+                    "arity mismatch in application `{}`: expected {} arguments, found {}",
+                    name(),
+                    decl.arg_sorts.len(),
+                    term.args.len()
                 ));
             }
+            for (index, (&arg, &expected)) in term.args.iter().zip(&decl.arg_sorts).enumerate() {
+                let found = self.arena.terms[arg].sort;
+                if found != expected {
+                    return Err(self.sort_mismatch(
+                        &format!("application `{}` argument {}", name(), index + 1),
+                        expected,
+                        found,
+                    ));
+                }
+            }
         }
-        Ok(decl.result_sort)
+        Ok(())
     }
 
     fn intern_application(
@@ -6186,6 +6211,7 @@ fn parse_problem_with_scoped_let_mode(
     for sexp in &sexps {
         ctx.parse_command(sexp)?;
     }
+    ctx.validate_application_signatures()?;
     Ok(ctx.finish())
 }
 
@@ -7790,6 +7816,35 @@ mod tests {
         assert!(problem.fun_decls.get(interior_gap).is_none());
         assert_eq!(problem.fun_decls.get(f).unwrap().result_sort, BOOL_SORT);
         assert_eq!(problem.fun_decls.get(g).unwrap().result_sort, BOOL_SORT);
+    }
+
+    #[test]
+    fn deferred_signature_validation_checks_unique_interned_applications() {
+        let mut ctx = ParseCtx::new(false);
+        parse_test_declarations(
+            &mut ctx,
+            "(declare-sort U 0)
+             (declare-sort V 0)
+             (declare-fun b () V)
+             (declare-fun f (U) U)",
+        );
+
+        let f = ctx.symbols.ids["f"];
+        let b = ctx
+            .parse_typed_term(&parse_one_sexp("b"), &mut HashMap::default())
+            .unwrap();
+        let first = ctx.intern_application(f, "f", vec![b]).unwrap();
+        let repeated = ctx.intern_application(f, "f", vec![b]).unwrap();
+
+        assert_eq!(first, repeated);
+        assert_eq!(
+            ctx.arena.apps.iter().filter(|&&term| term == first).count(),
+            1
+        );
+        assert_eq!(
+            ctx.validate_application_signatures().unwrap_err(),
+            "sort mismatch in application `f` argument 1: expected `U`, found `V`"
+        );
     }
 
     #[test]
