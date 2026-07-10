@@ -2,8 +2,9 @@
 
 Date: 2026-07-10
 
-Status: targeted optimization passed, but unconditional activation failed the
-full-corpus gate. A structural `auto` route for deep-let inputs is under test.
+Status: unconditional activation failed the full-corpus gate. The predeclared
+structural `auto` route passed production-config targeted and sample gates;
+hot-400 gate `142918`/`142926` is running.
 
 ## Problem
 
@@ -59,11 +60,29 @@ therefore retains the original cloned parser below 512 lexical occurrences and
 uses scoped restoration at or above 512. That threshold was selected from the
 complete gate before measuring the routed binary.
 
+Commit `58efe9d` exposes strict `EUF_VIPER_SCOPED_LET=off|auto|on`, defaults
+to `auto`, and stops its optimized substring scan once 512 occurrences are
+seen. Exact WMI binary SHA-256 is
+`4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`.
+
+The first routed jobs accidentally inherited the historical harness default
+`EUF_VIPER_INVALID_MODEL_FALLBACK=varisat`; they are diagnostic only. Under
+the promoted Linux `cadical-refine` fallback, repeated gates gave:
+
+| Gate | Coverage | All-total | Common-total | Geometric |
+| --- | ---: | ---: | ---: | ---: |
+| Deep NEQ `142892` | 0 -> 1 | 1.5580x | n/a | n/a |
+| Sample-40 `142895` | 37 -> 37 | 1.0005x | 1.0011x | 1.0052x |
+
+Both had zero wrong answers, execution errors, or baseline-only cases. This is
+sufficient to advance to hot-400, not to default promotion.
+
 ## Artifacts
 
 - `results/wmi/scoped-let-neq027-142743/`.
 - `results/wmi/scoped-let-sample40-142744/`.
 - Full gate: `results/wmi/scoped-let-full-142745/`.
+- Routed production gates: `results/wmi/scoped-let-auto-*` once archived.
 
 ## Decision
 

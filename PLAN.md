@@ -68,10 +68,13 @@ front tier of a coverage-oriented portfolio.
 - [x] Complete scoped-`let` full gate `142745`/`142750`; reject unconditional
   activation after a one-solve coverage loss and `0.996x` geometric speed.
 - [ ] Gate the predeclared `>=512` lexical-let automatic route through targeted,
-  sample, hot, and complete paired campaigns.
-- [ ] Re-run the clique-core finite-support policy through finite, hot, and
-  full-corpus promotion gates; repeated finite gate `142796` passed and
-  hot-400 gate `142867`/`142871` is running.
+  sample, hot, and complete paired campaigns; production targeted `142892` and
+  sample `142895` passed, and hot-400 `142918`/`142926` is running.
+- [x] Re-run and reject the clique-core finite-support policy: repeated finite
+  gate `142796` passed, but hot-400 `142867`/`142871` lost two solves and
+  regressed every speed metric, so no full gate was launched.
+- [ ] Gate compact typed-sort tracking against its pre-sort parent before
+  implementing definitional substitution.
 - [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
@@ -128,7 +131,8 @@ target-family win is evidence for routing, not evidence for promotion.
   `142578`, finite gate `142581`, hot-400 `142597`, and cross-architecture gate
   `142702`. Full gate `142610` gained five solves and improved total time but
   missed geometric promotion at `0.997x`; the original route is rejected as a
-  global default. A necessary `(n-1)`-core prefilter is now under test.
+  global default. A necessary `(n-1)`-core prefilter then failed hot-400 and is
+  also rejected.
 - **Direct-root CNF:** full gate `142591` passed coverage and every speed metric;
   it is promoted by `50edc7d`, with `EUF_VIPER_DIRECT_ROOT_CNF=0` as rollback.
 - **Model-directed CaDiCaL cuts:** explicit refinement gate `142586` improved

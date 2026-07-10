@@ -5,7 +5,7 @@ Date: 2026-07-10
 Status: the original focused policy passed targeted, repeated, finite-family,
 hot-400, and second-architecture gates but failed the full-corpus geometric
 criterion. Its necessary clique-core prefilter passed the repeated 151-case
-gate; hot-400 gate `142867`/`142871` is running.
+gate, then failed hot-400 and is rejected.
 
 ## Hypothesis
 
@@ -111,6 +111,16 @@ There were zero candidate-only or baseline-only cases, wrong answers, or
 execution errors. This advances the revision to hot-400, but is not sufficient
 for global promotion.
 
+Repeated hot-400 gate `142867`/`142871` rejected the revision:
+
+| Coverage | All-total | Common-total | Geometric | Wins |
+| ---: | ---: | ---: | ---: | ---: |
+| 321 -> 319 | 0.9795x | 0.9609x | 0.9728x | 36 -> 283 |
+
+`gensys_icl325.smt2` and `gensys_icl_sk002.smt2` were reproducible
+baseline-only solves. There were no wrong answers or execution errors. The
+candidate therefore stops before a complete-corpus run.
+
 ## Rejected Uniform Policy
 
 Uniform support lost `PEQ013_size7.smt2` at the two-second boundary and slowed
@@ -143,7 +153,8 @@ Raw ignored artifacts are under:
 - `results/wmi/finite-permutation-focused-full-142610/`;
 - `results/wmi/finite-permutation-focused-boundary-crossarch-142702/`;
 - `results/wmi/finite-structures-full-c958-142731/`;
-- `results/wmi/finite-kcore-all151-142796/`.
+- `results/wmi/finite-kcore-all151-142796/`;
+- `results/wmi/finite-kcore-hot400-142867/`.
 
 The structure report is
 `results/wmi/finite-permutation-all151-142567/finite-structures.json`; its
@@ -152,7 +163,6 @@ metric-only full-clique manifest contains 40 instances.
 ## Decision
 
 Do not default-enable the original focused policy: its full gate failed
-geometric speed. The clique-core revision has passed the finite slice and must
-still pass hot-400 and complete-corpus gates. Native Hall propagation remains
-the broader follow-up because the current rule handles only proved full-domain
-injections.
+geometric speed. Reject the clique-core revision because it lost coverage and
+all speed criteria at hot-400. Native Hall propagation remains the broader
+follow-up because the current rule handles only proved full-domain injections.

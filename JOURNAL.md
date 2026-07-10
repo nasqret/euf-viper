@@ -311,6 +311,21 @@
   star edges on 4,610, and consumed 1.46% of successful solver time in
   aggregate; hardened same-binary facts gates now use explicit fresh-atom and
   quota settings.
+- Found that the WMI A/B harness still forced the obsolete `varisat`
+  invalid-model fallback although the promoted Linux solver defaults to
+  `cadical-refine`. Commit `94c86c0` aligns the harness with production;
+  historical exact-environment results remain valid, but all live promotion
+  candidates are being rerun under the corrected default.
+- Rejected the clique-core finite-support revision after hot-400
+  `142867`/`142871` lost two solves and regressed all-total to `0.980x`,
+  common-total to `0.961x`, and geometric speed to `0.973x`.
+- Added `off|auto|on` scoped-let routing at the predeclared 512-let threshold.
+  Production-config deep gate `142892` added one solve and sample gate `142895`
+  held 37/37 while passing all three speed criteria. Hot-400 is running.
+- Added compact typed-sort tracking for terms and full function signatures as
+  the soundness prerequisite for definitional substitution. Cross-sort
+  equality and application errors are rejected; 90 all-feature release tests
+  pass. The typed parser remains unpromoted until its own speed gates pass.
 
 ## Next Entry Template
 
