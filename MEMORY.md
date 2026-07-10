@@ -110,12 +110,12 @@
 - Broad equality facts are rejected. Production sample `142898` measured
   0.9763x common and 0.9337x geometric speed. Hard-hit `142899`/`142907`
   added 18 solves but still regressed common/geometric speed.
-- A path-independent prospective selector,
-  `guarded_disequality_clauses > 0`, covers 55/7,503 instances. Five-repeat
-  full-population gate `142947`/`142951` improved coverage 18 to 29,
-  all-total 1.2086x, common-total 1.4738x, and geometric 1.4191x with no
-  losses or errors. Implement only as explicit `guarded-facts` until its
-  actual routed full gate passes; fresh equality atoms must remain disabled.
+- The path-independent `guarded_disequality_clauses > 0` equality-fact route
+  is rejected on the current baseline. Its actual mode passed sample `143160`
+  narrowly, but selected-population gate `143161` stayed 29/29 and regressed
+  all-total to 0.9960x, common-total to 0.9852x, and geometric speed to
+  0.9816x. Scoped-let now solves all 11 historical fact-only gains. Keep
+  `guarded-facts` default-off and do not launch its hot/full gates.
 - Typed sort tracking is the soundness prerequisite for definitional
   substitution. Initial sample `142943` failed speed because it traversed
   valid assertions twice. Commit `991d700` defers diagnostics to parse-error
@@ -123,6 +123,12 @@
   1.0023x/1.0038x but geometric speed stayed at 0.9971x. Do not implement
   substitution on an untyped arena and do not promote typed parsing before all
   speed gates pass.
+- Dense `Vec<Option<FunDecl>>` indexing in `1820fef` is a measured typed-branch
+  improvement: isolated sample `143178` kept 37/37 and improved
+  all/common/geometric speed by 1.0102x/1.0203x/1.0129x. Direct gate `143188`
+  against accepted pre-typed `58efe9d` still failed at
+  0.9962x/0.9923x/0.9835x. Keep the accepted binary unchanged and optimize
+  repeated application checks next.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
   against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
   cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by

@@ -348,6 +348,23 @@
   the soundness prerequisite for definitional substitution. Cross-sort
   equality and application errors are rejected; 90 all-feature release tests
   pass. The typed parser remains unpromoted until its own speed gates pass.
+- Implemented exact non-default equality mode `guarded-facts` in `cce247b` and
+  froze WMI binary
+  `d26631dec1cd5c6df2c5f145e7d5597ac630cdf427e0eb80ca7ba7508eb31881`.
+  Five-repeat sample `143160` passed at 37/37 with all-total `1.0006x`,
+  common-total `1.0012x`, and geometric `1.0018x`.
+- Rejected `guarded-facts` after selected-population gate `143161` stayed
+  29/29 and regressed all-total/common/geometric speed to
+  `0.9960x`/`0.9852x`/`0.9816x`. All 11 historical fact-only gains are now
+  baseline solves due to the promoted scoped-let parser, so hot-400 and full
+  gates were intentionally not launched.
+- Replaced typed function-declaration hash lookups with dense indexed storage
+  in `1820fef`. Isolated sample `143178` kept 37/37 and passed all speed gates:
+  all-total `1.0102x`, common-total `1.0203x`, geometric `1.0129x`.
+- Direct typed+dense versus accepted pre-typed gate `143188` kept 37/37 but
+  failed all speed gates at `0.9962x`/`0.9923x`/`0.9835x`. Dense lookup stays
+  in the research branch, while the accepted production binary remains
+  `58efe9d`; next optimize only redundant checks for already interned terms.
 
 ## Next Entry Template
 

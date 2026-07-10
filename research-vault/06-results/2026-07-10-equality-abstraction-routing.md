@@ -2,10 +2,11 @@
 
 Date: 2026-07-10
 
-Status: broad fact insertion is rejected. A path-independent guarded-
-disequality route passed all analysis folds and a repeated 55-instance
-full-population gate. The actual routed implementation is under test and is
-not default-enabled.
+Status: rejected. A path-independent guarded-disequality route passed the
+historical analysis folds and its original 55-instance population gate, but
+its actual routed implementation lost every speed metric after the scoped-let
+baseline was promoted. It remains default-off and did not advance to hot-path
+or complete-corpus gates.
 
 ## Soundness Boundary
 
@@ -104,6 +105,45 @@ The experimental mode is `EUF_VIPER_EQ_ABSTRACTION=guarded-facts`. It must:
 6. remain non-default until sample, guarded55, hot-400, and complete-corpus
    same-binary gates all pass.
 
+## Actual Routed Build
+
+Commit `cce247b` implements the contract with a lazy shared finite-analysis
+context. A structural scan first rejects formulas that cannot contain the
+guarded pattern. Only the remaining formulas compute the exact verified
+guarded-clause count, and equality abstraction runs only when that count is
+positive. Fact integration precedes finite-domain atom materialization, and
+the routed mode forcibly disables fresh atoms.
+
+The frozen WMI binary SHA-256 is
+`d26631dec1cd5c6df2c5f145e7d5597ac630cdf427e0eb80ca7ba7508eb31881`.
+Rust all-feature release tests pass 96/96 and the campaign-analysis suite
+passes 38/38.
+
+Five-repeat same-binary sample gate `143160` changed only
+`EUF_VIPER_EQ_ABSTRACTION=off|guarded-facts`:
+
+| Coverage | All-total | Common-total | Geometric | Baseline wins | Candidate wins |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 37 -> 37 | 1.0006x | 1.0012x | 1.0018x | 16 | 21 |
+
+There were no one-sided solves, wrong answers, or execution errors. The margin
+is narrow but passes the predeclared sample boundary; it is not sufficient for
+promotion by itself.
+
+The next five-repeat gate `143161` reran all 55 structurally selected cases on
+the current baseline:
+
+| Coverage | All-total | Common-total | Geometric | Baseline wins | Candidate wins |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 29 -> 29 | 0.9960x | 0.9852x | 0.9816x | 27 | 2 |
+
+There were no one-sided solves, wrong answers, or execution errors. All 11
+instances that had been candidate-only in the earlier `off|facts` gate are now
+solved by the baseline. The intervening scoped-let promotion captured those
+gains, leaving only equality-analysis overhead. This is a direct example of
+why candidates are rebased and remeasured rather than stacking projected
+wins.
+
 ## Artifacts
 
 - Shadow telemetry: `results/wmi/eq-abstraction-shadow-142801/`.
@@ -114,10 +154,16 @@ The experimental mode is `EUF_VIPER_EQ_ABSTRACTION=guarded-facts`. It must:
   `results/wmi/eq-abstraction-production-hard-hits-142899/route-analysis.json`.
 - Repeated selector population:
   `results/wmi/eq-abstraction-guarded55-142947/`.
+- Actual routed sample:
+  `results/wmi/eq-abstraction-guarded-mode-sample40-143160/`.
+- Actual routed selected population:
+  `results/wmi/eq-abstraction-guarded-mode-guarded55-143161/`.
 
 ## Decision
 
-Reject `facts` as a broad mode. Implement `guarded-facts` exactly as frozen,
-then promote only if runtime routing preserves coverage and all speed metrics
-through the complete corpus. Do not infer a Z3 or Yices2 victory from this
-within-solver gate.
+Reject both broad `facts` and the current `guarded-facts` route. Keep the
+implementation default-off for controlled research, but do not spend hot-400
+or complete-corpus resources on a candidate that already fails its selected
+population. Any future equality-fact route needs a newly frozen population
+with gains not already supplied by scoped parsing. Do not infer a Z3 or Yices2
+victory from the historical within-solver gate.

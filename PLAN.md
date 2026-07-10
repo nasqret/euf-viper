@@ -79,11 +79,15 @@ front tier of a coverage-oriented portfolio.
   regressed every speed metric, so no full gate was launched.
 - [ ] Gate compact typed-sort tracking against its pre-sort parent before
   implementing definitional substitution. Removing the duplicate valid-path
-  traversal recovered aggregate speed in `143080`, but geometric speed remains
-  below the gate at `0.9971x`.
-- [ ] Implement and gate non-default equality `guarded-facts`; its frozen
-  55-instance route population passed `142947`/`142951` with +11 solves and
-  every speed metric above 1.20x.
+  traversal recovered aggregate speed in `143080`. Dense declaration indexing
+  then passed isolated sample `143178` at `1.0129x` geometric speed, but the
+  combined typed branch still lost to `58efe9d` in `143188` at `0.9835x`.
+  Continue reducing valid-path signature overhead before substitution.
+- [x] Implement and reject non-default equality `guarded-facts`. Sample
+  `143160` passed narrowly, but current-baseline selected-population gate
+  `143161` stayed 29/29 and regressed all three speed metrics. Scoped-let had
+  already recovered every one of the 11 historical fact-only solves, so no
+  hot-400 or complete-corpus gate was launched.
 - [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
