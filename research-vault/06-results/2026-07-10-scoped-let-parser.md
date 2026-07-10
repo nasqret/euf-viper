@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: implementation and targeted gate passed; full-corpus decision gate
-`142745`/`142750` is running.
+Status: targeted optimization passed, but unconditional activation failed the
+full-corpus gate. A structural `auto` route for deep-let inputs is under test.
 
 ## Problem
 
@@ -43,15 +43,31 @@ The 40-case no-regression gate `142744` remained 40/40 but was within noise on
 the wrong side of the strict speed threshold: 0.998x total and 0.995x
 geometric. Therefore the targeted result alone is not a promotion.
 
+The complete 7,503-instance gate `142745`/`142750` rejected unconditional
+activation:
+
+| Metric | Baseline | Candidate / ratio |
+| --- | ---: | ---: |
+| Correct | 6,852 | 6,851 |
+| All-total speed | - | 1.0023x |
+| Common-total speed | - | 1.0016x |
+| Geometric speed | - | 0.9963x |
+
+The candidate-only solves had 852, 1,140, and 1,243 lexical `let` occurrences.
+The four baseline-only solves had only 4, 5, 15, and 28. A prospective route
+therefore retains the original cloned parser below 512 lexical occurrences and
+uses scoped restoration at or above 512. That threshold was selected from the
+complete gate before measuring the routed binary.
+
 ## Artifacts
 
 - `results/wmi/scoped-let-neq027-142743/`.
 - `results/wmi/scoped-let-sample40-142744/`.
-- Full gate, when complete: `results/wmi/scoped-let-full-142745/`.
+- Full gate: `results/wmi/scoped-let-full-142745/`.
 
 ## Decision
 
-Keep the implementation while full gate `142745` runs. Accept it only if the
-complete paired corpus has no coverage loss and all three speed metrics are at
-least 1.0. Otherwise retain the code only behind a structural parser route or
-revert it in a follow-up commit.
+Reject unconditional activation. Keep the scoped implementation behind
+`EUF_VIPER_SCOPED_LET=off|auto|on`; promote `auto` only if targeted, sample,
+hot, and complete paired gates preserve coverage and keep all three speed
+metrics at least 1.0.

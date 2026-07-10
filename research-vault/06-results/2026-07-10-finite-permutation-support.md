@@ -2,10 +2,10 @@
 
 Date: 2026-07-10
 
-Status: focused policy passed targeted, repeated, finite-family, hot-400, and
-second-architecture gates, but failed the full-corpus geometric promotion
-criterion. It remains explicit and is being narrowed with a necessary
-clique-core prefilter.
+Status: the original focused policy passed targeted, repeated, finite-family,
+hot-400, and second-architecture gates but failed the full-corpus geometric
+criterion. Its necessary clique-core prefilter passed the repeated 151-case
+gate; hot-400 gate `142867`/`142871` is running.
 
 ## Hypothesis
 
@@ -98,7 +98,18 @@ Commit `fbcefb5` adds a necessary graph prefilter: focused mode proceeds to
 clique enumeration only if the candidate graph has at least `n` vertices in
 its `(n-1)`-core. Every real `n`-clique survives this peeling, so the filter
 cannot remove a support opportunity. It removes only searches that provably
-cannot emit a clause. This revision requires fresh finite, hot, and full gates.
+cannot emit a clause. Commit `b80c238` also restores the cheapest structural
+rejection before constructing the candidate graph.
+
+The exact-binary repeated 151-case gate `142796`/`142800` passed:
+
+| Coverage | All-total | Common-total | Geometric | Wins |
+| ---: | ---: | ---: | ---: | ---: |
+| 130 -> 130 | 1.0017x | 1.0035x | 1.0085x | 92 -> 38 |
+
+There were zero candidate-only or baseline-only cases, wrong answers, or
+execution errors. This advances the revision to hot-400, but is not sufficient
+for global promotion.
 
 ## Rejected Uniform Policy
 
@@ -131,7 +142,8 @@ Raw ignored artifacts are under:
 - `results/wmi/finite-permutation-focused-hot-142597/`;
 - `results/wmi/finite-permutation-focused-full-142610/`;
 - `results/wmi/finite-permutation-focused-boundary-crossarch-142702/`;
-- `results/wmi/finite-structures-full-c958-142731/`.
+- `results/wmi/finite-structures-full-c958-142731/`;
+- `results/wmi/finite-kcore-all151-142796/`.
 
 The structure report is
 `results/wmi/finite-permutation-all151-142567/finite-structures.json`; its
@@ -140,6 +152,7 @@ metric-only full-clique manifest contains 40 instances.
 ## Decision
 
 Do not default-enable the original focused policy: its full gate failed
-geometric speed. Benchmark the clique-core revision from the finite slice
-through the complete corpus. Native Hall propagation remains the broader
-follow-up because the current rule handles only proved full-domain injections.
+geometric speed. The clique-core revision has passed the finite slice and must
+still pass hot-400 and complete-corpus gates. Native Hall propagation remains
+the broader follow-up because the current rule handles only proved full-domain
+injections.

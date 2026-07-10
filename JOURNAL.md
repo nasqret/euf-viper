@@ -298,7 +298,19 @@
 - Replaced cloned nested-`let` environments with scoped in-place bindings.
   Seven-repeat gate `142743` improved `NEQ027_size10/11` by `5.63x` aggregate
   at unchanged coverage. The 40-case control was flat but slightly below the
-  strict speed threshold, so full gate `142745`/`142750` decides promotion.
+  strict speed threshold. Full gate `142745`/`142750` then lost one net solve
+  and measured `0.996x` geometric speed, so unconditional activation is
+  rejected; a predeclared lexical-depth route at 512 lets is under test.
+- Passed the repeated 151-case clique-core finite-support gate
+  `142796`/`142800`: coverage stayed 130/130, all-total improved `1.0017x`,
+  common-total `1.0035x`, and geometric speed `1.0085x`, with zero wrong
+  answers or errors. Hot-400 gate `142867`/`142871` is the next promotion
+  boundary.
+- Completed corrected equality-shadow telemetry on all 7,503 instances in
+  `142801`/`142803`. The abstraction applied to 7,401 inputs, found useful
+  star edges on 4,610, and consumed 1.46% of successful solver time in
+  aggregate; hardened same-binary facts gates now use explicit fresh-atom and
+  quota settings.
 
 ## Next Entry Template
 

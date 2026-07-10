@@ -65,9 +65,13 @@ front tier of a coverage-oriented portfolio.
   audit, shadow telemetry, and default-off fact insertion.
 - [x] Replace cloned nested-`let` environments with scoped restoration;
   `NEQ027_size10/11` improved by `5.63x` aggregate in repeated gate `142743`.
-- [ ] Complete the scoped-`let` full-corpus decision gate `142745`/`142750`.
+- [x] Complete scoped-`let` full gate `142745`/`142750`; reject unconditional
+  activation after a one-solve coverage loss and `0.996x` geometric speed.
+- [ ] Gate the predeclared `>=512` lexical-let automatic route through targeted,
+  sample, hot, and complete paired campaigns.
 - [ ] Re-run the clique-core finite-support policy through finite, hot, and
-  full-corpus promotion gates.
+  full-corpus promotion gates; repeated finite gate `142796` passed and
+  hot-400 gate `142867`/`142871` is running.
 - [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
@@ -134,10 +138,12 @@ target-family win is evidence for routing, not evidence for promotion.
 - **Equality abstraction:** bounded `off|shadow|facts` modes and an independent
   soundness audit are complete. Unrouted facts regressed the 40-case sample;
   associative flattening, duplicate-unit suppression, quotas, and a frozen
-  shadow-hit manifest are required before the next facts gate.
+  shadow-hit manifest are complete. Same-binary hardened sample and hard-hit
+  gates are running with fresh equality atoms disabled.
 - **Streaming parser:** scoped `let` environments removed roughly eleven
   million copies on the worst nested case and passed a `5.63x` targeted gate.
-  Full-corpus gate `142745` decides promotion before token streaming begins.
+  Unconditional activation failed the full-corpus gate; a predeclared
+  lexical-let threshold now decides whether the scoped path is used.
 
 ## Current Limitation
 
