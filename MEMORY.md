@@ -133,6 +133,10 @@
   but failed isolated sample `143202`: all-total 0.99995x, common-total
   0.99987x, geometric 1.00003x at 37/37. It was reverted in `d69792a`; do not
   spend production-baseline, hot, or full gates on it.
+- Typed QG profile `143209` measured faster candidate parse medians on all four
+  completed controls. Removing the rejected guarded-facts context in
+  `93e2d90` still failed isolated sample `143220` at 0.9992x all-total and
+  0.9985x common-total despite 1.0036x geometric speed. `92a7a8f` restored it.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
   against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
   cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by

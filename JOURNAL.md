@@ -369,6 +369,10 @@
   `f7b52fb`. Isolated sample `143202` stayed 37/37 and was effectively flat:
   all-total `0.99995x`, common-total `0.99987x`, geometric `1.00003x`. The
   strict gate failed, so `d69792a` reverted it before broader campaigns.
+- QG phase profile `143209` found typed+dense parse medians faster on all four
+  completed controls. Removing the rejected guarded-facts finite context in
+  `93e2d90` nevertheless failed isolated sample `143220`: all-total `0.9992x`,
+  common-total `0.9985x`, geometric `1.0036x`. `92a7a8f` restored the code.
 
 ## Next Entry Template
 

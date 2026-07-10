@@ -84,7 +84,8 @@ front tier of a coverage-oriented portfolio.
   combined typed branch still lost to `58efe9d` in `143188` at `0.9835x`.
   Exact-term reuse then failed its isolated gate `143202` at
   `0.99995x`/`0.99987x` aggregate speed and was reverted. Continue reducing
-  measured valid-path allocation or signature overhead before substitution.
+  measured valid-path allocation or signature overhead before substitution;
+  removing the guarded finite context also failed `143220` and was restored.
 - [x] Implement and reject non-default equality `guarded-facts`. Sample
   `143160` passed narrowly, but current-baseline selected-population gate
   `143161` stayed 29/29 and regressed all three speed metrics. Scoped-let had

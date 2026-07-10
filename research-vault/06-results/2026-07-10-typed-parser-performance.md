@@ -75,6 +75,20 @@ effectively flat at 1.00003x, while all-total and common-total failed the strict
 gate at 0.99995x and 0.99987x. The change was reverted in `d69792a` without a
 production-baseline, hot-400, or full-corpus run.
 
+## Rejected Guarded-Context Removal
+
+Phase profile `143209` showed typed+dense parse medians were faster on all four
+completed QG controls, by 1.006x to 1.063x. This weakened the hypothesis that
+sort parsing itself explains the remaining end-to-end loss. Commit `93e2d90`
+therefore removed the rejected guarded-facts implementation and its shared
+finite-analysis context while preserving typed+dense code.
+
+Five-repeat isolated gate `143220` again kept 37/37. Geometric speed improved
+to 1.0036x, but all-total and common-total failed at 0.9992x and 0.9985x. The
+strict gate rejected the removal, and `92a7a8f` restored the default-off
+implementation. The remaining production gap is not attributable to that
+context refactor alone.
+
 ## Artifacts
 
 - Initial typed sample: `results/wmi/typed-sorts-sample40-142943/`.
@@ -84,6 +98,9 @@ production-baseline, hot-400, or full-corpus run.
   `results/wmi/typed-dense-vs-pretyped-sample40-143188/`.
 - Rejected exact-term reuse:
   `results/wmi/exact-term-reuse-sample40-143202/`.
+- QG phase profile: `results/wmi/typed-dense-profile-qg5-143209/`.
+- Rejected guarded-context removal:
+  `results/wmi/remove-guarded-context-sample40-143220/`.
 
 ## Decision
 
