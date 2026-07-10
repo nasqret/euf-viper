@@ -4,7 +4,8 @@ The current pipeline keeps each soundness boundary explicit.
 
 1. Parse SMT-LIB S-expressions.
 2. Hash-cons data and Boolean application terms.
-3. Tseitin-encode arbitrary ground Boolean structure.
+3. Encode top-level assertions directly, introducing Tseitin variables only
+   for internal Boolean values that must be named.
 4. Detect small explicit finite domains and add sound one-hot and function
    channeling clauses where applicable.
 5. Add selected equality-transitivity and congruence axioms.
@@ -12,7 +13,7 @@ The current pipeline keeps each soundness boundary explicit.
 7. Trust UNSAT from the sound clause set; validate SAT models with full EUF
    congruence closure.
 8. If validation finds a theory conflict on a selected large sparse shape,
-   rebuild a compact direct-root CNF, complete it propositionally, and retry.
+   rebuild the direct-root CNF with bounded propositional completion and retry.
 9. Otherwise add explanation clauses and refine incrementally.
 
 On Linux x86_64, step 9 uses incremental CaDiCaL refinement by default after
@@ -26,6 +27,42 @@ The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail
 gate.
+
+## Direct-root Boolean encoding
+
+The default encoder applies the truth requirement directly to each assertion.
+For example, a positive conjunction emits its children as required clauses and
+a positive disjunction emits one clause over child literals, rather than
+allocating a fresh root variable and a unit clause. Internal subformulas still
+use Tseitin definitions whenever their value is shared or must appear as a
+literal. Exhaustive assignment tests compare both encoders across nested
+`and`, `or`, `not`, `iff`, and `ite` formulas.
+
+The complete paired gate improved coverage from 6,825 to 6,843 and passed all
+three speed criteria. `EUF_VIPER_DIRECT_ROOT_CNF=0` retains the old root-unit
+encoding as an exact rollback.
+
+## Parser routing
+
+Nested SMT-LIB `let` expressions can use in-place scoped restoration instead
+of cloning the complete binding map at every level. This reduced two
+parser-dominated NEQ cases by 5.63x in a repeated gate, but unconditional use
+lost one net solve and regressed geometric speed on the complete corpus.
+`EUF_VIPER_SCOPED_LET=off|auto|on` therefore keeps both implementations. The
+prospective `auto` policy selects scoped restoration only when a bounded
+lexical scan reaches 512 `let` forms; it is not considered promoted until its
+own complete paired gate passes.
+
+## Equality abstraction
+
+The default-off `EUF_VIPER_EQ_ABSTRACTION=shadow|facts` experiment computes
+equalities common to Boolean branches using partition meet and join. Fact mode
+adds only already-materialized equality atoms by default, suppresses duplicate
+positive units, and rolls back transactionally at explicit quotas. Creating
+fresh equality atoms requires the separate
+`EUF_VIPER_EQ_ABSTRACTION_FRESH=1` opt-in. Shadow telemetry covered all 7,503
+inputs, but no fact route is promoted until same-binary sample, hard-hit, and
+complete-corpus gates pass.
 
 ## Dynamic Ackermann completion
 
