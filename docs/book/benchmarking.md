@@ -98,6 +98,27 @@ errors, or decisive disagreements. `euf-viper` beat Z3 on 5,428/6,437 jointly
 correct instances, but Yices beat `euf-viper` on 6,166/6,463. This result
 rejects a broad fastest-solver claim.
 
+## Current Two-Second Checkpoint
+
+After direct-root CNF and structurally routed scoped-let parsing were promoted,
+fresh exact-binary campaign `143049`/`143051`/`143052` reran all four solvers.
+The euf-viper source was `58efe9d`; its binary SHA-256 was
+`4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`.
+
+| Solver | Correct | Coverage | Median time | Timeout-charged total |
+|---|---:|---:|---:|---:|
+| euf-viper | 6,948 | 92.60% | 0.0471s | 2,327.84s |
+| Z3 4.16.0 | 7,176 | 95.64% | 0.1285s | 2,245.09s |
+| cvc5 1.3.4 | 6,926 | 92.31% | 0.1888s | 3,188.03s |
+| Yices 2.7.0 | 7,434 | 99.08% | 0.0243s | 748.96s |
+
+On 6,907 common euf-viper/Z3 solves, euf-viper was 1.119x faster by aggregate
+time and 2.083x geometrically. It had 41 pairwise-only solves, while Z3 had
+269. Against Yices2, euf-viper had four pairwise-only solves and Yices2 had
+490; Yices2 was about 3.46x faster by common aggregate time. All 30,012 rows
+completed without wrong answers, disagreements, or execution errors. This is
+the current fast-head result, not an overall superiority result.
+
 QG-classification contributes 6,396 instances (85.24%). `euf-viper` covered
 86.18% of QG and 86.63% of non-QG; Yices covered 98.91% and 96.48%
 respectively. The 60-second and competition-budget runs retain both strata.

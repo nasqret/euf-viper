@@ -49,9 +49,10 @@ of cloning the complete binding map at every level. This reduced two
 parser-dominated NEQ cases by 5.63x in a repeated gate, but unconditional use
 lost one net solve and regressed geometric speed on the complete corpus.
 `EUF_VIPER_SCOPED_LET=off|auto|on` therefore keeps both implementations. The
-prospective `auto` policy selects scoped restoration only when a bounded
-lexical scan reaches 512 `let` forms; it is not considered promoted until its
-own complete paired gate passes.
+promoted `auto` policy selects scoped restoration only when a bounded lexical
+scan reaches 512 `let` forms. Its complete paired gate added 30 solves and
+improved all-total, common-total, and geometric speed; the coverage gains then
+reproduced on both WMI CPU classes. `off` remains the exact rollback.
 
 ## Equality abstraction
 
