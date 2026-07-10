@@ -236,17 +236,6 @@ pub(crate) fn add_permutation_support(
         );
     }
     let guarded_vertices = edge_vertices(&guarded_edges);
-    let selected =
-        permutation_support_selected(mode, closed_table_functions, domain.len(), guarded_vertices);
-    if !selected {
-        return PermutationSupportStats {
-            direct_edges: mandatory_disequalities.len(),
-            guarded_edges: guarded_edges.len(),
-            selected: false,
-            ..PermutationSupportStats::default()
-        };
-    }
-
     let mut candidate_edges = mandatory_disequalities.clone();
     candidate_edges.extend(guarded_edges.iter().copied());
     candidate_edges.retain(|(left, right)| {
@@ -257,6 +246,23 @@ pub(crate) fn add_permutation_support(
             && membership.contains_key(&(*left, domain[0]))
             && membership.contains_key(&(*right, domain[0]))
     });
+
+    let selected = permutation_support_selected(
+        mode,
+        closed_table_functions,
+        domain.len(),
+        guarded_vertices,
+        &candidate_edges,
+    );
+    if !selected {
+        return PermutationSupportStats {
+            direct_edges: mandatory_disequalities.len(),
+            guarded_edges: guarded_edges.len(),
+            candidate_edges: candidate_edges.len(),
+            selected: false,
+            ..PermutationSupportStats::default()
+        };
+    }
 
     let clique_limit = env::var("EUF_VIPER_FINITE_PERMUTATION_CLIQUE_LIMIT")
         .ok()
@@ -292,10 +298,76 @@ fn permutation_support_selected(
     closed_table_functions: usize,
     domain_size: usize,
     guarded_vertices: usize,
+    candidate_edges: &HashSet<(TermId, TermId)>,
 ) -> bool {
-    mode == PermutationSupportMode::All
-        || closed_table_functions == 1
-        || (domain_size >= 2 && guarded_vertices == domain_size)
+    match mode {
+        PermutationSupportMode::All => true,
+        PermutationSupportMode::Focused => {
+            (closed_table_functions == 1 || (domain_size >= 2 && guarded_vertices == domain_size))
+                && candidate_graph_has_clique_core(candidate_edges, domain_size)
+        }
+    }
+}
+
+fn candidate_graph_has_clique_core(edges: &HashSet<(TermId, TermId)>, target_size: usize) -> bool {
+    if target_size < 2 {
+        return true;
+    }
+
+    let mut adjacency = HashMap::<TermId, HashSet<TermId>>::default();
+    for &(left, right) in edges {
+        if left == right {
+            continue;
+        }
+        adjacency.entry(left).or_default().insert(right);
+        adjacency.entry(right).or_default().insert(left);
+    }
+
+    let required_edges = (target_size as u128) * ((target_size - 1) as u128) / 2;
+    let edge_count = adjacency
+        .values()
+        .map(|neighbors| neighbors.len() as u128)
+        .sum::<u128>()
+        / 2;
+    if edge_count < required_edges {
+        return false;
+    }
+
+    let minimum_degree = target_size - 1;
+    let mut degrees = adjacency
+        .iter()
+        .map(|(&vertex, neighbors)| (vertex, neighbors.len()))
+        .collect::<HashMap<_, _>>();
+    let mut peel = degrees
+        .iter()
+        .filter_map(|(&vertex, &degree)| (degree < minimum_degree).then_some(vertex))
+        .collect::<Vec<_>>();
+    peel.sort_unstable();
+
+    // Any size-n clique survives (n-1)-core peeling: before the first clique
+    // vertex could be removed, its other n-1 clique vertices are still neighbors.
+    // Thus fewer than n surviving vertices proves that no size-n clique existed.
+    while let Some(vertex) = peel.pop() {
+        let Some(degree) = degrees.get(&vertex).copied() else {
+            continue;
+        };
+        if degree >= minimum_degree {
+            continue;
+        }
+        degrees.remove(&vertex);
+        for neighbor in &adjacency[&vertex] {
+            let Some(neighbor_degree) = degrees.get_mut(neighbor) else {
+                continue;
+            };
+            let newly_below_minimum = *neighbor_degree == minimum_degree;
+            *neighbor_degree -= 1;
+            if newly_below_minimum {
+                peel.push(*neighbor);
+            }
+        }
+    }
+
+    degrees.len() >= target_size
 }
 
 fn cliques_of_size(
@@ -777,6 +849,58 @@ mod tests {
     }
 
     #[test]
+    fn focused_clique_core_prefilter_accepts_a_true_n_clique() {
+        let complete_four = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        assert!(candidate_graph_has_clique_core(&complete_four, 4));
+        assert!(permutation_support_selected(
+            PermutationSupportMode::Focused,
+            1,
+            4,
+            0,
+            &complete_four,
+        ));
+    }
+
+    #[test]
+    fn focused_clique_core_prefilter_rejects_insufficient_edge_count() {
+        let almost_complete_four = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)]
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        assert!(!candidate_graph_has_clique_core(&almost_complete_four, 4));
+        assert!(!permutation_support_selected(
+            PermutationSupportMode::Focused,
+            1,
+            4,
+            0,
+            &almost_complete_four,
+        ));
+    }
+
+    #[test]
+    fn focused_clique_core_prefilter_rejects_dense_graph_without_n_core() {
+        let complete_bipartite_two_by_three = [(0, 2), (0, 3), (0, 4), (1, 2), (1, 3), (1, 4)]
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        assert_eq!(complete_bipartite_two_by_three.len(), 6);
+        assert!(!candidate_graph_has_clique_core(
+            &complete_bipartite_two_by_three,
+            4
+        ));
+        assert!(!permutation_support_selected(
+            PermutationSupportMode::Focused,
+            1,
+            4,
+            0,
+            &complete_bipartite_two_by_three,
+        ));
+    }
+
+    #[test]
     fn adds_dual_value_support_for_a_verified_finite_injection() {
         let domain = vec![0, 1, 2];
         let domain_set = domain.iter().copied().collect::<HashSet<_>>();
@@ -842,36 +966,107 @@ mod tests {
     }
 
     #[test]
-    fn focused_support_selects_single_tables_and_single_injections() {
+    fn all_support_bypasses_focused_structural_selection() {
+        let domain = vec![0, 1, 2];
+        let domain_set = domain.iter().copied().collect::<HashSet<_>>();
+        let outputs = [3, 4, 5];
+        let finite_terms = domain
+            .iter()
+            .copied()
+            .chain(outputs)
+            .collect::<HashSet<_>>();
+        let mandatory_disequalities = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
+        let bool_problem = BoolProblem {
+            assertions: Vec::new(),
+            unsupported: Vec::new(),
+            true_term: 6,
+            false_term: 7,
+        };
+        let mut membership = HashMap::default();
+        let mut literal = 1;
+        for term in outputs {
+            for &value in &domain {
+                membership.insert((term, value), literal);
+                literal += 1;
+            }
+        }
+
+        let mut focused_cnf = CnfProblem::new();
+        let focused = add_permutation_support(
+            &mut focused_cnf,
+            &bool_problem,
+            &domain,
+            &domain_set,
+            &finite_terms,
+            2,
+            &mandatory_disequalities,
+            &membership,
+            PermutationSupportMode::Focused,
+        );
+        assert_eq!(focused.candidate_edges, 3);
+        assert!(!focused.selected);
+        assert!(focused_cnf.clauses.is_empty());
+
+        let mut all_cnf = CnfProblem::new();
+        let all = add_permutation_support(
+            &mut all_cnf,
+            &bool_problem,
+            &domain,
+            &domain_set,
+            &finite_terms,
+            2,
+            &mandatory_disequalities,
+            &membership,
+            PermutationSupportMode::All,
+        );
+        assert_eq!(
+            all,
+            PermutationSupportStats {
+                direct_edges: 3,
+                guarded_edges: 0,
+                candidate_edges: 3,
+                cliques: 1,
+                clauses: 3,
+                selected: true,
+                truncated: false,
+            }
+        );
+        assert_eq!(
+            all_cnf.clauses,
+            vec![vec![1, 4, 7], vec![2, 5, 8], vec![3, 6, 9]]
+        );
+    }
+
+    #[test]
+    fn focused_support_keeps_the_existing_structural_selector() {
+        let triangle = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
         assert!(permutation_support_selected(
             PermutationSupportMode::All,
             4,
             7,
             49,
+            &HashSet::default(),
         ));
         assert!(permutation_support_selected(
             PermutationSupportMode::Focused,
             1,
-            8,
-            64,
+            3,
+            0,
+            &triangle,
         ));
         assert!(permutation_support_selected(
             PermutationSupportMode::Focused,
             7,
-            10,
-            10,
+            3,
+            3,
+            &triangle,
         ));
         assert!(!permutation_support_selected(
             PermutationSupportMode::Focused,
             3,
-            8,
-            64,
-        ));
-        assert!(!permutation_support_selected(
-            PermutationSupportMode::Focused,
-            4,
-            7,
-            49,
+            3,
+            2,
+            &triangle,
         ));
     }
 }
