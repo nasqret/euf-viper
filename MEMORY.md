@@ -137,6 +137,15 @@
   completed controls. Removing the rejected guarded-facts context in
   `93e2d90` still failed isolated sample `143220` at 0.9992x all-total and
   0.9985x common-total despite 1.0036x geometric speed. `92a7a8f` restored it.
+- Cross-architecture typed+dense confirmation `143228` on c2n1 stayed 39/39
+  but failed at 0.9997x all-total, 0.9995x common-total, and 0.9876x geometric.
+  Worst-10 profile `143224` localized the main loss to parse time. The
+  `HashMap::entry` reuse candidate `d5a0e14` then failed isolated `143232` at
+  0.9935x/0.9873x aggregate speed and was reverted by `aaffae3`.
+- Global-get candidate `4a0ff44` improved worst-10 parse by 1.0337x, but sample
+  `143239` failed geometric speed at 0.9955x despite 1.0011x/1.0021x aggregate
+  speed. `6973ed4` reverted it. Next validate sorts once per unique interned
+  application rather than once per syntax occurrence.
 - Fresh four-solver two-second campaign `143049`/`143051`/`143052` completed
   against exact scoped binary commit `58efe9d`: euf-viper 6,948, Z3 7,176,
   cvc5 6,926, Yices2 7,434. Euf-viper beats Z3 on 6,907 common solves by

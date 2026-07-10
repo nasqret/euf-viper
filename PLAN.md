@@ -86,6 +86,10 @@ front tier of a coverage-oriented portfolio.
   `0.99995x`/`0.99987x` aggregate speed and was reverted. Continue reducing
   measured valid-path allocation or signature overhead before substitution;
   removing the guarded finite context also failed `143220` and was restored.
+  Cross-architecture `143228` confirmed the production loss, and an entry-API
+  reuse path failed isolated `143232`. Global-get `143239` improved aggregate
+  speed but failed geometric speed and was reverted; unique-term post-parse
+  validation is next.
 - [x] Implement and reject non-default equality `guarded-facts`. Sample
   `143160` passed narrowly, but current-baseline selected-population gate
   `143161` stayed 29/29 and regressed all three speed metrics. Scoped-let had

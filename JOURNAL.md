@@ -373,6 +373,17 @@
   completed controls. Removing the rejected guarded-facts finite context in
   `93e2d90` nevertheless failed isolated sample `143220`: all-total `0.9992x`,
   common-total `0.9985x`, geometric `1.0036x`. `92a7a8f` restored the code.
+- Seven-repeat c2n1 gate `143228` confirmed typed+dense remains slower than
+  accepted `58efe9d`: 39/39 coverage, all-total `0.9997x`, common-total
+  `0.9995x`, geometric `0.9876x`.
+- Worst-loss profile `143224` measured the typed branch at 0.9860x geometric
+  parse speed. A global-interner `HashMap::entry` fast path in `d5a0e14`
+  worsened aggregate timing and failed isolated sample `143232` at
+  `0.9935x`/`0.9873x` despite 1.0032x geometric speed. `aaffae3` reverted it.
+- Global-get fast path `4a0ff44` improved worst-10 parse/end-to-end profile
+  `143241` by `1.0337x`/`1.0167x`. Seven-repeat sample `143239` still failed
+  geometric speed at `0.9955x` while aggregate metrics passed
+  `1.0011x`/`1.0021x`; `6973ed4` reverted it.
 
 ## Next Entry Template
 

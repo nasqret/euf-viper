@@ -61,6 +61,11 @@ strict first-seen signature checking while avoiding redundant checks when the
 exact `(function, argument TermIds)` application was already validated and
 interned.
 
+Seven-repeat cross-architecture confirmation `143228` on `c2n1` kept 39/39 but
+again failed all three speed boundaries: all-total 0.9997x, common-total
+0.9995x, and geometric 0.9876x. This rules out treating the original `c3n1`
+failure as a single-node fluctuation.
+
 ## Rejected Exact-Term Reuse
 
 Commit `f7b52fb` replaced the composite interning map with a dense per-function
@@ -89,6 +94,32 @@ strict gate rejected the removal, and `92a7a8f` restored the default-off
 implementation. The remaining production gap is not attributable to that
 context refactor alone.
 
+## Rejected Entry API Fast Path
+
+Worst-loss profile `143224` localized the current typed+dense deficit to parse
+time (0.9860x geometric, 0.9773x aggregate) plus smaller CNF, load, and SAT
+shifts. Commit `d5a0e14` preserved the global interner but used
+`HashMap::entry` so occupied terms skipped signature checks.
+
+The entry path made worst-10 parse time slower by another 1.3% and failed
+seven-repeat isolated sample `143232`: coverage stayed 37/37, geometric speed
+was 1.0032x, but all-total/common-total regressed to 0.9935x/0.9873x. Commit
+`aaffae3` reverted it. The follow-up candidate retains the original
+`get`/`insert` sequence and only moves validation after the existing miss.
+
+## Rejected Global-Get Fast Path
+
+Commit `4a0ff44` kept the original map layout and `get`/`insert` sequence,
+moving signature validation only behind the existing lookup miss. Worst-10
+profile `143241` improved parse by 1.0337x and end-to-end geometric speed by
+1.0167x over typed+dense.
+
+The authoritative seven-repeat sample `143239` stayed 37/37 and improved
+all-total/common-total to 1.0011x/1.0021x, but geometric speed failed at
+0.9955x. Commit `6973ed4` reverted the candidate. The next experiment changes
+the operation count more substantially: validate argument sorts once over
+unique interned applications after parsing, not once per syntax occurrence.
+
 ## Artifacts
 
 - Initial typed sample: `results/wmi/typed-sorts-sample40-142943/`.
@@ -96,11 +127,21 @@ context refactor alone.
 - Dense lookup isolation: `results/wmi/dense-fun-decls-sample40-143178/`.
 - Dense typed versus accepted pre-typed:
   `results/wmi/typed-dense-vs-pretyped-sample40-143188/`.
+- Dense typed versus accepted pre-typed on `c2n1`:
+  `results/wmi/typed-dense-vs-pretyped-c2-sample40-143228/`.
 - Rejected exact-term reuse:
   `results/wmi/exact-term-reuse-sample40-143202/`.
 - QG phase profile: `results/wmi/typed-dense-profile-qg5-143209/`.
 - Rejected guarded-context removal:
   `results/wmi/remove-guarded-context-sample40-143220/`.
+- Worst-10 typed profile:
+  `results/wmi/typed-dense-profile-worst10-143224/`.
+- Rejected entry fast path:
+  `results/wmi/entry-fast-profile-worst10-143236/` and
+  `results/wmi/entry-fast-sample40-143232/`.
+- Rejected global-get fast path:
+  `results/wmi/get-fast-profile-worst10-143241/` and
+  `results/wmi/get-fast-sample40-143239/`.
 
 ## Decision
 
