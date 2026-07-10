@@ -389,6 +389,30 @@
   end-to-end. Seven-repeat sample `143244` stayed 37/37 and measured 1.0017x
   geometric speed, but all-total/common-total regressed to
   `0.9931x`/`0.9865x`; reject before broader gates.
+- Built a profile-guided binary from accepted source `58efe9d`. It passed the
+  40-case control but failed the disjoint 512-case holdout: coverage
+  `480 -> 476`, all-total `0.9964x`, common-total `0.9945x`, geometric
+  `1.0203x`. Global PGO is rejected.
+- Added deterministic structural binary-router training and independent
+  evaluation with median aggregation, source-SHA folds, forbidden-feature
+  enforcement, and hard coverage/speed gates. All 43 repository Python tests
+  passed after the initial implementation; the focused router suite has six
+  tests.
+- Five-fold routing on the PGO holdout preserved 480 baseline solves, routed
+  74/512 held-out cases, and projected `1.00040x` all-total, `1.00075x`
+  common-total, and `1.00407x` geometric speed. Its frozen
+  `equalities <= 579` rule passed the independent 40-case control but improved
+  all-total by only `1.00010x`. Reject an external launcher because its
+  overhead would dominate the measured margin.
+- Completed exact 60-second campaign `143248`/`143249`/`143254`. Coverage is
+  euf-viper 7,478, Z3 7,490, cvc5 7,473, and Yices2 7,500, with zero wrong
+  answers, disagreements, errors, or failed shards. Viper beats Z3 on 5,811
+  of 7,466 common solves and is `1.888x` faster geometrically, but loses
+  common aggregate time at `0.723x`; Yices leads both speed and coverage.
+- Archived the complete 60-second run and exact manifest under
+  `results/wmi/four-solver-60s-143248/`. Submitted the hash-pinned
+  1,200-second timeout-only continuation as prep `143382`, array `143383`, and
+  merge `143384`; it is running and no final result is claimed.
 
 ## Next Entry Template
 

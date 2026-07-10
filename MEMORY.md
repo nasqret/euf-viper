@@ -156,6 +156,21 @@
   1.119x aggregate and 2.083x geometric speed, but Z3 adds 228 net solves.
   Yices2 adds 486 net solves and is about 3.46x faster on common aggregate.
   No overall Z3 or Yices2 superiority claim is allowed.
+- Global PGO for accepted source `58efe9d` is rejected. The disjoint 512-case
+  holdout lost four solves and regressed all/common aggregate speed despite a
+  1.0203x geometric gain. A structural PGO rule passed five-fold and
+  independent-sample gates, but its all-time gains were only 1.00040x and
+  1.00010x before runtime routing overhead. Do not implement an external PGO
+  launcher; retain the signal only for future in-process code partitioning.
+- Exact 60-second campaign `143248`/`143249`/`143254` used binary SHA-256
+  `4d543113...` and completed all 30,012 observations without errors or wrong
+  answers. Coverage is euf-viper 7,478, Z3 7,490, cvc5 7,473, and Yices2
+  7,500. Viper's euf/Z3 common geometric ratio is 1.888x, but common-total is
+  0.723x because of the hard tail. Yices remains decisively ahead.
+- Exact 1,200-second timeout-only resume `143382`/`143383`/`143384` inherits
+  solved rows from `143248` and reruns 71 timeout observations. Prep verified
+  source `58efe9d`, binary SHA-256 `4d543113...`, and 7,503 manifest rows. It
+  is running; do not infer final coverage from the older competition campaign.
 
 ## Local Canary Results
 

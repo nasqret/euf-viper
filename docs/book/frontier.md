@@ -23,6 +23,42 @@ The labels below keep different kinds of statements separate:
 - **[H] Hypothesis:** a proposed mechanism, policy, or expected effect that
   still requires the stated experiment.
 
+## Latest 60-Second Baseline
+
+**[M]** Exact accepted-binary campaign `143248`/`143249`/`143254` ran all
+7,503 SMT-LIB 2025 QF_UF instances at 60 seconds per solver. It used source
+`58efe9d`, binary SHA-256
+`4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`,
+and a manifest with SHA-256
+`2ab1041d877d65befb41d5c7ae0c942a970bc4266aa37167dc8a77ec91bd2acf`.
+All 30,012 observations completed with zero wrong answers, disagreements,
+execution errors, or failed shards.
+
+| Solver | Correct | Timeouts | Median | Timeout-charged total |
+| --- | ---: | ---: | ---: | ---: |
+| euf-viper | 7,478 | 25 | 0.0471s | 5,930.09s |
+| Z3 4.16.0 | 7,490 | 13 | 0.1285s | 3,998.14s |
+| cvc5 1.3.4 | 7,473 | 30 | 0.1888s | 7,752.73s |
+| Yices 2.7.0 | 7,500 | 3 | 0.0243s | 1,307.54s |
+
+On the 7,466 common euf-viper/Z3 solves, euf-viper wins 5,811 instances and
+has a `1.8883x` geometric speed ratio. Its common-total ratio is only
+`0.7233x`: a small hard tail outweighs the large fast-head win. Against Yices,
+euf-viper has only three unique solves while Yices has 25, and Yices wins
+7,013/7,475 common cases. The four-solver oracle covers all 7,503 instances.
+
+**[M]** The exact 1,200-second timeout-only continuation is running as prep
+`143382`, array `143383`, and merge `143384`. It inherits solved observations
+from `143248` and reruns only its 71 timeout cells. No final competition-budget
+claim is made before the dependent merge completes.
+
+**[M]** Global PGO was separately rejected after losing four solves and
+aggregate time on a disjoint 512-case holdout. A structural PGO rule passed
+five-fold validation and a disjoint 40-case control, but improved all-time by
+only `1.00010x` on the control before routing overhead. It is not promoted.
+The detailed evidence is in
+`research-vault/06-results/2026-07-10-pgo-and-long-timeout.md`.
+
 ## Current Comparator
 
 **[M]** Campaign `142480` used revision

@@ -96,7 +96,15 @@ front tier of a coverage-oriented portfolio.
   `143161` stayed 29/29 and regressed all three speed metrics. Scoped-let had
   already recovered every one of the 11 historical fact-only solves, so no
   hot-400 or complete-corpus gate was launched.
-- [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
+- [x] Rerun the accepted standalone solver at 60 seconds. Exact campaign
+  `143248`/`143249`/`143254` completed at 7,478 euf-viper, 7,490 Z3, 7,473
+  cvc5, and 7,500 Yices2 solves with no wrong answers or errors.
+- [ ] Complete the accepted standalone 1,200-second timeout-only resume.
+  Prep `143382`, array `143383`, and merge `143384` are running against the
+  hash-pinned `58efe9d` binary and resume only 71 timeout observations.
+- [x] Evaluate PGO globally and through a source-SHA-folded structural route.
+  Reject global PGO for coverage and aggregate regressions; reject an external
+  router because independent all-time gain is only `1.00010x` before overhead.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
@@ -190,5 +198,8 @@ Z3's 7,176, cvc5's 6,926, and Yices2's 7,434. On 6,907 common euf-viper/Z3
 solves it is `1.119x` faster by aggregate and `2.083x` geometrically, but Z3's
 228 net coverage advantage still wins timeout-charged total time. Yices2 is
 about `3.46x` faster on common aggregate time and adds 486 net solves.
-Long-timeout campaigns remain pending, so no overall Z3 or Yices2 superiority
-claim is allowed.
+The exact 60-second rerun is complete: euf-viper solves 7,478 versus Z3's
+7,490 and Yices2's 7,500. Euf-viper retains a 1.888x geometric advantage over
+Z3 on common solves, but loses common aggregate time at 0.723x because of its
+hard tail. The exact 1,200-second timeout-only continuation is running. No
+overall Z3 or Yices2 superiority claim is allowed.
