@@ -4,4 +4,5 @@ chapters:
   - file: theory
   - file: implementation
   - file: benchmarking
+  - file: frontier
   - file: operations
