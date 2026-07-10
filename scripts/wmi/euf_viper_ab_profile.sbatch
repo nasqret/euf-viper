@@ -48,6 +48,8 @@ BASELINE_FINITE_PERMUTATION_SUPPORT="${EUF_VIPER_BASELINE_FINITE_PERMUTATION_SUP
 CANDIDATE_FINITE_PERMUTATION_SUPPORT="${EUF_VIPER_CANDIDATE_FINITE_PERMUTATION_SUPPORT:-0}"
 BASELINE_INVALID_MODEL_FALLBACK="${EUF_VIPER_BASELINE_INVALID_MODEL_FALLBACK:-varisat}"
 CANDIDATE_INVALID_MODEL_FALLBACK="${EUF_VIPER_CANDIDATE_INVALID_MODEL_FALLBACK:-varisat}"
+BASELINE_REFINEMENT_MODE="${EUF_VIPER_BASELINE_REFINEMENT_MODE:-current}"
+CANDIDATE_REFINEMENT_MODE="${EUF_VIPER_CANDIDATE_REFINEMENT_MODE:-current}"
 BASELINE_AXIOM_ORDER="${EUF_VIPER_BASELINE_AXIOM_ORDER:-native}"
 CANDIDATE_AXIOM_ORDER="${EUF_VIPER_CANDIDATE_AXIOM_ORDER:-native}"
 REPEATS="${EUF_VIPER_PROFILE_REPEATS:-3}"
@@ -84,6 +86,7 @@ for relative_path in "${CASES[@]}"; do
       finite_lex_min_domain="$BASELINE_FINITE_LEX_MIN_DOMAIN"
       finite_permutation_support="$BASELINE_FINITE_PERMUTATION_SUPPORT"
       invalid_model_fallback="$BASELINE_INVALID_MODEL_FALLBACK"
+      refinement_mode="$BASELINE_REFINEMENT_MODE"
       axiom_order="$BASELINE_AXIOM_ORDER"
     else
       binary="$CANDIDATE_BIN"
@@ -102,6 +105,7 @@ for relative_path in "${CASES[@]}"; do
       finite_lex_min_domain="$CANDIDATE_FINITE_LEX_MIN_DOMAIN"
       finite_permutation_support="$CANDIDATE_FINITE_PERMUTATION_SUPPORT"
       invalid_model_fallback="$CANDIDATE_INVALID_MODEL_FALLBACK"
+      refinement_mode="$CANDIDATE_REFINEMENT_MODE"
       axiom_order="$CANDIDATE_AXIOM_ORDER"
     fi
     for repeat in $(seq 1 "$REPEATS"); do
@@ -122,6 +126,7 @@ for relative_path in "${CASES[@]}"; do
         EUF_VIPER_FINITE_LEX_MIN_DOMAIN="$finite_lex_min_domain" \
         EUF_VIPER_FINITE_PERMUTATION_SUPPORT="$finite_permutation_support" \
         EUF_VIPER_INVALID_MODEL_FALLBACK="$invalid_model_fallback" \
+        EUF_VIPER_REFINEMENT_MODE="$refinement_mode" \
         EUF_VIPER_PROFILE=1 \
         EUF_VIPER_AXIOM_ORDER="$axiom_order" \
         timeout "${TIMEOUT}s" "$binary" solve --stats "$input" 2>&1; then

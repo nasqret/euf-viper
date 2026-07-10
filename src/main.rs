@@ -3503,6 +3503,24 @@ fn use_cadical_refine_after_invalid_model() -> bool {
     cadical_refine_after_invalid_model(setting.as_deref())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefinementMode {
+    Current,
+    ModelCuts,
+}
+
+fn parse_refinement_mode(setting: Option<&str>) -> RefinementMode {
+    match setting {
+        Some("model-cuts") => RefinementMode::ModelCuts,
+        _ => RefinementMode::Current,
+    }
+}
+
+fn selected_refinement_mode() -> RefinementMode {
+    let setting = env::var("EUF_VIPER_REFINEMENT_MODE").ok();
+    parse_refinement_mode(setting.as_deref())
+}
+
 fn force_full_ackermann(setting: Option<&str>) -> bool {
     matches!(setting, Some("1" | "on"))
 }
@@ -3519,6 +3537,18 @@ fn dynamic_full_ackermann_for_shape(
         Some("1" | "on" | "0" | "off") => false,
         _ => finite_added == 0 && cnf_clauses >= 100_000 && app_count <= 256,
     }
+}
+
+fn dynamic_full_ackermann_before_refinement(
+    setting: Option<&str>,
+    refinement_mode: RefinementMode,
+    cnf_clauses: usize,
+    app_count: usize,
+    finite_added: usize,
+) -> bool {
+    !force_full_ackermann(setting)
+        && refinement_mode == RefinementMode::Current
+        && dynamic_full_ackermann_for_shape(setting, cnf_clauses, app_count, finite_added)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3815,11 +3845,118 @@ fn solve_cadical_euf_once(
         .then_some(SolveResult::Sat)
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CadicalRefinementTelemetry {
+    rounds: usize,
+    sat_calls: usize,
+    sat_time_ns: u128,
+    validation_calls: usize,
+    validation_time_ns: u128,
+    cuts_generated: usize,
+    cuts_added: usize,
+    cuts_duplicate: usize,
+    cut_width_total: usize,
+    cut_width_max: usize,
+    candidate_clause_generation_avoided: bool,
+    group_clause_loading_avoided: bool,
+}
+
+impl CadicalRefinementTelemetry {
+    fn profile(&self) {
+        profile_measurement("cadical_refine_solve", self.sat_time_ns, self.sat_calls);
+        profile_measurement("cadical_refine_rounds", 0, self.rounds);
+        profile_measurement("cadical_refine_sat_calls", 0, self.sat_calls);
+        profile_measurement(
+            "cadical_refine_validation",
+            self.validation_time_ns,
+            self.validation_calls,
+        );
+        profile_measurement("cadical_refine_cuts_generated", 0, self.cuts_generated);
+        profile_measurement("cadical_refine_cuts_added", 0, self.cuts_added);
+        profile_measurement("cadical_refine_cuts_duplicate", 0, self.cuts_duplicate);
+        profile_measurement("cadical_refine_cut_width_total", 0, self.cut_width_total);
+        profile_measurement("cadical_refine_cut_width_max", 0, self.cut_width_max);
+        profile_measurement(
+            "cadical_refine_candidate_clause_generation_avoided",
+            0,
+            usize::from(self.candidate_clause_generation_avoided),
+        );
+        profile_measurement(
+            "cadical_refine_group_clause_loading_avoided",
+            0,
+            usize::from(self.group_clause_loading_avoided),
+        );
+    }
+}
+
+fn add_novel_theory_cuts(
+    conflicts: &[Vec<i32>],
+    learned_theory: &mut HashSet<Vec<i32>>,
+    var_count: usize,
+    telemetry: &mut CadicalRefinementTelemetry,
+    mut add_clause: impl FnMut(&[i32]) -> bool,
+) -> Option<usize> {
+    telemetry.cuts_generated = telemetry.cuts_generated.saturating_add(conflicts.len());
+    let mut added = 0usize;
+    for conflict in conflicts {
+        let mut clause = conflict.clone();
+        clause.sort_unstable();
+        clause.dedup();
+        if clause
+            .iter()
+            .any(|literal| *literal == 0 || literal.unsigned_abs() as usize > var_count)
+        {
+            return None;
+        }
+        telemetry.cut_width_total = telemetry.cut_width_total.saturating_add(clause.len());
+        telemetry.cut_width_max = telemetry.cut_width_max.max(clause.len());
+        if !learned_theory.insert(clause.clone()) {
+            telemetry.cuts_duplicate = telemetry.cuts_duplicate.saturating_add(1);
+            continue;
+        }
+        if !add_clause(&clause) {
+            learned_theory.remove(&clause);
+            return None;
+        }
+        telemetry.cuts_added = telemetry.cuts_added.saturating_add(1);
+        added += 1;
+    }
+    Some(added)
+}
+
 fn solve_cadical_euf_refining(
     cnf: &CnfProblem,
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
+    refinement_mode: RefinementMode,
+) -> Option<(SolveResult, usize, usize)> {
+    let max_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(10_000usize);
+    let mut telemetry = CadicalRefinementTelemetry::default();
+    let outcome = solve_cadical_euf_refining_with_limit(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        refinement_mode,
+        max_rounds,
+        &mut telemetry,
+    );
+    telemetry.profile();
+    outcome
+}
+
+fn solve_cadical_euf_refining_with_limit(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    refinement_mode: RefinementMode,
+    max_rounds: usize,
+    telemetry: &mut CadicalRefinementTelemetry,
 ) -> Option<(SolveResult, usize, usize)> {
     let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
@@ -3833,45 +3970,50 @@ fn solve_cadical_euf_refining(
     }
     profile_phase("cadical_refine_base_load", load_start, cnf.clauses.len());
 
-    let congruence_start = Instant::now();
-    let congruence = congruence_axiom_clauses(cnf, arena);
-    profile_phase(
-        "cadical_refine_candidates",
-        congruence_start,
-        congruence.len(),
-    );
-    let canonical_values = canonical_value_terms(cnf, arena);
+    let mut congruence = Vec::new();
     let mut congruence_groups = HashMap::<(TermId, i8), Vec<usize>>::default();
-    let mut clause_groups = Vec::with_capacity(congruence.len());
-    for (index, clause) in congruence.iter().enumerate() {
-        let group = congruence_clause_group(clause, cnf, arena, &canonical_values);
-        if let Some(group) = group {
-            congruence_groups.entry(group).or_default().push(index);
+    let mut clause_groups = Vec::new();
+    let mut loaded_congruence = Vec::new();
+    match refinement_mode {
+        RefinementMode::Current => {
+            let congruence_start = Instant::now();
+            congruence = congruence_axiom_clauses(cnf, arena);
+            profile_phase(
+                "cadical_refine_candidates",
+                congruence_start,
+                congruence.len(),
+            );
+            let canonical_values = canonical_value_terms(cnf, arena);
+            clause_groups.reserve(congruence.len());
+            for (index, clause) in congruence.iter().enumerate() {
+                let group = congruence_clause_group(clause, cnf, arena, &canonical_values);
+                if let Some(group) = group {
+                    congruence_groups.entry(group).or_default().push(index);
+                }
+                clause_groups.push(group);
+            }
+            loaded_congruence.resize(congruence.len(), false);
         }
-        clause_groups.push(group);
+        RefinementMode::ModelCuts => {
+            telemetry.candidate_clause_generation_avoided = true;
+            telemetry.group_clause_loading_avoided = true;
+            profile_measurement("cadical_refine_candidates", 0, 0);
+        }
     }
-    let mut loaded_congruence = vec![false; congruence.len()];
     let mut learned_theory = HashSet::<Vec<i32>>::default();
-    let max_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(10_000usize);
-    let mut sat_time_ns = 0u128;
     let mut lemma_count = 0usize;
 
     for round in 1..=max_rounds {
+        telemetry.rounds = round;
+        telemetry.sat_calls += 1;
         let sat_start = Instant::now();
         let result = solver.solve().ok()?;
-        sat_time_ns += sat_start.elapsed().as_nanos();
+        telemetry.sat_time_ns += sat_start.elapsed().as_nanos();
         match result {
             RustSatResult::Unsat => {
-                profile_measurement("cadical_refine_solve", sat_time_ns, round);
                 return Some((SolveResult::Unsat, round, lemma_count));
             }
-            RustSatResult::Interrupted => {
-                profile_measurement("cadical_refine_solve", sat_time_ns, round);
-                return None;
-            }
+            RustSatResult::Interrupted => return None,
             RustSatResult::Sat => {}
         }
 
@@ -3919,25 +4061,27 @@ fn solve_cadical_euf_refining(
             added += 1;
         }
 
+        let validation_start = Instant::now();
         let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+        telemetry.validation_time_ns += validation_start.elapsed().as_nanos();
+        telemetry.validation_calls += 1;
         if conflicts.is_empty() && added == 0 {
-            profile_measurement("cadical_refine_solve", sat_time_ns, round);
             return Some((SolveResult::Sat, round, lemma_count));
         }
-        for clause in conflicts {
-            if learned_theory.insert(clause.clone()) {
-                solver.add_clause(rustsat_clause(&clause)).ok()?;
-                lemma_count += 1;
-                added += 1;
-            }
-        }
+        let cut_count = add_novel_theory_cuts(
+            &conflicts,
+            &mut learned_theory,
+            cnf.var_count(),
+            telemetry,
+            |clause| solver.add_clause(rustsat_clause(clause)).is_ok(),
+        )?;
+        lemma_count += cut_count;
+        added += cut_count;
         if added == 0 {
-            profile_measurement("cadical_refine_solve", sat_time_ns, round);
             return None;
         }
     }
 
-    profile_measurement("cadical_refine_solve", sat_time_ns, max_rounds);
     None
 }
 
@@ -4647,6 +4791,7 @@ fn solve_bool_problem(
         } else {
             0
         };
+        let refinement_mode = selected_refinement_mode();
         let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
         let full_ackermann_forced = force_full_ackermann(full_ackermann_setting.as_deref());
         if full_ackermann_forced {
@@ -4709,8 +4854,9 @@ fn solve_bool_problem(
                 EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
                     let mut completed_cnf = None;
                     let mut prior_sat_calls = 1;
-                    if dynamic_full_ackermann_for_shape(
+                    if dynamic_full_ackermann_before_refinement(
                         full_ackermann_setting.as_deref(),
+                        refinement_mode,
                         cnf.clauses.len(),
                         arena.apps.len(),
                         finite_added,
@@ -4744,6 +4890,7 @@ fn solve_bool_problem(
                             arena,
                             bool_problem.true_term,
                             bool_problem.false_term,
+                            refinement_mode,
                         ) {
                             return Some((
                                 result,
@@ -4776,6 +4923,7 @@ fn solve_bool_problem(
                 arena,
                 bool_problem.true_term,
                 bool_problem.false_term,
+                refinement_mode,
             ) {
                 return Some((
                     result,
@@ -5912,6 +6060,37 @@ mod tests {
         .0
     }
 
+    fn solve_text_cadical_refinement(
+        input: &str,
+        refinement_mode: RefinementMode,
+        max_rounds: usize,
+    ) -> (
+        Option<(SolveResult, usize, usize)>,
+        CadicalRefinementTelemetry,
+        usize,
+        usize,
+    ) {
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert!(bool_problem.unsupported.is_empty());
+        let mut cnf = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        let initial_vars = cnf.var_count();
+        let mut telemetry = CadicalRefinementTelemetry::default();
+        let outcome = solve_cadical_euf_refining_with_limit(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            refinement_mode,
+            max_rounds,
+            &mut telemetry,
+        );
+        (outcome, telemetry, initial_vars, cnf.var_count())
+    }
+
     #[test]
     fn detects_direct_disequality_conflict() {
         let input = "
@@ -6489,6 +6668,278 @@ mod tests {
             1,
             0
         ));
+    }
+
+    #[test]
+    fn parses_refinement_mode_and_preserves_full_ackermann_precedence() {
+        assert_eq!(parse_refinement_mode(None), RefinementMode::Current);
+        assert_eq!(
+            parse_refinement_mode(Some("current")),
+            RefinementMode::Current
+        );
+        assert_eq!(
+            parse_refinement_mode(Some("model-cuts")),
+            RefinementMode::ModelCuts
+        );
+        assert_eq!(
+            parse_refinement_mode(Some("unknown")),
+            RefinementMode::Current
+        );
+
+        assert!(dynamic_full_ackermann_before_refinement(
+            None,
+            RefinementMode::Current,
+            100_000,
+            256,
+            0,
+        ));
+        assert!(!dynamic_full_ackermann_before_refinement(
+            None,
+            RefinementMode::ModelCuts,
+            100_000,
+            256,
+            0,
+        ));
+        assert!(force_full_ackermann(Some("on")));
+        assert!(!dynamic_full_ackermann_before_refinement(
+            Some("on"),
+            RefinementMode::ModelCuts,
+            1_000_000,
+            1,
+            0,
+        ));
+    }
+
+    #[test]
+    fn model_cut_validator_emits_exact_existing_atom_clause() {
+        let mut arena = TermArena::default();
+        let a = arena.intern(0, Vec::new());
+        let b = arena.intern(1, Vec::new());
+        let f_a = arena.intern(2, vec![a]);
+        let f_b = arena.intern(2, vec![b]);
+        let true_term = arena.intern(3, Vec::new());
+        let false_term = arena.intern(4, Vec::new());
+        let mut cnf = CnfProblem::new();
+        let arguments_equal = cnf.atom_lit(BoolAtomKey::Eq(a, b));
+        let results_equal = cnf.atom_lit(BoolAtomKey::Eq(f_a, f_b));
+        let mut assignment = vec![0i8; cnf.var_count() + 1];
+        assignment[arguments_equal as usize] = 1;
+        assignment[results_equal as usize] = -1;
+
+        let conflicts = theory_conflict_clauses(&cnf, &arena, true_term, false_term, &assignment);
+        assert_eq!(conflicts, vec![vec![-arguments_equal, results_equal]]);
+        assert!(conflicts.iter().flatten().all(|literal| {
+            *literal != 0 && literal.unsigned_abs() as usize <= cnf.var_count()
+        }));
+
+        let mut learned = HashSet::default();
+        let mut telemetry = CadicalRefinementTelemetry::default();
+        let mut added = Vec::new();
+        assert_eq!(
+            add_novel_theory_cuts(
+                &conflicts,
+                &mut learned,
+                cnf.var_count(),
+                &mut telemetry,
+                |clause| {
+                    added.push(clause.to_vec());
+                    true
+                },
+            ),
+            Some(1)
+        );
+        assert_eq!(added, conflicts);
+        assert_eq!(telemetry.cuts_generated, 1);
+        assert_eq!(telemetry.cuts_added, 1);
+        assert_eq!(telemetry.cuts_duplicate, 0);
+        assert_eq!(telemetry.cut_width_total, 2);
+        assert_eq!(telemetry.cut_width_max, 2);
+    }
+
+    #[test]
+    fn model_cut_deduplication_detects_no_progress_and_rejects_fresh_variables() {
+        let conflicts = vec![vec![2, -1], vec![-1, 2]];
+        let mut learned = HashSet::default();
+        let mut telemetry = CadicalRefinementTelemetry::default();
+        let mut added = Vec::new();
+        let first_add =
+            add_novel_theory_cuts(&conflicts, &mut learned, 2, &mut telemetry, |clause| {
+                added.push(clause.to_vec());
+                true
+            });
+        assert_eq!(first_add, Some(1));
+        assert_eq!(added, vec![vec![-1, 2]]);
+        assert_eq!(telemetry.cuts_duplicate, 1);
+
+        let duplicate_add =
+            add_novel_theory_cuts(&[vec![-1, 2]], &mut learned, 2, &mut telemetry, |_| true);
+        assert_eq!(duplicate_add, Some(0));
+        assert_eq!(telemetry.cuts_generated, 3);
+        assert_eq!(telemetry.cuts_added, 1);
+        assert_eq!(telemetry.cuts_duplicate, 2);
+        assert_eq!(telemetry.cut_width_total, 6);
+        assert_eq!(telemetry.cut_width_max, 2);
+
+        let fresh_variable =
+            add_novel_theory_cuts(&[vec![3]], &mut learned, 2, &mut telemetry, |_| true);
+        assert!(fresh_variable.is_none());
+    }
+
+    #[test]
+    fn model_cuts_add_only_the_exact_conflict_without_fresh_variables() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        ";
+        let (outcome, telemetry, initial_vars, final_vars) =
+            solve_text_cadical_refinement(input, RefinementMode::ModelCuts, 8);
+        assert_eq!(outcome, Some((SolveResult::Unsat, 2, 1)));
+        assert_eq!(initial_vars, final_vars);
+        assert_eq!(telemetry.rounds, 2);
+        assert_eq!(telemetry.sat_calls, 2);
+        assert_eq!(telemetry.validation_calls, 1);
+        assert_eq!(telemetry.cuts_generated, 1);
+        assert_eq!(telemetry.cuts_added, 1);
+        assert_eq!(telemetry.cuts_duplicate, 0);
+        assert_eq!(telemetry.cut_width_total, 2);
+        assert_eq!(telemetry.cut_width_max, 2);
+        assert!(telemetry.candidate_clause_generation_avoided);
+        assert!(telemetry.group_clause_loading_avoided);
+    }
+
+    #[test]
+    fn model_cuts_return_none_at_theory_round_cap() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (assert (= a a))
+            (check-sat)
+        ";
+        let (outcome, telemetry, _, _) =
+            solve_text_cadical_refinement(input, RefinementMode::ModelCuts, 0);
+        assert_eq!(outcome, None);
+        assert_eq!(telemetry.rounds, 0);
+        assert_eq!(telemetry.sat_calls, 0);
+    }
+
+    #[test]
+    fn model_cuts_keep_pure_equality_cycles_sound() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (assert (= a b))
+            (assert (= b c))
+            (assert (distinct a c))
+            (check-sat)
+        ";
+        let (outcome, telemetry, _, _) =
+            solve_text_cadical_refinement(input, RefinementMode::ModelCuts, 8);
+        assert_eq!(outcome, Some((SolveResult::Unsat, 1, 0)));
+        assert_eq!(telemetry.sat_calls, 1);
+        assert_eq!(telemetry.validation_calls, 0);
+        assert_eq!(telemetry.cuts_added, 0);
+    }
+
+    #[test]
+    fn model_cuts_accept_a_theory_valid_sat_model() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (= (f a) (f b)))
+            (check-sat)
+        ";
+        let (outcome, telemetry, _, _) =
+            solve_text_cadical_refinement(input, RefinementMode::ModelCuts, 8);
+        assert_eq!(outcome, Some((SolveResult::Sat, 1, 0)));
+        assert_eq!(telemetry.validation_calls, 1);
+        assert_eq!(telemetry.cuts_generated, 0);
+        assert_eq!(telemetry.cuts_added, 0);
+    }
+
+    #[test]
+    fn model_cuts_match_current_refinement_on_representative_euf_formulas() {
+        let cases = [
+            (
+                "
+                    (set-logic QF_UF)
+                    (declare-sort U 0)
+                    (declare-fun a () U)
+                    (declare-fun b () U)
+                    (declare-fun f (U) U)
+                    (assert (= a b))
+                    (assert (distinct (f a) (f b)))
+                    (check-sat)
+                ",
+                SolveResult::Unsat,
+            ),
+            (
+                "
+                    (set-logic QF_UF)
+                    (declare-sort U 0)
+                    (declare-fun a () U)
+                    (declare-fun b () U)
+                    (declare-fun p (U) Bool)
+                    (assert (= a b))
+                    (assert (p a))
+                    (assert (not (p b)))
+                    (check-sat)
+                ",
+                SolveResult::Unsat,
+            ),
+            (
+                "
+                    (set-logic QF_UF)
+                    (declare-sort U 0)
+                    (declare-fun a () U)
+                    (declare-fun b () U)
+                    (declare-fun f (U) U)
+                    (declare-fun g (U) U)
+                    (assert (= a b))
+                    (assert (distinct (g (f a)) (g (f b))))
+                    (check-sat)
+                ",
+                SolveResult::Unsat,
+            ),
+            (
+                "
+                    (set-logic QF_UF)
+                    (declare-sort U 0)
+                    (declare-fun a () U)
+                    (declare-fun b () U)
+                    (declare-fun f (U) U)
+                    (assert (distinct a b))
+                    (assert (distinct (f a) (f b)))
+                    (check-sat)
+                ",
+                SolveResult::Sat,
+            ),
+        ];
+
+        for (input, expected) in cases {
+            let (current, _, _, _) =
+                solve_text_cadical_refinement(input, RefinementMode::Current, 64);
+            let (model_cuts, _, _, _) =
+                solve_text_cadical_refinement(input, RefinementMode::ModelCuts, 64);
+            assert_eq!(current.as_ref().map(|outcome| &outcome.0), Some(&expected));
+            assert_eq!(
+                model_cuts.as_ref().map(|outcome| &outcome.0),
+                current.as_ref().map(|outcome| &outcome.0)
+            );
+        }
     }
 
     #[test]
