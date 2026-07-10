@@ -281,6 +281,24 @@
   gate `142628` then lost four solves and regressed all speed metrics, so
   replacing dynamic Ackermannization was rejected. Model cuts remain
   default-off as a reference strategy for future partial-trail propagation.
+- Completed focused finite-support hot gate `142597`, full gate `142610`, and
+  cross-architecture boundary `142702`. The full corpus gained five solves and
+  improved total/common time, but geometric speed was `0.997x`; the original
+  route is not promoted. Full telemetry showed it selected 6,156 QG instances,
+  so a necessary clique-core prefilter now removes provably empty searches.
+- Accepted full direct-root gate `142591`/`142596`: coverage `6,825 -> 6,843`,
+  all-total `1.006x`, common-total `1.010x`, geometric `1.026x`, zero wrong
+  answers and zero execution errors. Commit `50edc7d` makes it default while
+  preserving `EUF_VIPER_DIRECT_ROOT_CNF=0` as rollback.
+- Added bounded Yices-style equality abstraction with independent meet/join,
+  Iff, Ite, cap-rollback, randomized, and Z3 implication checks. Unrouted facts
+  gate `142742` kept 40/40 coverage but regressed total/geometric speed to
+  `0.990x`/`0.933x`; facts remain default-off while shadow telemetry and
+  associative flattening identify a narrow route.
+- Replaced cloned nested-`let` environments with scoped in-place bindings.
+  Seven-repeat gate `142743` improved `NEQ027_size10/11` by `5.63x` aggregate
+  at unchanged coverage. The 40-case control was flat but slightly below the
+  strict speed threshold, so full gate `142745`/`142750` decides promotion.
 
 ## Next Entry Template
 

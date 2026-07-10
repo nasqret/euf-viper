@@ -2,8 +2,10 @@
 
 Date: 2026-07-10
 
-Status: focused policy passed the targeted, repeated, and complete finite-family
-gates. It is not yet a default or a full-corpus promotion.
+Status: focused policy passed targeted, repeated, finite-family, hot-400, and
+second-architecture gates, but failed the full-corpus geometric promotion
+criterion. It remains explicit and is being narrowed with a necessary
+clique-core prefilter.
 
 ## Hypothesis
 
@@ -54,6 +56,9 @@ changed. There were zero wrong answers and zero execution errors.
 | Uniform boundary `142572` | 4 | 3s / 7 | 3 -> 4 | 1.445x | 1.074x | 1.007x |
 | Focused boundary `142578` | 4 | 3s / 7 | 3 -> 4 | 1.821x | 1.449x | 1.334x |
 | Focused finite `142581` | 151 | 2s / 3 | 126 -> 128 | 1.043x | 1.047x | 1.070x |
+| Focused hot `142597` | 400 | 2s / 3 | 400 -> 400 | 1.006x | 1.006x | 1.001x |
+| Focused full `142610` | 7,503 | 2s / 1 | 7,357 -> 7,362 | 1.012x | 1.013x | 0.997x |
+| Cross-architecture boundary `142702` | 4 | 3s / 7 | 3 -> 4 | 1.807x | 1.386x | 1.337x |
 
 The focused full finite gate had 67 candidate wins and 59 baseline wins. Its
 candidate-only solves were:
@@ -65,6 +70,35 @@ candidate-only solves were:
 
 The 120-second target also changed `NEQ027_size11.smt2` from `17.78s` to
 `2.07s` and `PEQ011_size8.smt2` from `0.171s` to `0.140s`.
+
+The cross-architecture boundary reproduced the NEQ gain on the second WMI CPU
+class while the two excluded PEQ controls stayed within about 1%. The complete
+corpus gained five net solves and improved timeout-charged and common-total
+time, but geometric speed regressed by 0.284%. It therefore failed the declared
+global default gate.
+
+## Full-Corpus Route Audit
+
+Corpus-wide finite telemetry job `142731` completed 7,499/7,503 records; four
+NEQ parser-heavy cases exceeded the two-second telemetry timeout. The original
+focused selector fired on 6,197 successful instances:
+
+| Family | Selected instances |
+| --- | ---: |
+| QG-classification | 6,156 |
+| NEQ | 19 |
+| PEQ | 12 |
+| SEQ | 10 |
+
+The one-closed-table condition was therefore much broader than the 151-case
+development slice suggested. This explains why a nominal finite-family route
+could perturb geometric timing over the whole corpus.
+
+Commit `fbcefb5` adds a necessary graph prefilter: focused mode proceeds to
+clique enumeration only if the candidate graph has at least `n` vertices in
+its `(n-1)`-core. Every real `n`-clique survives this peeling, so the filter
+cannot remove a support opportunity. It removes only searches that provably
+cannot emit a clause. This revision requires fresh finite, hot, and full gates.
 
 ## Rejected Uniform Policy
 
@@ -93,7 +127,11 @@ Raw ignored artifacts are under:
 - `results/wmi/finite-permutation-target-142564/`;
 - `results/wmi/finite-permutation-all151-142567/`;
 - `results/wmi/finite-permutation-focused-boundary-142578/`;
-- `results/wmi/finite-permutation-focused-all151-142581/`.
+- `results/wmi/finite-permutation-focused-all151-142581/`;
+- `results/wmi/finite-permutation-focused-hot-142597/`;
+- `results/wmi/finite-permutation-focused-full-142610/`;
+- `results/wmi/finite-permutation-focused-boundary-crossarch-142702/`;
+- `results/wmi/finite-structures-full-c958-142731/`.
 
 The structure report is
 `results/wmi/finite-permutation-all151-142567/finite-structures.json`; its
@@ -101,7 +139,7 @@ metric-only full-clique manifest contains 40 instances.
 
 ## Decision
 
-Advance `focused` to the QG hot-400 guard and the complete 7,503-instance gate.
-Do not default-enable it until those gates pass. Native Hall propagation remains
-the broader follow-up because the current rule handles only proved full-domain
-injections.
+Do not default-enable the original focused policy: its full gate failed
+geometric speed. Benchmark the clique-core revision from the finite slice
+through the complete corpus. Native Hall propagation remains the broader
+follow-up because the current rule handles only proved full-domain injections.

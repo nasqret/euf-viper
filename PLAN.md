@@ -58,6 +58,16 @@ front tier of a coverage-oriented portfolio.
   using the exact promoted binary SHA-256. The solver beats cvc5 overall and
   beats Z3 by `1.111x` common-total and `2.035x` geometric speed, but trails Z3
   by 249 solves and Yices2 by 546 solves.
+- [x] Promote direct-root CNF after full gate `142591` improved coverage
+  `6,825 -> 6,843`, all-total `1.006x`, common-total `1.010x`, and geometric
+  speed `1.026x` with zero wrong answers or execution errors.
+- [x] Add bounded Yices-style equality abstraction with independent semantic
+  audit, shadow telemetry, and default-off fact insertion.
+- [x] Replace cloned nested-`let` environments with scoped restoration;
+  `NEQ027_size10/11` improved by `5.63x` aggregate in repeated gate `142743`.
+- [ ] Complete the scoped-`let` full-corpus decision gate `142745`/`142750`.
+- [ ] Re-run the clique-core finite-support policy through finite, hot, and
+  full-corpus promotion gates.
 - [ ] Rerun the accepted standalone solver at 60 and 1,200 seconds.
 - [ ] Reduce the remaining finite-model tail without regressing a full-corpus
   paired speed or coverage metric.
@@ -111,20 +121,23 @@ target-family win is evidence for routing, not evidence for promotion.
 ### Live 2026-07-10 Candidates
 
 - **Finite permutation support, focused:** passed repeated boundary gate
-  `142578` and complete finite-family gate `142581`. The latter improved
-  coverage `126 -> 128` and all three speed metrics with no baseline-only
-  cases. Hot-400 and full-corpus gates remain required before defaulting.
-- **Direct-root CNF:** passed hot-400 `142549`, but failed the clean finite-tail
-  speed gate `142554`; full-corpus gate `142591` is the decision experiment.
+  `142578`, finite gate `142581`, hot-400 `142597`, and cross-architecture gate
+  `142702`. Full gate `142610` gained five solves and improved total time but
+  missed geometric promotion at `0.997x`; the original route is rejected as a
+  global default. A necessary `(n-1)`-core prefilter is now under test.
+- **Direct-root CNF:** full gate `142591` passed coverage and every speed metric;
+  it is promoted by `50edc7d`, with `EUF_VIPER_DIRECT_ROOT_CNF=0` as rollback.
 - **Model-directed CaDiCaL cuts:** explicit refinement gate `142586` improved
   common and geometric speed slightly at equal coverage. Auto-routing gate
   `142628` lost four Goel solves and is rejected; keep the mode default-off and
   preserve dynamic Ackermannization.
-- **Equality abstraction:** Yices source mapping and exact meet/join semantics
-  are complete. Implement fact-only shadow/facts modes before substitution.
-- **Streaming parser:** design is complete. The first isolated optimization is
-  scoped `let` environments, because one 1.14 MB tail file performs roughly
-  eleven million binding copies in the legacy frontend.
+- **Equality abstraction:** bounded `off|shadow|facts` modes and an independent
+  soundness audit are complete. Unrouted facts regressed the 40-case sample;
+  associative flattening, duplicate-unit suppression, quotas, and a frozen
+  shadow-hit manifest are required before the next facts gate.
+- **Streaming parser:** scoped `let` environments removed roughly eleven
+  million copies on the worst nested case and passed a `5.63x` targeted gate.
+  Full-corpus gate `142745` decides promotion before token streaming begins.
 
 ## Current Limitation
 
