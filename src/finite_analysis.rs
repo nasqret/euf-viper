@@ -29,6 +29,34 @@ pub(crate) enum PermutationSupportMode {
     Focused,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct FiniteAnalysisContext {
+    pub(crate) domain: Option<FiniteDomainAnalysis>,
+    pub(crate) guarded: Option<GuardedDisequalitySummary>,
+    pub(crate) closure: Option<FiniteClosureAnalysis>,
+    analysis: Option<FiniteAnalysis>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FiniteDomainAnalysis {
+    pub(crate) mandatory_disequalities: HashSet<(TermId, TermId)>,
+    pub(crate) domain: Vec<TermId>,
+    pub(crate) domain_set: HashSet<TermId>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct GuardedDisequalitySummary {
+    pub(crate) clauses: usize,
+    pub(crate) edges: HashSet<(TermId, TermId)>,
+}
+
+#[derive(Debug)]
+pub(crate) struct FiniteClosureAnalysis {
+    pub(crate) covered_terms: HashSet<TermId>,
+    pub(crate) closed_functions: HashSet<SymId>,
+    pub(crate) finite_terms: HashSet<TermId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FiniteAnalysis {
     pub(crate) discovered_domain_size: usize,
@@ -94,113 +122,202 @@ impl fmt::Display for FiniteAnalysis {
     }
 }
 
-pub(crate) fn analyze(arena: &TermArena, bool_problem: &BoolProblem) -> FiniteAnalysis {
-    let mut disequality_edges = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_mandatory_disequalities(assertion, &mut disequality_edges);
-    }
-
-    let domain = largest_small_disequality_clique(&disequality_edges, arena);
-    let domain_set = domain.iter().copied().collect::<HashSet<_>>();
-
-    let mut covered_terms = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_mandatory_coverages(assertion, &domain_set, &mut covered_terms);
-    }
-
-    let closed_functions = closed_table_functions(arena, &domain, &domain_set, &covered_terms);
-    let finite_terms = close_finite_terms(arena, &domain_set, &covered_terms, &closed_functions);
-
-    let mut unary_table_applications = 0;
-    let mut binary_table_applications = 0;
-    let mut higher_arity_table_applications = 0;
-    for &term_id in &arena.apps {
-        let term = &arena.terms[term_id];
-        if !finite_terms.contains(&term_id) || !closed_functions.contains(&term.fun) {
-            continue;
+impl FiniteAnalysisContext {
+    pub(crate) fn domain_analysis(
+        &mut self,
+        arena: &TermArena,
+        bool_problem: &BoolProblem,
+    ) -> &FiniteDomainAnalysis {
+        if self.domain.is_none() {
+            let mut mandatory_disequalities = HashSet::default();
+            for assertion in &bool_problem.assertions {
+                collect_mandatory_disequalities(assertion, &mut mandatory_disequalities);
+            }
+            let domain = if mandatory_disequalities.is_empty() {
+                Vec::new()
+            } else {
+                largest_small_disequality_clique(&mandatory_disequalities, arena)
+            };
+            let domain_set = domain.iter().copied().collect();
+            self.domain = Some(FiniteDomainAnalysis {
+                mandatory_disequalities,
+                domain,
+                domain_set,
+            });
         }
-        match term.args.len() {
-            1 => unary_table_applications += 1,
-            2 => binary_table_applications += 1,
-            3.. => higher_arity_table_applications += 1,
-            0 => {}
+        self.domain.as_ref().unwrap()
+    }
+
+    pub(crate) fn guarded_summary(
+        &mut self,
+        arena: &TermArena,
+        bool_problem: &BoolProblem,
+    ) -> &GuardedDisequalitySummary {
+        self.domain_analysis(arena, bool_problem);
+        if self.guarded.is_none() {
+            let domain = self.domain.as_ref().unwrap();
+            let mut summary = GuardedDisequalitySummary::default();
+            if !domain.mandatory_disequalities.is_empty() && !domain.domain_set.is_empty() {
+                for assertion in &bool_problem.assertions {
+                    collect_guarded_disequalities(
+                        assertion,
+                        &domain.domain_set,
+                        &domain.mandatory_disequalities,
+                        &mut summary.clauses,
+                        &mut summary.edges,
+                    );
+                }
+            }
+            self.guarded = Some(summary);
         }
+        self.guarded.as_ref().unwrap()
     }
 
-    let mut equality_edges = HashSet::default();
-    let mut equality_vertices = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_equality_graph(assertion, &mut equality_vertices, &mut equality_edges);
+    pub(crate) fn finite_closure(
+        &mut self,
+        arena: &TermArena,
+        bool_problem: &BoolProblem,
+    ) -> &FiniteClosureAnalysis {
+        self.domain_analysis(arena, bool_problem);
+        if self.closure.is_none() {
+            let domain = self.domain.as_ref().unwrap();
+            let mut covered_terms = HashSet::default();
+            for assertion in &bool_problem.assertions {
+                collect_mandatory_coverages(assertion, &domain.domain_set, &mut covered_terms);
+            }
+            let closed_functions =
+                closed_table_functions(arena, &domain.domain, &domain.domain_set, &covered_terms);
+            let finite_terms =
+                close_finite_terms(arena, &domain.domain_set, &covered_terms, &closed_functions);
+            self.closure = Some(FiniteClosureAnalysis {
+                covered_terms,
+                closed_functions,
+                finite_terms,
+            });
+        }
+        self.closure.as_ref().unwrap()
     }
-    let equality_graph_vertices = equality_vertices.len();
 
-    // A shared vertex universe keeps the equality and disequality densities comparable.
-    let equality_graph_density_ppm =
-        graph_density_ppm(equality_edges.len(), equality_graph_vertices);
-    let disequality_graph_density_ppm =
-        graph_density_ppm(disequality_edges.len(), equality_graph_vertices);
-    let mut guarded_disequality_clauses = 0;
-    let mut guarded_disequality_edges = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_guarded_disequalities(
-            assertion,
-            &domain_set,
-            &disequality_edges,
-            &mut guarded_disequality_clauses,
-            &mut guarded_disequality_edges,
-        );
+    pub(crate) fn guarded_disequality_clause_count(
+        &mut self,
+        arena: &TermArena,
+        bool_problem: &BoolProblem,
+    ) -> usize {
+        self.guarded_summary(arena, bool_problem).clauses
     }
-    let guarded_disequality_vertices = edge_vertices(&guarded_disequality_edges);
-    let guarded_disequality_density_ppm = graph_density_ppm(
-        guarded_disequality_edges.len(),
-        guarded_disequality_vertices,
-    );
-    let guarded_disequality_clique_lower_bound =
-        greedy_clique_lower_bound(&guarded_disequality_edges);
-    let (estimated_one_hot_variables, estimated_one_hot_clauses) = estimate_one_hot_pressure(
-        domain.len(),
-        finite_terms.len().saturating_sub(domain.len()),
-    );
 
-    FiniteAnalysis {
-        discovered_domain_size: domain.len(),
-        covered_finite_terms: covered_terms.len(),
-        recognized_finite_terms: finite_terms.len(),
-        distinct_constants: arena
-            .terms
-            .iter()
-            .enumerate()
-            .filter(|(term_id, term)| {
-                term.args.is_empty()
-                    && *term_id != bool_problem.true_term
-                    && *term_id != bool_problem.false_term
-            })
-            .count(),
-        closed_table_functions: closed_functions.len(),
-        unary_table_applications,
-        binary_table_applications,
-        higher_arity_table_applications,
-        equality_graph_vertices,
-        equality_graph_edges: equality_edges.len(),
-        equality_graph_density_ppm,
-        disequality_graph_edges: disequality_edges.len(),
-        disequality_graph_density_ppm,
-        guarded_disequality_clauses,
-        guarded_disequality_edges: guarded_disequality_edges.len(),
-        guarded_disequality_vertices,
-        guarded_disequality_density_ppm,
-        guarded_disequality_clique_lower_bound,
-        all_different_clique_lower_bound: domain.len(),
-        estimated_one_hot_variables,
-        estimated_one_hot_clauses,
+    pub(crate) fn analyze(
+        &mut self,
+        arena: &TermArena,
+        bool_problem: &BoolProblem,
+    ) -> &FiniteAnalysis {
+        self.domain_analysis(arena, bool_problem);
+        self.finite_closure(arena, bool_problem);
+        self.guarded_summary(arena, bool_problem);
+        if self.analysis.is_none() {
+            let domain = self.domain.as_ref().unwrap();
+            let closure = self.closure.as_ref().unwrap();
+            let guarded = self.guarded.as_ref().unwrap();
+
+            let mut unary_table_applications = 0;
+            let mut binary_table_applications = 0;
+            let mut higher_arity_table_applications = 0;
+            for &term_id in &arena.apps {
+                let term = &arena.terms[term_id];
+                if !closure.finite_terms.contains(&term_id)
+                    || !closure.closed_functions.contains(&term.fun)
+                {
+                    continue;
+                }
+                match term.args.len() {
+                    1 => unary_table_applications += 1,
+                    2 => binary_table_applications += 1,
+                    3.. => higher_arity_table_applications += 1,
+                    0 => {}
+                }
+            }
+
+            let mut equality_edges = HashSet::default();
+            let mut equality_vertices = HashSet::default();
+            for assertion in &bool_problem.assertions {
+                collect_equality_graph(assertion, &mut equality_vertices, &mut equality_edges);
+            }
+            let equality_graph_vertices = equality_vertices.len();
+            // A shared vertex universe keeps the equality and disequality densities comparable.
+            let equality_graph_density_ppm =
+                graph_density_ppm(equality_edges.len(), equality_graph_vertices);
+            let disequality_graph_density_ppm = graph_density_ppm(
+                domain.mandatory_disequalities.len(),
+                equality_graph_vertices,
+            );
+            let guarded_disequality_vertices = edge_vertices(&guarded.edges);
+            let guarded_disequality_density_ppm =
+                graph_density_ppm(guarded.edges.len(), guarded_disequality_vertices);
+            let guarded_disequality_clique_lower_bound = greedy_clique_lower_bound(&guarded.edges);
+            let (estimated_one_hot_variables, estimated_one_hot_clauses) =
+                estimate_one_hot_pressure(
+                    domain.domain.len(),
+                    closure
+                        .finite_terms
+                        .len()
+                        .saturating_sub(domain.domain.len()),
+                );
+
+            self.analysis = Some(FiniteAnalysis {
+                discovered_domain_size: domain.domain.len(),
+                covered_finite_terms: closure.covered_terms.len(),
+                recognized_finite_terms: closure.finite_terms.len(),
+                distinct_constants: arena
+                    .terms
+                    .iter()
+                    .enumerate()
+                    .filter(|(term_id, term)| {
+                        term.args.is_empty()
+                            && *term_id != bool_problem.true_term
+                            && *term_id != bool_problem.false_term
+                    })
+                    .count(),
+                closed_table_functions: closure.closed_functions.len(),
+                unary_table_applications,
+                binary_table_applications,
+                higher_arity_table_applications,
+                equality_graph_vertices,
+                equality_graph_edges: equality_edges.len(),
+                equality_graph_density_ppm,
+                disequality_graph_edges: domain.mandatory_disequalities.len(),
+                disequality_graph_density_ppm,
+                guarded_disequality_clauses: guarded.clauses,
+                guarded_disequality_edges: guarded.edges.len(),
+                guarded_disequality_vertices,
+                guarded_disequality_density_ppm,
+                guarded_disequality_clique_lower_bound,
+                all_different_clique_lower_bound: domain.domain.len(),
+                estimated_one_hot_variables,
+                estimated_one_hot_clauses,
+            });
+        }
+        self.analysis.as_ref().unwrap()
     }
 }
 
-pub(crate) fn profile_if_enabled(arena: &TermArena, bool_problem: &BoolProblem) {
+pub(crate) fn analyze(arena: &TermArena, bool_problem: &BoolProblem) -> FiniteAnalysis {
+    FiniteAnalysisContext::default()
+        .analyze(arena, bool_problem)
+        .clone()
+}
+
+pub(crate) fn profile_if_enabled(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    context: &mut FiniteAnalysisContext,
+) {
     if env::var_os("EUF_VIPER_PROFILE").is_none() {
         return;
     }
-    eprintln!("profile_finite_analysis {}", analyze(arena, bool_problem));
+    eprintln!(
+        "profile_finite_analysis {}",
+        context.analyze(arena, bool_problem)
+    );
 }
 
 /// Adds the dual support side of a permutation-matrix encoding.
@@ -211,12 +328,12 @@ pub(crate) fn profile_if_enabled(arena: &TermArena, bool_problem: &BoolProblem) 
 /// clauses state the implied column support without changing the model set.
 pub(crate) fn add_permutation_support(
     cnf: &mut CnfProblem,
-    bool_problem: &BoolProblem,
     domain: &[TermId],
     domain_set: &HashSet<TermId>,
     finite_terms: &HashSet<TermId>,
     closed_table_functions: usize,
     mandatory_disequalities: &HashSet<(TermId, TermId)>,
+    guarded: &GuardedDisequalitySummary,
     membership: &HashMap<(TermId, TermId), i32>,
     mode: PermutationSupportMode,
 ) -> PermutationSupportStats {
@@ -224,18 +341,7 @@ pub(crate) fn add_permutation_support(
         return PermutationSupportStats::default();
     }
 
-    let mut guarded_edges = HashSet::default();
-    let mut guarded_clause_count = 0;
-    for assertion in &bool_problem.assertions {
-        collect_guarded_disequalities(
-            assertion,
-            domain_set,
-            mandatory_disequalities,
-            &mut guarded_clause_count,
-            &mut guarded_edges,
-        );
-    }
-    let guarded_vertices = edge_vertices(&guarded_edges);
+    let guarded_vertices = edge_vertices(&guarded.edges);
     if !permutation_support_structurally_selected(
         mode,
         closed_table_functions,
@@ -244,13 +350,13 @@ pub(crate) fn add_permutation_support(
     ) {
         return PermutationSupportStats {
             direct_edges: mandatory_disequalities.len(),
-            guarded_edges: guarded_edges.len(),
+            guarded_edges: guarded.edges.len(),
             ..PermutationSupportStats::default()
         };
     }
 
     let mut candidate_edges = mandatory_disequalities.clone();
-    candidate_edges.extend(guarded_edges.iter().copied());
+    candidate_edges.extend(guarded.edges.iter().copied());
     candidate_edges.retain(|(left, right)| {
         finite_terms.contains(left)
             && finite_terms.contains(right)
@@ -265,7 +371,7 @@ pub(crate) fn add_permutation_support(
     {
         return PermutationSupportStats {
             direct_edges: mandatory_disequalities.len(),
-            guarded_edges: guarded_edges.len(),
+            guarded_edges: guarded.edges.len(),
             candidate_edges: candidate_edges.len(),
             selected: false,
             ..PermutationSupportStats::default()
@@ -292,13 +398,44 @@ pub(crate) fn add_permutation_support(
 
     PermutationSupportStats {
         direct_edges: mandatory_disequalities.len(),
-        guarded_edges: guarded_edges.len(),
+        guarded_edges: guarded.edges.len(),
         candidate_edges: candidate_edges.len(),
         cliques: cliques.len(),
         clauses: cnf.clauses.len() - start_clause_count,
         selected: true,
         truncated,
     }
+}
+
+pub(crate) fn has_guarded_disequality_shape(bool_problem: &BoolProblem) -> bool {
+    bool_problem
+        .assertions
+        .iter()
+        .any(has_guarded_disequality_shape_in_expression)
+}
+
+fn has_guarded_disequality_shape_in_expression(expression: &BoolExpr) -> bool {
+    if let BoolExpr::And(children) = expression {
+        return children
+            .iter()
+            .any(has_guarded_disequality_shape_in_expression);
+    }
+    let BoolExpr::Or(children) = expression else {
+        return false;
+    };
+    let [first, second] = children.as_slice() else {
+        return false;
+    };
+    has_equality_guard_and_negated_equality(first, second)
+        || has_equality_guard_and_negated_equality(second, first)
+}
+
+fn has_equality_guard_and_negated_equality(guard: &BoolExpr, consequence: &BoolExpr) -> bool {
+    matches!(guard, BoolExpr::Atom(BoolAtomKey::Eq(_, _)))
+        && matches!(
+            consequence,
+            BoolExpr::Not(child) if matches!(child.as_ref(), BoolExpr::Atom(BoolAtomKey::Eq(_, _)))
+        )
 }
 
 fn permutation_support_structurally_selected(
@@ -836,6 +973,116 @@ mod tests {
     }
 
     #[test]
+    fn guarded_shape_prefilter_is_structural_and_nonallocating() {
+        let positive = parse_problem(
+            "(set-logic QF_UF)
+             (declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun b () U)
+             (declare-fun x () U)
+             (declare-fun y () U)
+             (assert (or (= a b) (not (= x y))))
+             (check-sat)",
+        )
+        .unwrap();
+        assert!(has_guarded_disequality_shape(
+            positive.bool_problem.as_ref().unwrap()
+        ));
+
+        let structural_negative = parse_problem(
+            "(set-logic QF_UF)
+             (declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun b () U)
+             (declare-fun x () U)
+             (declare-fun y () U)
+             (assert (or (= a b) (= x y)))
+             (check-sat)",
+        )
+        .unwrap();
+        assert!(!has_guarded_disequality_shape(
+            structural_negative.bool_problem.as_ref().unwrap()
+        ));
+    }
+
+    #[test]
+    fn guarded_selector_requires_verified_guards_and_counts_duplicate_clauses() {
+        let plausible_unverified = parse_problem(
+            "(set-logic QF_UF)
+             (declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun b () U)
+             (declare-fun x () U)
+             (declare-fun y () U)
+             (assert (or (= a b) (not (= x y))))
+             (check-sat)",
+        )
+        .unwrap();
+        let bool_problem = plausible_unverified.bool_problem.as_ref().unwrap();
+        assert!(has_guarded_disequality_shape(bool_problem));
+        assert_eq!(
+            FiniteAnalysisContext::default()
+                .guarded_disequality_clause_count(&plausible_unverified.arena, bool_problem),
+            0
+        );
+
+        let verified = parse_problem(
+            "(set-logic QF_UF)
+             (declare-sort U 0)
+             (declare-fun a () U)
+             (declare-fun b () U)
+             (declare-fun c () U)
+             (declare-fun x () U)
+             (declare-fun y () U)
+             (assert (distinct a b c))
+             (assert (or (= a b) (not (= x y))))
+             (assert (or (= a b) (not (= x y))))
+             (check-sat)",
+        )
+        .unwrap();
+        let bool_problem = verified.bool_problem.as_ref().unwrap();
+        let mut context = FiniteAnalysisContext::default();
+        assert_eq!(
+            context.guarded_disequality_clause_count(&verified.arena, bool_problem),
+            2
+        );
+        assert_eq!(context.guarded.as_ref().unwrap().edges.len(), 1);
+    }
+
+    #[test]
+    fn cached_context_metrics_match_fresh_analysis_after_staged_reuse() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (assert (distinct a b c))
+            (assert (or (= x a) (= x b) (= x c)))
+            (assert (or (= a b) (not (= x y))))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let fresh = analyze(&problem.arena, bool_problem);
+
+        let mut context = FiniteAnalysisContext::default();
+        assert_eq!(
+            context.guarded_disequality_clause_count(&problem.arena, bool_problem),
+            1
+        );
+        context.finite_closure(&problem.arena, bool_problem);
+        let cached = context.analyze(&problem.arena, bool_problem).clone();
+
+        assert_eq!(cached, fresh);
+        let first_cached = context.analyze(&problem.arena, bool_problem) as *const FiniteAnalysis;
+        let second_cached = context.analyze(&problem.arena, bool_problem) as *const FiniteAnalysis;
+        assert_eq!(first_cached, second_cached);
+    }
+
+    #[test]
     fn enumerates_verified_cliques_deterministically_and_honors_the_cap() {
         let triangle = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
         assert_eq!(
@@ -893,21 +1140,9 @@ mod tests {
             .chain(outputs)
             .collect::<HashSet<_>>();
         let mandatory_disequalities = [(0, 1), (0, 2), (1, 2)].into_iter().collect::<HashSet<_>>();
-        let guarded = |guard_left, guard_right, left, right| {
-            BoolExpr::Or(vec![
-                equality(guard_left, guard_right),
-                BoolExpr::Not(Box::new(equality(left, right))),
-            ])
-        };
-        let bool_problem = BoolProblem {
-            assertions: vec![BoolExpr::And(vec![
-                guarded(0, 1, 3, 4),
-                guarded(0, 2, 3, 5),
-                guarded(1, 2, 4, 5),
-            ])],
-            unsupported: Vec::new(),
-            true_term: 6,
-            false_term: 7,
+        let guarded = GuardedDisequalitySummary {
+            clauses: 3,
+            edges: [(3, 4), (3, 5), (4, 5)].into_iter().collect(),
         };
 
         let mut cnf = CnfProblem::new();
@@ -919,12 +1154,12 @@ mod tests {
         }
         let stats = add_permutation_support(
             &mut cnf,
-            &bool_problem,
             &domain,
             &domain_set,
             &finite_terms,
             3,
             &mandatory_disequalities,
+            &guarded,
             &membership,
             PermutationSupportMode::Focused,
         );
@@ -958,12 +1193,7 @@ mod tests {
             .chain(outputs)
             .collect::<HashSet<_>>();
         let mandatory_disequalities = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
-        let bool_problem = BoolProblem {
-            assertions: Vec::new(),
-            unsupported: Vec::new(),
-            true_term: 6,
-            false_term: 7,
-        };
+        let guarded = GuardedDisequalitySummary::default();
         let mut membership = HashMap::default();
         let mut literal = 1;
         for term in outputs {
@@ -976,12 +1206,12 @@ mod tests {
         let mut focused_cnf = CnfProblem::new();
         let focused = add_permutation_support(
             &mut focused_cnf,
-            &bool_problem,
             &domain,
             &domain_set,
             &finite_terms,
             2,
             &mandatory_disequalities,
+            &guarded,
             &membership,
             PermutationSupportMode::Focused,
         );
@@ -1002,12 +1232,12 @@ mod tests {
         let mut all_cnf = CnfProblem::new();
         let all = add_permutation_support(
             &mut all_cnf,
-            &bool_problem,
             &domain,
             &domain_set,
             &finite_terms,
             2,
             &mandatory_disequalities,
+            &guarded,
             &membership,
             PermutationSupportMode::All,
         );

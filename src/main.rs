@@ -2400,6 +2400,16 @@ fn add_finite_domain_axioms(
     arena: &TermArena,
     bool_problem: &BoolProblem,
 ) -> usize {
+    let mut context = finite_analysis::FiniteAnalysisContext::default();
+    add_finite_domain_axioms_with_context(cnf, arena, bool_problem, &mut context)
+}
+
+fn add_finite_domain_axioms_with_context(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    context: &mut finite_analysis::FiniteAnalysisContext,
+) -> usize {
     let equality_channeling = match env::var("EUF_VIPER_FINITE_EQUALITY_CHANNELING").as_deref() {
         Ok("0" | "off") => FiniteEqualityChanneling::Off,
         Ok("1" | "all") => FiniteEqualityChanneling::All,
@@ -2418,21 +2428,23 @@ fn add_finite_domain_axioms(
         if arena.apps.len() >= symmetry_min_apps
             && matches!(symmetry_mode.as_str(), "1" | "constants" | "hybrid" | "lex")
         {
-            return add_finite_domain_axioms_with_options::<true>(
+            return add_finite_domain_axioms_with_options_and_context::<true>(
                 cnf,
                 arena,
                 bool_problem,
                 equality_channeling,
                 predicate_channeling,
+                context,
             );
         }
     }
-    add_finite_domain_axioms_with_options::<false>(
+    add_finite_domain_axioms_with_options_and_context::<false>(
         cnf,
         arena,
         bool_problem,
         equality_channeling,
         predicate_channeling,
+        context,
     )
 }
 
@@ -2824,11 +2836,26 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     equality_channeling: FiniteEqualityChanneling,
     predicate_channeling: bool,
 ) -> usize {
-    let mut disequality_edges = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_mandatory_disequalities(assertion, &mut disequality_edges);
-    }
-    let domain = largest_small_disequality_clique(&disequality_edges, arena);
+    let mut context = finite_analysis::FiniteAnalysisContext::default();
+    add_finite_domain_axioms_with_options_and_context::<FINITE_SYMMETRY>(
+        cnf,
+        arena,
+        bool_problem,
+        equality_channeling,
+        predicate_channeling,
+        &mut context,
+    )
+}
+
+fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool>(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    equality_channeling: FiniteEqualityChanneling,
+    predicate_channeling: bool,
+    context: &mut finite_analysis::FiniteAnalysisContext,
+) -> usize {
+    context.domain_analysis(arena, bool_problem);
     #[cfg(feature = "finite-symmetry")]
     let max_domain = if FINITE_SYMMETRY {
         env::var("EUF_VIPER_FINITE_DOMAIN_MAX")
@@ -2841,55 +2868,35 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     };
     #[cfg(not(feature = "finite-symmetry"))]
     let max_domain = 8;
-    if domain.len() < 3 || domain.len() > max_domain {
+    let domain_size = context.domain.as_ref().unwrap().domain.len();
+    if domain_size < 3 || domain_size > max_domain {
         return 0;
     }
-    let domain_set = domain.iter().copied().collect::<HashSet<_>>();
-
-    let mut covered_terms = HashSet::default();
-    for assertion in &bool_problem.assertions {
-        collect_mandatory_coverages(assertion, &domain_set, &mut covered_terms);
-    }
-
-    let mut function_arities: HashMap<SymId, usize> = HashMap::default();
-    for &term_id in &covered_terms {
-        let term = &arena.terms[term_id];
-        if !term.args.is_empty() && term.args.iter().all(|arg| domain_set.contains(arg)) {
-            function_arities.insert(term.fun, term.args.len());
-        }
-    }
-    let mut closed_functions = HashSet::default();
-    for (function, arity) in function_arities {
-        let Some(expected) = domain.len().checked_pow(arity as u32) else {
-            continue;
-        };
-        let covered = covered_terms
-            .iter()
-            .filter(|&&term_id| {
-                let term = &arena.terms[term_id];
-                term.fun == function
-                    && term.args.len() == arity
-                    && term.args.iter().all(|arg| domain_set.contains(arg))
-            })
-            .count();
-        if covered == expected {
-            closed_functions.insert(function);
-        }
-    }
-    if closed_functions.is_empty() {
+    context.finite_closure(arena, bool_problem);
+    if context
+        .closure
+        .as_ref()
+        .unwrap()
+        .closed_functions
+        .is_empty()
+    {
         return 0;
     }
 
     #[cfg(feature = "finite-symmetry")]
     let domain_swap_maps = if FINITE_SYMMETRY {
         let symmetry_start = Instant::now();
-        let swap_maps = verified_domain_swap_maps(arena, bool_problem, &domain);
+        let swap_maps = verified_domain_swap_maps(
+            arena,
+            bool_problem,
+            &context.domain.as_ref().unwrap().domain,
+        );
         profile_phase(
             "finite_symmetry_check",
             symmetry_start,
             usize::from(swap_maps.is_some()),
         );
-        if domain.len() > 8 && swap_maps.is_none() {
+        if domain_size > 8 && swap_maps.is_none() {
             return 0;
         }
         swap_maps
@@ -2899,22 +2906,24 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     #[cfg(feature = "finite-symmetry")]
     let domain_symmetry = domain_swap_maps.is_some();
 
-    let mut finite_terms = domain_set.clone();
-    finite_terms.extend(covered_terms.iter().copied());
-    loop {
-        let mut changed = false;
-        for &term_id in &arena.apps {
-            let term = &arena.terms[term_id];
-            if closed_functions.contains(&term.fun)
-                && term.args.iter().all(|arg| finite_terms.contains(arg))
-            {
-                changed |= finite_terms.insert(term_id);
-            }
-        }
-        if !changed {
-            break;
-        }
+    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
+    {
+        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
+        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
+        _ => None,
+    };
+    if permutation_support_mode.is_some() {
+        context.guarded_summary(arena, bool_problem);
     }
+
+    let domain_analysis = context.domain.as_ref().unwrap();
+    let closure = context.closure.as_ref().unwrap();
+    let domain = &domain_analysis.domain;
+    let domain_set = &domain_analysis.domain_set;
+    let disequality_edges = &domain_analysis.mandatory_disequalities;
+    let covered_terms = &closure.covered_terms;
+    let closed_functions = &closure.closed_functions;
+    let finite_terms = &closure.finite_terms;
 
     let mut ordered_finite_terms = finite_terms.iter().copied().collect::<Vec<_>>();
     order_finite_terms(&mut ordered_finite_terms);
@@ -2941,7 +2950,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
 
     let mut membership = HashMap::default();
     for &term in &ordered_finite_terms {
-        for &value in &domain {
+        for &value in domain {
             let literal = cnf.atom_lit(BoolAtomKey::Eq(term, value));
             membership.insert((term, value), literal);
         }
@@ -2954,7 +2963,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
             .map(|value| membership[&(term, *value)])
             .collect::<Vec<_>>();
         if domain_set.contains(&term) {
-            for &value in &domain {
+            for &value in domain {
                 let literal = membership[&(term, value)];
                 cnf.clauses
                     .push(vec![if term == value { literal } else { -literal }]);
@@ -2969,21 +2978,15 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
         }
     }
 
-    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
-    {
-        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
-        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
-        _ => None,
-    };
     if let Some(permutation_support_mode) = permutation_support_mode {
         let stats = finite_analysis::add_permutation_support(
             cnf,
-            bool_problem,
             &domain,
             &domain_set,
             &finite_terms,
             closed_functions.len(),
             &disequality_edges,
+            context.guarded.as_ref().unwrap(),
             &membership,
             permutation_support_mode,
         );
@@ -3130,7 +3133,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
             if domain_set.contains(&left) || domain_set.contains(&right) {
                 continue;
             }
-            for &value in &domain {
+            for &value in domain {
                 let left_value = membership[&(left, value)];
                 let right_value = membership[&(right, value)];
                 cnf.clauses.push(vec![-equality, -left_value, right_value]);
@@ -3172,7 +3175,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
                 .filter(|(arg, value)| arg != value)
                 .map(|(arg, value)| membership[&(*arg, *value)])
                 .collect::<Vec<_>>();
-            for &output in &domain {
+            for &output in domain {
                 let mut clause = conditions
                     .iter()
                     .map(|literal| -*literal)
@@ -5125,6 +5128,12 @@ fn profile_measurement(label: &str, elapsed_ns: u128, count: usize) {
     }
 }
 
+fn profile_eq_facts_guarded_clauses(count: usize) {
+    if env::var_os("EUF_VIPER_PROFILE").is_some() {
+        eprintln!("profile_eq_facts_guarded_clauses={count}");
+    }
+}
+
 fn lit_status(lit: i32, assignment: &[i8]) -> i8 {
     let var = lit.unsigned_abs() as usize;
     let value = assignment[var];
@@ -5242,6 +5251,7 @@ enum EqAbstractionMode {
     Off,
     Shadow,
     Facts,
+    GuardedFacts,
 }
 
 impl EqAbstractionMode {
@@ -5250,6 +5260,7 @@ impl EqAbstractionMode {
             Self::Off => "off",
             Self::Shadow => "shadow",
             Self::Facts => "facts",
+            Self::GuardedFacts => "guarded-facts",
         }
     }
 }
@@ -5258,6 +5269,7 @@ fn parse_eq_abstraction_mode(value: Option<&str>) -> EqAbstractionMode {
     match value {
         Some("shadow") => EqAbstractionMode::Shadow,
         Some("facts") => EqAbstractionMode::Facts,
+        Some("guarded-facts") => EqAbstractionMode::GuardedFacts,
         None | Some("off") | Some(_) => EqAbstractionMode::Off,
     }
 }
@@ -5312,6 +5324,55 @@ fn selected_eq_abstraction_fact_config() -> EqAbstractionFactConfig {
             max_fresh_facts.as_deref(),
             DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS,
         ),
+    }
+}
+
+fn eq_abstraction_fact_config_for_mode(
+    mode: EqAbstractionMode,
+    mut config: EqAbstractionFactConfig,
+) -> EqAbstractionFactConfig {
+    if mode == EqAbstractionMode::GuardedFacts {
+        config.allow_fresh = false;
+    }
+    config
+}
+
+fn route_eq_abstraction_mode(
+    requested: EqAbstractionMode,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    finite_context: &mut finite_analysis::FiniteAnalysisContext,
+) -> EqAbstractionMode {
+    if requested != EqAbstractionMode::GuardedFacts {
+        return requested;
+    }
+
+    let shape_start = Instant::now();
+    let has_shape = finite_analysis::has_guarded_disequality_shape(bool_problem);
+    profile_measurement(
+        "eq_facts_guarded_shape",
+        shape_start.elapsed().as_nanos(),
+        usize::from(has_shape),
+    );
+    if !has_shape {
+        profile_measurement("eq_facts_guarded_selector", 0, 0);
+        profile_eq_facts_guarded_clauses(0);
+        return EqAbstractionMode::Off;
+    }
+
+    let selector_start = Instant::now();
+    let guarded_clauses = finite_context.guarded_disequality_clause_count(arena, bool_problem);
+    let selected = guarded_clauses > 0;
+    profile_measurement(
+        "eq_facts_guarded_selector",
+        selector_start.elapsed().as_nanos(),
+        usize::from(selected),
+    );
+    profile_eq_facts_guarded_clauses(guarded_clauses);
+    if selected {
+        EqAbstractionMode::GuardedFacts
+    } else {
+        EqAbstractionMode::Off
     }
 }
 
@@ -5498,7 +5559,11 @@ fn equality_abstraction_fact_candidates(
         );
     }
 
-    if mode != EqAbstractionMode::Facts || outcome.cap_reason.is_some() {
+    if !matches!(
+        mode,
+        EqAbstractionMode::Facts | EqAbstractionMode::GuardedFacts
+    ) || outcome.cap_reason.is_some()
+    {
         return Vec::new();
     }
     normalized_edges
@@ -5552,7 +5617,8 @@ fn solve_problem_with_eq_abstraction(
     }
 
     if let Some(bool_problem) = &problem.bool_problem {
-        finite_analysis::profile_if_enabled(&problem.arena, bool_problem);
+        let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+        finite_analysis::profile_if_enabled(&problem.arena, bool_problem, &mut finite_context);
         if bool_problem.unsupported.is_empty() {
             if let Some((result, cnf_vars, cnf_clauses, search_nodes, sat_calls, theory_lemmas)) =
                 solve_bool_problem(
@@ -5560,6 +5626,7 @@ fn solve_problem_with_eq_abstraction(
                     bool_problem,
                     direct_root_cnf,
                     eq_abstraction_mode,
+                    &mut finite_context,
                 )
             {
                 return SolveReport {
@@ -5655,7 +5722,8 @@ fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     direct_root_cnf: bool,
-    eq_abstraction_mode: EqAbstractionMode,
+    requested_eq_abstraction_mode: EqAbstractionMode,
+    finite_context: &mut finite_analysis::FiniteAnalysisContext,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
@@ -5669,13 +5737,25 @@ fn solve_bool_problem(
         }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
+    let eq_abstraction_mode = route_eq_abstraction_mode(
+        requested_eq_abstraction_mode,
+        arena,
+        bool_problem,
+        finite_context,
+    );
     let candidate_edges =
         equality_abstraction_fact_candidates(&bool_problem.assertions, eq_abstraction_mode);
-    let accepted_equality_facts = if eq_abstraction_mode == EqAbstractionMode::Facts {
+    let accepted_equality_facts = if matches!(
+        eq_abstraction_mode,
+        EqAbstractionMode::Facts | EqAbstractionMode::GuardedFacts
+    ) {
         let integration = integrate_equality_abstraction_facts(
             &mut cnf,
             &candidate_edges,
-            selected_eq_abstraction_fact_config(),
+            eq_abstraction_fact_config_for_mode(
+                eq_abstraction_mode,
+                selected_eq_abstraction_fact_config(),
+            ),
         );
         integration.profile();
         integration.accepted_edges
@@ -5691,7 +5771,12 @@ fn solve_bool_problem(
             || env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1")
         {
             let finite_start = Instant::now();
-            let added = add_finite_domain_axioms(&mut cnf, arena, bool_problem);
+            let added = add_finite_domain_axioms_with_context(
+                &mut cnf,
+                arena,
+                bool_problem,
+                finite_context,
+            );
             profile_phase("finite_domain", finite_start, added);
             added
         } else {
@@ -6725,7 +6810,19 @@ mod tests {
             EqAbstractionMode::Facts
         );
         assert_eq!(
+            parse_eq_abstraction_mode(Some("guarded-facts")),
+            EqAbstractionMode::GuardedFacts
+        );
+        assert_eq!(
             parse_eq_abstraction_mode(Some("on")),
+            EqAbstractionMode::Off
+        );
+        assert_eq!(
+            parse_eq_abstraction_mode(Some(" guarded-facts")),
+            EqAbstractionMode::Off
+        );
+        assert_eq!(
+            parse_eq_abstraction_mode(Some("GUARDED-FACTS")),
             EqAbstractionMode::Off
         );
     }
@@ -6754,6 +6851,33 @@ mod tests {
                 max_facts: 4_096,
                 max_fresh_facts: 256,
             }
+        );
+
+        let guarded = eq_abstraction_fact_config_for_mode(
+            EqAbstractionMode::GuardedFacts,
+            EqAbstractionFactConfig {
+                allow_fresh: true,
+                max_facts: 19,
+                max_fresh_facts: 17,
+            },
+        );
+        assert_eq!(
+            guarded,
+            EqAbstractionFactConfig {
+                allow_fresh: false,
+                max_facts: 19,
+                max_fresh_facts: 17,
+            }
+        );
+        assert!(
+            eq_abstraction_fact_config_for_mode(
+                EqAbstractionMode::Facts,
+                EqAbstractionFactConfig {
+                    allow_fresh: true,
+                    ..EqAbstractionFactConfig::default()
+                }
+            )
+            .allow_fresh
         );
     }
 
@@ -6861,6 +6985,36 @@ mod tests {
         assert!(integration.accepted_edges.is_empty());
         assert_eq!(cnf.clauses, clauses_before);
         assert_eq!(cnf.var_count(), vars_before);
+    }
+
+    #[test]
+    fn guarded_equality_abstraction_preserves_total_quota_rollback() {
+        let mut cnf = CnfProblem::new();
+        let first = cnf.atom_lit(BoolAtomKey::Eq(0, 1));
+        let second = cnf.atom_lit(BoolAtomKey::Eq(2, 3));
+        cnf.clauses.push(vec![first, second]);
+        let clauses_before = cnf.clauses.clone();
+
+        let integration = integrate_equality_abstraction_facts(
+            &mut cnf,
+            &[(0, 1), (2, 3)],
+            eq_abstraction_fact_config_for_mode(
+                EqAbstractionMode::GuardedFacts,
+                EqAbstractionFactConfig {
+                    allow_fresh: true,
+                    max_facts: 1,
+                    max_fresh_facts: 0,
+                },
+            ),
+        );
+
+        assert_eq!(
+            integration.rollback_reason,
+            Some(EqAbstractionIntegrationRollbackReason::MaxFacts)
+        );
+        assert_eq!(integration.rollback_count, 2);
+        assert!(integration.accepted_edges.is_empty());
+        assert_eq!(cnf.clauses, clauses_before);
     }
 
     #[test]
@@ -7033,24 +7187,57 @@ mod tests {
     }
 
     #[test]
-    fn equality_fact_integration_has_direct_root_tseitin_parity() {
-        let equality_expr = BoolExpr::Atom(BoolAtomKey::Eq(7, 2));
-        let expression = BoolExpr::Iff(vec![equality_expr, BoolExpr::Const(true)]);
+    fn guarded_equality_fact_integration_has_direct_root_tseitin_parity() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun p () U)
+            (declare-fun q () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (assert (distinct a b c))
+            (assert (or (= a b) (not (= x y))))
+            (assert (= (= p q) true))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        let mode = route_eq_abstraction_mode(
+            EqAbstractionMode::GuardedFacts,
+            &problem.arena,
+            bool_problem,
+            &mut context,
+        );
+        assert_eq!(mode, EqAbstractionMode::GuardedFacts);
+        let candidates = equality_abstraction_fact_candidates(&bool_problem.assertions, mode);
+        assert_eq!(candidates.len(), 1);
         let mut integrations = Vec::new();
 
         for direct_root_cnf in [false, true] {
             let mut cnf = CnfProblem::new();
-            if direct_root_cnf {
-                cnf.add_direct_assertion(&expression);
-            } else {
-                cnf.add_assertion(&expression);
+            for assertion in &bool_problem.assertions {
+                if direct_root_cnf {
+                    cnf.add_direct_assertion(assertion);
+                } else {
+                    cnf.add_assertion(assertion);
+                }
             }
             let integration = integrate_equality_abstraction_facts(
                 &mut cnf,
-                &[(7, 2)],
-                EqAbstractionFactConfig::default(),
+                &candidates,
+                eq_abstraction_fact_config_for_mode(
+                    mode,
+                    EqAbstractionFactConfig {
+                        allow_fresh: true,
+                        ..EqAbstractionFactConfig::default()
+                    },
+                ),
             );
-            let equality = cnf.atom_vars[&BoolAtomKey::Eq(2, 7)];
+            let equality = cnf.atom_vars[&BoolAtomKey::Eq(candidates[0].0, candidates[0].1)];
 
             assert_eq!(integration.accepted_existing_facts, 1);
             assert_eq!(integration.accepted_fresh_facts, 0);
@@ -7259,6 +7446,86 @@ mod tests {
         equality_abstraction_fact_candidates(&bool_problem.assertions, mode).len()
     }
 
+    fn routed_eq_abstraction_mode(input: &str) -> (EqAbstractionMode, usize) {
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        let mode = route_eq_abstraction_mode(
+            EqAbstractionMode::GuardedFacts,
+            &problem.arena,
+            bool_problem,
+            &mut context,
+        );
+        let clauses = context
+            .guarded
+            .as_ref()
+            .map_or(0, |summary| summary.clauses);
+        (mode, clauses)
+    }
+
+    #[test]
+    fn guarded_equality_route_selects_only_verified_guarded_clauses() {
+        let declarations = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun p () U)
+            (declare-fun q () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+        ";
+        let selected = format!(
+            "{declarations}
+             (assert (distinct a b c))
+             (assert (or (= a b) (not (= x y))))
+             (assert (= (= p q) true))
+             (check-sat)"
+        );
+        assert_eq!(
+            routed_eq_abstraction_mode(&selected),
+            (EqAbstractionMode::GuardedFacts, 1)
+        );
+
+        let plausible_unverified = format!(
+            "{declarations}
+             (assert (or (= a b) (not (= x y))))
+             (assert (= (= p q) true))
+             (check-sat)"
+        );
+        assert_eq!(
+            equality_abstraction_fact_candidate_count(
+                &plausible_unverified,
+                EqAbstractionMode::Facts
+            ),
+            1
+        );
+        let problem = parse_problem(&plausible_unverified).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        let routed = route_eq_abstraction_mode(
+            EqAbstractionMode::GuardedFacts,
+            &problem.arena,
+            bool_problem,
+            &mut context,
+        );
+        assert_eq!(routed, EqAbstractionMode::Off);
+        assert!(equality_abstraction_fact_candidates(&bool_problem.assertions, routed).is_empty());
+
+        let structural_negative = format!(
+            "{declarations}
+             (assert (distinct a b c))
+             (assert (or (= a b) (= x y)))
+             (assert (= (= p q) true))
+             (check-sat)"
+        );
+        assert_eq!(
+            routed_eq_abstraction_mode(&structural_negative),
+            (EqAbstractionMode::Off, 0)
+        );
+    }
+
     #[test]
     fn dynamic_full_ackermann_rebuild_preserves_accepted_equality_facts() {
         let input = "
@@ -7266,15 +7533,27 @@ mod tests {
             (declare-sort U 0)
             (declare-fun a () U)
             (declare-fun b () U)
-            (assert (= (= a b) true))
+            (declare-fun c () U)
+            (declare-fun p () U)
+            (declare-fun q () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (assert (distinct a b c))
+            (assert (or (= a b) (not (= x y))))
+            (assert (= (= p q) true))
             (check-sat)
         ";
         let problem = parse_problem(input).unwrap();
         let bool_problem = problem.bool_problem.as_ref().unwrap();
-        let candidates = equality_abstraction_fact_candidates(
-            &bool_problem.assertions,
-            EqAbstractionMode::Facts,
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        let mode = route_eq_abstraction_mode(
+            EqAbstractionMode::GuardedFacts,
+            &problem.arena,
+            bool_problem,
+            &mut context,
         );
+        assert_eq!(mode, EqAbstractionMode::GuardedFacts);
+        let candidates = equality_abstraction_fact_candidates(&bool_problem.assertions, mode);
         assert_eq!(candidates.len(), 1);
 
         let mut initial_cnf = CnfProblem::new();
@@ -7284,7 +7563,13 @@ mod tests {
         let integration = integrate_equality_abstraction_facts(
             &mut initial_cnf,
             &candidates,
-            EqAbstractionFactConfig::default(),
+            eq_abstraction_fact_config_for_mode(
+                mode,
+                EqAbstractionFactConfig {
+                    allow_fresh: true,
+                    ..EqAbstractionFactConfig::default()
+                },
+            ),
         );
         assert_eq!(integration.accepted_existing_facts, 1);
 
@@ -8838,9 +9123,15 @@ mod tests {
                     direct_root_cnf,
                     EqAbstractionMode::Facts,
                 );
+                let guarded = solve_text_with_eq_abstraction(
+                    &input,
+                    direct_root_cnf,
+                    EqAbstractionMode::GuardedFacts,
+                );
                 assert_eq!(off, expected);
                 assert_eq!(shadow, off);
                 assert_eq!(facts, off);
+                assert_eq!(guarded, off);
             }
         }
     }
