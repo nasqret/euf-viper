@@ -67,7 +67,8 @@ The following are useful ingredients but cannot be the headline contribution:
 The detailed evidence is in:
 
 - `2026-07-11-novelty-exclusion-map.md`;
-- `2026-07-11-z3-yices-boundary-audit.md`.
+- `2026-07-11-z3-yices-boundary-audit.md`;
+- `2026-07-11-unorthodox-euf-mechanism-map.md`.
 
 Every surviving claim must name the closest known mechanism and the exact
 semantic, proof-system, or integration difference.
