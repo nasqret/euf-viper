@@ -206,16 +206,30 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 - [x] Prove that `qg7/iso_icl_nogen001.smt2` contains 5,040 unique forbidden
   complete tables forming one exact `S_7` conjugacy orbit. The same input has
   497,474 Boolean occurrences but only 11,370 syntactic nodes.
-- [ ] Finish exact repair A/B `143700`/`143701`. Sample `143697` preserved
-  39/40 coverage but measured `0.9940x` common-total speed; the mandatory
-  soundness repair is not a performance optimization.
-- [ ] Accept WMI candidate build `143747`, then evaluate same-binary direct
-  negated-root CNF canary `143751` and structural profile `143758`.
-- [ ] Complete fixed four-solver 2-second array `143752` and merge `143753`
-  against Z3, cvc5, and Yices2. No superiority claim precedes this result.
-- [ ] Promote direct negated-root CNF only if the paired target gate passes,
-  followed by sample, hot, hard-tail, and full-corpus gates. The flag remains
-  default-off.
+- [x] Finish exact repair A/B `143700`/`143701`. The mandatory repair has zero
+  wrong answers, but is not an optimization: 7,273 common correct instances,
+  `0.9974x` total, `0.9940x` geometric, `0.9963x` median speed, and two fewer
+  solved instances at the two-second boundary. It is retained for soundness
+  and rejected by the statistical promotion gate.
+- [x] Accept research-main WMI build `143747` as sound. Direct-negated-root
+  run `143751` completed computation but could not write its result under the
+  effective WMI file quota; exact rerun `143792` completed after bounded
+  cleanup. Profile `143758` records the clause and load deltas.
+- [ ] Complete fixed four-solver two-second research-main array `143752` and
+  merge `143753`, then the faster exact-lineage array `143798` and merge
+  `143799`, against Z3, cvc5, and Yices2. No superiority claim precedes these
+  results.
+- [x] Reject direct negated-root CNF as a qg7 hard-tail mechanism. It removes
+  15,120 CNF items and reduces measured CNF construction on the exemplar, but
+  both arms timed out on all 14 target instances and timeout-charged speed was
+  only `1.00004x`. The flag remains default-off; no broader behavioral gate is
+  justified from this hypothesis.
+- [ ] Pass exact-lineage soundness `143794`, parser candidate gate `143797`,
+  direct-on Boolean-data differential `143796`, and full campaign
+  `143798`/`143799` for commit `ebf8e27`. Its first gate `143786` passed all
+  100 tests and built the release binary but failed before semantic fixtures
+  because the archive omitted the external counterexample; `ebf8e27` makes
+  the archive self-contained and removes compile-disabled merge residue.
 - [ ] Convert the exact orbit-cover reference into a production recognizer
   only after typed base-invariance extraction and replayable certificates are
   end-to-end tested.
@@ -284,10 +298,10 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 The historically measured `58efe9d` binary has a confirmed general soundness
 defect for unasserted Boolean values used as uninterpreted-function arguments.
 The local candidate repairs that defect, quoted-reserved symbol dispatch, and
-query ordering; 198 all-feature Rust tests and 86 Python tests pass. General
-soundness and superiority are still unclaimed until hash-pinned WMI build
-`143747`, full repair A/B `143700`/`143701`, differential gates, and the fixed
-four-solver campaign `143752`/`143753` all complete.
+query ordering; 198 all-feature Rust tests and 86 Python tests pass at the last
+integrated checkpoint. General soundness and superiority are still unclaimed
+until exact-lineage WMI build `143794`, its differential/parser gates, and the
+fixed four-solver campaigns `143752`/`143753` and `143798`/`143799` complete.
 
 At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a
 0.0278s median versus `euf-viper` at 7,478/7,503 and 0.0910s. On 7,478 common

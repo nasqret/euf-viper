@@ -515,6 +515,27 @@
   quotienting, stabilizer-aware MDDs, EUF-structured BVA, certifying Hall/PB
   escalation, and theory-aware vivification above another generic lazy
   e-graph. Each mechanism has a falsifiable paired gate in the vault.
+- Full mandatory-repair A/B `143700`/`143701` completed with zero wrong answers
+  and 7,273 common correct instances. The repair is measurably slower and loses
+  two boundary solves: total `0.9974x`, geometric `0.9940x`, median `0.9963x`.
+  The statistical gate correctly rejects it as an optimization while the
+  correctness change remains mandatory.
+- Research-main soundness `143747` passed. Same-binary direct-negated-root
+  rerun `143792` then timed out in both arms on all 14 qg7 targets. Profile
+  `143758` shows 734,066 to 718,946 CNF items and 51.52ms to 46.98ms CNF time
+  on `iso_icl_nogen001`, but no proof or coverage change; reject the mechanism
+  for this tail rather than broadening it.
+- Parser metamorphic job `143765` gave euf-viper zero anomalies on 1,620 cases.
+  Its strict failure records comparator behavior separately: cvc5 rejected 18
+  quoted-reserved groups, Yices2 rejected 21, and Z3 contradicted two generated
+  expectations. Candidate gating now preserves all comparator anomalies but
+  fails the job only on euf-viper's generator-known or metamorphic obligations.
+- Created the fastest sound exact lineage `soundness/exact-parser-negroot`.
+  Commit `ebf8e27` contains the Boolean-data repair, quote/query-order repair,
+  default-off negated-root experiment, a self-contained counterexample
+  fixture, and no compile-disabled typed-parser residue. WMI soundness
+  `143794`, differential `143796`, parser `143797`, full array `143798`, and
+  merge `143799` are hash-pinned to this lineage.
 
 ## Next Entry Template
 
