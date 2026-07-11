@@ -37,11 +37,13 @@ enum Tok {
     LParen,
     RParen,
     Atom(String),
+    QuotedAtom(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Sexp {
     Atom(String),
+    QuotedAtom(String),
     List(Vec<Sexp>),
 }
 
@@ -216,6 +218,8 @@ struct ParseCtx {
     fresh_internal_counter: usize,
     preprocess_branch_intersections: bool,
     scoped_let_selected: bool,
+    check_sat_seen: bool,
+    exit_seen: bool,
     contradiction: bool,
 }
 
@@ -259,6 +263,239 @@ impl ParseCtx {
         self.unsupported.push(msg.into());
     }
 
+    #[cfg(any())]
+    fn parse_sort(&mut self, sexp: &Sexp, context: &str) -> Result<SortId, String> {
+        let Some(name) = atom_text(sexp) else {
+            return Err(format!("{context} is not a sort symbol"));
+        };
+        if syntax_atom_text(sexp) == Some("Bool") {
+            return Ok(BOOL_SORT);
+        }
+        let sym = self.symbols.intern(name);
+        self.sorts
+            .get(sym)
+            .ok_or_else(|| format!("unknown sort `{name}` in {context}"))
+    }
+
+    #[cfg(any())]
+    fn declare_function(
+        &mut self,
+        name: &str,
+        arg_sorts: Vec<SortId>,
+        result_sort: SortId,
+    ) -> Result<SymId, String> {
+        let sym = self.symbols.intern(name);
+        if self.fun_decls.get(sym).is_some() {
+            return Err(format!("function `{name}` is already declared"));
+        }
+        self.fun_decls.insert(
+            sym,
+            FunDecl {
+                arg_sorts,
+                result_sort,
+            },
+        );
+        Ok(sym)
+    }
+
+    #[cfg(any())]
+    fn sort_mismatch(&self, context: &str, expected: SortId, found: SortId) -> String {
+        format!(
+            "sort mismatch in {context}: expected `{}`, found `{}`",
+            self.sorts.name(expected),
+            self.sorts.name(found)
+        )
+    }
+
+    #[cfg(any())]
+    fn validate_expected_sort(
+        &self,
+        context: &str,
+        found: Option<SortId>,
+        expected: SortId,
+    ) -> Result<(), String> {
+        if let Some(found) = found
+            && found != expected
+        {
+            return Err(self.sort_mismatch(context, expected, found));
+        }
+        Ok(())
+    }
+
+    #[cfg(any())]
+    fn validate_expr_sort(
+        &mut self,
+        sexp: &Sexp,
+        env: &HashMap<String, Option<SortId>>,
+    ) -> Result<Option<SortId>, String> {
+        match sexp {
+            Sexp::Atom(atom) if matches!(atom.as_str(), "true" | "false") => Ok(Some(BOOL_SORT)),
+            Sexp::Atom(atom) | Sexp::QuotedAtom(atom) => {
+                if let Some(sort) = env.get(atom) {
+                    return Ok(*sort);
+                }
+                let sym = self.symbols.intern(atom);
+                let Some(decl) = self.fun_decls.get(sym) else {
+                    return Ok(None);
+                };
+                if !decl.arg_sorts.is_empty() {
+                    return Err(format!(
+                        "arity mismatch in application `{atom}`: expected {} arguments, found 0",
+                        decl.arg_sorts.len()
+                    ));
+                }
+                Ok(Some(decl.result_sort))
+            }
+            Sexp::List(items) => {
+                if items.is_empty() {
+                    return Ok(None);
+                }
+                let Some(head) = atom_text(&items[0]) else {
+                    return Ok(None);
+                };
+                match syntax_atom_text(&items[0]) {
+                    Some("!") => {
+                        let Some(payload) = items.get(1) else {
+                            return Ok(None);
+                        };
+                        self.validate_expr_sort(payload, env)
+                    }
+                    Some("and" | "or") => {
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            self.validate_expected_sort(
+                                &format!("`{head}` argument"),
+                                sort,
+                                BOOL_SORT,
+                            )?;
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    Some("not") => {
+                        if items.len() != 2 {
+                            return Ok(None);
+                        }
+                        let sort = self.validate_expr_sort(&items[1], env)?;
+                        self.validate_expected_sort("`not` argument", sort, BOOL_SORT)?;
+                        Ok(Some(BOOL_SORT))
+                    }
+                    Some("=>" | "xor") => {
+                        if items.len() < 3 {
+                            return Ok(None);
+                        }
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            self.validate_expected_sort(
+                                &format!("`{head}` argument"),
+                                sort,
+                                BOOL_SORT,
+                            )?;
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    Some("=" | "distinct") => {
+                        if items.len() < 3 {
+                            return Ok(None);
+                        }
+                        let mut expected = None;
+                        for child in &items[1..] {
+                            let sort = self.validate_expr_sort(child, env)?;
+                            if let Some(sort) = sort {
+                                if let Some(expected) = expected {
+                                    if sort != expected {
+                                        return Err(self.sort_mismatch(
+                                            if head == "=" { "equality" } else { "distinct" },
+                                            expected,
+                                            sort,
+                                        ));
+                                    }
+                                } else {
+                                    expected = Some(sort);
+                                }
+                            }
+                        }
+                        Ok(Some(BOOL_SORT))
+                    }
+                    Some("ite") => {
+                        if items.len() != 4 {
+                            return Ok(None);
+                        }
+                        let condition = self.validate_expr_sort(&items[1], env)?;
+                        self.validate_expected_sort("ite condition", condition, BOOL_SORT)?;
+                        let then_sort = self.validate_expr_sort(&items[2], env)?;
+                        let else_sort = self.validate_expr_sort(&items[3], env)?;
+                        if let (Some(then_sort), Some(else_sort)) = (then_sort, else_sort)
+                            && then_sort != else_sort
+                        {
+                            return Err(self.sort_mismatch("ite branches", then_sort, else_sort));
+                        }
+                        Ok(then_sort.or(else_sort))
+                    }
+                    Some("let") => {
+                        if items.len() != 3 {
+                            return Ok(None);
+                        }
+                        let Sexp::List(binding_list) = &items[1] else {
+                            return Ok(None);
+                        };
+                        let mut parsed = Vec::with_capacity(binding_list.len());
+                        for binding in binding_list {
+                            let Sexp::List(pair) = binding else {
+                                return Ok(None);
+                            };
+                            if pair.len() != 2 {
+                                return Ok(None);
+                            }
+                            let Some(name) = atom_text(&pair[0]) else {
+                                return Ok(None);
+                            };
+                            parsed.push((name.to_owned(), self.validate_expr_sort(&pair[1], env)?));
+                        }
+                        let mut local = env.clone();
+                        for (name, sort) in parsed {
+                            local.insert(name, sort);
+                        }
+                        self.validate_expr_sort(&items[2], &local)
+                    }
+                    _ => {
+                        let sym = self.symbols.intern(head);
+                        let Some(decl) = self.fun_decls.get(sym).cloned() else {
+                            return Ok(None);
+                        };
+                        let args = &items[1..];
+                        if args.len() != decl.arg_sorts.len() {
+                            return Err(format!(
+                                "arity mismatch in application `{head}`: expected {} arguments, found {}",
+                                decl.arg_sorts.len(),
+                                args.len()
+                            ));
+                        }
+                        for (index, (arg, expected)) in args.iter().zip(&decl.arg_sorts).enumerate()
+                        {
+                            let found = self.validate_expr_sort(arg, env)?;
+                            self.validate_expected_sort(
+                                &format!("application `{head}` argument {}", index + 1),
+                                found,
+                                *expected,
+                            )?;
+                        }
+                        Ok(Some(decl.result_sort))
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(any())]
+    fn validate_assertion_sort(&mut self, sexp: &Sexp) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            self.assertion_sort_validations += 1;
+        }
+        let sort = self.validate_expr_sort(sexp, &HashMap::default())?;
+        self.validate_expected_sort("assertion", sort, BOOL_SORT)
+    }
+
     fn parse_command(&mut self, sexp: &Sexp) -> Result<(), String> {
         let Sexp::List(items) = sexp else {
             return Ok(());
@@ -266,9 +503,17 @@ impl ParseCtx {
         if items.is_empty() {
             return Ok(());
         }
-        let Some(head) = atom_text(&items[0]) else {
-            return Ok(());
+        let Some(head) = syntax_atom_text(&items[0]) else {
+            return Err("top-level command head must be an unquoted symbol".to_owned());
         };
+        if self.exit_seen {
+            return Err(format!("command `{head}` appears after `exit`"));
+        }
+        if self.check_sat_seen && !matches!(head, "get-model" | "get-value" | "exit") {
+            return Err(format!(
+                "command `{head}` after `check-sat` is unsupported in single-query mode"
+            ));
+        }
         match head {
             "assert" => {
                 if items.len() != 2 {
@@ -311,10 +556,10 @@ impl ParseCtx {
                         .get(2)
                         .and_then(|arg_sorts| match arg_sorts {
                             Sexp::List(sorts) => Some(sorts.len()),
-                            Sexp::Atom(_) => None,
+                            Sexp::Atom(_) | Sexp::QuotedAtom(_) => None,
                         })
                         .unwrap_or(0);
-                    let result_is_bool = items.get(3).and_then(atom_text) == Some("Bool");
+                    let result_is_bool = items.get(3).and_then(syntax_atom_text) == Some("Bool");
                     self.fun_decls.insert(
                         sym,
                         FunDecl {
@@ -327,7 +572,7 @@ impl ParseCtx {
             "declare-const" => {
                 if let Some(name) = items.get(1).and_then(atom_text) {
                     let sym = self.symbols.intern(name);
-                    let result_is_bool = items.get(2).and_then(atom_text) == Some("Bool");
+                    let result_is_bool = items.get(2).and_then(syntax_atom_text) == Some("Bool");
                     self.fun_decls.insert(
                         sym,
                         FunDecl {
@@ -340,8 +585,20 @@ impl ParseCtx {
                     }
                 }
             }
-            "set-logic" | "set-option" | "set-info" | "declare-sort" | "check-sat" | "exit"
-            | "get-model" | "get-value" => {}
+            "set-logic" | "set-option" | "set-info" | "declare-sort" | "get-model"
+            | "get-value" => {}
+            "check-sat" => {
+                if items.len() != 1 {
+                    return Err("check-sat command must not have arguments".to_owned());
+                }
+                self.check_sat_seen = true;
+            }
+            "exit" => {
+                if items.len() != 1 {
+                    return Err("exit command must not have arguments".to_owned());
+                }
+                self.exit_seen = true;
+            }
             "define-fun" => {
                 if items.len() != 5 {
                     self.add_unsupported("define-fun with unexpected arity");
@@ -359,7 +616,8 @@ impl ParseCtx {
                     self.add_unsupported("define-fun parameters are not a list");
                     return Ok(());
                 };
-                if !parameters.is_empty() || items.get(3).and_then(atom_text) != Some("Bool") {
+                if !parameters.is_empty() || items.get(3).and_then(syntax_atom_text) != Some("Bool")
+                {
                     self.add_unsupported("only zero-arity Boolean define-fun macros are supported");
                     return Ok(());
                 }
@@ -402,24 +660,22 @@ impl ParseCtx {
         env: &mut HashMap<String, TermId>,
     ) -> Result<(), String> {
         match sexp {
-            Sexp::Atom(atom) => match atom.as_str() {
-                "true" if polarity => Ok(()),
-                "false" if polarity => {
-                    self.contradiction = true;
-                    Ok(())
-                }
-                "true" => {
-                    self.contradiction = true;
-                    Ok(())
-                }
-                "false" => Ok(()),
-                name => {
-                    self.add_unsupported(format!(
-                        "Boolean atom `{name}` is not handled without SAT search"
-                    ));
-                    Ok(())
-                }
-            },
+            Sexp::Atom(atom) if atom == "true" && polarity => Ok(()),
+            Sexp::Atom(atom) if atom == "false" && polarity => {
+                self.contradiction = true;
+                Ok(())
+            }
+            Sexp::Atom(atom) if atom == "true" => {
+                self.contradiction = true;
+                Ok(())
+            }
+            Sexp::Atom(atom) if atom == "false" => Ok(()),
+            Sexp::Atom(name) | Sexp::QuotedAtom(name) => {
+                self.add_unsupported(format!(
+                    "Boolean atom `{name}` is not handled without SAT search"
+                ));
+                Ok(())
+            }
             Sexp::List(items) => {
                 if items.is_empty() {
                     self.add_unsupported("empty formula list");
@@ -429,15 +685,15 @@ impl ParseCtx {
                     self.add_unsupported("formula head is not a symbol");
                     return Ok(());
                 };
-                match head {
-                    "!" => {
+                match syntax_atom_text(&items[0]) {
+                    Some("!") => {
                         if items.len() < 2 {
                             self.add_unsupported("annotation without a payload");
                         } else {
                             self.collect_formula(&items[1], polarity, env)?;
                         }
                     }
-                    "and" if polarity => {
+                    Some("and") if polarity => {
                         let mut delayed_or = Vec::new();
                         for child in &items[1..] {
                             if is_positive_or(child) {
@@ -450,21 +706,21 @@ impl ParseCtx {
                             self.collect_formula(child, true, env)?;
                         }
                     }
-                    "or" if !polarity => {
+                    Some("or") if !polarity => {
                         for child in &items[1..] {
                             self.collect_formula(child, false, env)?;
                         }
                     }
-                    "not" => {
+                    Some("not") => {
                         if items.len() != 2 {
                             self.add_unsupported("not with arity other than 1");
                         } else {
                             self.collect_formula(&items[1], !polarity, env)?;
                         }
                     }
-                    "=" => self.collect_equality(&items[1..], polarity, env)?,
-                    "distinct" => self.collect_distinct(&items[1..], polarity, env)?,
-                    "let" => {
+                    Some("=") => self.collect_equality(&items[1..], polarity, env)?,
+                    Some("distinct") => self.collect_distinct(&items[1..], polarity, env)?,
+                    Some("let") => {
                         if items.len() != 3 {
                             self.add_unsupported("let formula with unexpected arity");
                         } else if self.scoped_let_selected {
@@ -476,7 +732,7 @@ impl ParseCtx {
                             self.collect_formula(&items[2], polarity, &mut local)?;
                         }
                     }
-                    "or" if polarity => {
+                    Some("or") if polarity => {
                         let analysis = self.analyze_positive_or(&items[1..], env)?;
                         if !analysis.proved_unsat {
                             self.add_unsupported(format!(
@@ -487,7 +743,7 @@ impl ParseCtx {
                             ));
                         }
                     }
-                    "and" | "=>" | "xor" | "ite" => {
+                    Some("and" | "=>" | "xor" | "ite") => {
                         self.add_unsupported(format!(
                             "Boolean connective `{head}` needs DPLL(T), not only EUF closure"
                         ));
@@ -618,18 +874,19 @@ impl ParseCtx {
     ) -> Result<bool, String> {
         match sexp {
             Sexp::Atom(atom) => Ok((atom == "true" && polarity) || (atom == "false" && !polarity)),
+            Sexp::QuotedAtom(_) => Ok(false),
             Sexp::List(items) => {
                 if items.is_empty() {
                     return Ok(false);
                 }
-                let Some(head) = atom_text(&items[0]) else {
+                let Some(_) = atom_text(&items[0]) else {
                     return Ok(false);
                 };
-                match head {
-                    "!" if items.len() >= 2 => {
+                match syntax_atom_text(&items[0]) {
+                    Some("!") if items.len() >= 2 => {
                         self.collect_branch_literals_into(&items[1], polarity, env, lits)
                     }
-                    "and" if polarity => {
+                    Some("and") if polarity => {
                         for child in &items[1..] {
                             if !self.collect_branch_literals_into(child, true, env, lits)? {
                                 return Ok(false);
@@ -637,7 +894,7 @@ impl ParseCtx {
                         }
                         Ok(true)
                     }
-                    "or" if !polarity => {
+                    Some("or") if !polarity => {
                         for child in &items[1..] {
                             if !self.collect_branch_literals_into(child, false, env, lits)? {
                                 return Ok(false);
@@ -645,10 +902,10 @@ impl ParseCtx {
                         }
                         Ok(true)
                     }
-                    "not" if items.len() == 2 => {
+                    Some("not") if items.len() == 2 => {
                         self.collect_branch_literals_into(&items[1], !polarity, env, lits)
                     }
-                    "=" if polarity => {
+                    Some("=") if polarity => {
                         let terms = self.parse_terms(&items[1..], env)?;
                         if terms.len() < 2 {
                             return Ok(false);
@@ -659,17 +916,17 @@ impl ParseCtx {
                         }
                         Ok(true)
                     }
-                    "=" if !polarity && items.len() == 3 => {
+                    Some("=") if !polarity && items.len() == 3 => {
                         let terms = self.parse_terms(&items[1..], env)?;
                         lits.diseqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
-                    "distinct" if !polarity && items.len() == 3 => {
+                    Some("distinct") if !polarity && items.len() == 3 => {
                         let terms = self.parse_terms(&items[1..], env)?;
                         lits.eqs.push((terms[0], terms[1]));
                         Ok(true)
                     }
-                    "distinct" if polarity => {
+                    Some("distinct") if polarity => {
                         let terms = self.parse_terms(&items[1..], env)?;
                         for i in 0..terms.len() {
                             for j in (i + 1)..terms.len() {
@@ -678,7 +935,7 @@ impl ParseCtx {
                         }
                         Ok(true)
                     }
-                    "let" if items.len() == 3 => {
+                    Some("let") if items.len() == 3 => {
                         if self.scoped_let_selected {
                             let bindings = self.parse_let_bindings(&items[1], env)?;
                             let mut scope = ScopedBindings::new(env, bindings);
@@ -705,25 +962,23 @@ impl ParseCtx {
         env: &mut HashMap<String, BindingValue>,
     ) -> Result<BoolExpr, String> {
         match sexp {
-            Sexp::Atom(atom) => match atom.as_str() {
-                "true" => Ok(BoolExpr::Const(true)),
-                "false" => Ok(BoolExpr::Const(false)),
-                name => match env.get(name).cloned() {
-                    Some(BindingValue::Bool(expr)) => Ok(expr),
-                    Some(BindingValue::Term(_)) => {
-                        Err(format!("term binding `{name}` used as a Boolean formula"))
+            Sexp::Atom(atom) if atom == "true" => Ok(BoolExpr::Const(true)),
+            Sexp::Atom(atom) if atom == "false" => Ok(BoolExpr::Const(false)),
+            Sexp::Atom(name) | Sexp::QuotedAtom(name) => match env.get(name).cloned() {
+                Some(BindingValue::Bool(expr)) => Ok(expr),
+                Some(BindingValue::Term(_)) => {
+                    Err(format!("term binding `{name}` used as a Boolean formula"))
+                }
+                None => {
+                    let sym = self.symbols.intern(name);
+                    if let Some(body) = self.bool_definitions.get(&sym).cloned() {
+                        Ok(body)
+                    } else if self.is_bool_symbol(sym, 0) {
+                        Ok(self.bool_app_expr(sym, Vec::new()))
+                    } else {
+                        Err(format!("non-Boolean atom `{name}` used as a formula"))
                     }
-                    None => {
-                        let sym = self.symbols.intern(name);
-                        if let Some(body) = self.bool_definitions.get(&sym).cloned() {
-                            Ok(body)
-                        } else if self.is_bool_symbol(sym, 0) {
-                            Ok(self.bool_app_expr(sym, Vec::new()))
-                        } else {
-                            Err(format!("non-Boolean atom `{name}` used as a formula"))
-                        }
-                    }
-                },
+                }
             },
             Sexp::List(items) => {
                 if items.is_empty() {
@@ -732,29 +987,29 @@ impl ParseCtx {
                 let Some(head) = atom_text(&items[0]) else {
                     return Err("Boolean formula head is not a symbol".to_owned());
                 };
-                match head {
-                    "!" => {
+                match syntax_atom_text(&items[0]) {
+                    Some("!") => {
                         if items.len() < 2 {
                             Err("annotation without a payload".to_owned())
                         } else {
                             self.parse_bool_expr(&items[1], env)
                         }
                     }
-                    "and" => {
+                    Some("and") => {
                         let mut children = Vec::with_capacity(items.len().saturating_sub(1));
                         for child in &items[1..] {
                             children.push(self.parse_bool_expr(child, env)?);
                         }
                         Ok(BoolExpr::And(children))
                     }
-                    "or" => {
+                    Some("or") => {
                         let mut children = Vec::with_capacity(items.len().saturating_sub(1));
                         for child in &items[1..] {
                             children.push(self.parse_bool_expr(child, env)?);
                         }
                         Ok(BoolExpr::Or(children))
                     }
-                    "not" => {
+                    Some("not") => {
                         if items.len() != 2 {
                             Err("not with arity other than 1".to_owned())
                         } else {
@@ -763,7 +1018,7 @@ impl ParseCtx {
                             )))
                         }
                     }
-                    "=>" => {
+                    Some("=>") => {
                         if items.len() < 3 {
                             return Err("=> with fewer than 2 arguments".to_owned());
                         }
@@ -779,7 +1034,7 @@ impl ParseCtx {
                         };
                         Ok(BoolExpr::Or(vec![BoolExpr::Not(Box::new(premise)), last]))
                     }
-                    "xor" => {
+                    Some("xor") => {
                         if items.len() < 3 {
                             return Err("xor with fewer than 2 arguments".to_owned());
                         }
@@ -790,7 +1045,7 @@ impl ParseCtx {
                         }
                         Ok(expr)
                     }
-                    "ite" => {
+                    Some("ite") => {
                         if items.len() != 4 {
                             Err("Boolean ite with arity other than 3".to_owned())
                         } else {
@@ -801,9 +1056,9 @@ impl ParseCtx {
                             ))
                         }
                     }
-                    "=" => self.parse_bool_equality(&items[1..], env),
-                    "distinct" => self.parse_bool_distinct(&items[1..], env),
-                    "let" => {
+                    Some("=") => self.parse_bool_equality(&items[1..], env),
+                    Some("distinct") => self.parse_bool_distinct(&items[1..], env),
+                    Some("let") => {
                         if items.len() != 3 {
                             Err("let formula with unexpected arity".to_owned())
                         } else if self.scoped_let_selected {
@@ -932,13 +1187,9 @@ impl ParseCtx {
         env: &mut HashMap<String, BindingValue>,
     ) -> Result<BindingValue, String> {
         match sexp {
-            Sexp::Atom(atom) => {
-                if atom == "true" {
-                    return Ok(BindingValue::Bool(BoolExpr::Const(true)));
-                }
-                if atom == "false" {
-                    return Ok(BindingValue::Bool(BoolExpr::Const(false)));
-                }
+            Sexp::Atom(atom) if atom == "true" => Ok(BindingValue::Bool(BoolExpr::Const(true))),
+            Sexp::Atom(atom) if atom == "false" => Ok(BindingValue::Bool(BoolExpr::Const(false))),
+            Sexp::Atom(atom) | Sexp::QuotedAtom(atom) => {
                 if let Some(value) = env.get(atom).cloned() {
                     return Ok(value);
                 }
@@ -958,22 +1209,26 @@ impl ParseCtx {
                 let Some(head) = atom_text(&items[0]) else {
                     return Err("expression head is not a symbol".to_owned());
                 };
-                if head == "!" {
+                let syntax_head = syntax_atom_text(&items[0]);
+                if syntax_head == Some("!") {
                     if items.len() < 2 {
                         return Err("annotation without a payload".to_owned());
                     }
                     return self.parse_bool_or_term(&items[1], env);
                 }
-                if matches!(head, "and" | "or" | "not" | "=>" | "xor" | "=" | "distinct") {
+                if matches!(
+                    syntax_head,
+                    Some("and" | "or" | "not" | "=>" | "xor" | "=" | "distinct")
+                ) {
                     return Ok(BindingValue::Bool(self.parse_bool_expr(sexp, env)?));
                 }
-                if head == "ite" {
+                if syntax_head == Some("ite") {
                     if let Ok(expr) = self.parse_bool_expr(sexp, env) {
                         return Ok(BindingValue::Bool(expr));
                     }
                     return Ok(BindingValue::Term(self.parse_typed_term(sexp, env)?));
                 }
-                if head == "let" {
+                if syntax_head == Some("let") {
                     if let Ok(expr) = self.parse_bool_expr(sexp, env) {
                         return Ok(BindingValue::Bool(expr));
                     }
@@ -1000,7 +1255,15 @@ impl ParseCtx {
         env: &mut HashMap<String, BindingValue>,
     ) -> Result<TermId, String> {
         match sexp {
-            Sexp::Atom(atom) => {
+            Sexp::Atom(atom) if matches!(atom.as_str(), "true" | "false") => {
+                let (true_term, false_term) = self.ensure_bool_value_terms();
+                Ok(if atom == "true" {
+                    true_term
+                } else {
+                    false_term
+                })
+            }
+            Sexp::Atom(atom) | Sexp::QuotedAtom(atom) => {
                 if let Some(value) = env.get(atom).cloned() {
                     return match value {
                         BindingValue::Term(term) => Ok(term),
@@ -1020,13 +1283,14 @@ impl ParseCtx {
                 let Some(head) = atom_text(&items[0]) else {
                     return Err("term head is not a symbol".to_owned());
                 };
-                if head == "!" {
+                let syntax_head = syntax_atom_text(&items[0]);
+                if syntax_head == Some("!") {
                     if items.len() < 2 {
                         return Err("annotation without a payload".to_owned());
                     }
                     return self.parse_typed_term(&items[1], env);
                 }
-                if head == "let" {
+                if syntax_head == Some("let") {
                     if items.len() != 3 {
                         return Err("let term with unexpected arity".to_owned());
                     }
@@ -1038,7 +1302,7 @@ impl ParseCtx {
                     let mut local = self.extend_mixed_let_env(&items[1], env)?;
                     return self.parse_typed_term(&items[2], &mut local);
                 }
-                if head == "ite" {
+                if syntax_head == Some("ite") {
                     if items.len() != 4 {
                         return Err("term-level ite with arity other than 3".to_owned());
                     }
@@ -1238,7 +1502,7 @@ impl ParseCtx {
         env: &mut HashMap<String, TermId>,
     ) -> Result<TermId, String> {
         match sexp {
-            Sexp::Atom(atom) => {
+            Sexp::Atom(atom) | Sexp::QuotedAtom(atom) => {
                 if let Some(&id) = env.get(atom) {
                     return Ok(id);
                 }
@@ -1252,13 +1516,14 @@ impl ParseCtx {
                 let Some(head) = atom_text(&items[0]) else {
                     return Err("term head is not a symbol".to_owned());
                 };
-                if head == "!" {
+                let syntax_head = syntax_atom_text(&items[0]);
+                if syntax_head == Some("!") {
                     if items.len() < 2 {
                         return Err("annotation without a payload".to_owned());
                     }
                     return self.parse_term(&items[1], env);
                 }
-                if head == "let" {
+                if syntax_head == Some("let") {
                     if items.len() != 3 {
                         return Err("let term with unexpected arity".to_owned());
                     }
@@ -5573,13 +5838,20 @@ fn congruence_closure(arena: &TermArena, uf: &mut UnionFind) -> (usize, usize) {
 
 fn atom_text(sexp: &Sexp) -> Option<&str> {
     match sexp {
-        Sexp::Atom(text) => Some(text.as_str()),
+        Sexp::Atom(text) | Sexp::QuotedAtom(text) => Some(text.as_str()),
         Sexp::List(_) => None,
     }
 }
 
+fn syntax_atom_text(sexp: &Sexp) -> Option<&str> {
+    match sexp {
+        Sexp::Atom(text) => Some(text.as_str()),
+        Sexp::QuotedAtom(_) | Sexp::List(_) => None,
+    }
+}
+
 fn is_positive_or(sexp: &Sexp) -> bool {
-    matches!(sexp, Sexp::List(items) if items.first().and_then(atom_text) == Some("or"))
+    matches!(sexp, Sexp::List(items) if items.first().and_then(syntax_atom_text) == Some("or"))
 }
 
 fn is_equality_path_branch(expr: &BoolExpr) -> bool {
@@ -5646,6 +5918,7 @@ fn tokenize(input: &str) -> Result<Vec<Tok>, String> {
             b'|' => {
                 i += 1;
                 let mut atom = String::new();
+                let mut closed = false;
                 while i < bytes.len() {
                     match bytes[i] {
                         b'\\' if i + 1 < bytes.len() => {
@@ -5655,6 +5928,7 @@ fn tokenize(input: &str) -> Result<Vec<Tok>, String> {
                         }
                         b'|' => {
                             i += 1;
+                            closed = true;
                             break;
                         }
                         c => {
@@ -5663,7 +5937,10 @@ fn tokenize(input: &str) -> Result<Vec<Tok>, String> {
                         }
                     }
                 }
-                toks.push(Tok::Atom(atom));
+                if !closed {
+                    return Err("unterminated quoted symbol".to_owned());
+                }
+                toks.push(Tok::QuotedAtom(atom));
             }
             b'"' => {
                 let start = i;
@@ -5715,6 +5992,10 @@ fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
             *pos += 1;
             Ok(Sexp::Atom(text))
         }
+        Tok::QuotedAtom(text) => {
+            *pos += 1;
+            Ok(Sexp::QuotedAtom(text))
+        }
         Tok::RParen => Err("unexpected ')'".to_owned()),
         Tok::LParen => {
             *pos += 1;
@@ -5750,7 +6031,8 @@ fn parse_problem_with_scoped_let_mode(
         .filter(|sexp| {
             matches!(
                 sexp,
-                Sexp::List(items) if items.first().and_then(atom_text) == Some("assert")
+                Sexp::List(items)
+                    if items.first().and_then(syntax_atom_text) == Some("assert")
             )
         })
         .take(2)
@@ -8355,6 +8637,85 @@ mod tests {
                 assert_eq!(facts, off);
             }
         }
+    }
+
+    #[test]
+    fn quoted_reserved_identifiers_are_not_dispatched_as_builtins() {
+        let quoted_true = r#"
+            (set-logic QF_UF)
+            (declare-fun |true| () Bool)
+            (assert true)
+            (assert (not |true|))
+            (check-sat)
+        "#;
+        assert_eq!(solve_text(quoted_true), SolveResult::Sat);
+
+        let quoted_not = r#"
+            (set-logic QF_UF)
+            (declare-fun |not| (Bool) Bool)
+            (assert (|not| true))
+            (check-sat)
+        "#;
+        assert_eq!(solve_text(quoted_not), SolveResult::Sat);
+    }
+
+    #[test]
+    fn quoted_and_simple_spellings_share_user_symbol_identity() {
+        let input = r#"
+            (set-logic QF_UF)
+            (declare-fun |p| () Bool)
+            (assert p)
+            (assert |p|)
+            (check-sat)
+        "#;
+        assert_eq!(solve_text(input), SolveResult::Sat);
+    }
+
+    #[test]
+    fn parser_rejects_mutating_commands_after_the_single_query() {
+        let error = parse_problem(
+            r#"
+                (set-logic QF_UF)
+                (check-sat)
+                (assert false)
+            "#,
+        )
+        .unwrap_err();
+        assert!(error.contains("after `check-sat`"), "{error}");
+
+        let repeated = parse_problem("(set-logic QF_UF) (check-sat) (check-sat)").unwrap_err();
+        assert!(repeated.contains("after `check-sat`"), "{repeated}");
+    }
+
+    #[test]
+    fn parser_allows_read_only_queries_and_exit_after_check_sat() {
+        parse_problem(
+            r#"
+                (set-logic QF_UF)
+                (declare-fun p () Bool)
+                (assert p)
+                (check-sat)
+                (get-model)
+                (get-value (p))
+                (exit)
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn tokenizer_preserves_quotedness_and_rejects_unterminated_symbols() {
+        assert_eq!(
+            parse_sexps("|true| true").unwrap(),
+            vec![
+                Sexp::QuotedAtom("true".to_owned()),
+                Sexp::Atom("true".to_owned()),
+            ]
+        );
+        assert_eq!(
+            parse_sexps("|unterminated"),
+            Err("unterminated quoted symbol".to_owned())
+        );
     }
 
     #[test]
