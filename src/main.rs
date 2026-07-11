@@ -282,6 +282,7 @@ struct BoolProblem {
     unsupported: Vec<String>,
     true_term: TermId,
     false_term: TermId,
+    data_terms: Vec<TermId>,
 }
 
 #[derive(Debug, Default)]
@@ -305,6 +306,7 @@ struct ParseCtx {
     fun_decls: FunDeclTable,
     bool_definitions: HashMap<SymId, BoolExpr>,
     bool_value_terms: Option<(TermId, TermId)>,
+    bool_data_terms: HashSet<TermId>,
     fresh_internal_counter: usize,
     preprocess_branch_intersections: bool,
     scoped_let_selected: bool,
@@ -322,18 +324,23 @@ impl ParseCtx {
     }
 
     fn finish(self) -> Problem {
-        let bool_problem = (!self.bool_assertions.is_empty() || !self.bool_unsupported.is_empty())
-            .then(|| {
-                let (true_term, false_term) = self
-                    .bool_value_terms
-                    .expect("Boolean parsing initializes value terms");
-                BoolProblem {
-                    assertions: self.bool_assertions,
-                    unsupported: self.bool_unsupported,
-                    true_term,
-                    false_term,
-                }
-            });
+        let mut bool_data_terms = self.bool_data_terms.into_iter().collect::<Vec<_>>();
+        bool_data_terms.sort_unstable();
+        let bool_problem = (!self.bool_assertions.is_empty()
+            || !self.bool_unsupported.is_empty()
+            || !bool_data_terms.is_empty())
+        .then(|| {
+            let (true_term, false_term) = self
+                .bool_value_terms
+                .expect("Boolean parsing initializes value terms");
+            BoolProblem {
+                assertions: self.bool_assertions,
+                unsupported: self.bool_unsupported,
+                true_term,
+                false_term,
+                data_terms: bool_data_terms,
+            }
+        });
         Problem {
             sorts: self.sorts,
             fun_decls: self.fun_decls,
@@ -1575,7 +1582,8 @@ impl ParseCtx {
     }
 
     fn materialize_bool_expr(&mut self, expr: BoolExpr) -> TermId {
-        match expr {
+        self.ensure_bool_value_terms();
+        let term = match expr {
             BoolExpr::Const(value) => {
                 let (true_term, false_term) = self.ensure_bool_value_terms();
                 if value { true_term } else { false_term }
@@ -1589,7 +1597,9 @@ impl ParseCtx {
                 ]));
                 term
             }
-        }
+        };
+        self.bool_data_terms.insert(term);
+        term
     }
 
     fn ensure_bool_value_terms(&mut self) -> (TermId, TermId) {
@@ -2187,6 +2197,12 @@ impl CnfProblem {
                 self.encode_and(&pairs)
             }
         }
+    }
+}
+
+fn atomize_bool_data_terms(cnf: &mut CnfProblem, bool_problem: &BoolProblem) {
+    for &term in &bool_problem.data_terms {
+        cnf.atom_lit(BoolAtomKey::BoolTerm(term));
     }
 }
 
@@ -3931,7 +3947,10 @@ impl<'a> DpllSolver<'a> {
                 best_occurrence = clause_best_occurrence;
             }
         }
-        best
+        best.or_else(|| {
+            (1..assignment.len())
+                .find(|&var| assignment[var] == 0 && self.cnf.var_atoms[var].is_some())
+        })
     }
 
     fn preferred_values(&self, var: usize) -> [i8; 2] {
@@ -3943,13 +3962,40 @@ impl<'a> DpllSolver<'a> {
     }
 }
 
+fn complete_cnf_assignment(cnf: &CnfProblem, assignment: &mut [i8]) -> bool {
+    if assignment.len() != cnf.var_count() + 1 || assignment.first() != Some(&0) {
+        return false;
+    }
+    for value in assignment.iter_mut().skip(1) {
+        match *value {
+            -1 | 1 => {}
+            0 => *value = -1,
+            _ => return false,
+        }
+    }
+    cnf.clauses.iter().all(|clause| {
+        clause
+            .iter()
+            .any(|literal| lit_status(*literal, assignment) == 1)
+    })
+}
+
 fn theory_conflict_clauses(
     cnf: &CnfProblem,
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
     assignment: &[i8],
-) -> Vec<Vec<i32>> {
+) -> Option<Vec<Vec<i32>>> {
+    if assignment.len() != cnf.var_count() + 1
+        || assignment.first() != Some(&0)
+        || assignment
+            .iter()
+            .skip(1)
+            .any(|value| !matches!(value, -1 | 1))
+    {
+        return None;
+    }
     let mut theory = ExplainingTheory::new(arena);
     let mut false_equalities = Vec::new();
     for var in 1..assignment.len() {
@@ -3994,7 +4040,7 @@ fn theory_conflict_clauses(
     conflicts.sort_by(|left, right| left.len().cmp(&right.len()).then_with(|| left.cmp(right)));
     conflicts.dedup();
     conflicts.truncate(32);
-    conflicts
+    Some(conflicts)
 }
 
 fn conflict_clause(reasons: HashSet<i32>) -> Vec<i32> {
@@ -4164,7 +4210,13 @@ fn solve_kissat_euf_once(
             None => 0,
         };
     }
-    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    if !complete_cnf_assignment(cnf, &mut assignment) {
+        return EagerSolveOutcome::Unavailable;
+    }
+    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+    else {
+        return EagerSolveOutcome::Unavailable;
+    };
     if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
@@ -4254,7 +4306,13 @@ fn solve_kissat_euf_once(
             TernaryVal::DontCare => 0,
         };
     }
-    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    if !complete_cnf_assignment(cnf, &mut assignment) {
+        return EagerSolveOutcome::Unavailable;
+    }
+    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+    else {
+        return EagerSolveOutcome::Unavailable;
+    };
     if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
@@ -4378,7 +4436,8 @@ fn solve_cadical_euf_once(
             TernaryVal::DontCare => 0,
         };
     }
-    theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+    complete_cnf_assignment(cnf, &mut assignment).then_some(())?;
+    theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?
         .is_empty()
         .then_some(SolveResult::Sat)
 }
@@ -4564,6 +4623,7 @@ fn solve_cadical_euf_refining_with_limit(
                 TernaryVal::DontCare => 0,
             };
         }
+        complete_cnf_assignment(cnf, &mut assignment).then_some(())?;
 
         let mut violated_groups = HashSet::default();
         let mut violated_ungrouped = Vec::new();
@@ -4600,7 +4660,7 @@ fn solve_cadical_euf_refining_with_limit(
         }
 
         let validation_start = Instant::now();
-        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?;
         telemetry.validation_time_ns += validation_start.elapsed().as_nanos();
         telemetry.validation_calls += 1;
         if conflicts.is_empty() && added == 0 {
@@ -4704,7 +4764,29 @@ fn solve_varisat_euf(
                 assignment[var] = if dimacs > 0 { 1 } else { -1 };
             }
         }
-        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+        if !complete_cnf_assignment(cnf, &mut assignment) {
+            profile_measurement("varisat_solve", sat_time_ns, round);
+            return (
+                SolveResult::Unsupported(vec![
+                    "Varisat returned an incomplete model that does not satisfy the base CNF"
+                        .to_owned(),
+                ]),
+                round,
+                learned.len(),
+            );
+        }
+        let Some(conflicts) =
+            theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+        else {
+            profile_measurement("varisat_solve", sat_time_ns, round);
+            return (
+                SolveResult::Unsupported(vec![
+                    "Varisat model could not be completed for EUF validation".to_owned(),
+                ]),
+                round,
+                learned.len(),
+            );
+        };
         if conflicts.is_empty() {
             profile_measurement("varisat_solve", sat_time_ns, round);
             return (SolveResult::Sat, round, learned.len());
@@ -4776,7 +4858,11 @@ fn discover_certificate_theory_conflicts(
                 assignment[var] = if dimacs > 0 { 1 } else { -1 };
             }
         }
-        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+        if !complete_cnf_assignment(cnf, &mut assignment) {
+            return Err("certificate SAT model does not satisfy the reconstructed CNF".to_owned());
+        }
+        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+            .ok_or_else(|| "certificate SAT model is incomplete".to_owned())?;
         if conflicts.is_empty() {
             return Err("input is satisfiable; no UNSAT certificate exists".to_owned());
         }
@@ -4870,6 +4956,7 @@ fn dump_eager_cnf(path: &str, output: &str) -> Result<i32, String> {
     }
 
     let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
     for assertion in &bool_problem.assertions {
         cnf.add_assertion(assertion);
     }
@@ -5043,6 +5130,7 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
     }
 
     let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
     for assertion in &bool_problem.assertions {
         cnf.add_assertion(assertion);
     }
@@ -5694,6 +5782,7 @@ fn solve_dynamic_full_ackermann(
 ) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
+    atomize_bool_data_terms(&mut completed, bool_problem);
     for assertion in &bool_problem.assertions {
         completed.add_direct_assertion(assertion);
     }
@@ -5727,6 +5816,7 @@ fn solve_bool_problem(
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
     if direct_root_cnf {
         for assertion in &bool_problem.assertions {
             cnf.add_direct_assertion(assertion);
@@ -7585,6 +7675,7 @@ mod tests {
         let bool_problem = problem.bool_problem.as_ref().unwrap();
         assert!(bool_problem.unsupported.is_empty());
         let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
         for assertion in &bool_problem.assertions {
             cnf.add_assertion(assertion);
         }
@@ -7611,6 +7702,7 @@ mod tests {
         let bool_problem = problem.bool_problem.as_ref().unwrap();
         assert!(bool_problem.unsupported.is_empty());
         let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
         for assertion in &bool_problem.assertions {
             cnf.add_assertion(assertion);
         }
@@ -8633,7 +8725,8 @@ mod tests {
         assignment[arguments_equal as usize] = 1;
         assignment[results_equal as usize] = -1;
 
-        let conflicts = theory_conflict_clauses(&cnf, &arena, true_term, false_term, &assignment);
+        let conflicts =
+            theory_conflict_clauses(&cnf, &arena, true_term, false_term, &assignment).unwrap();
         assert_eq!(conflicts, vec![vec![-arguments_equal, results_equal]]);
         assert!(conflicts.iter().flatten().all(|literal| {
             *literal != 0 && literal.unsigned_abs() as usize <= cnf.var_count()
@@ -8661,6 +8754,34 @@ mod tests {
         assert_eq!(telemetry.cuts_duplicate, 0);
         assert_eq!(telemetry.cut_width_total, 2);
         assert_eq!(telemetry.cut_width_max, 2);
+    }
+
+    #[test]
+    fn model_completion_fills_dont_care_values_and_checks_base_cnf() {
+        let mut cnf = CnfProblem::new();
+        let data = cnf.atom_lit(BoolAtomKey::BoolTerm(0));
+        let required = cnf.new_var(None);
+        cnf.clauses.push(vec![required]);
+        let mut assignment = vec![0i8; cnf.var_count() + 1];
+        assignment[required as usize] = 1;
+        assert!(complete_cnf_assignment(&cnf, &mut assignment));
+        assert_eq!(assignment[data as usize], -1);
+
+        let mut invalid = vec![0i8; cnf.var_count() + 1];
+        assert!(!complete_cnf_assignment(&cnf, &mut invalid));
+        assert!(!complete_cnf_assignment(&cnf, &mut [0]));
+    }
+
+    #[test]
+    fn theory_validator_rejects_partial_assignments() {
+        let mut arena = TermArena::default();
+        let value = arena.intern(0, Vec::new());
+        let true_term = arena.intern(1, Vec::new());
+        let false_term = arena.intern(2, Vec::new());
+        let mut cnf = CnfProblem::new();
+        cnf.atom_lit(BoolAtomKey::BoolTerm(value));
+        assert!(theory_conflict_clauses(&cnf, &arena, true_term, false_term, &[0, 0],).is_none());
+        assert!(theory_conflict_clauses(&cnf, &arena, true_term, false_term, &[0],).is_none());
     }
 
     #[test]
@@ -8860,6 +8981,64 @@ mod tests {
             (assert p)
             (assert q)
             (assert (distinct (f p) (f q)))
+            (check-sat)
+        ";
+        assert_eq!(solve_text(input), SolveResult::Unsat);
+        assert_eq!(solve_text_varisat(input), SolveResult::Unsat);
+    }
+
+    #[test]
+    fn unasserted_bool_data_terms_obey_the_two_element_domain() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun r () Bool)
+            (declare-fun f (Bool) U)
+            (assert (distinct (f p) (f q) (f r)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert_eq!(bool_problem.data_terms.len(), 3);
+        assert_eq!(solve_text(input), SolveResult::Unsat);
+        assert_eq!(solve_text_varisat(input), SolveResult::Unsat);
+        for mode in [RefinementMode::Current, RefinementMode::ModelCuts] {
+            let (outcome, _, _, _) = solve_text_cadical_refinement(input, mode, 64);
+            assert_eq!(
+                outcome.as_ref().map(|result| &result.0),
+                Some(&SolveResult::Unsat)
+            );
+        }
+    }
+
+    #[test]
+    fn unasserted_bool_data_terms_retain_satisfiable_completions() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun f (Bool) U)
+            (assert (distinct (f p) (f q)))
+            (check-sat)
+        ";
+        assert_eq!(solve_text(input), SolveResult::Sat);
+        assert_eq!(solve_text_varisat(input), SolveResult::Sat);
+    }
+
+    #[test]
+    fn nested_bool_data_results_obey_the_two_element_domain() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun r () Bool)
+            (declare-fun h (Bool) Bool)
+            (declare-fun f (Bool) U)
+            (assert (distinct (f (h p)) (f (h q)) (f (h r))))
             (check-sat)
         ";
         assert_eq!(solve_text(input), SolveResult::Unsat);

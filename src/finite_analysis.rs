@@ -869,6 +869,7 @@ mod tests {
                 unsupported: Vec::new(),
                 true_term,
                 false_term,
+                data_terms: Vec::new(),
             },
         );
 
