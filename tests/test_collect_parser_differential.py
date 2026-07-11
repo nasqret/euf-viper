@@ -222,6 +222,25 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(COLLECTOR.HarnessError, "duplicate"):
                 COLLECTOR.read_manifest(manifest)
 
+    def test_manifest_hash_and_rows_share_one_immutable_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus = root / "QF_UF"
+            manifest = root / "manifest.jsonl"
+            row = write_case(corpus, "old.smt2", {"expected_mode": "tree"})
+            write_manifest(manifest, [row])
+            expected_bytes = manifest.read_bytes()
+
+            snapshot = COLLECTOR.load_manifest_snapshot(manifest)
+            replacement = root / "replacement.jsonl"
+            replacement.write_text('{"not": "the parsed manifest"}\n', encoding="utf-8")
+            os.replace(replacement, manifest)
+
+            self.assertEqual(snapshot.raw_bytes, expected_bytes)
+            self.assertEqual(snapshot.sha256, digest_bytes(expected_bytes))
+            self.assertEqual(snapshot.entries[0]["relative_path"], "old.smt2")
+            self.assertNotEqual(snapshot.sha256, digest_file(manifest))
+
 
 class CollectionTests(unittest.TestCase):
     def test_collects_in_manifest_order_and_separates_direct_from_fallback(self) -> None:
@@ -311,24 +330,128 @@ class CollectionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             corpus = root / "QF_UF"
+            binary = root / "fake-viper"
             manifest = root / "manifest.jsonl"
+            write_executable(binary, FAKE_PARSER)
             row = write_case(corpus, "case.smt2", {"expected_mode": "stream"})
             write_manifest(manifest, [row])
 
-            records, summary = COLLECTOR.collect_manifest(
-                manifest,
-                root / "missing-viper",
-                "stream",
-                timeout_s=1.0,
-                jobs=1,
-                benchmark_root=corpus,
-            )
+            with mock.patch.object(
+                COLLECTOR.subprocess,
+                "run",
+                side_effect=OSError("synthetic spawn failure"),
+            ):
+                records, summary = COLLECTOR.collect_manifest(
+                    manifest,
+                    binary,
+                    "stream",
+                    timeout_s=1.0,
+                    jobs=1,
+                    benchmark_root=corpus,
+                )
 
             self.assertEqual(records[0]["failure_kind"], "spawn_error")
             self.assertIsNone(records[0]["exit_code"])
             self.assertTrue(records[0]["corpus_verified"])
             self.assertGreaterEqual(records[0]["wall_time_ns"], 0)
             self.assertEqual(summary["errors"], 1)
+
+    def test_source_replacement_after_verification_cannot_change_consumed_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus = root / "QF_UF"
+            binary = root / "fake-viper"
+            manifest = root / "manifest.jsonl"
+            write_executable(binary, FAKE_PARSER)
+            row = write_case(corpus, "case.smt2", {"expected_mode": "shadow"})
+            write_manifest(manifest, [row])
+            source = corpus / "case.smt2"
+            replacement = root / "replacement.smt2"
+            replacement.write_text(
+                json.dumps(
+                    {
+                        "expected_mode": "shadow",
+                        "error": "replacement path was consumed",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            real_run = subprocess.run
+            replaced = False
+
+            def replace_then_run(*args: object, **kwargs: object) -> object:
+                nonlocal replaced
+                if not replaced:
+                    os.replace(replacement, source)
+                    replaced = True
+                return real_run(*args, **kwargs)
+
+            with mock.patch.object(
+                COLLECTOR.subprocess, "run", side_effect=replace_then_run
+            ):
+                records, _ = COLLECTOR.collect_manifest(
+                    manifest,
+                    binary,
+                    "shadow",
+                    timeout_s=1.0,
+                    jobs=1,
+                    benchmark_root=corpus,
+                )
+
+            self.assertTrue(replaced)
+            self.assertEqual(records[0]["status"], "ok")
+            self.assertEqual(records[0]["source_actual_sha256"], row["sha256"])
+            self.assertNotEqual(digest_file(source), row["sha256"])
+            self.assertEqual(records[0]["source_consumed_via"], "inherited-posix-fd")
+
+    def test_binary_replacement_after_pinning_cannot_change_consumed_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus = root / "QF_UF"
+            binary = root / "fake-viper"
+            manifest = root / "manifest.jsonl"
+            write_executable(binary, FAKE_PARSER)
+            original_digest = digest_file(binary)
+            row = write_case(corpus, "case.smt2", {"expected_mode": "stream"})
+            write_manifest(manifest, [row])
+            replacement = root / "bad-viper"
+            write_executable(replacement, "#!/bin/sh\nexit 99\n")
+            real_run = subprocess.run
+            replaced = False
+
+            def replace_then_run(*args: object, **kwargs: object) -> object:
+                nonlocal replaced
+                if not replaced:
+                    os.replace(replacement, binary)
+                    replaced = True
+                return real_run(*args, **kwargs)
+
+            with COLLECTOR.open_pinned_file(
+                binary, require_executable=True
+            ) as pinned_binary:
+                with mock.patch.object(
+                    COLLECTOR.subprocess, "run", side_effect=replace_then_run
+                ):
+                    records, _ = COLLECTOR.collect_manifest(
+                        manifest,
+                        pinned_binary,
+                        "stream",
+                        timeout_s=1.0,
+                        jobs=1,
+                        benchmark_root=corpus,
+                    )
+
+            self.assertTrue(replaced)
+            self.assertEqual(records[0]["status"], "ok")
+            self.assertEqual(records[0]["binary_consumed_sha256"], original_digest)
+            self.assertNotEqual(digest_file(binary), original_digest)
+            self.assertIn(
+                records[0]["binary_consumed_via"],
+                {
+                    "inherited-posix-fd",
+                    "private-immutable-stage-from-pinned-fd",
+                },
+            )
 
     def test_classifies_timeout_and_diagnostic_errors_per_row(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -341,7 +464,7 @@ class CollectionTests(unittest.TestCase):
                 write_case(
                     corpus,
                     "timeout.smt2",
-                    {"expected_mode": "stream", "sleep": 0.5},
+                    {"expected_mode": "stream", "sleep": 1.2},
                     identifier=1,
                 ),
                 write_case(
@@ -357,7 +480,7 @@ class CollectionTests(unittest.TestCase):
                 manifest,
                 binary,
                 "stream",
-                timeout_s=0.2,
+                timeout_s=0.5,
                 jobs=2,
                 benchmark_root=corpus,
             )
@@ -408,6 +531,95 @@ class CollectionTests(unittest.TestCase):
             checkpoint_rows = checkpoint_path.read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(checkpoint_rows), len(records))
             self.assertFalse(list(root.glob(".*.tmp-*")))
+
+    def test_error_checkpoint_is_immediate_and_can_be_a_nonprefix_subset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus = root / "QF_UF"
+            binary = root / "fake-viper"
+            manifest = root / "manifest.jsonl"
+            write_executable(binary, FAKE_PARSER)
+            rows = [
+                write_case(
+                    corpus,
+                    "slow-first.smt2",
+                    {"expected_mode": "tree", "sleep": 0.4},
+                    identifier=1,
+                ),
+                write_case(
+                    corpus,
+                    "fast-error.smt2",
+                    {"expected_mode": "tree", "malformed": True},
+                    identifier=2,
+                ),
+            ]
+            write_manifest(manifest, rows)
+            checkpoints: list[tuple[list[int], int]] = []
+
+            def checkpoint(
+                records: list[dict], completed: int, expected: int
+            ) -> None:
+                self.assertEqual(expected, 2)
+                checkpoints.append(
+                    ([record["manifest_line"] for record in records], completed)
+                )
+
+            COLLECTOR.collect_manifest(
+                manifest,
+                binary,
+                "tree",
+                timeout_s=1.0,
+                jobs=2,
+                benchmark_root=corpus,
+                checkpoint=checkpoint,
+                checkpoint_every=100,
+            )
+
+            self.assertEqual(checkpoints[0], ([2], 1))
+            self.assertEqual(checkpoints[-1], ([1, 2], 2))
+
+    def test_durable_atomic_write_fsyncs_file_and_parent_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "bundle.json"
+            real_fsync = os.fsync
+            with mock.patch.object(
+                COLLECTOR.os, "fsync", wraps=real_fsync
+            ) as fsync:
+                COLLECTOR.durable_atomic_write(path, b"evidence\n")
+            self.assertEqual(path.read_bytes(), b"evidence\n")
+            self.assertGreaterEqual(fsync.call_count, 2)
+            self.assertFalse(list(path.parent.glob(f".{path.name}.tmp-*")))
+
+    def test_rejects_artifacts_inside_or_aliasing_protected_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            corpus = root / "QF_UF"
+            binary = root / "fake-viper"
+            manifest = root / "manifest.jsonl"
+            write_executable(binary, FAKE_PARSER)
+            row = write_case(corpus, "case.smt2", {"expected_mode": "tree"})
+            write_manifest(manifest, [row])
+            source = corpus / "case.smt2"
+            hardlink = root / "source-hardlink.json"
+            os.link(source, hardlink)
+            stale = root / "stale-progress.json"
+            stale.write_text('{"campaign_status": "complete"}\n', encoding="utf-8")
+            protected = [manifest, binary, source]
+
+            for candidate in (
+                corpus / "output.json",
+                manifest,
+                binary,
+                hardlink,
+                stale,
+            ):
+                with self.subTest(candidate=candidate):
+                    with self.assertRaises(COLLECTOR.HarnessError):
+                        COLLECTOR.validate_artifact_paths(
+                            {"output": candidate},
+                            benchmark_root=corpus,
+                            protected_paths=protected,
+                        )
 
     def test_exact_completion_rejects_missing_duplicate_and_reordered_rows(self) -> None:
         entries = [
@@ -468,6 +680,7 @@ class CliContractTests(unittest.TestCase):
         *,
         mode: str,
         expected_binary_sha256: str | None = None,
+        expected_manifest_sha256: str | None = None,
         expected_instances: int | None = None,
         max_fallbacks: int | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
@@ -482,6 +695,8 @@ class CliContractTests(unittest.TestCase):
             str(self.binary),
             "--expected-binary-sha256",
             expected_binary_sha256 or digest_file(self.binary),
+            "--expected-manifest-sha256",
+            expected_manifest_sha256 or digest_file(self.manifest),
             "--expected-instances",
             str(expected_instances if expected_instances is not None else len(rows)),
             "--candidate-parser-mode",
@@ -494,6 +709,8 @@ class CliContractTests(unittest.TestCase):
             "2",
             "--checkpoint-every",
             "1",
+            "--checkpoint",
+            str(output / "checkpoint.json"),
             "--out",
             str(output / "rows.jsonl"),
             "--summary",
@@ -530,6 +747,9 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
         progress = json.loads((output / "progress.json").read_text(encoding="utf-8"))
+        checkpoint = json.loads(
+            (output / "checkpoint.json").read_text(encoding="utf-8")
+        )
         evidence = [
             json.loads(line)
             for line in (output / "rows.jsonl").read_text(encoding="utf-8").splitlines()
@@ -539,6 +759,13 @@ class CliContractTests(unittest.TestCase):
             summary["expected_binary_sha256"], digest_file(self.binary)
         )
         self.assertEqual(summary["manifest_sha256"], digest_file(self.manifest))
+        self.assertEqual(
+            summary["expected_manifest_sha256"], digest_file(self.manifest)
+        )
+        self.assertTrue(
+            summary["provenance"]["manifest"]["parsed_from_single_snapshot"]
+        )
+        self.assertTrue(summary["provenance"]["manifest"]["sha256_verified"])
         self.assertTrue(summary["provenance"]["binary"]["sha256_verified"])
         self.assertEqual(summary["corpus_verification"]["verified"], 1)
         self.assertEqual(summary["corpus_verification"]["failed"], 0)
@@ -547,8 +774,31 @@ class CliContractTests(unittest.TestCase):
         self.assertTrue(summary["gate_passed"])
         self.assertEqual(progress["campaign_status"], "complete")
         self.assertEqual(progress["completed_instances"], 1)
+        self.assertTrue(progress["published_last"])
+        self.assertEqual(
+            progress["artifacts"]["records"]["sha256"],
+            digest_file(output / "rows.jsonl"),
+        )
+        self.assertEqual(
+            progress["artifacts"]["summary"]["sha256"],
+            digest_file(output / "summary.json"),
+        )
+        self.assertEqual(checkpoint["artifact_type"], "parser-differential-checkpoint")
+        self.assertFalse(
+            checkpoint["completion"]["contiguous_prefix_guaranteed"]
+        )
+        self.assertEqual(
+            checkpoint["records_sha256"],
+            digest_bytes(COLLECTOR.jsonl_bytes(checkpoint["records"])),
+        )
         self.assertEqual(len(evidence), 1)
         self.assertTrue(evidence[0]["corpus_verified"])
+        self.assertEqual(
+            evidence[0]["binary_consumed_sha256"], digest_file(self.binary)
+        )
+        self.assertEqual(
+            evidence[0]["source_actual_sha256"], rows[0]["sha256"]
+        )
 
     def test_rejects_binary_hash_and_instance_count_mismatches_before_running(self) -> None:
         row = write_case(
@@ -562,6 +812,15 @@ class CliContractTests(unittest.TestCase):
         self.assertEqual(bad_hash.returncode, 2)
         self.assertIn("binary SHA256 mismatch", bad_hash.stderr)
         self.assertEqual(list(hash_output.iterdir()), [])
+
+        bad_manifest, manifest_output = self.run_cli(
+            "bad-manifest",
+            mode="shadow",
+            expected_manifest_sha256="0" * 64,
+        )
+        self.assertEqual(bad_manifest.returncode, 2)
+        self.assertIn("manifest SHA256 mismatch", bad_manifest.stderr)
+        self.assertEqual(list(manifest_output.iterdir()), [])
 
         bad_count, count_output = self.run_cli(
             "bad-count", mode="shadow", expected_instances=2
@@ -669,6 +928,7 @@ Path(os.environ["PARSER_ARGUMENT_CAPTURE"]).write_text(
                     "EUF_VIPER_PARSER_BENCHMARK_ROOT": "/corpus/QF_UF",
                     "EUF_VIPER_PARSER_BINARY": "/opt/euf-viper",
                     "EUF_VIPER_PARSER_EXPECTED_BINARY_SHA256": "a" * 64,
+                    "EUF_VIPER_PARSER_EXPECTED_MANIFEST_SHA256": "b" * 64,
                     "EUF_VIPER_PARSER_EXPECTED_INSTANCES": "7503",
                     "PARSER_ARGUMENT_CAPTURE": str(capture),
                 }
@@ -698,6 +958,7 @@ Path(os.environ["PARSER_ARGUMENT_CAPTURE"]).write_text(
             "--candidate-parser-mode": "shadow",
             "--benchmark-root": "/corpus/QF_UF",
             "--expected-binary-sha256": "a" * 64,
+            "--expected-manifest-sha256": "b" * 64,
             "--expected-instances": "7503",
             "--checkpoint-every": "25",
             "--max-fallbacks": "3",
@@ -707,6 +968,7 @@ Path(os.environ["PARSER_ARGUMENT_CAPTURE"]).write_text(
                 index = arguments.index(option)
                 self.assertEqual(arguments[index + 1], value)
         self.assertIn("--progress", arguments)
+        self.assertIn("--checkpoint", arguments)
         self.assertEqual(arguments[0], "/corpus/full.jsonl")
 
     def test_default_wrapper_does_not_relax_zero_fallback_gate(self) -> None:
@@ -717,6 +979,7 @@ Path(os.environ["PARSER_ARGUMENT_CAPTURE"]).write_text(
     def test_requires_binary_hash_count_and_explicit_benchmark_root(self) -> None:
         for variable in (
             "EUF_VIPER_PARSER_EXPECTED_BINARY_SHA256",
+            "EUF_VIPER_PARSER_EXPECTED_MANIFEST_SHA256",
             "EUF_VIPER_PARSER_EXPECTED_INSTANCES",
             "EUF_VIPER_PARSER_BENCHMARK_ROOT",
         ):

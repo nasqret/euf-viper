@@ -27,12 +27,13 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Mapping, NamedTuple, Sequence
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GENERATOR_VERSION = "metamorphic-parser-diff-v1"
 FILE_PLACEHOLDER = "{file}"
 OUTPUT_LIMIT = 8192
@@ -41,6 +42,7 @@ CONSENSUS_POLICY = "consensus"
 VIPER_REJECT_POLICY = "viper-rejects-post-query"
 STRICT_GATE = "strict"
 CANDIDATE_GATE = "candidate"
+ACCEPTANCE_PARSER_MODES = ("shadow", "stream")
 SOLVER_ORDER = ("euf-viper", "z3", "cvc5", "yices")
 MANDATORY_SOLVERS = ("euf-viper", "z3", "cvc5")
 CASE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
@@ -83,11 +85,36 @@ def _json_line(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
 
 
-def _atomic_write_text(path: Path, value: str) -> None:
+def _json_bytes(value: object) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _durable_atomic_write(path: Path, value: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
-    temporary.write_text(value, encoding="utf-8")
-    temporary.replace(path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.tmp-", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(
+            path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        )
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _atomic_write_text(path: Path, value: str) -> None:
+    _durable_atomic_write(path, value.encode("utf-8"))
 
 
 def _limited(value: str) -> str:
@@ -891,6 +918,7 @@ def _case_record(case: FormulaCase) -> dict[str, object]:
 def _provenance_record(
     *,
     mode: str,
+    parser_mode: str | None,
     seed: int,
     random_groups: int,
     timeout_s: float | None,
@@ -915,6 +943,7 @@ def _provenance_record(
             "script_sha256": sha256_file(script_path),
         },
         "execution": {
+            "candidate_parser_mode": parser_mode,
             "timeout_s": timeout_s,
             "viper_reject_exit_code": viper_reject_exit_code,
             "solvers": solver_provenance,
@@ -943,9 +972,12 @@ def execute_campaign(
     seed: int,
     random_groups: int,
     generation_only: bool,
+    parser_mode: str | None = None,
     commands: Mapping[str, Sequence[str]] | None = None,
     timeout_s: float | None = None,
     viper_reject_exit_code: int = 2,
+    checkpoint_path: Path | None = None,
+    checkpoint_every: int = 1,
 ) -> dict[str, object]:
     _validate_cases(cases)
     commands = dict(commands or {})
@@ -957,13 +989,20 @@ def execute_campaign(
         raise ValueError(f"missing solver commands: {sorted(required - set(commands))}")
     if not generation_only and (timeout_s is None or timeout_s <= 0):
         raise ValueError("timeout must be positive")
+    if not generation_only and parser_mode not in ACCEPTANCE_PARSER_MODES:
+        raise ValueError("differential campaign requires parser mode shadow or stream")
+    if parser_mode is not None and parser_mode not in ACCEPTANCE_PARSER_MODES:
+        raise ValueError("parser mode must be shadow or stream")
     if not 1 <= viper_reject_exit_code <= 255:
         raise ValueError("viper reject exit code must be in [1, 255]")
+    if checkpoint_every < 1:
+        raise ValueError("checkpoint interval must be at least one")
 
     _prepare_output_dir(output_dir)
     mode = "generation-only" if generation_only else "differential"
     provenance = _provenance_record(
         mode=mode,
+        parser_mode=parser_mode,
         seed=seed,
         random_groups=random_groups,
         timeout_s=None if generation_only else timeout_s,
@@ -983,6 +1022,42 @@ def execute_campaign(
 
     observations_by_case: dict[str, dict[str, SolverResult]] = {}
     result_records: list[dict[str, object]] = []
+    checkpoint_generation = 0
+
+    def write_checkpoint(
+        campaign_status: str,
+        *,
+        metamorphic_records: Sequence[dict[str, object]] = (),
+        summary: Mapping[str, object] | None = None,
+    ) -> None:
+        nonlocal checkpoint_generation
+        if checkpoint_path is None:
+            return
+        checkpoint_generation += 1
+        encoded_records = "".join(_json_line(record) for record in result_records).encode(
+            "utf-8"
+        )
+        payload = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": "metamorphic-parser-checkpoint",
+            "campaign_status": campaign_status,
+            "generation": checkpoint_generation,
+            "candidate_parser_mode": parser_mode,
+            "generated_cases": len(cases),
+            "completed_cases": len(result_records),
+            "remaining_cases": len(cases) - len(result_records),
+            "checkpoint_every_cases": checkpoint_every,
+            "manifest_sha256": sha256_file(manifest_path),
+            "records_sha256": sha256_bytes(encoded_records),
+            "provenance": provenance,
+            "case_records": case_records,
+            "result_records": result_records,
+            "metamorphic_records": list(metamorphic_records),
+            "summary": dict(summary) if summary is not None else None,
+        }
+        _durable_atomic_write(checkpoint_path, _json_bytes(payload))
+
+    write_checkpoint("running")
     if not generation_only:
         assert timeout_s is not None
         names = [name for name in SOLVER_ORDER if name in commands]
@@ -1010,6 +1085,12 @@ def execute_campaign(
                     "candidate_passed": not candidate_anomalies(anomalies),
                 }
             )
+            if (
+                len(result_records) % checkpoint_every == 0
+                or result_records[-1]["anomalies"]
+                or len(result_records) == len(cases)
+            ):
+                write_checkpoint("running")
 
     metamorphic_records = (
         []
@@ -1042,6 +1123,7 @@ def execute_campaign(
     summary: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "mode": mode,
+        "candidate_parser_mode": parser_mode,
         "success": success,
         "candidate_success": candidate_success,
         "counts": {
@@ -1065,6 +1147,9 @@ def execute_campaign(
         output_dir / "summary.json",
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
     )
+    write_checkpoint(
+        "complete", metamorphic_records=metamorphic_records, summary=summary
+    )
     return summary
 
 
@@ -1075,6 +1160,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--random-groups", type=int, default=32)
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument("--generate-only", action="store_true")
+    parser.add_argument("--parser-mode", choices=ACCEPTANCE_PARSER_MODES)
+    parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--checkpoint-every", type=int, default=1)
     parser.add_argument("--viper-reject-exit-code", type=int, default=2)
     parser.add_argument(
         "--gate",
@@ -1106,6 +1194,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--random-groups must be non-negative")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if not args.generate_only and args.parser_mode is None:
+        parser.error("--parser-mode is required for differential campaigns")
+    if args.checkpoint_every < 1:
+        parser.error("--checkpoint-every must be at least one")
     if not 1 <= args.viper_reject_exit_code <= 255:
         parser.error("--viper-reject-exit-code must be in [1, 255]")
 
@@ -1124,9 +1216,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=args.seed,
             random_groups=args.random_groups,
             generation_only=args.generate_only,
+            parser_mode=args.parser_mode,
             commands=None if args.generate_only else commands,
             timeout_s=None if args.generate_only else args.timeout,
             viper_reject_exit_code=args.viper_reject_exit_code,
+            checkpoint_path=args.checkpoint,
+            checkpoint_every=args.checkpoint_every,
         )
     except (OSError, ValueError) as error:
         print(f"metamorphic parser campaign error: {error}", file=sys.stderr)

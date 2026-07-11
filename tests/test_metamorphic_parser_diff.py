@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -325,14 +328,18 @@ class CampaignTests(unittest.TestCase):
                 "yices": fake_command(fake, "reference"),
             }
             output = root / "output"
+            checkpoint_path = root / "persistent-checkpoint.json"
             summary = CAMPAIGN.execute_campaign(
                 cases=cases,
                 output_dir=output,
                 seed=4,
                 random_groups=0,
                 generation_only=False,
+                parser_mode="shadow",
                 commands=commands,
                 timeout_s=1.0,
+                checkpoint_path=checkpoint_path,
+                checkpoint_every=1,
             )
 
             self.assertTrue(summary["success"])
@@ -346,6 +353,10 @@ class CampaignTests(unittest.TestCase):
             ]
             provenance = result_records[0]
             self.assertEqual(provenance["record_type"], "provenance")
+            self.assertEqual(
+                provenance["execution"]["candidate_parser_mode"], "shadow"
+            )
+            self.assertEqual(summary["candidate_parser_mode"], "shadow")
             self.assertEqual(
                 list(provenance["execution"]["solvers"]),
                 ["cvc5", "euf-viper", "yices", "z3"],
@@ -375,6 +386,18 @@ class CampaignTests(unittest.TestCase):
                 hashlib.sha256((output / "results.jsonl").read_bytes()).hexdigest(),
                 summary["artifacts"]["results_sha256"],
             )
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint["campaign_status"], "complete")
+            self.assertEqual(checkpoint["candidate_parser_mode"], "shadow")
+            self.assertEqual(checkpoint["completed_cases"], len(cases))
+            encoded_records = "".join(
+                CAMPAIGN._json_line(record)
+                for record in checkpoint["result_records"]
+            ).encode("utf-8")
+            self.assertEqual(
+                checkpoint["records_sha256"],
+                hashlib.sha256(encoded_records).hexdigest(),
+            )
 
     def test_yices_is_optional_but_supplied_yices_is_mandatory(self) -> None:
         with tempfile.TemporaryDirectory(prefix="parser metamorphic optional yices ") as temp:
@@ -393,6 +416,7 @@ class CampaignTests(unittest.TestCase):
                 seed=1,
                 random_groups=0,
                 generation_only=False,
+                parser_mode="shadow",
                 commands=commands,
                 timeout_s=1.0,
             )
@@ -405,6 +429,7 @@ class CampaignTests(unittest.TestCase):
                 seed=1,
                 random_groups=0,
                 generation_only=False,
+                parser_mode="shadow",
                 commands=commands,
                 timeout_s=1.0,
             )
@@ -414,6 +439,55 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["candidate_failed_cases"], 0)
             self.assertTrue(
                 any(key.startswith("yices:") for key in summary["anomaly_counts"])
+            )
+
+    def test_persistent_checkpoint_advances_during_case_execution(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser checkpoint generations ") as temp:
+            root = Path(temp)
+            fake = write_fake_solver(root)
+            cases = complete_groups(
+                CAMPAIGN.generate_cases(seed=3, random_groups=0),
+                {"reserved-head-not"},
+            )
+            checkpoint = root / "persistent" / "checkpoint.json"
+            snapshots: list[dict] = []
+            durable_write = CAMPAIGN._durable_atomic_write
+
+            def capture(path: Path, value: bytes) -> None:
+                if path == checkpoint:
+                    snapshots.append(json.loads(value))
+                durable_write(path, value)
+
+            with mock.patch.object(
+                CAMPAIGN, "_durable_atomic_write", side_effect=capture
+            ):
+                CAMPAIGN.execute_campaign(
+                    cases=cases,
+                    output_dir=root / "output",
+                    seed=3,
+                    random_groups=0,
+                    generation_only=False,
+                    parser_mode="stream",
+                    commands={
+                        "euf-viper": fake_command(fake, "viper"),
+                        "z3": fake_command(fake, "reference"),
+                        "cvc5": fake_command(fake, "reference"),
+                    },
+                    timeout_s=1.0,
+                    checkpoint_path=checkpoint,
+                    checkpoint_every=1,
+                )
+
+            self.assertEqual(snapshots[0]["completed_cases"], 0)
+            self.assertEqual(
+                [item["completed_cases"] for item in snapshots[1:-1]],
+                list(range(1, len(cases) + 1)),
+            )
+            self.assertEqual(snapshots[-1]["campaign_status"], "complete")
+            self.assertEqual(snapshots[-1]["candidate_parser_mode"], "stream")
+            self.assertEqual(
+                [item["generation"] for item in snapshots],
+                list(range(1, len(snapshots) + 1)),
             )
 
     def test_solver_error_output_fails_closed_and_stale_output_is_refused(self) -> None:
@@ -431,6 +505,7 @@ class CampaignTests(unittest.TestCase):
                 seed=2,
                 random_groups=0,
                 generation_only=False,
+                parser_mode="shadow",
                 commands={
                     "euf-viper": fake_command(fake, "viper"),
                     "z3": fake_command(fake, "reference"),
@@ -470,6 +545,8 @@ class CampaignTests(unittest.TestCase):
                     "0",
                     "--timeout",
                     "1",
+                    "--parser-mode",
+                    "shadow",
                     "--viper-command",
                     command("wrong"),
                     "--z3-command",
@@ -508,6 +585,8 @@ class CampaignTests(unittest.TestCase):
                     "0",
                     "--timeout",
                     "1",
+                    "--parser-mode",
+                    "shadow",
                     "--gate",
                     "candidate",
                     "--viper-command",
@@ -536,11 +615,17 @@ class CampaignTests(unittest.TestCase):
 
 
 class WmiWrapperTests(unittest.TestCase):
-    def test_wrapper_is_self_contained_and_has_no_quotient_claim(self) -> None:
+    def test_wrapper_requires_and_injects_recorded_acceptance_mode(self) -> None:
         self.assertTrue(SCRIPT.is_file())
         self.assertTrue((ROOT / "tests" / "test_metamorphic_parser_diff.py").is_file())
         wrapper = WMI_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("scripts/bench/metamorphic_parser_diff.py", wrapper)
+        self.assertIn("EUF_VIPER_PARSER_DIFF_MODE:?", wrapper)
+        self.assertIn("shadow|stream", wrapper)
+        self.assertIn('--parser-mode "$PARSER_MODE"', wrapper)
+        self.assertIn("EUF_VIPER_PARSER_MODE=$PARSER_MODE", wrapper)
+        self.assertIn('--checkpoint "$CHECKPOINT"', wrapper)
+        self.assertIn("wrapper-failure.txt", wrapper)
         self.assertNotIn("UNCONDITIONAL_QUOTIENT", wrapper)
         self.assertNotIn("unconditional-quotient", wrapper.lower())
         completed = subprocess.run(
@@ -551,6 +636,44 @@ class WmiWrapperTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        match = re.search(r"^#SBATCH --time=(\d+):(\d+):(\d+)$", wrapper, re.MULTILINE)
+        self.assertIsNotNone(match)
+        assert match is not None
+        hours, minutes, seconds = (int(value) for value in match.groups())
+        self.assertGreaterEqual(hours * 3600 + minutes * 60 + seconds, 4.5 * 3600)
+
+    def test_wrapper_rejects_missing_and_tree_parser_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "SLURM_SUBMIT_DIR": temp_dir,
+                    "SLURM_JOB_ID": "123",
+                }
+            )
+            environment.pop("EUF_VIPER_PARSER_DIFF_MODE", None)
+            missing = subprocess.run(
+                ["bash", str(WMI_SCRIPT)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                check=False,
+            )
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("EUF_VIPER_PARSER_DIFF_MODE", missing.stderr)
+
+            environment["EUF_VIPER_PARSER_DIFF_MODE"] = "tree"
+            tree = subprocess.run(
+                ["bash", str(WMI_SCRIPT)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                check=False,
+            )
+            self.assertEqual(tree.returncode, 2)
+            self.assertIn("must be shadow or stream", tree.stderr)
 
 
 if __name__ == "__main__":
