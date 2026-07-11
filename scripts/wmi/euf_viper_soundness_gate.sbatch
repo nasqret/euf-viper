@@ -24,9 +24,9 @@ REVISION="${EUF_VIPER_GIT_REVISION:-unknown}"
 PERSIST_BIN="${EUF_VIPER_PERSIST_BIN:-$ROOT/artifacts/euf-viper-$REVISION}"
 
 case "$UNCONDITIONAL_QUOTIENT" in
-  off | shadow | on) ;;
+  off | shadow | on | auto) ;;
   *)
-    echo "EUF_VIPER_SOUNDNESS_UNCONDITIONAL_QUOTIENT must be off, shadow, or on" >&2
+    echo "EUF_VIPER_SOUNDNESS_UNCONDITIONAL_QUOTIENT must be off, shadow, on, or auto" >&2
     exit 2
     ;;
 esac
