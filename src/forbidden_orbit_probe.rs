@@ -18,6 +18,7 @@ pub(crate) enum ProbeError {
     TableAction,
     Pattern(PatternError),
     OrbitStabilizerMismatch,
+    MultiplePatternFunctions(usize),
     NonuniformPatternWidth { expected: usize, actual: usize },
 }
 
@@ -323,6 +324,9 @@ pub(crate) fn analyze_forbidden_pattern_orbit(
             .entry(exclusion.function)
             .or_default()
             .push(exclusion.pattern);
+    }
+    if by_function.len() != 1 {
+        return Err(ProbeError::MultiplePatternFunctions(by_function.len()));
     }
     let (&function, patterns) = by_function
         .iter()
@@ -1066,6 +1070,19 @@ mod tests {
     }
 
     #[test]
+    fn separate_patterned_operations_are_rejected() {
+        let source = partial_source(
+            &["(= (op e0 e1) e0)"],
+            "(declare-fun alt (I I) I)\n\
+             (assert (not (= (alt e1 e2) e0)))",
+        );
+        assert_eq!(
+            analyze_forbidden_pattern_orbit(&parse(&source)),
+            Err(ProbeError::MultiplePatternFunctions(2))
+        );
+    }
+
+    #[test]
     fn incomplete_table_is_fail_closed() {
         let problem = parse(&degree_three_source(false));
         assert_eq!(
@@ -1155,14 +1172,18 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires EUF_VIPER_QG7_CENSUS_DIR; bounded to at most 16 files"]
+    #[ignore = "requires EUF_VIPER_QG7_CENSUS_DIR; bounded to at most 512 files"]
     fn bounded_qg7_partial_pattern_census() {
         let directory = env::var("EUF_VIPER_QG7_CENSUS_DIR").unwrap();
         let requested = env::var("EUF_VIPER_QG7_CENSUS_LIMIT")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(4);
-        let limit = requested.clamp(1, 16);
+        let limit = requested.clamp(1, 512);
+        let offset = env::var("EUF_VIPER_QG7_CENSUS_OFFSET")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0);
         let mut paths = fs::read_dir(directory)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -1174,27 +1195,33 @@ mod tests {
         paths.sort();
         assert!(!paths.is_empty(), "qg7 census directory has no SMT2 files");
 
-        for path in paths.into_iter().take(limit) {
+        for path in paths.into_iter().skip(offset).take(limit) {
             let source = fs::read_to_string(&path).unwrap();
             let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
-            let report = analyze_forbidden_pattern_orbit(&problem).unwrap();
-            println!(
-                concat!(
-                    "{{\"path\":\"{}\",\"degree\":{},\"width\":{},",
-                    "\"records\":{},\"unique\":{},\"orbit_size\":{},",
-                    "\"stabilizer_size\":{},\"exact_cover\":{},",
-                    "\"malformed\":{}}}"
+            match analyze_forbidden_pattern_orbit(&problem) {
+                Ok(report) => println!(
+                    concat!(
+                        "{{\"path\":\"{}\",\"status\":\"analyzed\",",
+                        "\"degree\":{},\"width\":{},\"records\":{},",
+                        "\"unique\":{},\"orbit_size\":{},",
+                        "\"stabilizer_size\":{},\"exact_cover\":{},",
+                        "\"malformed\":{}}}"
+                    ),
+                    path.display(),
+                    report.degree,
+                    report.pattern_width,
+                    report.exclusion_records,
+                    report.unique_exclusions,
+                    report.first_pattern_orbit_size,
+                    report.first_pattern_stabilizer_size,
+                    report.exact_first_orbit_cover,
+                    report.extraction.malformed_pattern_candidates,
                 ),
-                path.display(),
-                report.degree,
-                report.pattern_width,
-                report.exclusion_records,
-                report.unique_exclusions,
-                report.first_pattern_orbit_size,
-                report.first_pattern_stabilizer_size,
-                report.exact_first_orbit_cover,
-                report.extraction.malformed_pattern_candidates,
-            );
+                Err(error) => println!(
+                    "{{\"path\":\"{}\",\"status\":\"ineligible\",\"reason\":\"{error:?}\"}}",
+                    path.display(),
+                ),
+            }
         }
     }
 
