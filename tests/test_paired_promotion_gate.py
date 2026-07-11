@@ -274,6 +274,162 @@ class PromotionGateTests(unittest.TestCase):
                 result["parameters"]["timeout_policy"], "allow_common_timeouts"
             )
 
+    def test_candidate_improvement_policy_accepts_common_timeouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "common-timeouts.csv"
+            rows = campaign_rows([(2.0, 1.0)] * 7)
+            mark_timeouts(rows)
+            write_rows(csv_path, rows)
+
+            result = evaluate(
+                csv_path,
+                allow_candidate_timeout_improvements=True,
+            )
+
+            self.assertTrue(result["promoted"])
+            self.assertTrue(result["checks"]["timeouts_satisfy_policy"]["passed"])
+            policy = result["timeout_policy"]
+            self.assertEqual(
+                policy["name"], "allow_candidate_timeout_improvements"
+            )
+            self.assertTrue(policy["allow_common_timeouts"])
+            self.assertEqual(
+                policy["allowed_timeout_patterns"],
+                [
+                    "paired_common_timeout",
+                    "baseline_timeout_to_candidate_correct",
+                ],
+            )
+            self.assertEqual(policy["tolerated_common_timeout_samples"], 3)
+            self.assertEqual(policy["rejected_timeout_samples"], 0)
+            self.assertEqual(policy["candidate_timeout_improvement_samples"], 0)
+
+    def test_candidate_timeout_improvements_are_separate_coverage_gains(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "candidate-improvements.csv"
+            rows = campaign_rows([(2.0, 1.0)] * 7)
+            mark_timeouts(rows, labels=("baseline",))
+            write_rows(csv_path, rows)
+
+            strict = evaluate(csv_path)
+            common_only = evaluate(csv_path, allow_common_timeouts=True)
+            result = evaluate(
+                csv_path,
+                allow_candidate_timeout_improvements=True,
+            )
+
+            self.assertFalse(strict["promoted"])
+            self.assertFalse(common_only["promoted"])
+            self.assertTrue(result["promoted"])
+            self.assertEqual(result["pairing"]["paired_instance_medians"], 6)
+            self.assertEqual(result["pairing"]["paired_timing_samples"], 18)
+            self.assertAlmostEqual(result["timing"]["total_speedup"], 2.0)
+            quality = result["quality"]
+            self.assertEqual(quality["candidate_only_correct_samples"]["count"], 3)
+            self.assertEqual(quality["candidate_only_correct_instances"]["count"], 1)
+            self.assertEqual(quality["sample_coverage_delta"], 3)
+            self.assertEqual(quality["instance_coverage_delta"], 1)
+            policy = result["timeout_policy"]
+            self.assertEqual(policy["candidate_timeout_improvement_samples"], 3)
+            self.assertEqual(policy["candidate_timeout_improvement_instances"], 1)
+            self.assertEqual(
+                policy["tolerated_candidate_timeout_improvement_samples"], 3
+            )
+            self.assertEqual(
+                policy["tolerated_candidate_timeout_improvement_instances"], 1
+            )
+            self.assertEqual(policy["rejected_timeout_samples"], 0)
+            timeout_check = result["checks"]["timeouts_satisfy_policy"]
+            self.assertEqual(
+                timeout_check["policy"], "allow_candidate_timeout_improvements"
+            )
+            self.assertEqual(
+                timeout_check["actual_metric"], "rejected_timeout_samples"
+            )
+
+    def test_candidate_timeout_improvement_cannot_hide_mixed_regression(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "mixed-timeouts.csv"
+            rows = campaign_rows([(2.0, 1.0)] * 8)
+            mark_timeouts(
+                rows,
+                instance=0,
+                labels=("baseline",),
+                repeats=(0,),
+            )
+            mark_timeouts(
+                rows,
+                instance=1,
+                labels=("candidate",),
+                repeats=(0,),
+            )
+            write_rows(csv_path, rows)
+
+            result = evaluate(
+                csv_path,
+                allow_candidate_timeout_improvements=True,
+            )
+
+            self.assertFalse(result["promoted"])
+            self.assertEqual(result["quality"]["sample_coverage_delta"], 0)
+            self.assertEqual(result["quality"]["instance_coverage_delta"], 0)
+            self.assertFalse(
+                result["checks"]["no_sample_coverage_regressions"]["passed"]
+            )
+            self.assertFalse(
+                result["checks"]["no_instance_coverage_regressions"]["passed"]
+            )
+            self.assertFalse(result["checks"]["timeouts_satisfy_policy"]["passed"])
+            policy = result["timeout_policy"]
+            self.assertEqual(policy["candidate_timeout_improvement_samples"], 1)
+            self.assertEqual(policy["rejected_timeout_samples"], 1)
+            self.assertEqual(policy["rejected_timeout_instances"], 1)
+            self.assertEqual(
+                policy["rejected_timeout_examples"][0]["reason"],
+                "candidate_timeout_with_baseline_correct",
+            )
+
+    def test_candidate_improvement_policy_rejects_wrong_answers_and_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for kind in ("wrong-answer", "execution-error"):
+                with self.subTest(kind=kind):
+                    csv_path = root / f"{kind}.csv"
+                    rows = campaign_rows([(2.0, 1.0)] * 8)
+                    mark_timeouts(rows, labels=("baseline",))
+                    target = next(
+                        row
+                        for row in rows
+                        if row["relative_path"] == "QF_UF/case-001.smt2"
+                        and row["label"] == "candidate"
+                        and row["repeat"] == 0
+                    )
+                    if kind == "wrong-answer":
+                        target["result"] = (
+                            "sat"
+                            if target["expected_status"] == "unsat"
+                            else "unsat"
+                        )
+                    else:
+                        target.update({"result": "exit-7", "exit_code": 7})
+                    write_rows(csv_path, rows)
+
+                    result = evaluate(
+                        csv_path,
+                        allow_candidate_timeout_improvements=True,
+                    )
+
+                    self.assertFalse(result["promoted"])
+                    self.assertTrue(
+                        result["checks"]["timeouts_satisfy_policy"]["passed"]
+                    )
+                    check = (
+                        "no_wrong_answers"
+                        if kind == "wrong-answer"
+                        else "no_execution_errors"
+                    )
+                    self.assertFalse(result["checks"][check]["passed"])
+
     def test_opt_in_rejects_candidate_only_timeout_as_coverage_loss(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             csv_path = Path(temp_dir) / "candidate-timeout.csv"
@@ -637,6 +793,47 @@ class CliTests(unittest.TestCase):
                 ],
                 1,
             )
+
+    def test_cli_candidate_timeout_improvements_is_distinct_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "candidate-improvements.csv"
+            rows = campaign_rows([(2.0, 1.0)] * 7)
+            mark_timeouts(rows, labels=("baseline",))
+            write_rows(csv_path, rows)
+
+            strict = self.run_gate(csv_path)
+            common_only = self.run_gate(csv_path, "--allow-common-timeouts")
+            improvements = self.run_gate(
+                csv_path,
+                "--allow-candidate-timeout-improvements",
+            )
+
+            self.assertEqual(strict.returncode, 1, strict.stderr)
+            self.assertEqual(common_only.returncode, 1, common_only.stderr)
+            self.assertEqual(improvements.returncode, 0, improvements.stderr)
+            payload = json.loads(improvements.stdout)
+            self.assertEqual(
+                payload["parameters"]["timeout_policy"],
+                "allow_candidate_timeout_improvements",
+            )
+            self.assertTrue(
+                payload["parameters"]["allow_candidate_timeout_improvements"]
+            )
+
+    def test_cli_timeout_policy_flags_are_mutually_exclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "winner.csv"
+            write_rows(csv_path, campaign_rows([(2.0, 1.0)] * 6))
+
+            result = self.run_gate(
+                csv_path,
+                "--allow-common-timeouts",
+                "--allow-candidate-timeout-improvements",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            self.assertIn("not allowed with argument", result.stderr)
 
 
 if __name__ == "__main__":

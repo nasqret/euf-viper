@@ -37,6 +37,12 @@ DEFAULT_MIN_SPEEDUP = 1.0
 DEFAULT_MAX_P_VALUE = 0.05
 DEFAULT_TIE_RELATIVE_TOLERANCE = 0.0
 
+TIMEOUT_POLICY_STRICT = "strict_no_timeouts"
+TIMEOUT_POLICY_COMMON = "allow_common_timeouts"
+TIMEOUT_POLICY_CANDIDATE_IMPROVEMENTS = (
+    "allow_candidate_timeout_improvements"
+)
+
 
 class GateInputError(ValueError):
     """Raised when an input is not a complete compare_viper_ab.py CSV."""
@@ -227,21 +233,44 @@ def _is_execution_error(observation: dict[str, Any]) -> bool:
     return observation["exit_code"] != 0 and not _is_timeout(observation)
 
 
+def _select_timeout_policy(
+    *,
+    allow_common_timeouts: bool,
+    allow_candidate_timeout_improvements: bool,
+) -> str:
+    if allow_common_timeouts and allow_candidate_timeout_improvements:
+        raise ValueError(
+            "allow_common_timeouts and allow_candidate_timeout_improvements "
+            "are mutually exclusive"
+        )
+    if allow_candidate_timeout_improvements:
+        return TIMEOUT_POLICY_CANDIDATE_IMPROVEMENTS
+    if allow_common_timeouts:
+        return TIMEOUT_POLICY_COMMON
+    return TIMEOUT_POLICY_STRICT
+
+
 def _classify_timeouts(
     observations: dict[tuple[str, int, str], dict[str, Any]],
     paths: list[str],
     repeats: list[int],
     *,
-    allow_common_timeouts: bool,
+    policy: str,
 ) -> tuple[dict[str, Any], bool, int]:
     common_timeout_samples = 0
     common_timeout_instances = 0
     matched_common_timeout_samples = 0
     matched_common_timeout_instances = 0
     timeout_samples = 0
+    timeout_instances: set[str] = set()
     unmatched_timeout_samples = 0
     unmatched_timeout_instances = 0
     unmatched_examples: list[dict[str, Any]] = []
+    timeout_examples: list[dict[str, Any]] = []
+    candidate_improvement_samples: list[dict[str, Any]] = []
+    candidate_improvement_instances: set[str] = set()
+    disallowed_improvement_policy_samples: list[dict[str, Any]] = []
+    disallowed_improvement_policy_instances: set[str] = set()
 
     for relative_path in paths:
         timeout_repeats = {
@@ -255,9 +284,47 @@ def _classify_timeouts(
         baseline_repeats = timeout_repeats["baseline"]
         candidate_repeats = timeout_repeats["candidate"]
         common_repeats = baseline_repeats & candidate_repeats
-        timeout_samples += len(baseline_repeats | candidate_repeats)
+        any_timeout_repeats = baseline_repeats | candidate_repeats
+        timeout_samples += len(any_timeout_repeats)
+        if any_timeout_repeats:
+            timeout_instances.add(relative_path)
         common_timeout_samples += len(common_repeats)
         common_timeout_instances += bool(common_repeats)
+
+        for repeat in sorted(any_timeout_repeats):
+            baseline = observations[(relative_path, repeat, "baseline")]
+            candidate = observations[(relative_path, repeat, "candidate")]
+            baseline_timeout = _is_timeout(baseline)
+            candidate_timeout = _is_timeout(candidate)
+            example = {
+                "baseline_result": baseline["result"],
+                "candidate_result": candidate["result"],
+                "relative_path": relative_path,
+                "repeat": repeat,
+            }
+            timeout_examples.append(example)
+
+            if baseline_timeout and _is_correct(candidate):
+                candidate_improvement_samples.append(
+                    {"relative_path": relative_path, "repeat": repeat}
+                )
+                candidate_improvement_instances.add(relative_path)
+
+            if baseline_timeout and candidate_timeout:
+                continue
+            if baseline_timeout and _is_correct(candidate):
+                continue
+
+            if candidate_timeout and _is_correct(baseline):
+                reason = "candidate_timeout_with_baseline_correct"
+            elif candidate_timeout:
+                reason = "candidate_timeout_without_matching_baseline_timeout"
+            else:
+                reason = "baseline_timeout_without_candidate_correct"
+            disallowed_improvement_policy_samples.append(
+                {**example, "reason": reason}
+            )
+            disallowed_improvement_policy_instances.add(relative_path)
 
         if baseline_repeats == candidate_repeats and baseline_repeats:
             matched_common_timeout_samples += len(baseline_repeats)
@@ -284,35 +351,80 @@ def _classify_timeouts(
     total_timeout_observations = sum(
         _is_timeout(observation) for observation in observations.values()
     )
-    policy = (
-        "allow_common_timeouts" if allow_common_timeouts else "strict_no_timeouts"
-    )
-    policy_actual = (
-        unmatched_timeout_samples
-        if allow_common_timeouts
-        else timeout_samples
-    )
+    if policy == TIMEOUT_POLICY_STRICT:
+        allowed_timeout_patterns: list[str] = []
+        rejected_timeout_samples = timeout_samples
+        rejected_timeout_instances = len(timeout_instances)
+        rejected_timeout_examples = timeout_examples
+    elif policy == TIMEOUT_POLICY_COMMON:
+        allowed_timeout_patterns = [
+            "identical_baseline_candidate_timeout_repeat_sets_per_instance"
+        ]
+        rejected_timeout_samples = unmatched_timeout_samples
+        rejected_timeout_instances = unmatched_timeout_instances
+        rejected_timeout_examples = unmatched_examples
+    elif policy == TIMEOUT_POLICY_CANDIDATE_IMPROVEMENTS:
+        allowed_timeout_patterns = [
+            "paired_common_timeout",
+            "baseline_timeout_to_candidate_correct",
+        ]
+        rejected_timeout_samples = len(disallowed_improvement_policy_samples)
+        rejected_timeout_instances = len(disallowed_improvement_policy_instances)
+        rejected_timeout_examples = disallowed_improvement_policy_samples
+    else:
+        raise ValueError(f"unknown timeout policy {policy!r}")
+
+    common_only = policy == TIMEOUT_POLICY_COMMON
+    tolerate_improvements = policy == TIMEOUT_POLICY_CANDIDATE_IMPROVEMENTS
     summary = {
-        "allow_common_timeouts": allow_common_timeouts,
+        "allow_candidate_timeout_improvements": tolerate_improvements,
+        "allow_common_timeouts": common_only or tolerate_improvements,
+        "allowed_timeout_patterns": allowed_timeout_patterns,
+        "candidate_timeout_improvement_instances": len(
+            candidate_improvement_instances
+        ),
+        "candidate_timeout_improvement_samples": len(candidate_improvement_samples),
+        "candidate_timeout_improvement_examples": candidate_improvement_samples[:25],
         "common_timeout_instances": common_timeout_instances,
         "common_timeout_samples": common_timeout_samples,
         "matched_common_timeout_instances": matched_common_timeout_instances,
         "matched_common_timeout_samples": matched_common_timeout_samples,
         "name": policy,
+        "rejected_timeout_examples": rejected_timeout_examples[:25],
+        "rejected_timeout_instances": rejected_timeout_instances,
+        "rejected_timeout_samples": rejected_timeout_samples,
         "sample_unit": "paired_(relative_path,repeat)",
         "timeout_observations": total_timeout_observations,
         "timeout_samples": timeout_samples,
         "tolerated_common_timeout_instances": (
-            matched_common_timeout_instances if allow_common_timeouts else 0
+            common_timeout_instances
+            if tolerate_improvements
+            else matched_common_timeout_instances
+            if common_only
+            else 0
         ),
         "tolerated_common_timeout_samples": (
-            matched_common_timeout_samples if allow_common_timeouts else 0
+            common_timeout_samples
+            if tolerate_improvements
+            else matched_common_timeout_samples
+            if common_only
+            else 0
+        ),
+        "tolerated_candidate_timeout_improvement_instances": (
+            len(candidate_improvement_instances) if tolerate_improvements else 0
+        ),
+        "tolerated_candidate_timeout_improvement_samples": (
+            len(candidate_improvement_samples) if tolerate_improvements else 0
         ),
         "unmatched_timeout_instances": unmatched_timeout_instances,
         "unmatched_timeout_samples": unmatched_timeout_samples,
         "unmatched_timeout_examples": unmatched_examples[:25],
     }
-    return summary, policy_actual == 0, policy_actual
+    return (
+        summary,
+        rejected_timeout_samples == 0,
+        rejected_timeout_samples,
+    )
 
 
 def _finite_ratio(numerator: float, denominator: float) -> float:
@@ -523,9 +635,16 @@ def evaluate_csv(
     max_p_value: float = DEFAULT_MAX_P_VALUE,
     tie_relative_tolerance: float = DEFAULT_TIE_RELATIVE_TOLERANCE,
     allow_common_timeouts: bool = False,
+    allow_candidate_timeout_improvements: bool = False,
 ) -> dict[str, Any]:
     """Evaluate a valid paired campaign and return a stable JSON-ready result."""
 
+    timeout_policy_name = _select_timeout_policy(
+        allow_common_timeouts=allow_common_timeouts,
+        allow_candidate_timeout_improvements=(
+            allow_candidate_timeout_improvements
+        ),
+    )
     _validate_parameters(
         bootstrap_iterations=bootstrap_iterations,
         permutation_iterations=permutation_iterations,
@@ -700,7 +819,7 @@ def evaluate_csv(
             observations,
             paths,
             repeats,
-            allow_common_timeouts=allow_common_timeouts,
+            policy=timeout_policy_name,
         )
     )
     execution_error_count = sum(
@@ -803,7 +922,11 @@ def evaluate_csv(
             actual=timeout_policy_actual,
             operator="==",
             threshold=0,
-        ),
+        )
+        | {
+            "actual_metric": "rejected_timeout_samples",
+            "policy": timeout_policy["name"],
+        },
         "permutation_p_value": _check(
             passed=(
                 permutation_test["p_value"] is not None
@@ -861,6 +984,9 @@ def evaluate_csv(
             "paired_timing_samples": len(paired_entries) * len(repeats),
         },
         "parameters": {
+            "allow_candidate_timeout_improvements": (
+                allow_candidate_timeout_improvements
+            ),
             "allow_common_timeouts": allow_common_timeouts,
             "bootstrap_iterations": bootstrap_iterations,
             "confidence_level": confidence_level,
@@ -1057,12 +1183,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TIE_RELATIVE_TOLERANCE,
         help="relative tolerance used only for win/loss/tie classification",
     )
-    parser.add_argument(
+    timeout_policy = parser.add_mutually_exclusive_group()
+    timeout_policy.add_argument(
         "--allow-common-timeouts",
         action="store_true",
         help=(
             "tolerate only instances with identical baseline/candidate timeout "
             "repeat sets"
+        ),
+    )
+    timeout_policy.add_argument(
+        "--allow-candidate-timeout-improvements",
+        action="store_true",
+        help=(
+            "tolerate paired common timeouts and baseline timeouts converted "
+            "to correct candidate solves"
         ),
     )
     return parser
@@ -1085,6 +1220,9 @@ def main(argv: list[str] | None = None) -> int:
             max_p_value=args.max_p_value,
             tie_relative_tolerance=args.tie_relative_tolerance,
             allow_common_timeouts=args.allow_common_timeouts,
+            allow_candidate_timeout_improvements=(
+                args.allow_candidate_timeout_improvements
+            ),
         )
         exit_code = 0 if payload["promoted"] else 1
     except GateInputError as error:
