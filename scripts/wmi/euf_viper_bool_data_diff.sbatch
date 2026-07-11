@@ -17,17 +17,23 @@ CVC5_BIN="${EUF_VIPER_CVC5_BIN:-$REFERENCE_ROOT/third_party/solvers/bin/cvc5}"
 RANDOM_CASES="${EUF_VIPER_BOOL_DIFF_CASES:-10000}"
 SEED="${EUF_VIPER_BOOL_DIFF_SEED:-20260711}"
 TIMEOUT="${EUF_VIPER_BOOL_DIFF_TIMEOUT:-2}"
+DIRECT_NEGATED_ROOT="${EUF_VIPER_BOOL_DIFF_DIRECT_NEGATED_ROOT:-0}"
 RUN_ID="${SLURM_JOB_ID:-local}"
 
 cd "$ROOT"
 mkdir -p results
+
+case "$DIRECT_NEGATED_ROOT" in
+  0 | 1) ;;
+  *) echo "EUF_VIPER_BOOL_DIFF_DIRECT_NEGATED_ROOT must be 0 or 1" >&2; exit 2 ;;
+esac
 
 python3 scripts/bench/differential_bool_data.py \
   --out "results/bool-data-diff-$RUN_ID" \
   --seed "$SEED" \
   --random-cases "$RANDOM_CASES" \
   --timeout "$TIMEOUT" \
-  --viper-command "$VIPER_BIN solve {file}" \
+  --viper-command "env EUF_VIPER_DIRECT_NEGATED_ROOT=$DIRECT_NEGATED_ROOT $VIPER_BIN solve {file}" \
   --z3-command "$Z3_BIN {file}" \
   --cvc5-command "$CVC5_BIN --lang=smt2 {file}"
 
