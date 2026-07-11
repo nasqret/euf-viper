@@ -3,10 +3,16 @@ mod bool_dag_telemetry;
 mod eq_abstraction;
 mod finite_analysis;
 #[cfg(test)]
+mod forbidden_orbit_probe;
+#[cfg(test)]
 mod model_scout;
+#[cfg(test)]
+mod novelty_census;
 #[cfg(test)]
 #[allow(dead_code)]
 mod orbit_canon;
+#[cfg(test)]
+mod quotient_csp;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
@@ -2069,9 +2075,20 @@ impl CnfProblem {
         self.clauses.push(vec![literal]);
     }
 
+    #[cfg(test)]
     #[cold]
     #[inline(never)]
     fn add_direct_assertion(&mut self, expr: &BoolExpr) {
+        self.add_direct_assertion_with_negated_root(expr, false);
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn add_direct_assertion_with_negated_root(
+        &mut self,
+        expr: &BoolExpr,
+        direct_negated_root: bool,
+    ) {
         match expr {
             BoolExpr::Const(true) => {}
             BoolExpr::Const(false) => self.clauses.push(Vec::new()),
@@ -2079,13 +2096,16 @@ impl CnfProblem {
                 let literal = self.atom_lit(atom.clone());
                 self.clauses.push(vec![literal]);
             }
+            BoolExpr::Not(child) if direct_negated_root => {
+                self.add_direct_negated_assertion(child);
+            }
             BoolExpr::Not(child) => {
                 let literal = self.encode_expr(child);
                 self.clauses.push(vec![-literal]);
             }
             BoolExpr::And(children) => {
                 for child in children {
-                    self.add_direct_assertion(child);
+                    self.add_direct_assertion_with_negated_root(child, direct_negated_root);
                 }
             }
             BoolExpr::Or(children) => {
@@ -2112,6 +2132,36 @@ impl CnfProblem {
                 let else_expr = self.encode_expr(else_expr);
                 self.clauses.push(vec![-cond, then_expr]);
                 self.clauses.push(vec![cond, else_expr]);
+            }
+        }
+    }
+
+    fn add_direct_negated_assertion(&mut self, expr: &BoolExpr) {
+        match expr {
+            BoolExpr::Const(true) => self.clauses.push(Vec::new()),
+            BoolExpr::Const(false) => {}
+            BoolExpr::Atom(atom) => {
+                let literal = self.atom_lit(atom.clone());
+                self.clauses.push(vec![-literal]);
+            }
+            BoolExpr::Not(child) => {
+                self.add_direct_assertion_with_negated_root(child, true);
+            }
+            BoolExpr::And(children) => {
+                let clause = children
+                    .iter()
+                    .map(|child| -self.encode_expr(child))
+                    .collect();
+                self.clauses.push(clause);
+            }
+            BoolExpr::Or(children) => {
+                for child in children {
+                    self.add_direct_negated_assertion(child);
+                }
+            }
+            BoolExpr::Iff(_) | BoolExpr::Ite(_, _, _) => {
+                let literal = self.encode_expr(expr);
+                self.clauses.push(vec![-literal]);
             }
         }
     }
@@ -5270,6 +5320,7 @@ struct SolveReport {
 }
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
+const DIRECT_NEGATED_ROOT_ENV: &str = "EUF_VIPER_DIRECT_NEGATED_ROOT";
 const SCOPED_LET_ENV: &str = "EUF_VIPER_SCOPED_LET";
 const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
 const EQ_ABSTRACTION_FRESH_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_FRESH";
@@ -5278,6 +5329,22 @@ const EQ_ABSTRACTION_MAX_FRESH_FACTS_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_MAX_F
 const DEFAULT_EQ_ABSTRACTION_MAX_FACTS: usize = 4_096;
 const DEFAULT_EQ_ABSTRACTION_MAX_FRESH_FACTS: usize = 256;
 const SCOPED_LET_AUTO_THRESHOLD: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RootCnfOptions {
+    direct_root_cnf: bool,
+    direct_negated_root: bool,
+}
+
+impl RootCnfOptions {
+    #[cfg(test)]
+    fn existing_behavior(direct_root_cnf: bool) -> Self {
+        Self {
+            direct_root_cnf,
+            direct_negated_root: false,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScopedLetMode {
@@ -5664,29 +5731,79 @@ fn equality_abstraction_fact_candidates(
     normalized_edges
 }
 
-fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
+fn parse_zero_one_setting_with_default(
+    name: &str,
+    value: Option<&str>,
+    default: bool,
+) -> Result<bool, String> {
     match value {
-        None | Some("1") => Ok(true),
+        None => Ok(default),
+        Some("1") => Ok(true),
         Some("0") => Ok(false),
         Some(_) => Err(format!("{name} must be 0 or 1")),
     }
 }
 
-fn direct_root_cnf_enabled() -> Result<bool, String> {
-    match env::var(DIRECT_ROOT_CNF_ENV) {
-        Ok(value) => parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some(&value)),
-        Err(env::VarError::NotPresent) => parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, None),
-        Err(env::VarError::NotUnicode(_)) => Err(format!("{DIRECT_ROOT_CNF_ENV} must be 0 or 1")),
+#[cfg(test)]
+fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
+    parse_zero_one_setting_with_default(name, value, true)
+}
+
+fn zero_one_env_setting(name: &str, default: bool) -> Result<bool, String> {
+    match env::var(name) {
+        Ok(value) => parse_zero_one_setting_with_default(name, Some(&value), default),
+        Err(env::VarError::NotPresent) => parse_zero_one_setting_with_default(name, None, default),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{name} must be 0 or 1")),
     }
 }
 
+fn direct_root_cnf_enabled() -> Result<bool, String> {
+    zero_one_env_setting(DIRECT_ROOT_CNF_ENV, true)
+}
+
+fn direct_negated_root_enabled() -> Result<bool, String> {
+    zero_one_env_setting(DIRECT_NEGATED_ROOT_ENV, false)
+}
+
+fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
+    Ok(RootCnfOptions {
+        direct_root_cnf: direct_root_cnf_enabled()?,
+        direct_negated_root: direct_negated_root_enabled()?,
+    })
+}
+
+#[cfg(test)]
 fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
     solve_problem_with_eq_abstraction(problem, direct_root_cnf, selected_eq_abstraction_mode())
 }
 
+fn solve_problem_with_root_cnf_options(
+    problem: Problem,
+    root_cnf_options: RootCnfOptions,
+) -> SolveReport {
+    solve_problem_with_options_and_eq_abstraction(
+        problem,
+        root_cnf_options,
+        selected_eq_abstraction_mode(),
+    )
+}
+
+#[cfg(test)]
 fn solve_problem_with_eq_abstraction(
     problem: Problem,
     direct_root_cnf: bool,
+    eq_abstraction_mode: EqAbstractionMode,
+) -> SolveReport {
+    solve_problem_with_options_and_eq_abstraction(
+        problem,
+        RootCnfOptions::existing_behavior(direct_root_cnf),
+        eq_abstraction_mode,
+    )
+}
+
+fn solve_problem_with_options_and_eq_abstraction(
+    problem: Problem,
+    root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> SolveReport {
     debug_assert!(problem.terms_are_well_sorted());
@@ -5719,7 +5836,7 @@ fn solve_problem_with_eq_abstraction(
                 solve_bool_problem(
                     &problem.arena,
                     bool_problem,
-                    direct_root_cnf,
+                    root_cnf_options,
                     eq_abstraction_mode,
                     &mut finite_context,
                 )
@@ -5780,18 +5897,33 @@ fn solve_problem_with_eq_abstraction(
     }
 }
 
-#[cold]
-#[inline(never)]
+#[cfg(test)]
 fn solve_dynamic_full_ackermann(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     accepted_equality_facts: &[(TermId, TermId)],
 ) -> (CnfProblem, EagerSolveOutcome) {
+    solve_dynamic_full_ackermann_with_negated_root(
+        arena,
+        bool_problem,
+        accepted_equality_facts,
+        false,
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn solve_dynamic_full_ackermann_with_negated_root(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    accepted_equality_facts: &[(TermId, TermId)],
+    direct_negated_root: bool,
+) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
     atomize_bool_data_terms(&mut completed, bool_problem);
     for assertion in &bool_problem.assertions {
-        completed.add_direct_assertion(assertion);
+        completed.add_direct_assertion_with_negated_root(assertion, direct_negated_root);
     }
     for &(left, right) in accepted_equality_facts {
         let (left, right) = normalized_pair(left, right);
@@ -5817,16 +5949,19 @@ fn solve_dynamic_full_ackermann(
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
-    direct_root_cnf: bool,
+    root_cnf_options: RootCnfOptions,
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
-    if direct_root_cnf {
+    if root_cnf_options.direct_root_cnf {
         for assertion in &bool_problem.assertions {
-            cnf.add_direct_assertion(assertion);
+            cnf.add_direct_assertion_with_negated_root(
+                assertion,
+                root_cnf_options.direct_negated_root,
+            );
         }
     } else {
         for assertion in &bool_problem.assertions {
@@ -5950,11 +6085,13 @@ fn solve_bool_problem(
                         finite_added,
                     ) {
                         profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
-                        let (completed, completed_outcome) = solve_dynamic_full_ackermann(
-                            arena,
-                            bool_problem,
-                            &accepted_equality_facts,
-                        );
+                        let (completed, completed_outcome) =
+                            solve_dynamic_full_ackermann_with_negated_root(
+                                arena,
+                                bool_problem,
+                                &accepted_equality_facts,
+                                root_cnf_options.direct_negated_root,
+                            );
                         prior_sat_calls += 1;
                         match completed_outcome {
                             EagerSolveOutcome::Solved(result) => {
@@ -6321,13 +6458,21 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
 }
 
 fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
-    let direct_root_cnf = direct_root_cnf_enabled()?;
+    let root_cnf_options = selected_root_cnf_options()?;
+    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options)
+}
+
+fn solve_file_with_root_cnf_options(
+    path: &str,
+    with_stats: bool,
+    root_cnf_options: RootCnfOptions,
+) -> Result<i32, String> {
     let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let start = Instant::now();
     let parse_start = Instant::now();
     let problem = parse_problem(&input)?;
     profile_phase("parse", parse_start, input.len());
-    let report = solve_problem(problem, direct_root_cnf);
+    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
     let elapsed = start.elapsed();
     print_report(&report, elapsed, with_stats);
     Ok(match report.result {
@@ -6365,6 +6510,7 @@ fn structural_router_prefers_euf(input: &[u8]) -> bool {
 }
 
 fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, String> {
+    let root_cnf_options = selected_root_cnf_options()?;
     let input = fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let use_euf = structural_router_prefers_euf(&input);
     if env::var_os("EUF_VIPER_PORTFOLIO_TRACE").is_some() {
@@ -6374,7 +6520,7 @@ fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, Stri
         );
     }
     if use_euf {
-        return solve_file(path, with_stats);
+        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options);
     }
 
     #[cfg(unix)]
@@ -6593,7 +6739,7 @@ fn gen_cmd(args: &[String]) -> Result<i32, String> {
 }
 
 fn bench_cmd(args: &[String]) -> Result<i32, String> {
-    let direct_root_cnf = direct_root_cnf_enabled()?;
+    let root_cnf_options = selected_root_cnf_options()?;
     let cases = parse_flag_usize(args, "--cases", 20)?;
     let size = parse_flag_usize(args, "--size", 10_000)?;
     let mut total_terms = 0usize;
@@ -6607,7 +6753,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem(problem, direct_root_cnf);
+        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
         let elapsed = start.elapsed();
         println!(
             "case={i} result={} elapsed_ns={} terms={} apps={} passes={} merges={}",
@@ -6632,7 +6778,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
 }
 
 fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
-    let direct_root_cnf = direct_root_cnf_enabled()?;
+    let root_cnf_options = selected_root_cnf_options()?;
     let cases = parse_flag_usize(args, "--cases", 8)?;
     let branches = parse_flag_usize(args, "--branches", 512)?;
     let depth = parse_flag_usize(args, "--depth", 4)?;
@@ -6647,7 +6793,7 @@ fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem(problem, direct_root_cnf);
+        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
         let elapsed = start.elapsed();
         println!(
             "or_case={i} kind={} result={} elapsed_ns={} terms={} eqs={} diseqs={} passes={} merges={}",
@@ -6847,6 +6993,37 @@ mod tests {
             Err(format!("{DIRECT_ROOT_CNF_ENV} must be 0 or 1"))
         );
         assert!(parse_zero_one_setting(DIRECT_ROOT_CNF_ENV, Some(" 1")).is_err());
+    }
+
+    #[test]
+    fn direct_negated_root_setting_is_strict_and_defaults_off() {
+        assert_eq!(
+            parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_ENV, None, false),
+            Ok(false)
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_ENV, Some("0"), false),
+            Ok(false)
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_ENV, Some("1"), false),
+            Ok(true)
+        );
+        for invalid in [
+            "", "true", "false", "on", "off", "2", "-1", "01", " 1", "1 ",
+        ] {
+            assert_eq!(
+                parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_ENV, Some(invalid), false,),
+                Err(format!("{DIRECT_NEGATED_ROOT_ENV} must be 0 or 1"))
+            );
+        }
+        assert_eq!(
+            RootCnfOptions::existing_behavior(true),
+            RootCnfOptions {
+                direct_root_cnf: true,
+                direct_negated_root: false,
+            }
+        );
     }
 
     #[test]
@@ -7165,9 +7342,24 @@ mod tests {
         direct_root_cnf: bool,
         atom_assignment: &[bool],
     ) -> bool {
+        assertion_is_satisfiable_with_root_options(
+            expression,
+            RootCnfOptions::existing_behavior(direct_root_cnf),
+            atom_assignment,
+        )
+    }
+
+    fn assertion_is_satisfiable_with_root_options(
+        expression: &BoolExpr,
+        root_cnf_options: RootCnfOptions,
+        atom_assignment: &[bool],
+    ) -> bool {
         let mut cnf = CnfProblem::new();
-        if direct_root_cnf {
-            cnf.add_direct_assertion(expression);
+        if root_cnf_options.direct_root_cnf {
+            cnf.add_direct_assertion_with_negated_root(
+                expression,
+                root_cnf_options.direct_negated_root,
+            );
         } else {
             cnf.add_assertion(expression);
         }
@@ -7189,6 +7381,62 @@ mod tests {
                 assertion_is_satisfiable(expression, false, &assignment),
                 "root encodings differ for {expression:?} under {assignment:?}"
             );
+        }
+    }
+
+    fn evaluate_bool_expr(expression: &BoolExpr, atom_assignment: &[bool]) -> bool {
+        match expression {
+            BoolExpr::Const(value) => *value,
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => atom_assignment[*term],
+            BoolExpr::Atom(BoolAtomKey::Eq(_, _)) => {
+                panic!("truth-table tests use only independent Boolean atoms")
+            }
+            BoolExpr::Not(child) => !evaluate_bool_expr(child, atom_assignment),
+            BoolExpr::And(children) => children
+                .iter()
+                .all(|child| evaluate_bool_expr(child, atom_assignment)),
+            BoolExpr::Or(children) => children
+                .iter()
+                .any(|child| evaluate_bool_expr(child, atom_assignment)),
+            BoolExpr::Iff(children) => children.split_first().is_none_or(|(first, rest)| {
+                let first = evaluate_bool_expr(first, atom_assignment);
+                rest.iter()
+                    .all(|child| evaluate_bool_expr(child, atom_assignment) == first)
+            }),
+            BoolExpr::Ite(condition, then_expression, else_expression) => {
+                if evaluate_bool_expr(condition, atom_assignment) {
+                    evaluate_bool_expr(then_expression, atom_assignment)
+                } else {
+                    evaluate_bool_expr(else_expression, atom_assignment)
+                }
+            }
+        }
+    }
+
+    fn assert_all_root_encodings_match_truth_table(expression: &BoolExpr, atom_count: usize) {
+        let encodings = [
+            RootCnfOptions {
+                direct_root_cnf: false,
+                direct_negated_root: false,
+            },
+            RootCnfOptions::existing_behavior(true),
+            RootCnfOptions {
+                direct_root_cnf: true,
+                direct_negated_root: true,
+            },
+        ];
+        for assignment_bits in 0..(1usize << atom_count) {
+            let assignment = (0..atom_count)
+                .map(|bit| assignment_bits & (1 << bit) != 0)
+                .collect::<Vec<_>>();
+            let expected = evaluate_bool_expr(expression, &assignment);
+            for encoding in encodings {
+                assert_eq!(
+                    assertion_is_satisfiable_with_root_options(expression, encoding, &assignment,),
+                    expected,
+                    "encoding {encoding:?} disagrees for {expression:?} under {assignment:?}"
+                );
+            }
         }
     }
 
@@ -7281,6 +7529,152 @@ mod tests {
         for formula in &formulas {
             assert_root_encodings_equivalent(formula, 0);
         }
+    }
+
+    #[test]
+    fn direct_negated_root_matches_truth_tables_and_existing_encodings() {
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+        let formulas = vec![
+            BoolExpr::Not(Box::new(BoolExpr::Const(true))),
+            BoolExpr::Not(Box::new(BoolExpr::Const(false))),
+            BoolExpr::Not(Box::new(atom(0))),
+            BoolExpr::Not(Box::new(BoolExpr::Not(Box::new(atom(0))))),
+            BoolExpr::Not(Box::new(BoolExpr::And(Vec::new()))),
+            BoolExpr::Not(Box::new(BoolExpr::And(vec![atom(0)]))),
+            BoolExpr::Not(Box::new(BoolExpr::And(vec![
+                atom(0),
+                BoolExpr::Not(Box::new(atom(1))),
+                BoolExpr::Const(true),
+            ]))),
+            BoolExpr::Not(Box::new(BoolExpr::And(vec![
+                atom(0),
+                BoolExpr::And(vec![atom(1), BoolExpr::Not(Box::new(atom(2)))]),
+                BoolExpr::Or(vec![atom(0), atom(2)]),
+            ]))),
+            BoolExpr::Not(Box::new(BoolExpr::And(vec![
+                BoolExpr::Iff(vec![atom(0), atom(1)]),
+                BoolExpr::Ite(
+                    Box::new(atom(2)),
+                    Box::new(atom(0)),
+                    Box::new(BoolExpr::Not(Box::new(atom(1)))),
+                ),
+            ]))),
+            BoolExpr::Not(Box::new(BoolExpr::Or(Vec::new()))),
+            BoolExpr::Not(Box::new(BoolExpr::Or(vec![atom(0)]))),
+            BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                atom(0),
+                BoolExpr::Not(Box::new(BoolExpr::And(vec![atom(1), atom(2)]))),
+                BoolExpr::Const(false),
+            ]))),
+            BoolExpr::And(vec![
+                BoolExpr::Not(Box::new(BoolExpr::And(vec![atom(0), atom(1)]))),
+                BoolExpr::Not(Box::new(BoolExpr::Or(vec![atom(1), atom(2)]))),
+            ]),
+        ];
+
+        for formula in &formulas {
+            assert_all_root_encodings_match_truth_table(formula, 3);
+        }
+    }
+
+    #[test]
+    fn direct_negated_root_reduces_every_complete_assignment_exactly() {
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+        const ATOM_COUNT: usize = 4;
+
+        for complete_assignment_bits in 0..(1usize << ATOM_COUNT) {
+            let children = (0..ATOM_COUNT)
+                .map(|term| {
+                    let atom = atom(term);
+                    if complete_assignment_bits & (1 << term) != 0 {
+                        atom
+                    } else {
+                        BoolExpr::Not(Box::new(atom))
+                    }
+                })
+                .collect::<Vec<_>>();
+            let expression = BoolExpr::Not(Box::new(BoolExpr::And(children)));
+
+            let mut tseitin = CnfProblem::new();
+            tseitin.add_assertion(&expression);
+            let mut existing_direct = CnfProblem::new();
+            existing_direct.add_direct_assertion(&expression);
+            let mut direct_negated = CnfProblem::new();
+            direct_negated.add_direct_assertion_with_negated_root(&expression, true);
+
+            assert_eq!(tseitin.var_count(), ATOM_COUNT + 1);
+            assert_eq!(tseitin.clauses.len(), ATOM_COUNT + 2);
+            assert_eq!(existing_direct.var_count(), ATOM_COUNT + 1);
+            assert_eq!(existing_direct.clauses.len(), ATOM_COUNT + 2);
+            assert_eq!(direct_negated.var_count(), ATOM_COUNT);
+            assert_eq!(direct_negated.clauses.len(), 1);
+
+            let expected_clause = (0..ATOM_COUNT)
+                .map(|term| {
+                    let variable = term as i32 + 1;
+                    if complete_assignment_bits & (1 << term) != 0 {
+                        -variable
+                    } else {
+                        variable
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(direct_negated.clauses, vec![expected_clause]);
+            assert_all_root_encodings_match_truth_table(&expression, ATOM_COUNT);
+        }
+    }
+
+    #[test]
+    fn direct_negated_root_handles_empty_singleton_nested_and_de_morgan_cases_exactly() {
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+        let encode = |expression: BoolExpr| {
+            let mut cnf = CnfProblem::new();
+            cnf.add_direct_assertion_with_negated_root(&expression, true);
+            cnf
+        };
+
+        let empty_and = encode(BoolExpr::Not(Box::new(BoolExpr::And(Vec::new()))));
+        assert_eq!(empty_and.var_count(), 0);
+        assert_eq!(empty_and.clauses, vec![Vec::<i32>::new()]);
+
+        let singleton_and = encode(BoolExpr::Not(Box::new(BoolExpr::And(vec![atom(0)]))));
+        assert_eq!(singleton_and.var_count(), 1);
+        assert_eq!(singleton_and.clauses, vec![vec![-1]]);
+
+        let nested_and = encode(BoolExpr::Not(Box::new(BoolExpr::And(vec![
+            atom(0),
+            BoolExpr::And(vec![atom(1), BoolExpr::Not(Box::new(atom(2)))]),
+        ]))));
+        assert_eq!(nested_and.var_count(), 4);
+        assert_eq!(
+            nested_and.clauses,
+            vec![vec![-4, 2], vec![-4, -3], vec![4, -2, 3], vec![-1, -4]]
+        );
+
+        let double_negation = encode(BoolExpr::Not(Box::new(BoolExpr::Not(Box::new(
+            BoolExpr::And(vec![atom(0), atom(1)]),
+        )))));
+        assert_eq!(double_negation.var_count(), 2);
+        assert_eq!(double_negation.clauses, vec![vec![1], vec![2]]);
+
+        let de_morgan = encode(BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+            atom(0),
+            BoolExpr::Not(Box::new(atom(1))),
+            BoolExpr::Const(false),
+        ]))));
+        assert_eq!(de_morgan.var_count(), 2);
+        assert_eq!(de_morgan.clauses, vec![vec![-1], vec![2]]);
+
+        let empty_or = encode(BoolExpr::Not(Box::new(BoolExpr::Or(Vec::new()))));
+        assert_eq!(empty_or.var_count(), 0);
+        assert!(empty_or.clauses.is_empty());
+
+        let not_true = encode(BoolExpr::Not(Box::new(BoolExpr::Const(true))));
+        assert_eq!(not_true.var_count(), 0);
+        assert_eq!(not_true.clauses, vec![Vec::<i32>::new()]);
+        let not_false = encode(BoolExpr::Not(Box::new(BoolExpr::Const(false))));
+        assert_eq!(not_false.var_count(), 0);
+        assert!(not_false.clauses.is_empty());
     }
 
     #[test]
@@ -7675,6 +8069,29 @@ mod tests {
         let edge = integration.accepted_edges[0];
         let equality = completed.atom_vars[&BoolAtomKey::Eq(edge.0, edge.1)];
         assert!(completed.clauses.iter().any(|clause| clause == &[equality]));
+    }
+
+    #[test]
+    fn dynamic_full_ackermann_rebuild_preserves_direct_negated_root_mode() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun r () Bool)
+            (assert (not (and p (not q) r)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+
+        let (existing, _) = solve_dynamic_full_ackermann(&problem.arena, bool_problem, &[]);
+        let (direct_negated, _) =
+            solve_dynamic_full_ackermann_with_negated_root(&problem.arena, bool_problem, &[], true);
+
+        assert_eq!(existing.var_count(), 4);
+        assert_eq!(existing.clauses.len(), 5);
+        assert_eq!(direct_negated.var_count(), 3);
+        assert_eq!(direct_negated.clauses, vec![vec![-1, 2, -3]]);
     }
 
     fn solve_text_varisat(input: &str) -> SolveResult {
@@ -8992,6 +9409,50 @@ mod tests {
         ";
         assert_eq!(solve_text(input), SolveResult::Unsat);
         assert_eq!(solve_text_varisat(input), SolveResult::Unsat);
+    }
+
+    #[test]
+    fn direct_negated_root_preserves_bool_as_data_atomization() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun f (Bool) U)
+            (assert (not (and p q)))
+            (assert (distinct (f p) (f q)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert_eq!(bool_problem.data_terms.len(), 2);
+
+        let build = |direct_negated_root| {
+            let mut cnf = CnfProblem::new();
+            atomize_bool_data_terms(&mut cnf, bool_problem);
+            for assertion in &bool_problem.assertions {
+                cnf.add_direct_assertion_with_negated_root(assertion, direct_negated_root);
+            }
+            cnf
+        };
+        let existing = build(false);
+        let direct_negated = build(true);
+        let data_variables = |cnf: &CnfProblem| {
+            bool_problem
+                .data_terms
+                .iter()
+                .map(|term| cnf.atom_vars[&BoolAtomKey::BoolTerm(*term)])
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(data_variables(&existing), vec![1, 2]);
+        assert_eq!(data_variables(&direct_negated), vec![1, 2]);
+        for (variable, term) in bool_problem.data_terms.iter().copied().enumerate() {
+            assert_eq!(
+                direct_negated.var_atoms[variable + 1],
+                Some(BoolAtomKey::BoolTerm(term))
+            );
+        }
     }
 
     #[test]
