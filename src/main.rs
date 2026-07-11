@@ -21,6 +21,10 @@ mod orbit_canon;
 mod orbit_cover;
 #[cfg(test)]
 mod quotient_csp;
+#[cfg(test)]
+mod quotient_state_search;
+#[cfg(test)]
+mod stabilizer_order;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};

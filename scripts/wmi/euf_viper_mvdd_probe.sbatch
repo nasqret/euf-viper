@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=euf-viper-mdd-probe
+#SBATCH --job-name=euf-viper-mvdd-probe
 #SBATCH --partition=cpu_idle
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=32G
 #SBATCH --time=01:00:00
-#SBATCH --output=results/wmi-mdd-probe-%j.out
-#SBATCH --error=results/wmi-mdd-probe-%j.err
+#SBATCH --output=results/wmi-mvdd-probe-%j.out
+#SBATCH --error=results/wmi-mvdd-probe-%j.err
 
 set -euo pipefail
 
@@ -28,5 +28,5 @@ printf 'case=%s\n' "$CASE"
 printf 'case_sha256=%s\n' "$(sha256sum "$CASE" | awk '{print $1}')"
 
 cargo test --release --all-features \
-  forbidden_orbit_probe::tests::probe_external_forbidden_table_mdd \
+  forbidden_orbit_probe::tests::probe_external_forbidden_table_mvdd \
   -- --ignored --exact --nocapture

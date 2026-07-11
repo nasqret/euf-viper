@@ -340,7 +340,9 @@ impl fmt::Display for OracleError {
                 "oracle cap for {resource} is {limit}, attempted {attempted}"
             ),
             Self::ArithmeticOverflow => output.write_str("arithmetic overflow in reference oracle"),
-            Self::EmptyOrbit => output.write_str("a forbidden orbit must contain at least one member"),
+            Self::EmptyOrbit => {
+                output.write_str("a forbidden orbit must contain at least one member")
+            }
             Self::SeedLength { expected, actual } => {
                 write!(output, "seed has {actual} cells, expected {expected}")
             }

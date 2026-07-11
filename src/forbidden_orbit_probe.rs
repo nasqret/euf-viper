@@ -261,7 +261,14 @@ fn report_for_tables(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forbidden_table_mdd::{ConstructionCap, Telemetry, compile_forbidden_table_mdd};
+    use crate::forbidden_table_mdd::{
+        ConstructionCap as BooleanConstructionCap, Telemetry as BooleanTelemetry,
+        compile_forbidden_table_mdd,
+    };
+    use crate::forbidden_table_mvdd::{
+        ConstructionCap as MultiValuedConstructionCap, Telemetry as MultiValuedTelemetry,
+        compile_forbidden_table_mvdd,
+    };
     use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
     use std::{env, fs};
 
@@ -353,7 +360,7 @@ mod tests {
             .collect()
     }
 
-    fn print_mdd_telemetry(label: &str, telemetry: &Telemetry) {
+    fn print_mdd_telemetry(label: &str, telemetry: &BooleanTelemetry) {
         println!(
             concat!(
                 "{{\"label\":\"{}\",\"variables\":{},",
@@ -370,6 +377,55 @@ mod tests {
             telemetry.trie_nodes,
             telemetry.mdd_nodes,
             telemetry.mdd_edges,
+            telemetry.hash_cons_hits,
+            telemetry.cnf_clauses,
+            telemetry.cnf_literals,
+        );
+    }
+
+    fn multi_valued_rows(tables: &[BinaryTable]) -> Vec<Vec<u8>> {
+        tables
+            .iter()
+            .map(|table| {
+                table
+                    .entries()
+                    .iter()
+                    .map(|&value| u8::try_from(value).unwrap())
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn one_hot_atom_mapping(degree: usize) -> Vec<Vec<u32>> {
+        (0..degree * degree)
+            .map(|cell| {
+                (0..degree)
+                    .map(|value| u32::try_from(cell * degree + value + 1).unwrap())
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn print_mvdd_telemetry(label: &str, telemetry: &MultiValuedTelemetry) {
+        println!(
+            concat!(
+                "{{\"label\":\"{}\",\"cells\":{},\"degree\":{},",
+                "\"forbidden_rows\":{},\"raw_forbidden_clauses\":{},",
+                "\"raw_forbidden_literals\":{},\"trie_nodes\":{},",
+                "\"mvdd_nodes\":{},\"mvdd_edges\":{},",
+                "\"eliminated_tests\":{},\"hash_cons_hits\":{},",
+                "\"cnf_clauses\":{},\"cnf_literals\":{}}}"
+            ),
+            label,
+            telemetry.cells,
+            telemetry.degree,
+            telemetry.forbidden_rows,
+            telemetry.raw_forbidden_clauses,
+            telemetry.raw_forbidden_literals,
+            telemetry.trie_nodes,
+            telemetry.mvdd_nodes,
+            telemetry.mvdd_edges,
+            telemetry.eliminated_tests,
             telemetry.hash_cons_hits,
             telemetry.cnf_clauses,
             telemetry.cnf_literals,
@@ -465,9 +521,13 @@ mod tests {
             .flat_map(|value| (0..9).map(move |cell| cell * 3 + value + 1))
             .collect::<Vec<_>>();
         for order in [cell_major, value_major] {
-            let compiled =
-                compile_forbidden_table_mdd(&assignments, &order, 28, ConstructionCap::default())
-                    .unwrap();
+            let compiled = compile_forbidden_table_mdd(
+                &assignments,
+                &order,
+                28,
+                BooleanConstructionCap::default(),
+            )
+            .unwrap();
             assert_eq!(compiled.telemetry.variables, 27);
             assert_eq!(compiled.telemetry.forbidden_assignments, 1);
         }
@@ -529,17 +589,62 @@ mod tests {
             &assignments,
             &cell_major,
             first_auxiliary,
-            ConstructionCap::default(),
+            BooleanConstructionCap::default(),
         )
         .unwrap();
         let value = compile_forbidden_table_mdd(
             &assignments,
             &value_major,
             first_auxiliary,
-            ConstructionCap::default(),
+            BooleanConstructionCap::default(),
         )
         .unwrap();
         print_mdd_telemetry("cell_major", &cell.telemetry);
         print_mdd_telemetry("value_major", &value.telemetry);
+    }
+
+    #[test]
+    #[ignore = "requires EUF_VIPER_MDD_PROBE_CASE"]
+    fn probe_external_forbidden_table_mvdd() {
+        let path = env::var("EUF_VIPER_MDD_PROBE_CASE").unwrap();
+        let source = fs::read_to_string(path).unwrap();
+        let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
+        let orbit = analyze_forbidden_table_orbit(&problem).unwrap();
+        assert!(orbit.exact_first_orbit_cover);
+        let (degree, function, tables) = dominant_table_exclusions(&problem);
+        assert_eq!(degree, orbit.degree);
+        assert_eq!(function, orbit.function);
+
+        let rows = multi_valued_rows(&tables);
+        let mapping = one_hot_atom_mapping(degree);
+        let cells = degree * degree;
+        let first_auxiliary = u32::try_from(cells * degree + 1).unwrap();
+        let row_major = (0..cells).collect::<Vec<_>>();
+        let column_major = (0..degree)
+            .flat_map(|column| (0..degree).map(move |row| row * degree + column))
+            .collect::<Vec<_>>();
+
+        let row = compile_forbidden_table_mvdd(
+            &rows,
+            cells,
+            degree,
+            &row_major,
+            &mapping,
+            first_auxiliary,
+            MultiValuedConstructionCap::default(),
+        )
+        .unwrap();
+        let column = compile_forbidden_table_mvdd(
+            &rows,
+            cells,
+            degree,
+            &column_major,
+            &mapping,
+            first_auxiliary,
+            MultiValuedConstructionCap::default(),
+        )
+        .unwrap();
+        print_mvdd_telemetry("row_major", &row.telemetry);
+        print_mvdd_telemetry("column_major", &column.telemetry);
     }
 }
