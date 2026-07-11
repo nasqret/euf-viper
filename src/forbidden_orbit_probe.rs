@@ -261,6 +261,7 @@ fn report_for_tables(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::forbidden_table_mdd::{ConstructionCap, Telemetry, compile_forbidden_table_mdd};
     use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
     use std::{env, fs};
 
@@ -294,6 +295,85 @@ mod tests {
              (check-sat)\n",
             equalities.join(" ")
         )
+    }
+
+    fn dominant_table_exclusions(problem: &Problem) -> (usize, SymId, Vec<BinaryTable>) {
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut finite = FiniteAnalysisContext::default();
+        let domain = finite
+            .domain_analysis(&problem.arena, bool_problem)
+            .domain
+            .clone();
+        let domain_positions = domain
+            .iter()
+            .enumerate()
+            .map(|(position, &term)| (term, position))
+            .collect::<HashMap<_, _>>();
+        let mut by_function: HashMap<SymId, Vec<BinaryTable>> = HashMap::default();
+        for assertion in &bool_problem.assertions {
+            let BoolExpr::Not(inner) = assertion else {
+                continue;
+            };
+            let mut equalities = Vec::new();
+            if !collect_conjunctive_equalities(inner, &mut equalities) {
+                continue;
+            }
+            if let Ok(extracted) =
+                extract_complete_table(&problem.arena, &domain_positions, domain.len(), &equalities)
+            {
+                by_function
+                    .entry(extracted.function)
+                    .or_default()
+                    .push(extracted.table);
+            }
+        }
+        let (function, tables) = by_function
+            .into_iter()
+            .max_by_key(|(function, tables)| (tables.len(), std::cmp::Reverse(*function)))
+            .unwrap();
+        (domain.len(), function, tables)
+    }
+
+    fn one_hot_assignments(degree: usize, tables: &[BinaryTable]) -> Vec<Vec<i32>> {
+        tables
+            .iter()
+            .map(|table| {
+                table
+                    .entries()
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(cell, &selected)| {
+                        (0..degree).map(move |value| {
+                            let atom = i32::try_from(cell * degree + value + 1).unwrap();
+                            if value == selected { atom } else { -atom }
+                        })
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn print_mdd_telemetry(label: &str, telemetry: &Telemetry) {
+        println!(
+            concat!(
+                "{{\"label\":\"{}\",\"variables\":{},",
+                "\"forbidden_assignments\":{},\"raw_forbidden_clauses\":{},",
+                "\"raw_forbidden_literals\":{},\"trie_nodes\":{},",
+                "\"mdd_nodes\":{},\"mdd_edges\":{},\"hash_cons_hits\":{},",
+                "\"cnf_clauses\":{},\"cnf_literals\":{}}}"
+            ),
+            label,
+            telemetry.variables,
+            telemetry.forbidden_assignments,
+            telemetry.raw_forbidden_clauses,
+            telemetry.raw_forbidden_literals,
+            telemetry.trie_nodes,
+            telemetry.mdd_nodes,
+            telemetry.mdd_edges,
+            telemetry.hash_cons_hits,
+            telemetry.cnf_clauses,
+            telemetry.cnf_literals,
+        );
     }
 
     #[test]
@@ -361,6 +441,39 @@ mod tests {
     }
 
     #[test]
+    fn one_hot_projection_is_complete_and_order_independent() {
+        let table = BinaryTable::new(3, vec![0, 1, 2, 1, 2, 0, 2, 0, 1]).unwrap();
+        let assignments = one_hot_assignments(3, &[table]);
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].len(), 27);
+        assert_eq!(
+            assignments[0]
+                .iter()
+                .map(|literal| literal.unsigned_abs())
+                .collect::<Vec<_>>(),
+            (1..=27).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            assignments[0]
+                .iter()
+                .filter(|literal| **literal > 0)
+                .count(),
+            9
+        );
+        let cell_major = (1..=27).collect::<Vec<_>>();
+        let value_major = (0..3)
+            .flat_map(|value| (0..9).map(move |cell| cell * 3 + value + 1))
+            .collect::<Vec<_>>();
+        for order in [cell_major, value_major] {
+            let compiled =
+                compile_forbidden_table_mdd(&assignments, &order, 28, ConstructionCap::default())
+                    .unwrap();
+            assert_eq!(compiled.telemetry.variables, 27);
+            assert_eq!(compiled.telemetry.forbidden_assignments, 1);
+        }
+    }
+
+    #[test]
     #[ignore = "requires EUF_VIPER_ORBIT_PROBE_CASE"]
     fn probe_external_formula() {
         let path = env::var("EUF_VIPER_ORBIT_PROBE_CASE").unwrap();
@@ -389,5 +502,44 @@ mod tests {
             report.exact_first_orbit_cover,
             report.extraction.malformed_table_candidates,
         );
+    }
+
+    #[test]
+    #[ignore = "requires EUF_VIPER_MDD_PROBE_CASE"]
+    fn probe_external_forbidden_table_mdd() {
+        let path = env::var("EUF_VIPER_MDD_PROBE_CASE").unwrap();
+        let source = fs::read_to_string(path).unwrap();
+        let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
+        let orbit = analyze_forbidden_table_orbit(&problem).unwrap();
+        assert!(orbit.exact_first_orbit_cover);
+        let (degree, function, tables) = dominant_table_exclusions(&problem);
+        assert_eq!(degree, orbit.degree);
+        assert_eq!(function, orbit.function);
+        let assignments = one_hot_assignments(degree, &tables);
+        let variables = u32::try_from(degree * degree * degree).unwrap();
+        let cell_major = (1..=variables).collect::<Vec<_>>();
+        let value_major = (0..degree)
+            .flat_map(|value| {
+                (0..degree * degree)
+                    .map(move |cell| u32::try_from(cell * degree + value + 1).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let first_auxiliary = variables + 1;
+        let cell = compile_forbidden_table_mdd(
+            &assignments,
+            &cell_major,
+            first_auxiliary,
+            ConstructionCap::default(),
+        )
+        .unwrap();
+        let value = compile_forbidden_table_mdd(
+            &assignments,
+            &value_major,
+            first_auxiliary,
+            ConstructionCap::default(),
+        )
+        .unwrap();
+        print_mdd_telemetry("cell_major", &cell.telemetry);
+        print_mdd_telemetry("value_major", &value.telemetry);
     }
 }
