@@ -15,7 +15,8 @@ FIXTURE="${EUF_VIPER_SOUNDNESS_FIXTURE:-tests/fixtures/bool_data_pigeonhole_unsa
 cd "$ROOT"
 mkdir -p results
 export PATH="$HOME/.cargo/bin:$PATH"
-TARGET_DIR="${CARGO_TARGET_DIR:-${SLURM_TMPDIR:-$ROOT}/euf-viper-target}"
+SCRATCH_ROOT="${SLURM_TMPDIR:-/tmp/${USER:?}/euf-viper-$SLURM_JOB_ID}"
+TARGET_DIR="${CARGO_TARGET_DIR:-$SCRATCH_ROOT/target}"
 export CARGO_TARGET_DIR="$TARGET_DIR"
 BIN="$TARGET_DIR/release/euf-viper"
 REVISION="${EUF_VIPER_GIT_REVISION:-unknown}"
