@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::env;
 
 pub(super) const PARSER_ENV: &str = "EUF_VIPER_PARSER";
-const MAX_EXPRESSION_DEPTH: usize = 1_024;
+const MAX_PARSE_NESTING: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ParserMode {
@@ -49,9 +49,9 @@ pub(super) enum FallbackReason {
     UnsupportedCommand,
     NoncanonicalCommand,
     UnsupportedExpression,
+    TermValuedIteOrLet,
     SingleAssertionBranchIntersection,
     QuotedUnicodeNeedsLegacyOracle,
-    ExpressionNestingLimit,
 }
 
 impl FallbackReason {
@@ -60,9 +60,9 @@ impl FallbackReason {
             Self::UnsupportedCommand => "unsupported_command",
             Self::NoncanonicalCommand => "noncanonical_command",
             Self::UnsupportedExpression => "unsupported_expression",
+            Self::TermValuedIteOrLet => "term_valued_ite_or_let",
             Self::SingleAssertionBranchIntersection => "single_assertion_branch_intersection",
             Self::QuotedUnicodeNeedsLegacyOracle => "quoted_unicode_needs_legacy_oracle",
-            Self::ExpressionNestingLimit => "expression_nesting_limit",
         }
     }
 }
@@ -85,6 +85,7 @@ pub(super) fn parse_problem_with_mode(
     scoped_let_mode: ScopedLetMode,
     mode: ParserMode,
 ) -> Result<Problem, String> {
+    enforce_nesting_limit(input)?;
     match mode {
         ParserMode::Tree => super::parse_problem_with_scoped_let_mode(input, scoped_let_mode),
         ParserMode::Stream => match parse_stream(input, scoped_let_mode)? {
@@ -224,6 +225,7 @@ struct RawSymbol<'input> {
     string: bool,
 }
 
+#[derive(Clone)]
 struct RawScanner<'input> {
     input: &'input str,
     pos: usize,
@@ -326,18 +328,17 @@ impl<'input> RawScanner<'input> {
         while self.pos < bytes.len() {
             match bytes[self.pos] {
                 b'\\' => {
-                    self.pos += 1;
-                    if self.pos >= bytes.len() {
-                        self.finished = true;
-                        return Err("unterminated string literal".to_owned());
+                    if self.pos + 1 < bytes.len() {
+                        self.pos += 1;
+                        let escaped_char = self.input[self.pos..]
+                            .chars()
+                            .next()
+                            .expect("position is inside valid UTF-8 input");
+                        self.pos += escaped_char.len_utf8();
+                    } else {
+                        self.pos += 1;
                     }
-                    let escaped_char = self.input[self.pos..]
-                        .chars()
-                        .next()
-                        .expect("position is inside valid UTF-8 input");
-                    self.pos += escaped_char.len_utf8();
                 }
-                b'"' if bytes.get(self.pos + 1) == Some(&b'"') => self.pos += 2,
                 b'"' => {
                     self.pos += 1;
                     return Ok(RawEvent::Symbol(RawSymbol {
@@ -350,8 +351,12 @@ impl<'input> RawScanner<'input> {
                 _ => self.pos += 1,
             }
         }
-        self.finished = true;
-        Err("unterminated string literal".to_owned())
+        Ok(RawEvent::Symbol(RawSymbol {
+            text: &self.input[start..self.pos],
+            quoted: false,
+            escaped: false,
+            string: true,
+        }))
     }
 
     fn scan_simple_symbol(&mut self) -> RawEvent<'input> {
@@ -360,7 +365,7 @@ impl<'input> RawScanner<'input> {
         while self.pos < bytes.len()
             && !matches!(
                 bytes[self.pos],
-                b' ' | b'\n' | b'\r' | b'\t' | b'(' | b')' | b';' | b'|' | b'"'
+                b' ' | b'\n' | b'\r' | b'\t' | b'(' | b')' | b';'
             )
         {
             self.pos += 1;
@@ -394,6 +399,7 @@ impl Symbol<'_> {
     }
 }
 
+#[derive(Clone)]
 struct Scanner<'input> {
     raw: RawScanner<'input>,
 }
@@ -446,6 +452,28 @@ struct Prepass {
     top_level_assertions: u8,
 }
 
+fn nesting_limit_error() -> String {
+    format!("SMT-LIB nesting exceeds parser safety limit of {MAX_PARSE_NESTING}")
+}
+
+fn enforce_nesting_limit(input: &str) -> Result<(), String> {
+    let mut scanner = RawScanner::new(input);
+    let mut depth = 0usize;
+    loop {
+        match scanner.next_event() {
+            Ok(Some(RawEvent::Open)) => {
+                depth += 1;
+                if depth > MAX_PARSE_NESTING {
+                    return Err(nesting_limit_error());
+                }
+            }
+            Ok(Some(RawEvent::Close)) => depth = depth.saturating_sub(1),
+            Ok(Some(RawEvent::Symbol(_))) => {}
+            Ok(None) | Err(_) => return Ok(()),
+        }
+    }
+}
+
 fn structural_prepass(input: &str) -> Result<Prepass, String> {
     let mut scanner = RawScanner::new(input);
     let mut depth = 0usize;
@@ -456,6 +484,9 @@ fn structural_prepass(input: &str) -> Result<Prepass, String> {
         match event {
             RawEvent::Open => {
                 depth += 1;
+                if depth > MAX_PARSE_NESTING {
+                    return Err(nesting_limit_error());
+                }
                 if depth == 1 {
                     awaiting_top_level_head = true;
                 } else if awaiting_top_level_head {
@@ -484,6 +515,7 @@ fn structural_prepass(input: &str) -> Result<Prepass, String> {
     })
 }
 
+#[derive(Clone)]
 struct EventCursor<'input> {
     scanner: Scanner<'input>,
     peeked: Option<Event<'input>>,
@@ -509,6 +541,198 @@ impl<'input> EventCursor<'input> {
             self.peeked = self.scanner.next_event()?;
         }
         Ok(self.peeked.as_ref())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValueKind {
+    Bool,
+    Term,
+}
+
+// Classify special forms on a cloned cursor before the direct reducer mutates ParseCtx.
+struct TypeProbe<'ctx, 'input> {
+    cursor: EventCursor<'input>,
+    ctx: &'ctx ParseCtx,
+    depth: usize,
+}
+
+impl<'ctx, 'input> TypeProbe<'ctx, 'input> {
+    fn new(cursor: EventCursor<'input>, ctx: &'ctx ParseCtx) -> Self {
+        Self {
+            cursor,
+            ctx,
+            depth: 0,
+        }
+    }
+
+    fn classify_value(&mut self, environment: &HashMap<String, ValueKind>) -> Option<ValueKind> {
+        if self.depth >= MAX_PARSE_NESTING {
+            return None;
+        }
+        self.depth += 1;
+        let result = self.classify_value_inner(environment);
+        self.depth -= 1;
+        result
+    }
+
+    fn classify_value_inner(
+        &mut self,
+        environment: &HashMap<String, ValueKind>,
+    ) -> Option<ValueKind> {
+        match self.next()? {
+            Event::Symbol(symbol) => self.classify_symbol(&symbol, environment),
+            Event::Open => self.classify_list(environment),
+            Event::Close => None,
+        }
+    }
+
+    fn classify_symbol(
+        &self,
+        symbol: &Symbol<'_>,
+        environment: &HashMap<String, ValueKind>,
+    ) -> Option<ValueKind> {
+        if symbol.string || symbol.quoted && !symbol.text.is_ascii() {
+            return None;
+        }
+        if symbol.is_syntax("true") || symbol.is_syntax("false") {
+            return Some(ValueKind::Bool);
+        }
+        if let Some(&kind) = environment.get(symbol.text.as_ref()) {
+            return Some(kind);
+        }
+        let Some(&sym) = self.ctx.symbols.ids.get(symbol.text.as_ref()) else {
+            return Some(ValueKind::Term);
+        };
+        if self.ctx.bool_definitions.contains_key(&sym) || self.ctx.is_bool_symbol(sym, 0) {
+            Some(ValueKind::Bool)
+        } else {
+            Some(ValueKind::Term)
+        }
+    }
+
+    fn classify_list(&mut self, environment: &HashMap<String, ValueKind>) -> Option<ValueKind> {
+        if self.peek_is_close()? {
+            return None;
+        }
+        let Event::Symbol(head) = self.next()? else {
+            return None;
+        };
+        if head.string || head.quoted && !head.text.is_ascii() {
+            return None;
+        }
+
+        if head.is_syntax("!") {
+            let kind = self.classify_value(environment)?;
+            self.skip_list_tail()?;
+            return Some(kind);
+        }
+        if matches!(
+            head.text.as_ref(),
+            "and" | "or" | "not" | "=>" | "xor" | "=" | "distinct"
+        ) && !head.quoted
+        {
+            self.skip_list_tail()?;
+            return Some(ValueKind::Bool);
+        }
+        if head.is_syntax("ite") {
+            return self.classify_ite_tail(environment);
+        }
+        if head.is_syntax("let") {
+            return self.classify_let_tail(environment);
+        }
+
+        let sym = self.ctx.symbols.ids.get(head.text.as_ref()).copied();
+        let mut arity = 0usize;
+        while !self.peek_is_close()? {
+            self.skip_one()?;
+            arity = arity.checked_add(1)?;
+        }
+        self.take_close()?;
+        if let Some(sym) = sym {
+            if arity == 0 && self.ctx.bool_definitions.contains_key(&sym) {
+                return Some(ValueKind::Bool);
+            }
+            if self.ctx.is_bool_symbol(sym, arity) {
+                return Some(ValueKind::Bool);
+            }
+        }
+        Some(ValueKind::Term)
+    }
+
+    fn classify_ite_tail(&mut self, environment: &HashMap<String, ValueKind>) -> Option<ValueKind> {
+        if self.classify_value(environment)? != ValueKind::Bool {
+            return None;
+        }
+        let then_kind = self.classify_value(environment)?;
+        let else_kind = self.classify_value(environment)?;
+        self.take_close()?;
+        (then_kind == else_kind).then_some(then_kind)
+    }
+
+    fn classify_let_tail(&mut self, environment: &HashMap<String, ValueKind>) -> Option<ValueKind> {
+        self.expect_open()?;
+        let mut bindings = Vec::new();
+        while !self.peek_is_close()? {
+            self.expect_open()?;
+            let Event::Symbol(name) = self.next()? else {
+                return None;
+            };
+            if name.string || name.quoted && !name.text.is_ascii() {
+                return None;
+            }
+            let kind = self.classify_value(environment)?;
+            self.take_close()?;
+            bindings.push((name.text.into_owned(), kind));
+        }
+        self.take_close()?;
+
+        let mut local = environment.clone();
+        for (name, kind) in bindings {
+            local.insert(name, kind);
+        }
+        let body_kind = self.classify_value(&local)?;
+        self.take_close()?;
+        Some(body_kind)
+    }
+
+    fn skip_one(&mut self) -> Option<()> {
+        match self.next()? {
+            Event::Symbol(_) => Some(()),
+            Event::Open => self.skip_list_tail(),
+            Event::Close => None,
+        }
+    }
+
+    fn skip_list_tail(&mut self) -> Option<()> {
+        let mut nested = 0usize;
+        loop {
+            match self.next()? {
+                Event::Open => nested += 1,
+                Event::Close if nested == 0 => return Some(()),
+                Event::Close => nested -= 1,
+                Event::Symbol(_) => {}
+            }
+        }
+    }
+
+    fn expect_open(&mut self) -> Option<()> {
+        matches!(self.next()?, Event::Open).then_some(())
+    }
+
+    fn take_close(&mut self) -> Option<()> {
+        matches!(self.next()?, Event::Close).then_some(())
+    }
+
+    fn peek_is_close(&mut self) -> Option<bool> {
+        self.cursor
+            .peek()
+            .ok()
+            .map(|event| matches!(event, Some(Event::Close)))
+    }
+
+    fn next(&mut self) -> Option<Event<'input>> {
+        self.cursor.next().ok().flatten()
     }
 }
 
@@ -723,8 +947,8 @@ impl<'input> DirectParser<'input> {
         &mut self,
         environment: &mut HashMap<String, BindingValue>,
     ) -> DirectResult<BindingValue> {
-        if self.expression_depth >= MAX_EXPRESSION_DEPTH {
-            return legacy(FallbackReason::ExpressionNestingLimit);
+        if self.expression_depth >= MAX_PARSE_NESTING {
+            return Err(DirectError::Parse(nesting_limit_error()));
         }
         self.expression_depth += 1;
         let result = self.parse_value_inner(environment);
@@ -804,7 +1028,11 @@ impl<'input> DirectParser<'input> {
             return self.parse_xor(environment);
         }
         if head.is_syntax("ite") {
-            return self.parse_ite(environment);
+            return match self.probe_special_form_kind(environment, true) {
+                Some(ValueKind::Bool) => self.parse_ite(environment),
+                Some(ValueKind::Term) => legacy(FallbackReason::TermValuedIteOrLet),
+                None => legacy(FallbackReason::UnsupportedExpression),
+            };
         }
         if head.is_syntax("=") {
             return self.parse_equality(environment);
@@ -813,9 +1041,39 @@ impl<'input> DirectParser<'input> {
             return self.parse_distinct(environment);
         }
         if head.is_syntax("let") {
-            return self.parse_let(environment);
+            return match self.probe_special_form_kind(environment, false) {
+                Some(ValueKind::Bool) => match self.parse_let(environment)? {
+                    value @ BindingValue::Bool(_) => Ok(value),
+                    BindingValue::Term(_) => legacy(FallbackReason::TermValuedIteOrLet),
+                },
+                Some(ValueKind::Term) => legacy(FallbackReason::TermValuedIteOrLet),
+                None => legacy(FallbackReason::UnsupportedExpression),
+            };
         }
         self.parse_user_application(head, environment)
+    }
+
+    fn probe_special_form_kind(
+        &self,
+        environment: &HashMap<String, BindingValue>,
+        ite: bool,
+    ) -> Option<ValueKind> {
+        let type_environment = environment
+            .iter()
+            .map(|(name, value)| {
+                let kind = match value {
+                    BindingValue::Bool(_) => ValueKind::Bool,
+                    BindingValue::Term(_) => ValueKind::Term,
+                };
+                (name.clone(), kind)
+            })
+            .collect::<HashMap<_, _>>();
+        let mut probe = TypeProbe::new(self.cursor.clone(), &self.ctx);
+        if ite {
+            probe.classify_ite_tail(&type_environment)
+        } else {
+            probe.classify_let_tail(&type_environment)
+        }
     }
 
     fn parse_annotation(
@@ -907,21 +1165,8 @@ impl<'input> DirectParser<'input> {
                     Box::new(else_expr),
                 )))
             }
-            (BindingValue::Term(then_term), BindingValue::Term(else_term)) => {
-                if then_term == else_term {
-                    return Ok(BindingValue::Term(then_term));
-                }
-                let ite_term = self.ctx.fresh_internal_term("ite");
-                let then_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, then_term));
-                let else_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, else_term));
-                self.ctx.bool_assertions.push(BoolExpr::Or(vec![
-                    BoolExpr::Not(Box::new(condition.clone())),
-                    then_eq,
-                ]));
-                self.ctx
-                    .bool_assertions
-                    .push(BoolExpr::Or(vec![condition, else_eq]));
-                Ok(BindingValue::Term(ite_term))
+            (BindingValue::Term(_), BindingValue::Term(_)) => {
+                legacy(FallbackReason::TermValuedIteOrLet)
             }
             _ => legacy(FallbackReason::UnsupportedExpression),
         }
@@ -1210,6 +1455,9 @@ fn legacy_branch_preprocessing_enabled(term_count: usize) -> bool {
 mod tests {
     use super::super::{SolveResult, solve_problem};
     use super::*;
+    use std::process::Command as ProcessCommand;
+
+    const DEEP_NESTING_HELPER_ENV: &str = "EUF_VIPER_DEEP_NESTING_HELPER";
 
     fn drain_scanner(input: &str) -> Result<Vec<Event<'_>>, String> {
         let mut scanner = Scanner::new(input);
@@ -1238,6 +1486,29 @@ mod tests {
         match parse_stream(input, ScopedLetMode::Off).unwrap() {
             StreamAttempt::LegacyRequired(reason) => reason,
             StreamAttempt::Parsed(_) => panic!("input unexpectedly stayed on stream path"),
+        }
+    }
+
+    fn assert_all_modes_match_tree(input: &str) {
+        for mode in [ParserMode::Tree, ParserMode::Shadow, ParserMode::Stream] {
+            let expected =
+                super::super::parse_problem_with_scoped_let_mode(input, ScopedLetMode::Off);
+            let actual = parse_problem_with_mode(input, ScopedLetMode::Off, mode);
+            match (actual, expected) {
+                (Ok(actual), Ok(expected)) => assert_eq!(
+                    SemanticSnapshot::from_problem(&actual),
+                    SemanticSnapshot::from_problem(&expected),
+                    "mode: {}",
+                    mode.as_str()
+                ),
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual, expected, "mode: {}", mode.as_str())
+                }
+                (actual, expected) => panic!(
+                    "mode {} outcome differs: {actual:?} != {expected:?}",
+                    mode.as_str()
+                ),
+            }
         }
     }
 
@@ -1298,14 +1569,12 @@ mod tests {
     }
 
     #[test]
-    fn scanner_rejects_malformed_structure_and_unterminated_lexemes() {
+    fn scanner_rejects_malformed_parentheses_and_quoted_symbols() {
         let cases = [
             (")", "unexpected ')'"),
             ("(", "unclosed '('"),
             ("|unterminated", "unterminated quoted symbol"),
             ("|trailing\\", "unterminated quoted symbol"),
-            ("\"unterminated", "unterminated string literal"),
-            ("\"trailing\\", "unterminated string literal"),
             ("(assert true))", "unexpected ')'"),
         ];
         for (input, expected) in cases {
@@ -1316,6 +1585,36 @@ mod tests {
             );
             assert_eq!(drain_scanner(input), Err(expected.to_owned()), "{input:?}");
         }
+    }
+
+    #[test]
+    fn unterminated_strings_follow_legacy_eof_tokenization() {
+        for input in ["\"unterminated", "\"trailing\\"] {
+            let events = drain_scanner(input).unwrap();
+            assert!(matches!(
+                events.as_slice(),
+                [Event::Symbol(Symbol {
+                    text: Cow::Borrowed(text),
+                    quoted: false,
+                    string: true
+                })] if *text == input
+            ));
+            assert_eq!(
+                structural_prepass(input).unwrap(),
+                Prepass {
+                    top_level_assertions: 0
+                }
+            );
+            assert_all_modes_match_tree(input);
+        }
+
+        let parenthesized = "(set-info :source \"unterminated)";
+        assert_all_modes_match_tree(parenthesized);
+        assert_eq!(
+            parse_problem_with_mode(parenthesized, ScopedLetMode::Off, ParserMode::Shadow)
+                .unwrap_err(),
+            "unclosed '('"
+        );
     }
 
     #[test]
@@ -1356,6 +1655,51 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(decoded, ["declare-fun", "p|q", "Bool", "assert", "p|q"]);
+    }
+
+    #[test]
+    fn quote_and_bar_adjacency_mirrors_legacy_token_boundaries() {
+        let adjacent_bar = "(set-logic|QF_UF|)";
+        let events = drain_scanner(adjacent_bar).unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                Event::Open,
+                Event::Symbol(Symbol {
+                    text: Cow::Borrowed("set-logic|QF_UF|"),
+                    quoted: false,
+                    string: false
+                }),
+                Event::Close
+            ]
+        ));
+        assert_eq!(
+            fallback_reason(adjacent_bar),
+            FallbackReason::UnsupportedCommand
+        );
+        assert_all_modes_match_tree(adjacent_bar);
+
+        let adjacent_strings = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun p ("x""y") Bool)
+            (assert (p a b))
+            (check-sat)
+        "#;
+        let string_events = drain_scanner(r#"("x""y")"#).unwrap();
+        let strings = string_events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Symbol(symbol) => Some(symbol.text.as_ref()),
+                Event::Open | Event::Close => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(strings, [r#""x""#, r#""y""#]);
+        assert_direct_parity(adjacent_strings, ScopedLetMode::Off);
+        assert_direct_parity(adjacent_strings, ScopedLetMode::On);
+        assert_all_modes_match_tree(adjacent_strings);
     }
 
     #[test]
@@ -1461,7 +1805,6 @@ mod tests {
             (declare-fun f (Bool) U)
             (define-fun same () Bool (= a b))
             (assert (and (or p q) (not r) (=> p q r) (xor p q r)))
-            (assert (= (ite p a b) a))
             (assert (= (f (ite p q r)) (f q)))
             (assert (= (same) same))
             (assert (distinct p q))
@@ -1469,6 +1812,58 @@ mod tests {
         "#;
         assert_direct_parity(input, ScopedLetMode::Off);
         assert_direct_parity(input, ScopedLetMode::On);
+    }
+
+    #[test]
+    fn term_valued_ite_and_let_fallback_before_direct_reduction() {
+        let term_ite = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (assert (= (ite p a b) a))
+            (check-sat)
+        "#;
+        let term_let = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (assert (= (let ((x a)) x) a))
+            (check-sat)
+        "#;
+        for input in [term_ite, term_let] {
+            assert_eq!(fallback_reason(input), FallbackReason::TermValuedIteOrLet);
+            assert_all_modes_match_tree(input);
+        }
+    }
+
+    #[test]
+    fn internal_symbols_cannot_alias_user_euf_viper_names() {
+        let input = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun g (Bool) U)
+            (assert
+                (and
+                    (= (g (= a b)) c)
+                    (distinct (ite p a b) @euf_viper_ite_3)))
+            (check-sat)
+        "#;
+        assert_eq!(fallback_reason(input), FallbackReason::TermValuedIteOrLet);
+        for mode in [ParserMode::Tree, ParserMode::Shadow, ParserMode::Stream] {
+            let problem = parse_problem_with_mode(input, ScopedLetMode::Off, mode).unwrap();
+            assert_eq!(
+                solve_problem(problem, false).result,
+                SolveResult::Sat,
+                "mode: {}",
+                mode.as_str()
+            );
+        }
     }
 
     #[test]
@@ -1559,13 +1954,13 @@ mod tests {
                 .unwrap_err();
         assert_eq!(matching_error, "unclosed '('");
 
-        let mismatch = parse_problem_with_mode(
+        let unterminated_string = parse_problem_with_mode(
             "(set-info :source \"unterminated)",
             ScopedLetMode::Off,
             ParserMode::Shadow,
         )
         .unwrap_err();
-        assert!(mismatch.contains("shadow mismatch"), "{mismatch}");
+        assert_eq!(unterminated_string, "unclosed '('");
     }
 
     #[test]
@@ -1597,5 +1992,50 @@ mod tests {
             super::super::parse_problem_with_scoped_let_mode(early_query, ScopedLetMode::Off)
                 .unwrap_err();
         assert_eq!(stream_error, tree_error);
+    }
+
+    fn deeply_nested_assertion(depth: usize) -> String {
+        let mut input = String::from("(assert ");
+        for _ in 0..depth {
+            input.push_str("(not ");
+        }
+        input.push_str("true");
+        for _ in 0..depth {
+            input.push(')');
+        }
+        input.push(')');
+        input
+    }
+
+    #[test]
+    fn deep_nesting_subprocess_helper() {
+        if env::var_os(DEEP_NESTING_HELPER_ENV).is_none() {
+            return;
+        }
+        let input = deeply_nested_assertion(MAX_PARSE_NESTING + 64);
+        let expected = nesting_limit_error();
+        for mode in [ParserMode::Tree, ParserMode::Shadow, ParserMode::Stream] {
+            let actual = parse_problem_with_mode(&input, ScopedLetMode::Off, mode).unwrap_err();
+            assert_eq!(actual, expected, "mode: {}", mode.as_str());
+        }
+    }
+
+    #[test]
+    fn deep_nesting_is_rejected_in_an_isolated_process() {
+        let output = ProcessCommand::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "smt2_stream::tests::deep_nesting_subprocess_helper",
+                "--nocapture",
+            ])
+            .env(DEEP_NESTING_HELPER_ENV, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "deep nesting subprocess failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

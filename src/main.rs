@@ -1192,16 +1192,16 @@ impl ParseCtx {
         (true_term, false_term)
     }
 
-    fn fresh_internal_term(&mut self, kind: &str) -> TermId {
-        loop {
-            let name = format!("@euf_viper_{kind}_{}", self.fresh_internal_counter);
-            self.fresh_internal_counter += 1;
-            if self.symbols.ids.contains_key(&name) {
-                continue;
-            }
-            let sym = self.symbols.intern(&name);
-            return self.arena.intern(sym, Vec::new());
-        }
+    fn fresh_internal_term(&mut self, _kind: &str) -> TermId {
+        // User symbols grow from zero; internal symbols grow down from the disjoint high end.
+        let offset = SymId::try_from(self.fresh_internal_counter)
+            .expect("internal symbol identifier space exhausted");
+        let sym = SymId::MAX
+            .checked_sub(offset)
+            .filter(|&candidate| candidate as usize >= self.symbols.ids.len())
+            .expect("user and internal symbol identifier spaces collided");
+        self.fresh_internal_counter += 1;
+        self.arena.intern(sym, Vec::new())
     }
 
     fn collect_equality(
