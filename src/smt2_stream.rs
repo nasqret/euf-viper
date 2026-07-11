@@ -5,7 +5,8 @@ use super::{
 use std::borrow::Cow;
 use std::env;
 
-pub(super) const PARSER_ENV: &str = "EUF_VIPER_PARSER";
+pub(super) const PARSER_MODE_ENV: &str = "EUF_VIPER_PARSER_MODE";
+pub(super) const LEGACY_PARSER_ENV: &str = "EUF_VIPER_PARSER";
 const MAX_PARSE_NESTING: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +17,7 @@ pub(super) enum ParserMode {
 }
 
 impl ParserMode {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Tree => "tree",
             Self::Shadow => "shadow",
@@ -26,21 +27,52 @@ impl ParserMode {
 }
 
 pub(super) fn parse_parser_mode(value: Option<&str>) -> Result<ParserMode, String> {
+    parse_parser_mode_for_env(PARSER_MODE_ENV, value)
+}
+
+fn parse_parser_mode_for_env(
+    environment_name: &str,
+    value: Option<&str>,
+) -> Result<ParserMode, String> {
     match value {
         None | Some("tree") => Ok(ParserMode::Tree),
         Some("shadow") => Ok(ParserMode::Shadow),
         Some("stream") => Ok(ParserMode::Stream),
-        Some(_) => Err(format!("{PARSER_ENV} must be tree, shadow, or stream")),
+        Some(_) => Err(format!(
+            "{environment_name} must be tree, shadow, or stream"
+        )),
     }
 }
 
 fn selected_parser_mode() -> Result<ParserMode, String> {
-    match env::var(PARSER_ENV) {
-        Ok(value) => parse_parser_mode(Some(&value)),
-        Err(env::VarError::NotPresent) => parse_parser_mode(None),
-        Err(env::VarError::NotUnicode(_)) => {
-            Err(format!("{PARSER_ENV} must be tree, shadow, or stream"))
+    let mode = read_parser_env(PARSER_MODE_ENV)?;
+    let legacy = read_parser_env(LEGACY_PARSER_ENV)?;
+    selected_parser_mode_from_values(mode.as_deref(), legacy.as_deref())
+}
+
+fn read_parser_env(name: &str) -> Result<Option<String>, String> {
+    match env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{name} must be tree, shadow, or stream")),
+    }
+}
+
+fn selected_parser_mode_from_values(
+    mode: Option<&str>,
+    legacy: Option<&str>,
+) -> Result<ParserMode, String> {
+    if let (Some(mode), Some(legacy)) = (mode, legacy) {
+        if mode != legacy {
+            return Err(format!(
+                "{PARSER_MODE_ENV} and {LEGACY_PARSER_ENV} must agree when both are set"
+            ));
         }
+    }
+    match (mode, legacy) {
+        (Some(mode), _) => parse_parser_mode_for_env(PARSER_MODE_ENV, Some(mode)),
+        (None, Some(legacy)) => parse_parser_mode_for_env(LEGACY_PARSER_ENV, Some(legacy)),
+        (None, None) => parse_parser_mode(None),
     }
 }
 
@@ -73,43 +105,126 @@ pub(super) enum StreamAttempt {
     LegacyRequired(FallbackReason),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParserRoute {
+    Tree,
+    Stream,
+    ShadowMatch,
+    TreeFallback,
+}
+
+impl ParserRoute {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Tree => "tree",
+            Self::Stream => "stream",
+            Self::ShadowMatch => "shadow-match",
+            Self::TreeFallback => "tree-fallback",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ParseReport {
+    problem: Problem,
+    mode: ParserMode,
+    route: ParserRoute,
+    fallback: Option<FallbackReason>,
+}
+
+impl ParseReport {
+    fn into_problem(self) -> Problem {
+        self.problem
+    }
+
+    pub(super) fn diagnostic_line(&self) -> String {
+        format!(
+            "parse_status={} parser_mode={} parser_route={} fallback_reason={}",
+            if self.fallback.is_some() {
+                "fallback"
+            } else {
+                "ok"
+            },
+            self.mode.as_str(),
+            self.route.as_str(),
+            self.fallback.map_or("none", FallbackReason::as_str),
+        )
+    }
+}
+
 pub(super) fn parse_problem(
     input: &str,
     scoped_let_mode: ScopedLetMode,
 ) -> Result<Problem, String> {
-    parse_problem_with_mode(input, scoped_let_mode, selected_parser_mode()?)
+    parse_problem_report(input, scoped_let_mode).map(ParseReport::into_problem)
 }
 
+pub(super) fn parse_problem_report(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<ParseReport, String> {
+    parse_problem_report_with_mode(input, scoped_let_mode, selected_parser_mode()?)
+}
+
+#[cfg(test)]
 pub(super) fn parse_problem_with_mode(
     input: &str,
     scoped_let_mode: ScopedLetMode,
     mode: ParserMode,
 ) -> Result<Problem, String> {
+    parse_problem_report_with_mode(input, scoped_let_mode, mode).map(ParseReport::into_problem)
+}
+
+fn parse_problem_report_with_mode(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+    mode: ParserMode,
+) -> Result<ParseReport, String> {
     enforce_nesting_limit(input)?;
     match mode {
-        ParserMode::Tree => super::parse_problem_with_scoped_let_mode(input, scoped_let_mode),
+        ParserMode::Tree => Ok(ParseReport {
+            problem: super::parse_problem_with_scoped_let_mode(input, scoped_let_mode)?,
+            mode,
+            route: ParserRoute::Tree,
+            fallback: None,
+        }),
         ParserMode::Stream => match parse_stream(input, scoped_let_mode)? {
             StreamAttempt::Parsed(problem) => {
                 profile_parser_route(mode, "stream", None);
-                Ok(problem)
+                Ok(ParseReport {
+                    problem,
+                    mode,
+                    route: ParserRoute::Stream,
+                    fallback: None,
+                })
             }
             StreamAttempt::LegacyRequired(reason) => {
                 profile_parser_route(mode, "tree", Some(reason));
-                super::parse_problem_with_scoped_let_mode(input, scoped_let_mode)
+                Ok(ParseReport {
+                    problem: super::parse_problem_with_scoped_let_mode(input, scoped_let_mode)?,
+                    mode,
+                    route: ParserRoute::TreeFallback,
+                    fallback: Some(reason),
+                })
             }
         },
         ParserMode::Shadow => parse_shadow(input, scoped_let_mode),
     }
 }
 
-fn parse_shadow(input: &str, scoped_let_mode: ScopedLetMode) -> Result<Problem, String> {
+fn parse_shadow(input: &str, scoped_let_mode: ScopedLetMode) -> Result<ParseReport, String> {
     let stream = parse_stream(input, scoped_let_mode);
     let tree = super::parse_problem_with_scoped_let_mode(input, scoped_let_mode);
 
     match stream {
         Ok(StreamAttempt::LegacyRequired(reason)) => {
             profile_parser_route(ParserMode::Shadow, "tree-fallback", Some(reason));
-            tree
+            Ok(ParseReport {
+                problem: tree?,
+                mode: ParserMode::Shadow,
+                route: ParserRoute::TreeFallback,
+                fallback: Some(reason),
+            })
         }
         Ok(StreamAttempt::Parsed(stream_problem)) => match tree {
             Ok(tree_problem) => {
@@ -117,14 +232,19 @@ fn parse_shadow(input: &str, scoped_let_mode: ScopedLetMode) -> Result<Problem, 
                 let tree_snapshot = SemanticSnapshot::from_problem(&tree_problem);
                 if stream_snapshot != tree_snapshot {
                     return Err(format!(
-                        "{PARSER_ENV}=shadow mismatch: stream and tree semantic snapshots differ"
+                        "{PARSER_MODE_ENV}=shadow mismatch: stream and tree semantic snapshots differ"
                     ));
                 }
                 profile_parser_route(ParserMode::Shadow, "matched", None);
-                Ok(tree_problem)
+                Ok(ParseReport {
+                    problem: tree_problem,
+                    mode: ParserMode::Shadow,
+                    route: ParserRoute::ShadowMatch,
+                    fallback: None,
+                })
             }
             Err(tree_error) => Err(format!(
-                "{PARSER_ENV}=shadow mismatch: stream parsed successfully but tree failed: {tree_error}"
+                "{PARSER_MODE_ENV}=shadow mismatch: stream parsed successfully but tree failed: {tree_error}"
             )),
         },
         Err(stream_error) => match tree {
@@ -133,10 +253,10 @@ fn parse_shadow(input: &str, scoped_let_mode: ScopedLetMode) -> Result<Problem, 
                 Err(tree_error)
             }
             Err(tree_error) => Err(format!(
-                "{PARSER_ENV}=shadow mismatch: stream error `{stream_error}` != tree error `{tree_error}`"
+                "{PARSER_MODE_ENV}=shadow mismatch: stream error `{stream_error}` != tree error `{tree_error}`"
             )),
             Ok(_) => Err(format!(
-                "{PARSER_ENV}=shadow mismatch: stream failed `{stream_error}` but tree parsed successfully"
+                "{PARSER_MODE_ENV}=shadow mismatch: stream failed `{stream_error}` but tree parsed successfully"
             )),
         },
     }
@@ -1711,7 +1831,72 @@ mod tests {
         for invalid in ["", "TREE", "off", "stream "] {
             assert_eq!(
                 parse_parser_mode(Some(invalid)),
-                Err(format!("{PARSER_ENV} must be tree, shadow, or stream"))
+                Err(format!("{PARSER_MODE_ENV} must be tree, shadow, or stream"))
+            );
+        }
+
+        assert_eq!(
+            selected_parser_mode_from_values(None, None),
+            Ok(ParserMode::Tree)
+        );
+        assert_eq!(
+            selected_parser_mode_from_values(Some("shadow"), None),
+            Ok(ParserMode::Shadow)
+        );
+        assert_eq!(
+            selected_parser_mode_from_values(None, Some("stream")),
+            Ok(ParserMode::Stream)
+        );
+        assert_eq!(
+            selected_parser_mode_from_values(None, Some("invalid")),
+            Err(format!(
+                "{LEGACY_PARSER_ENV} must be tree, shadow, or stream"
+            ))
+        );
+        assert_eq!(
+            selected_parser_mode_from_values(Some("stream"), Some("stream")),
+            Ok(ParserMode::Stream)
+        );
+        assert_eq!(
+            selected_parser_mode_from_values(Some("shadow"), Some("tree")),
+            Err(format!(
+                "{PARSER_MODE_ENV} and {LEGACY_PARSER_ENV} must agree when both are set"
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_reports_have_stable_mode_route_and_fallback_diagnostics() {
+        let direct = "(declare-fun p () Bool) (assert p) (check-sat)";
+        let expected = [
+            (
+                ParserMode::Tree,
+                "parse_status=ok parser_mode=tree parser_route=tree fallback_reason=none",
+            ),
+            (
+                ParserMode::Shadow,
+                "parse_status=ok parser_mode=shadow parser_route=shadow-match fallback_reason=none",
+            ),
+            (
+                ParserMode::Stream,
+                "parse_status=ok parser_mode=stream parser_route=stream fallback_reason=none",
+            ),
+        ];
+        for (mode, diagnostic) in expected {
+            let report = parse_problem_report_with_mode(direct, ScopedLetMode::Off, mode).unwrap();
+            assert_eq!(report.diagnostic_line(), diagnostic);
+        }
+
+        let fallback = "(push 1)";
+        for mode in [ParserMode::Shadow, ParserMode::Stream] {
+            let report =
+                parse_problem_report_with_mode(fallback, ScopedLetMode::Off, mode).unwrap();
+            assert_eq!(
+                report.diagnostic_line(),
+                format!(
+                    "parse_status=fallback parser_mode={} parser_route=tree-fallback fallback_reason=unsupported_command",
+                    mode.as_str()
+                )
             );
         }
     }

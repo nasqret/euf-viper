@@ -5973,6 +5973,13 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
     }
 }
 
+fn parse_check_file(path: &str) -> Result<i32, String> {
+    let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let report = smt2_stream::parse_problem_report(&input, selected_scoped_let_mode()?)?;
+    println!("{}", report.diagnostic_line());
+    Ok(0)
+}
+
 fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
     solve_file_with_root_cnf_options(path, with_stats, root_cnf_options)
@@ -6370,6 +6377,7 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
+  euf-viper parse-check FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper gen chain N [--sat]
@@ -6384,6 +6392,7 @@ fn usage() -> &'static str {
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
+  euf-viper parse-check FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper dump-eager-cnf FILE --out PATH
@@ -6411,6 +6420,12 @@ fn run() -> Result<i32, String> {
                 .find(|arg| !arg.starts_with("--"))
                 .ok_or_else(|| usage().to_owned())?;
             solve_file(file, with_stats)
+        }
+        "parse-check" => {
+            if args.len() != 3 {
+                return Err(usage().to_owned());
+            }
+            parse_check_file(&args[2])
         }
         "portfolio" => {
             let (file, yices, with_stats) = parse_portfolio_args(&args)?;
