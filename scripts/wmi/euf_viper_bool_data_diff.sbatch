@@ -32,8 +32,8 @@ case "$DIRECT_NEGATED_ROOT" in
   *) echo "EUF_VIPER_BOOL_DIFF_DIRECT_NEGATED_ROOT must be 0 or 1" >&2; exit 2 ;;
 esac
 case "$UNCONDITIONAL_QUOTIENT" in
-  off | shadow | on) ;;
-  *) echo "EUF_VIPER_BOOL_DIFF_UNCONDITIONAL_QUOTIENT must be off, shadow, or on" >&2; exit 2 ;;
+  off | shadow | on | auto) ;;
+  *) echo "EUF_VIPER_BOOL_DIFF_UNCONDITIONAL_QUOTIENT must be off, shadow, on, or auto" >&2; exit 2 ;;
 esac
 
 python3 scripts/bench/differential_bool_data.py \
