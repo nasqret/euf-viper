@@ -234,7 +234,9 @@ def grouped_summaries(
             solver_data[solver] = {
                 "count": len(observations),
                 "correct": len(correct_observations),
-                "coverage": len(correct_observations) / len(paths),
+                "coverage": (
+                    len(correct_observations) / len(paths) if paths else None
+                ),
                 "results": dict(
                     sorted(Counter(obs["result"] for obs in observations).items())
                 ),
