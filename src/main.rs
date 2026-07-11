@@ -1904,10 +1904,17 @@ fn atomize_bool_data_terms(cnf: &mut CnfProblem, bool_problem: &BoolProblem) {
     }
 }
 
+const LEAF_BUDGET_MAX_TERMS: usize = 16_384;
+const LEAF_BUDGET_MAX_VARS: usize = 131_072;
+const LEAF_BUDGET_MAX_BASE_CLAUSES: usize = 131_072;
+const LEAF_BUDGET_MAX_BASE_LITERAL_SLOTS: usize = 1_048_576;
 const LEAF_BUDGET_MAX_APPS: usize = 256;
+const LEAF_BUDGET_MAX_ARITY: usize = 64;
+const LEAF_BUDGET_MAX_APP_ARGUMENT_SLOTS: usize = 16_384;
 const LEAF_BUDGET_MAX_ACKERMANN_CLAUSES: usize = 65_536;
 const LEAF_BUDGET_MAX_ACKERMANN_LITERAL_SLOTS: usize = 262_144;
 const LEAF_BUDGET_MAX_FILL_EDGES: usize = 16_384;
+const LEAF_BUDGET_MAX_FILL_PAIR_EXAMINATIONS: usize = 8_388_608;
 const LEAF_BUDGET_MAX_TRANSITIVITY_CLAUSES: usize = 4_194_304;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -2173,6 +2180,132 @@ fn add_sparse_transitivity_fill(
     Some(fill_edges.len())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SparseTransitivityFillPlan {
+    edges: Vec<(TermId, TermId)>,
+    pair_examinations: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SparseTransitivityFillFailure {
+    InvalidTerm,
+    ArithmeticOverflow,
+    FillEdgeCap {
+        at_least: usize,
+        pair_examinations: usize,
+    },
+    PairExaminationCap {
+        at_least: usize,
+        fill_edges: usize,
+    },
+}
+
+fn plan_sparse_transitivity_fill(
+    cnf: &CnfProblem,
+    term_count: usize,
+    max_fill_edges: usize,
+    max_pair_examinations: usize,
+) -> Result<SparseTransitivityFillPlan, SparseTransitivityFillFailure> {
+    let mut adjacency = vec![HashSet::<TermId>::default(); term_count];
+    for atom in cnf.var_atoms.iter().flatten() {
+        let BoolAtomKey::Eq(left, right) = atom else {
+            continue;
+        };
+        if *left >= term_count || *right >= term_count {
+            return Err(SparseTransitivityFillFailure::InvalidTerm);
+        }
+        if left == right {
+            continue;
+        }
+        adjacency[*left].insert(*right);
+        adjacency[*right].insert(*left);
+    }
+
+    let mut active = adjacency
+        .iter()
+        .map(|neighbors| !neighbors.is_empty())
+        .collect::<Vec<_>>();
+    let mut degree = adjacency.iter().map(HashSet::len).collect::<Vec<_>>();
+    let mut queue = BinaryHeap::new();
+    for (vertex, &vertex_degree) in degree.iter().enumerate() {
+        if active[vertex] {
+            queue.push(Reverse((vertex_degree, vertex)));
+        }
+    }
+
+    let mut fill_edges = Vec::new();
+    let mut pair_examinations = 0usize;
+    while let Some(Reverse((queued_degree, vertex))) = queue.pop() {
+        if !active[vertex] || degree[vertex] != queued_degree {
+            continue;
+        }
+        let neighbors = adjacency[vertex]
+            .iter()
+            .copied()
+            .filter(|neighbor| active[*neighbor])
+            .collect::<Vec<_>>();
+        for left_index in 0..neighbors.len() {
+            let left = neighbors[left_index];
+            for &right in &neighbors[(left_index + 1)..] {
+                pair_examinations = pair_examinations
+                    .checked_add(1)
+                    .ok_or(SparseTransitivityFillFailure::ArithmeticOverflow)?;
+                if pair_examinations > max_pair_examinations {
+                    return Err(SparseTransitivityFillFailure::PairExaminationCap {
+                        at_least: pair_examinations,
+                        fill_edges: fill_edges.len(),
+                    });
+                }
+                if adjacency[left].contains(&right) {
+                    continue;
+                }
+                let next_fill_count = fill_edges
+                    .len()
+                    .checked_add(1)
+                    .ok_or(SparseTransitivityFillFailure::ArithmeticOverflow)?;
+                if next_fill_count > max_fill_edges {
+                    return Err(SparseTransitivityFillFailure::FillEdgeCap {
+                        at_least: next_fill_count,
+                        pair_examinations,
+                    });
+                }
+                adjacency[left].insert(right);
+                adjacency[right].insert(left);
+                degree[left] = degree[left]
+                    .checked_add(1)
+                    .ok_or(SparseTransitivityFillFailure::ArithmeticOverflow)?;
+                degree[right] = degree[right]
+                    .checked_add(1)
+                    .ok_or(SparseTransitivityFillFailure::ArithmeticOverflow)?;
+                queue.push(Reverse((degree[left], left)));
+                queue.push(Reverse((degree[right], right)));
+                fill_edges.push(normalized_pair(left, right));
+            }
+        }
+
+        active[vertex] = false;
+        for neighbor in neighbors {
+            degree[neighbor] = degree[neighbor]
+                .checked_sub(1)
+                .ok_or(SparseTransitivityFillFailure::ArithmeticOverflow)?;
+            queue.push(Reverse((degree[neighbor], neighbor)));
+        }
+    }
+
+    fill_edges.sort_unstable();
+    fill_edges.dedup();
+    Ok(SparseTransitivityFillPlan {
+        edges: fill_edges,
+        pair_examinations,
+    })
+}
+
+fn apply_sparse_transitivity_fill_plan(cnf: &mut CnfProblem, plan: &SparseTransitivityFillPlan) {
+    for &(left, right) in &plan.edges {
+        cnf.atom_lit(BoolAtomKey::Eq(left, right));
+    }
+}
+
 #[cold]
 #[inline(never)]
 fn add_full_ackermann_completion(cnf: &mut CnfProblem, arena: &TermArena) {
@@ -2322,29 +2455,88 @@ fn bounded_equality_transitivity_clause_count(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LeafBudgetLimits {
+    max_terms: usize,
+    max_vars: usize,
+    max_base_clauses: usize,
+    max_base_literal_slots: usize,
     max_apps: usize,
+    max_arity: usize,
+    max_app_argument_slots: usize,
     max_ackermann_clauses: usize,
     max_ackermann_literal_slots: usize,
     max_fill_edges: usize,
+    max_fill_pair_examinations: usize,
     max_transitivity_clauses: usize,
 }
 
 impl Default for LeafBudgetLimits {
     fn default() -> Self {
         Self {
+            max_terms: LEAF_BUDGET_MAX_TERMS,
+            max_vars: LEAF_BUDGET_MAX_VARS,
+            max_base_clauses: LEAF_BUDGET_MAX_BASE_CLAUSES,
+            max_base_literal_slots: LEAF_BUDGET_MAX_BASE_LITERAL_SLOTS,
             max_apps: LEAF_BUDGET_MAX_APPS,
+            max_arity: LEAF_BUDGET_MAX_ARITY,
+            max_app_argument_slots: LEAF_BUDGET_MAX_APP_ARGUMENT_SLOTS,
             max_ackermann_clauses: LEAF_BUDGET_MAX_ACKERMANN_CLAUSES,
             max_ackermann_literal_slots: LEAF_BUDGET_MAX_ACKERMANN_LITERAL_SLOTS,
             max_fill_edges: LEAF_BUDGET_MAX_FILL_EDGES,
+            max_fill_pair_examinations: LEAF_BUDGET_MAX_FILL_PAIR_EXAMINATIONS,
             max_transitivity_clauses: LEAF_BUDGET_MAX_TRANSITIVITY_CLAUSES,
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct BoundedCount {
+    lower_bound: usize,
+    exact: bool,
+}
+
+impl BoundedCount {
+    fn exact(value: usize) -> Self {
+        Self {
+            lower_bound: value,
+            exact: true,
+        }
+    }
+
+    fn capped(lower_bound: usize) -> Self {
+        Self {
+            lower_bound,
+            exact: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct LeafBudgetFootprint {
+    terms: usize,
+    vars: usize,
+    clauses: usize,
+    base_literal_slots: BoundedCount,
+    applications: usize,
+    max_arity: BoundedCount,
+    app_argument_slots: BoundedCount,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LeafBudgetRejection {
     AutoLeafInactive,
+    TermCountCap,
+    VarCountCap,
+    BaseClauseCap,
+    BaseLiteralSlotCap,
     AppCountCap,
+    ArityCap,
+    AppArgumentSlotCap,
+    InvalidApplicationTerm,
+    InvalidApplicationArgument,
+    InvalidAtomTerm,
+    InvalidEqualityEndpoint,
+    InvalidClauseLiteral,
+    FootprintArithmeticOverflow,
     AckermannInvalidTerm,
     AckermannArithmeticOverflow,
     AckermannClauseCap,
@@ -2352,7 +2544,10 @@ enum LeafBudgetRejection {
     MaterializationVariableCapacity,
     MaterializationArithmeticOverflow,
     MaterializationMismatch,
+    FillInvalidTerm,
+    FillArithmeticOverflow,
     FillCap,
+    FillPairExaminationCap,
     TransitivityInvalidTerm,
     TransitivityDuplicateEquality,
     TransitivityArithmeticOverflow,
@@ -2363,7 +2558,19 @@ impl LeafBudgetRejection {
     fn as_str(self) -> &'static str {
         match self {
             Self::AutoLeafInactive => "auto_leaf_inactive",
+            Self::TermCountCap => "term_count_cap",
+            Self::VarCountCap => "var_count_cap",
+            Self::BaseClauseCap => "base_clause_cap",
+            Self::BaseLiteralSlotCap => "base_literal_slot_cap",
             Self::AppCountCap => "app_count_cap",
+            Self::ArityCap => "arity_cap",
+            Self::AppArgumentSlotCap => "app_argument_slot_cap",
+            Self::InvalidApplicationTerm => "invalid_application_term",
+            Self::InvalidApplicationArgument => "invalid_application_argument",
+            Self::InvalidAtomTerm => "invalid_atom_term",
+            Self::InvalidEqualityEndpoint => "invalid_equality_endpoint",
+            Self::InvalidClauseLiteral => "invalid_clause_literal",
+            Self::FootprintArithmeticOverflow => "footprint_arithmetic_overflow",
             Self::AckermannInvalidTerm => "ackermann_invalid_term",
             Self::AckermannArithmeticOverflow => "ackermann_arithmetic_overflow",
             Self::AckermannClauseCap => "ackermann_clause_cap",
@@ -2371,7 +2578,10 @@ impl LeafBudgetRejection {
             Self::MaterializationVariableCapacity => "materialization_variable_capacity",
             Self::MaterializationArithmeticOverflow => "materialization_arithmetic_overflow",
             Self::MaterializationMismatch => "materialization_mismatch",
+            Self::FillInvalidTerm => "fill_invalid_term",
+            Self::FillArithmeticOverflow => "fill_arithmetic_overflow",
             Self::FillCap => "fill_cap",
+            Self::FillPairExaminationCap => "fill_pair_examination_cap",
             Self::TransitivityInvalidTerm => "transitivity_invalid_term",
             Self::TransitivityDuplicateEquality => "transitivity_duplicate_equality",
             Self::TransitivityArithmeticOverflow => "transitivity_arithmetic_overflow",
@@ -2384,21 +2594,29 @@ impl LeafBudgetRejection {
 struct LeafBudgetCompletionReport {
     activated: bool,
     rejection: Option<LeafBudgetRejection>,
-    app_count: usize,
+    footprint: LeafBudgetFootprint,
     ackermann: Option<AckermannEstimate>,
-    fill_edges: usize,
-    transitivity_clauses: usize,
+    fill_edges: BoundedCount,
+    fill_pair_examinations: BoundedCount,
+    transitivity_clauses: BoundedCount,
 }
 
 impl LeafBudgetCompletionReport {
-    fn new(app_count: usize) -> Self {
+    fn new(cnf: &CnfProblem, arena: &TermArena) -> Self {
         Self {
             activated: false,
             rejection: None,
-            app_count,
+            footprint: LeafBudgetFootprint {
+                terms: arena.terms.len(),
+                vars: cnf.var_count(),
+                clauses: cnf.clauses.len(),
+                applications: arena.apps.len(),
+                ..LeafBudgetFootprint::default()
+            },
             ackermann: None,
-            fill_edges: 0,
-            transitivity_clauses: 0,
+            fill_edges: BoundedCount::default(),
+            fill_pair_examinations: BoundedCount::default(),
+            transitivity_clauses: BoundedCount::default(),
         }
     }
 
@@ -2408,30 +2626,20 @@ impl LeafBudgetCompletionReport {
     }
 }
 
-fn try_activate_leaf_budget_completion(
-    cnf: &mut CnfProblem,
+fn build_leaf_budget_completion_candidate(
+    cnf: &CnfProblem,
     arena: &TermArena,
     auto_leaf_active: bool,
     limits: LeafBudgetLimits,
-) -> LeafBudgetCompletionReport {
+) -> (Option<CnfProblem>, LeafBudgetCompletionReport) {
     let mut report = leaf_budget_completion_precheck(cnf, arena, auto_leaf_active, limits);
     if report.rejection.is_some() {
-        return report;
+        return (None, report);
     }
 
     let estimate = report
         .ackermann
         .expect("successful leaf-budget precheck has an estimate");
-    let Some(max_candidate_vars) = cnf
-        .var_count()
-        .checked_add(estimate.literal_slots)
-        .and_then(|count| count.checked_add(limits.max_fill_edges))
-    else {
-        return report.reject(LeafBudgetRejection::MaterializationVariableCapacity);
-    };
-    if max_candidate_vars > i32::MAX as usize {
-        return report.reject(LeafBudgetRejection::MaterializationVariableCapacity);
-    }
     let mut candidate = cnf.clone();
     let ackermann_start = candidate.clauses.len();
     let materialized_clauses = add_full_ackermann_axioms(&mut candidate, arena);
@@ -2439,22 +2647,63 @@ fn try_activate_leaf_budget_completion(
         .iter()
         .try_fold(0usize, |count, clause| count.checked_add(clause.len()))
     else {
-        return report.reject(LeafBudgetRejection::MaterializationArithmeticOverflow);
+        return (
+            None,
+            report.reject(LeafBudgetRejection::MaterializationArithmeticOverflow),
+        );
     };
     if materialized_clauses != estimate.clauses
         || materialized_literal_slots != estimate.literal_slots
     {
-        return report.reject(LeafBudgetRejection::MaterializationMismatch);
+        return (
+            None,
+            report.reject(LeafBudgetRejection::MaterializationMismatch),
+        );
     }
 
     if !candidate.finite_equalities_complete {
-        let Some(fill_edges) =
-            add_sparse_transitivity_fill(&mut candidate, arena.terms.len(), limits.max_fill_edges)
-        else {
-            report.fill_edges = limits.max_fill_edges.saturating_add(1);
-            return report.reject(LeafBudgetRejection::FillCap);
+        let fill_plan = match plan_sparse_transitivity_fill(
+            &candidate,
+            arena.terms.len(),
+            limits.max_fill_edges,
+            limits.max_fill_pair_examinations,
+        ) {
+            Ok(plan) => plan,
+            Err(SparseTransitivityFillFailure::InvalidTerm) => {
+                return (None, report.reject(LeafBudgetRejection::FillInvalidTerm));
+            }
+            Err(SparseTransitivityFillFailure::ArithmeticOverflow) => {
+                return (
+                    None,
+                    report.reject(LeafBudgetRejection::FillArithmeticOverflow),
+                );
+            }
+            Err(SparseTransitivityFillFailure::FillEdgeCap {
+                at_least,
+                pair_examinations,
+            }) => {
+                report.fill_edges = BoundedCount::capped(at_least);
+                report.fill_pair_examinations = BoundedCount::capped(pair_examinations);
+                return (None, report.reject(LeafBudgetRejection::FillCap));
+            }
+            Err(SparseTransitivityFillFailure::PairExaminationCap {
+                at_least,
+                fill_edges,
+            }) => {
+                report.fill_edges = BoundedCount::capped(fill_edges);
+                report.fill_pair_examinations = BoundedCount::capped(at_least);
+                return (
+                    None,
+                    report.reject(LeafBudgetRejection::FillPairExaminationCap),
+                );
+            }
         };
-        report.fill_edges = fill_edges;
+        report.fill_edges = BoundedCount::exact(fill_plan.edges.len());
+        report.fill_pair_examinations = BoundedCount::exact(fill_plan.pair_examinations);
+        apply_sparse_transitivity_fill_plan(&mut candidate, &fill_plan);
+    } else {
+        report.fill_edges = BoundedCount::exact(0);
+        report.fill_pair_examinations = BoundedCount::exact(0);
     }
 
     report.transitivity_clauses = match bounded_equality_transitivity_clause_count(
@@ -2462,25 +2711,36 @@ fn try_activate_leaf_budget_completion(
         arena.terms.len(),
         limits.max_transitivity_clauses,
     ) {
-        Ok(count) => count,
+        Ok(count) => BoundedCount::exact(count),
         Err(TransitivityCountFailure::InvalidTerm) => {
-            return report.reject(LeafBudgetRejection::TransitivityInvalidTerm);
+            return (
+                None,
+                report.reject(LeafBudgetRejection::TransitivityInvalidTerm),
+            );
         }
         Err(TransitivityCountFailure::DuplicateEquality) => {
-            return report.reject(LeafBudgetRejection::TransitivityDuplicateEquality);
+            return (
+                None,
+                report.reject(LeafBudgetRejection::TransitivityDuplicateEquality),
+            );
         }
         Err(TransitivityCountFailure::ArithmeticOverflow) => {
-            return report.reject(LeafBudgetRejection::TransitivityArithmeticOverflow);
+            return (
+                None,
+                report.reject(LeafBudgetRejection::TransitivityArithmeticOverflow),
+            );
         }
         Err(TransitivityCountFailure::ClauseCap { at_least }) => {
-            report.transitivity_clauses = at_least;
-            return report.reject(LeafBudgetRejection::TransitivityClauseCap);
+            report.transitivity_clauses = BoundedCount::capped(at_least);
+            return (
+                None,
+                report.reject(LeafBudgetRejection::TransitivityClauseCap),
+            );
         }
     };
 
-    *cnf = candidate;
     report.activated = true;
-    report
+    (Some(candidate), report)
 }
 
 fn leaf_budget_completion_precheck(
@@ -2489,12 +2749,101 @@ fn leaf_budget_completion_precheck(
     auto_leaf_active: bool,
     limits: LeafBudgetLimits,
 ) -> LeafBudgetCompletionReport {
-    let mut report = LeafBudgetCompletionReport::new(arena.apps.len());
+    let mut report = LeafBudgetCompletionReport::new(cnf, arena);
     if !auto_leaf_active {
         return report.reject(LeafBudgetRejection::AutoLeafInactive);
     }
+    if arena.terms.len() > limits.max_terms {
+        return report.reject(LeafBudgetRejection::TermCountCap);
+    }
+    if cnf.var_count() > limits.max_vars {
+        return report.reject(LeafBudgetRejection::VarCountCap);
+    }
+    if cnf.clauses.len() > limits.max_base_clauses {
+        return report.reject(LeafBudgetRejection::BaseClauseCap);
+    }
+
+    let mut base_literal_slots = 0usize;
+    for clause in &cnf.clauses {
+        if clause
+            .iter()
+            .any(|literal| *literal == 0 || literal.unsigned_abs() as usize > cnf.var_count())
+        {
+            return report.reject(LeafBudgetRejection::InvalidClauseLiteral);
+        }
+        base_literal_slots = match base_literal_slots.checked_add(clause.len()) {
+            Some(count) => count,
+            None => {
+                report.footprint.base_literal_slots = BoundedCount::capped(base_literal_slots);
+                return report.reject(LeafBudgetRejection::FootprintArithmeticOverflow);
+            }
+        };
+        if base_literal_slots > limits.max_base_literal_slots {
+            report.footprint.base_literal_slots = BoundedCount::capped(base_literal_slots);
+            return report.reject(LeafBudgetRejection::BaseLiteralSlotCap);
+        }
+    }
+    report.footprint.base_literal_slots = BoundedCount::exact(base_literal_slots);
+
     if arena.apps.len() > limits.max_apps {
         return report.reject(LeafBudgetRejection::AppCountCap);
+    }
+
+    let mut max_arity = 0usize;
+    let mut app_argument_slots = 0usize;
+    let mut seen_applications = HashSet::default();
+    for &term_id in &arena.apps {
+        let Some(application) = arena.terms.get(term_id) else {
+            return report.reject(LeafBudgetRejection::InvalidApplicationTerm);
+        };
+        if application.args.is_empty() || !seen_applications.insert(term_id) {
+            return report.reject(LeafBudgetRejection::InvalidApplicationTerm);
+        }
+        max_arity = max_arity.max(application.args.len());
+        if max_arity > limits.max_arity {
+            report.footprint.max_arity = BoundedCount::capped(max_arity);
+            return report.reject(LeafBudgetRejection::ArityCap);
+        }
+        app_argument_slots = match app_argument_slots.checked_add(application.args.len()) {
+            Some(count) => count,
+            None => {
+                report.footprint.app_argument_slots = BoundedCount::capped(app_argument_slots);
+                return report.reject(LeafBudgetRejection::FootprintArithmeticOverflow);
+            }
+        };
+        if app_argument_slots > limits.max_app_argument_slots {
+            report.footprint.app_argument_slots = BoundedCount::capped(app_argument_slots);
+            return report.reject(LeafBudgetRejection::AppArgumentSlotCap);
+        }
+        if application
+            .args
+            .iter()
+            .any(|argument| *argument >= arena.terms.len())
+        {
+            return report.reject(LeafBudgetRejection::InvalidApplicationArgument);
+        }
+    }
+    if arena.terms.iter().enumerate().any(|(term, application)| {
+        !application.args.is_empty() && !seen_applications.contains(&term)
+    }) {
+        return report.reject(LeafBudgetRejection::InvalidApplicationTerm);
+    }
+    report.footprint.max_arity = BoundedCount::exact(max_arity);
+    report.footprint.app_argument_slots = BoundedCount::exact(app_argument_slots);
+
+    for atom in cnf.var_atoms.iter().flatten() {
+        match atom {
+            BoolAtomKey::Eq(left, right) => {
+                if *left >= arena.terms.len() || *right >= arena.terms.len() {
+                    return report.reject(LeafBudgetRejection::InvalidEqualityEndpoint);
+                }
+            }
+            BoolAtomKey::BoolTerm(term) => {
+                if *term >= arena.terms.len() {
+                    return report.reject(LeafBudgetRejection::InvalidAtomTerm);
+                }
+            }
+        }
     }
 
     let estimate = match full_ackermann_estimate(cnf, arena) {
@@ -2513,6 +2862,16 @@ fn leaf_budget_completion_precheck(
     if estimate.literal_slots > limits.max_ackermann_literal_slots {
         return report.reject(LeafBudgetRejection::AckermannLiteralCap);
     }
+    let Some(max_candidate_vars) = cnf
+        .var_count()
+        .checked_add(estimate.literal_slots)
+        .and_then(|count| count.checked_add(limits.max_fill_edges))
+    else {
+        return report.reject(LeafBudgetRejection::MaterializationVariableCapacity);
+    };
+    if max_candidate_vars > i32::MAX as usize {
+        return report.reject(LeafBudgetRejection::MaterializationVariableCapacity);
+    }
     report
 }
 
@@ -2522,15 +2881,28 @@ fn profile_leaf_budget_completion(report: &LeafBudgetCompletionReport) {
     }
     let estimate = report.ackermann.unwrap_or_default();
     eprintln!(
-        "profile_full_ackermann_leaf_budget attempt=1 admitted={} rejected={} reason={} app_count={} ackermann_clauses={} ackermann_literal_slots={} fill_edges={} transitivity_clauses={}",
+        "profile_full_ackermann_leaf_budget attempt=1 admitted={} rejected={} reason={} terms={} vars={} base_clauses={} base_literal_slots_lower_bound={} base_literal_slots_exact={} app_count={} max_arity_lower_bound={} max_arity_exact={} app_argument_slots_lower_bound={} app_argument_slots_exact={} ackermann_clauses={} ackermann_literal_slots={} fill_edges_lower_bound={} fill_edges_exact={} fill_pair_examinations_lower_bound={} fill_pair_examinations_exact={} transitivity_clauses_lower_bound={} transitivity_clauses_exact={}",
         usize::from(report.activated),
         usize::from(!report.activated),
         report.rejection.map_or("none", LeafBudgetRejection::as_str),
-        report.app_count,
+        report.footprint.terms,
+        report.footprint.vars,
+        report.footprint.clauses,
+        report.footprint.base_literal_slots.lower_bound,
+        usize::from(report.footprint.base_literal_slots.exact),
+        report.footprint.applications,
+        report.footprint.max_arity.lower_bound,
+        usize::from(report.footprint.max_arity.exact),
+        report.footprint.app_argument_slots.lower_bound,
+        usize::from(report.footprint.app_argument_slots.exact),
         estimate.clauses,
         estimate.literal_slots,
-        report.fill_edges,
-        report.transitivity_clauses,
+        report.fill_edges.lower_bound,
+        usize::from(report.fill_edges.exact),
+        report.fill_pair_examinations.lower_bound,
+        usize::from(report.fill_pair_examinations.exact),
+        report.transitivity_clauses.lower_bound,
+        usize::from(report.transitivity_clauses.exact),
     );
 }
 
@@ -4287,6 +4659,18 @@ enum EagerSolveOutcome {
     Unavailable,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EagerSolveAttempt {
+    outcome: EagerSolveOutcome,
+    sat_calls: usize,
+}
+
+impl EagerSolveAttempt {
+    fn new(outcome: EagerSolveOutcome, sat_calls: usize) -> Self {
+        Self { outcome, sat_calls }
+    }
+}
+
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
     let configuration = match env::var("EUF_VIPER_KISSAT_MODE").as_deref() {
@@ -4300,13 +4684,13 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn solve_kissat_euf_once(
+fn solve_kissat_euf_once_counted(
     cnf: &CnfProblem,
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
-) -> EagerSolveOutcome {
+) -> EagerSolveAttempt {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
     let variables = (0..cnf.var_count())
@@ -4343,7 +4727,7 @@ fn solve_kissat_euf_once(
     let result = solver.sat();
     profile_phase("kissat_solve", sat_start, 0);
     let Some(solution) = result else {
-        return EagerSolveOutcome::Solved(SolveResult::Unsat);
+        return EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Unsat), 1);
     };
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
@@ -4355,16 +4739,16 @@ fn solve_kissat_euf_once(
         };
     }
     if !complete_cnf_assignment(cnf, &mut assignment) {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
     }
     let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
     else {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
     };
     if conflicts.is_empty() {
-        EagerSolveOutcome::Solved(SolveResult::Sat)
+        EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Sat), 1)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
+        EagerSolveAttempt::new(EagerSolveOutcome::InvalidTheoryModel(conflicts.len()), 1)
     }
 }
 
@@ -4380,21 +4764,21 @@ fn kissat_clause(clause: &[i32], variables: &[KissatVar]) -> Vec<KissatVar> {
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn solve_kissat_euf_once(
+fn solve_kissat_euf_once_counted(
     cnf: &CnfProblem,
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
-) -> EagerSolveOutcome {
+) -> EagerSolveAttempt {
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
     if configure_kissat(&mut solver).is_none() {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
     }
     for clause in &cnf.clauses {
         if solver.add_clause(rustsat_clause(clause)).is_err() {
-            return EagerSolveOutcome::Unavailable;
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
         }
     }
     profile_phase("kissat_base_load", load_start, cnf.clauses.len());
@@ -4405,7 +4789,7 @@ fn solve_kissat_euf_once(
     let transitivity_load_start = Instant::now();
     for clause in transitivity {
         if solver.add_clause(rustsat_clause(&clause)).is_err() {
-            return EagerSolveOutcome::Unavailable;
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
         }
     }
     profile_phase("kissat_transitivity_load", transitivity_load_start, 0);
@@ -4420,29 +4804,33 @@ fn solve_kissat_euf_once(
     let congruence_load_start = Instant::now();
     for clause in congruence {
         if solver.add_clause(rustsat_clause(&clause)).is_err() {
-            return EagerSolveOutcome::Unavailable;
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
         }
     }
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
     let Ok(result) = solver.solve() else {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
     };
     profile_phase("kissat_solve", sat_start, 0);
     match result {
-        RustSatResult::Unsat => return EagerSolveOutcome::Solved(SolveResult::Unsat),
-        RustSatResult::Interrupted => return EagerSolveOutcome::Unavailable,
+        RustSatResult::Unsat => {
+            return EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Unsat), 1);
+        }
+        RustSatResult::Interrupted => {
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        }
         RustSatResult::Sat => {}
     }
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
     for (var, value) in assignment.iter_mut().enumerate().skip(1) {
         let Ok(literal) = RustSatLit::from_ipasir(var as i32) else {
-            return EagerSolveOutcome::Unavailable;
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
         };
         let Ok(literal_value) = solver.lit_val(literal) else {
-            return EagerSolveOutcome::Unavailable;
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
         };
         *value = match literal_value {
             TernaryVal::True => 1,
@@ -4451,17 +4839,27 @@ fn solve_kissat_euf_once(
         };
     }
     if !complete_cnf_assignment(cnf, &mut assignment) {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
     }
     let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
     else {
-        return EagerSolveOutcome::Unavailable;
+        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
     };
     if conflicts.is_empty() {
-        EagerSolveOutcome::Solved(SolveResult::Sat)
+        EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Sat), 1)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
+        EagerSolveAttempt::new(EagerSolveOutcome::InvalidTheoryModel(conflicts.len()), 1)
     }
+}
+
+fn solve_kissat_euf_once(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    eager_congruence: bool,
+) -> EagerSolveOutcome {
+    solve_kissat_euf_once_counted(cnf, arena, true_term, false_term, eager_congruence).outcome
 }
 
 fn rustsat_clause(clause: &[i32]) -> RustSatClause {
@@ -6107,11 +6505,49 @@ fn rebuild_dynamic_cnf(
     completed
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BoolSolveRouting<'a> {
+    backend: &'a str,
+    full_ackermann_setting: Option<&'a str>,
+    finite_domain: bool,
+    auto_cadical_app_threshold: usize,
+    leaf_budget_limits: LeafBudgetLimits,
+}
+
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
+) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
+    let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
+    let finite_domain = env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1");
+    let auto_cadical_app_threshold = env::var("EUF_VIPER_AUTO_CADICAL_APP_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1_000usize);
+    solve_bool_problem_with_routing(
+        arena,
+        bool_problem,
+        root_cnf_options,
+        eq_abstraction_mode,
+        BoolSolveRouting {
+            backend: &backend,
+            full_ackermann_setting: full_ackermann_setting.as_deref(),
+            finite_domain,
+            auto_cadical_app_threshold,
+            leaf_budget_limits: LeafBudgetLimits::default(),
+        },
+    )
+}
+
+fn solve_bool_problem_with_routing(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    root_cnf_options: RootCnfOptions,
+    eq_abstraction_mode: EqAbstractionMode,
+    routing: BoolSolveRouting<'_>,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let (quotient_plan, quotient_active) = build_unconditional_quotient_plan(
         &bool_problem.assertions,
@@ -6153,84 +6589,81 @@ fn solve_bool_problem(
     } else {
         Vec::new()
     };
-    let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
+    let backend = routing.backend;
     if matches!(
-        backend.as_str(),
+        backend,
         "auto" | "varisat" | "kissat" | "cadical" | "cadical-refine"
     ) {
-        let finite_added = if matches!(backend.as_str(), "auto" | "cadical" | "cadical-refine")
-            || env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1")
-        {
-            let finite_start = Instant::now();
-            let added = add_finite_domain_axioms(&mut cnf, arena, bool_problem);
-            profile_phase("finite_domain", finite_start, added);
-            added
-        } else {
-            0
-        };
+        let finite_added =
+            if matches!(backend, "auto" | "cadical" | "cadical-refine") || routing.finite_domain {
+                let finite_start = Instant::now();
+                let added = add_finite_domain_axioms(&mut cnf, arena, bool_problem);
+                profile_phase("finite_domain", finite_start, added);
+                added
+            } else {
+                0
+            };
         let refinement_mode = selected_refinement_mode();
-        let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
-        let full_ackermann_mode = parse_full_ackermann_mode(full_ackermann_setting.as_deref());
-        let full_ackermann_forced = force_full_ackermann(full_ackermann_setting.as_deref());
+        let full_ackermann_setting = routing.full_ackermann_setting;
+        let full_ackermann_mode = parse_full_ackermann_mode(full_ackermann_setting);
+        let full_ackermann_forced = force_full_ackermann(full_ackermann_setting);
+        let auto_uses_cadical = backend == "auto"
+            && auto_prefers_cadical(
+                arena.apps.len(),
+                finite_added,
+                routing.auto_cadical_app_threshold,
+            );
+        let leaf_budget_backend_active =
+            backend == "kissat" || (backend == "auto" && !auto_uses_cadical);
         let mut leaf_budget_sat_calls = 0usize;
         if full_ackermann_forced {
             add_full_ackermann_completion(&mut cnf, arena);
-        } else if full_ackermann_mode == FullAckermannMode::LeafBudget {
+        } else if full_ackermann_mode == FullAckermannMode::LeafBudget && leaf_budget_backend_active
+        {
             let auto_leaf_active = leaf_budget_auto_quotient_active(
                 root_cnf_options.unconditional_quotient,
                 active_quotient.is_some(),
             );
-            let precheck = leaf_budget_completion_precheck(
+            let (completed, report) = build_leaf_budget_completion_candidate(
                 &cnf,
                 arena,
                 auto_leaf_active,
-                LeafBudgetLimits::default(),
+                routing.leaf_budget_limits,
             );
-            if precheck.rejection.is_some() {
-                profile_leaf_budget_completion(&precheck);
-            } else {
-                let mut completed = rebuild_dynamic_cnf(
-                    bool_problem,
-                    &accepted_equality_facts,
-                    root_cnf_options.direct_negated_root,
-                    active_quotient,
-                );
-                let report = try_activate_leaf_budget_completion(
-                    &mut completed,
+            profile_leaf_budget_completion(&report);
+            if let Some(completed) = completed {
+                let attempt = solve_kissat_euf_once_counted(
+                    &completed,
                     arena,
-                    true,
-                    LeafBudgetLimits::default(),
+                    bool_problem.true_term,
+                    bool_problem.false_term,
+                    false,
                 );
-                profile_leaf_budget_completion(&report);
-                if report.activated {
-                    leaf_budget_sat_calls = 1;
-                    match solve_kissat_euf_once(
-                        &completed,
-                        arena,
-                        bool_problem.true_term,
-                        bool_problem.false_term,
-                        false,
-                    ) {
-                        EagerSolveOutcome::Solved(result) => {
-                            return Some((
-                                result,
-                                completed.var_count(),
-                                completed.clauses.len(),
-                                0,
-                                leaf_budget_sat_calls,
-                                0,
-                            ));
-                        }
-                        EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
-                            profile_measurement(
-                                "full_ackermann_leaf_budget_invalid_model",
-                                1,
-                                conflict_count,
-                            );
-                        }
-                        EagerSolveOutcome::Unavailable => {
-                            profile_measurement("full_ackermann_leaf_budget_unavailable", 1, 0);
-                        }
+                leaf_budget_sat_calls = attempt.sat_calls;
+                match attempt.outcome {
+                    EagerSolveOutcome::Solved(result) => {
+                        return Some((
+                            result,
+                            completed.var_count(),
+                            completed.clauses.len(),
+                            0,
+                            leaf_budget_sat_calls,
+                            0,
+                        ));
+                    }
+                    EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
+                        profile_measurement(
+                            "full_ackermann_leaf_budget_invalid_model",
+                            1,
+                            conflict_count,
+                        );
+                    }
+                    EagerSolveOutcome::Unavailable => {
+                        profile_measurement(
+                            "full_ackermann_leaf_budget_unavailable",
+                            1,
+                            leaf_budget_sat_calls,
+                        );
                     }
                 }
             }
@@ -6262,12 +6695,6 @@ fn solve_bool_problem(
             u128::from(eager_congruence),
             finite_added,
         );
-        let auto_cadical_threshold = env::var("EUF_VIPER_AUTO_CADICAL_APP_THRESHOLD")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(1_000usize);
-        let auto_uses_cadical = backend == "auto"
-            && auto_prefers_cadical(arena.apps.len(), finite_added, auto_cadical_threshold);
         if backend == "auto" && auto_uses_cadical {
             if let Some(result) = solve_cadical_euf_once(
                 &cnf,
@@ -6309,7 +6736,7 @@ fn solve_bool_problem(
                     let mut completed_cnf = None;
                     let mut prior_sat_calls = 1 + leaf_budget_sat_calls;
                     if dynamic_full_ackermann_before_refinement(
-                        full_ackermann_setting.as_deref(),
+                        full_ackermann_setting,
                         refinement_mode,
                         cnf.clauses.len(),
                         arena.apps.len(),
@@ -6412,7 +6839,7 @@ fn solve_bool_problem(
             sat_calls
                 + leaf_budget_sat_calls
                 + usize::from(matches!(
-                    backend.as_str(),
+                    backend,
                     "auto" | "kissat" | "cadical" | "cadical-refine"
                 )),
             theory_lemmas,
@@ -7620,6 +8047,91 @@ mod tests {
         (assertions, data_terms)
     }
 
+    fn test_bool_routing<'a>(
+        backend: &'a str,
+        full_ackermann_setting: Option<&'a str>,
+    ) -> BoolSolveRouting<'a> {
+        BoolSolveRouting {
+            backend,
+            full_ackermann_setting,
+            finite_domain: false,
+            auto_cadical_app_threshold: 1_000,
+            leaf_budget_limits: LeafBudgetLimits::default(),
+        }
+    }
+
+    fn admitted_auto_leaf_problem() -> (TermArena, BoolProblem) {
+        let (mut assertions, data_terms) = generated_auto_pairs(1_000);
+        let mut arena = TermArena::default();
+        for function in 0..2_000 {
+            let term = arena.intern(function as SymId, Vec::new());
+            assert_eq!(term, function);
+        }
+        let left_app = arena.intern(3_000, vec![0]);
+        let right_app = arena.intern(3_000, vec![2]);
+        let true_term = arena.intern(3_001, Vec::new());
+        let false_term = arena.intern(3_002, Vec::new());
+        assertions.push(BoolExpr::Or(vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(left_app, right_app)),
+            BoolExpr::Const(true),
+        ]));
+        (
+            arena,
+            BoolProblem {
+                assertions,
+                unsupported: Vec::new(),
+                true_term,
+                false_term,
+                data_terms,
+            },
+        )
+    }
+
+    fn admitted_auto_finite_problem() -> (TermArena, BoolProblem) {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun f (U) U)
+            (assert (distinct a b c))
+            (assert (or (= (f a) a) (= (f a) b) (= (f a) c)))
+            (assert (or (= (f b) a) (= (f b) b) (= (f b) c)))
+            (assert (or (= (f c) a) (= (f c) b) (= (f c) c)))
+            (check-sat)
+        ";
+        let mut problem = parse_problem(input).unwrap();
+        let mut bool_problem = problem.bool_problem.take().unwrap();
+        for pair in 0..1_000 {
+            let left = problem.arena.intern(10_000 + 2 * pair, Vec::new());
+            let right = problem.arena.intern(10_001 + 2 * pair, Vec::new());
+            bool_problem
+                .assertions
+                .push(BoolExpr::Atom(BoolAtomKey::Eq(left, right)));
+            bool_problem.data_terms.extend([left, right]);
+        }
+        (problem.arena, bool_problem)
+    }
+
+    fn admitted_auto_quotient_cnf(arena: &TermArena, bool_problem: &BoolProblem) -> CnfProblem {
+        let outcome = unconditional_leaf_quotient::Plan::build_auto(
+            &bool_problem.assertions,
+            &bool_problem.data_terms,
+            arena.terms.len(),
+        );
+        assert!(outcome.telemetry.admitted);
+        let (plan, _) = outcome.into_parts();
+        let plan = plan.unwrap();
+        assert!(plan.is_effective());
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            cnf.add_direct_assertion_with_quotient(assertion, false, Some(&plan));
+        }
+        cnf
+    }
+
     fn assert_cnf_byte_identical(left: &CnfProblem, right: &CnfProblem) {
         assert_eq!(left.clauses, right.clauses);
         assert_eq!(left.var_atoms, right.var_atoms);
@@ -8528,7 +9040,157 @@ mod tests {
     }
 
     #[test]
-    fn leaf_budget_rechecks_dynamic_rebuild() {
+    fn leaf_budget_preclone_caps_have_exact_boundaries() {
+        assert_eq!(LEAF_BUDGET_MAX_TERMS, 16_384);
+        assert_eq!(LEAF_BUDGET_MAX_VARS, 131_072);
+        assert_eq!(LEAF_BUDGET_MAX_BASE_CLAUSES, 131_072);
+        assert_eq!(LEAF_BUDGET_MAX_BASE_LITERAL_SLOTS, 1_048_576);
+        assert_eq!(LEAF_BUDGET_MAX_APPS, 256);
+        assert_eq!(LEAF_BUDGET_MAX_ARITY, 64);
+        assert_eq!(LEAF_BUDGET_MAX_APP_ARGUMENT_SLOTS, 16_384);
+        assert_eq!(LEAF_BUDGET_MAX_FILL_PAIR_EXAMINATIONS, 8_388_608);
+
+        let mut arena = TermArena::default();
+        let a = arena.intern(0, Vec::new());
+        let b = arena.intern(1, Vec::new());
+        let f_ab = arena.intern(2, vec![a, b]);
+        arena.intern(2, vec![b, a]);
+        let mut cnf = CnfProblem::new();
+        let equality = cnf.atom_lit(BoolAtomKey::Eq(a, b));
+        let predicate = cnf.atom_lit(BoolAtomKey::BoolTerm(f_ab));
+        cnf.clauses.push(vec![equality, predicate]);
+
+        let exact_limits = LeafBudgetLimits {
+            max_terms: 4,
+            max_vars: 2,
+            max_base_clauses: 1,
+            max_base_literal_slots: 2,
+            max_apps: 2,
+            max_arity: 2,
+            max_app_argument_slots: 4,
+            ..LeafBudgetLimits::default()
+        };
+        let admitted = leaf_budget_completion_precheck(&cnf, &arena, true, exact_limits);
+        assert_eq!(admitted.rejection, None);
+        assert_eq!(
+            admitted.footprint.base_literal_slots,
+            BoundedCount::exact(2)
+        );
+        assert_eq!(admitted.footprint.max_arity, BoundedCount::exact(2));
+        assert_eq!(
+            admitted.footprint.app_argument_slots,
+            BoundedCount::exact(4)
+        );
+
+        let cases = [
+            (
+                LeafBudgetLimits {
+                    max_terms: 3,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::TermCountCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_vars: 1,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::VarCountCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_base_clauses: 0,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::BaseClauseCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_base_literal_slots: 1,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::BaseLiteralSlotCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_apps: 1,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::AppCountCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_arity: 1,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::ArityCap,
+            ),
+            (
+                LeafBudgetLimits {
+                    max_app_argument_slots: 3,
+                    ..exact_limits
+                },
+                LeafBudgetRejection::AppArgumentSlotCap,
+            ),
+        ];
+        for (limits, rejection) in cases {
+            assert_eq!(
+                leaf_budget_completion_precheck(&cnf, &arena, true, limits).rejection,
+                Some(rejection)
+            );
+        }
+
+        let literal_rejection = leaf_budget_completion_precheck(
+            &cnf,
+            &arena,
+            true,
+            LeafBudgetLimits {
+                max_base_literal_slots: 1,
+                ..exact_limits
+            },
+        );
+        assert_eq!(
+            literal_rejection.footprint.base_literal_slots,
+            BoundedCount::capped(2)
+        );
+    }
+
+    #[test]
+    fn leaf_budget_preclone_validation_rejects_invalid_endpoints() {
+        let mut arena = TermArena::default();
+        let a = arena.intern(0, Vec::new());
+        let app = arena.intern(1, vec![a]);
+        arena.terms[app].args[0] = arena.terms.len();
+        let invalid_app = leaf_budget_completion_precheck(
+            &CnfProblem::new(),
+            &arena,
+            true,
+            LeafBudgetLimits::default(),
+        );
+        assert_eq!(
+            invalid_app.rejection,
+            Some(LeafBudgetRejection::InvalidApplicationArgument)
+        );
+
+        let mut valid_arena = TermArena::default();
+        valid_arena.intern(0, Vec::new());
+        let mut invalid_equality = CnfProblem::new();
+        let equality = invalid_equality.atom_lit(BoolAtomKey::Eq(0, 1));
+        invalid_equality.clauses.push(vec![equality]);
+        let invalid_equality = leaf_budget_completion_precheck(
+            &invalid_equality,
+            &valid_arena,
+            true,
+            LeafBudgetLimits::default(),
+        );
+        assert_eq!(
+            invalid_equality.rejection,
+            Some(LeafBudgetRejection::InvalidEqualityEndpoint)
+        );
+    }
+
+    #[test]
+    fn leaf_budget_candidate_preserves_existing_cnf_state() {
         let input = "
             (set-logic QF_UF)
             (declare-sort U 0)
@@ -8540,26 +9202,284 @@ mod tests {
         ";
         let problem = parse_problem(input).unwrap();
         let bool_problem = problem.bool_problem.as_ref().unwrap();
-        let limits = LeafBudgetLimits {
-            max_ackermann_clauses: 1,
-            ..LeafBudgetLimits::default()
-        };
+        let mut original = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            original.add_direct_assertion(assertion);
+        }
+        let accepted = original.atom_lit(BoolAtomKey::Eq(0, 1));
+        original.clauses.push(vec![accepted]);
+        original.finite_equalities_complete = true;
+        original.finite_predicate_congruence_complete = true;
+        let before = original.clone();
 
-        let preliminary = CnfProblem::new();
-        let precheck = leaf_budget_completion_precheck(&preliminary, &problem.arena, true, limits);
-        assert_eq!(precheck.rejection, None);
-        assert_eq!(precheck.ackermann.unwrap().clauses, 1);
-
-        let mut rebuilt = rebuild_dynamic_cnf(bool_problem, &[], false, None);
-        let before = rebuilt.clone();
-        let report =
-            try_activate_leaf_budget_completion(&mut rebuilt, &problem.arena, true, limits);
-        assert_eq!(
-            report.rejection,
-            Some(LeafBudgetRejection::AckermannClauseCap)
+        let (candidate, report) = build_leaf_budget_completion_candidate(
+            &original,
+            &problem.arena,
+            true,
+            LeafBudgetLimits::default(),
         );
-        assert_eq!(report.ackermann.unwrap().clauses, 2);
-        assert_eq!(rebuilt, before);
+        let candidate = candidate.unwrap();
+        assert!(report.activated);
+        assert_eq!(original, before);
+        assert_eq!(candidate.clauses[..before.clauses.len()], before.clauses);
+        assert_eq!(
+            candidate.var_atoms[..before.var_atoms.len()],
+            before.var_atoms
+        );
+        assert!(candidate.finite_equalities_complete);
+        assert!(candidate.finite_predicate_congruence_complete);
+    }
+
+    #[test]
+    fn solve_bool_problem_routes_admitted_auto_leaf_budget_to_kissat_candidate() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let leaf = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("leaf-budget")),
+        )
+        .unwrap();
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("off")),
+        )
+        .unwrap();
+
+        assert_eq!(leaf.0, SolveResult::Sat);
+        assert_eq!(leaf.4, 1);
+        assert!(
+            leaf.2 > off.2,
+            "accepted candidate must report its added CNF"
+        );
+    }
+
+    #[test]
+    fn solve_bool_problem_bypasses_leaf_budget_for_explicit_non_kissat_backends() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        for backend in ["varisat", "cadical", "cadical-refine"] {
+            let leaf = solve_bool_problem_with_routing(
+                &arena,
+                &bool_problem,
+                options,
+                EqAbstractionMode::Off,
+                test_bool_routing(backend, Some("leaf-budget")),
+            );
+            let off = solve_bool_problem_with_routing(
+                &arena,
+                &bool_problem,
+                options,
+                EqAbstractionMode::Off,
+                test_bool_routing(backend, Some("off")),
+            );
+            assert_eq!(leaf, off, "backend {backend} must bypass leaf-budget");
+        }
+
+        let mut auto_leaf = test_bool_routing("auto", Some("leaf-budget"));
+        auto_leaf.auto_cadical_app_threshold = 1;
+        let mut auto_off = auto_leaf;
+        auto_off.full_ackermann_setting = Some("off");
+        assert_eq!(
+            solve_bool_problem_with_routing(
+                &arena,
+                &bool_problem,
+                options,
+                EqAbstractionMode::Off,
+                auto_leaf,
+            ),
+            solve_bool_problem_with_routing(
+                &arena,
+                &bool_problem,
+                options,
+                EqAbstractionMode::Off,
+                auto_off,
+            ),
+            "auto must bypass leaf-budget when its router selects CaDiCaL"
+        );
+    }
+
+    #[test]
+    fn solve_bool_problem_preserves_finite_candidate_and_fallback_state() {
+        let (arena, bool_problem) = admitted_auto_finite_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let mut finite_base = admitted_auto_quotient_cnf(&arena, &bool_problem);
+        assert!(add_finite_domain_axioms(&mut finite_base, &arena, &bool_problem) > 0);
+        let finite_snapshot = finite_base.clone();
+        let (candidate, report) = build_leaf_budget_completion_candidate(
+            &finite_base,
+            &arena,
+            true,
+            LeafBudgetLimits::default(),
+        );
+        let candidate = candidate.unwrap();
+        assert!(report.activated);
+        assert_eq!(finite_base, finite_snapshot);
+        assert_eq!(
+            candidate.clauses[..finite_snapshot.clauses.len()],
+            finite_snapshot.clauses
+        );
+        assert_eq!(
+            candidate.finite_equalities_complete,
+            finite_snapshot.finite_equalities_complete
+        );
+        assert_eq!(
+            candidate.finite_predicate_congruence_complete,
+            finite_snapshot.finite_predicate_congruence_complete
+        );
+
+        let mut admitted_routing = test_bool_routing("kissat", Some("leaf-budget"));
+        admitted_routing.finite_domain = true;
+        let admitted = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            admitted_routing,
+        )
+        .unwrap();
+        assert_eq!(admitted.0, SolveResult::Sat);
+        assert_eq!(admitted.1, candidate.var_count());
+        assert_eq!(admitted.2, candidate.clauses.len());
+        assert_eq!(admitted.4, 1);
+
+        let mut rejected_routing = admitted_routing;
+        rejected_routing.leaf_budget_limits.max_arity = 0;
+        let rejected = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            rejected_routing,
+        );
+        let mut off_routing = test_bool_routing("kissat", Some("off"));
+        off_routing.finite_domain = true;
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            off_routing,
+        );
+        assert_eq!(rejected, off);
+        assert_eq!(rejected.unwrap().4, off.unwrap().4);
+    }
+
+    #[test]
+    fn solve_bool_problem_falls_back_on_high_arity_and_dense_fill() {
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+
+        let (mut high_arity_arena, high_arity_problem) = admitted_auto_leaf_problem();
+        high_arity_arena.intern(4_000, (0..=LEAF_BUDGET_MAX_ARITY).collect());
+        let high_arity_cnf = admitted_auto_quotient_cnf(&high_arity_arena, &high_arity_problem);
+        assert_eq!(
+            leaf_budget_completion_precheck(
+                &high_arity_cnf,
+                &high_arity_arena,
+                true,
+                LeafBudgetLimits::default(),
+            )
+            .rejection,
+            Some(LeafBudgetRejection::ArityCap)
+        );
+        let high_leaf = solve_bool_problem_with_routing(
+            &high_arity_arena,
+            &high_arity_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("leaf-budget")),
+        );
+        let high_off = solve_bool_problem_with_routing(
+            &high_arity_arena,
+            &high_arity_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("off")),
+        );
+        assert_eq!(high_leaf, high_off);
+
+        let (dense_arena, mut dense_problem) = admitted_auto_leaf_problem();
+        dense_problem.assertions.push(BoolExpr::Or(vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 2)),
+            BoolExpr::Atom(BoolAtomKey::Eq(2, 4)),
+            BoolExpr::Atom(BoolAtomKey::Eq(4, 6)),
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 6)),
+        ]));
+        let dense_cnf = admitted_auto_quotient_cnf(&dense_arena, &dense_problem);
+        let mut dense_limits = LeafBudgetLimits::default();
+        dense_limits.max_fill_pair_examinations = 0;
+        let (dense_candidate, dense_report) =
+            build_leaf_budget_completion_candidate(&dense_cnf, &dense_arena, true, dense_limits);
+        assert!(dense_candidate.is_none());
+        assert_eq!(
+            dense_report.rejection,
+            Some(LeafBudgetRejection::FillPairExaminationCap)
+        );
+        assert!(!dense_report.fill_pair_examinations.exact);
+
+        let mut dense_routing = test_bool_routing("kissat", Some("leaf-budget"));
+        dense_routing.leaf_budget_limits = dense_limits;
+        let dense_leaf = solve_bool_problem_with_routing(
+            &dense_arena,
+            &dense_problem,
+            options,
+            EqAbstractionMode::Off,
+            dense_routing,
+        );
+        let dense_off = solve_bool_problem_with_routing(
+            &dense_arena,
+            &dense_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("off")),
+        );
+        assert_eq!(dense_leaf, dense_off);
+    }
+
+    #[test]
+    fn solve_bool_problem_honors_exact_base_literal_cap() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let base = admitted_auto_quotient_cnf(&arena, &bool_problem);
+        let footprint =
+            leaf_budget_completion_precheck(&base, &arena, true, LeafBudgetLimits::default());
+        assert_eq!(footprint.rejection, None);
+        assert!(footprint.footprint.base_literal_slots.exact);
+        let exact_slots = footprint.footprint.base_literal_slots.lower_bound;
+
+        let mut exact_routing = test_bool_routing("kissat", Some("leaf-budget"));
+        exact_routing.leaf_budget_limits.max_base_literal_slots = exact_slots;
+        let exact = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            exact_routing,
+        )
+        .unwrap();
+        let mut rejected_routing = exact_routing;
+        rejected_routing.leaf_budget_limits.max_base_literal_slots = exact_slots - 1;
+        let rejected = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            rejected_routing,
+        );
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            test_bool_routing("kissat", Some("off")),
+        );
+        assert_eq!(rejected, off);
+        assert!(exact.2 > off.unwrap().2);
     }
 
     #[test]
@@ -8590,30 +9510,32 @@ mod tests {
         for function in 1..=256 {
             arena_256.intern(function, vec![argument]);
         }
-        let mut accepted = CnfProblem::new();
-        let accepted_report = try_activate_leaf_budget_completion(
-            &mut accepted,
+        let accepted = CnfProblem::new();
+        let (accepted_candidate, accepted_report) = build_leaf_budget_completion_candidate(
+            &accepted,
             &arena_256,
             true,
             LeafBudgetLimits::default(),
         );
+        assert!(accepted_candidate.is_some());
         assert!(accepted_report.activated);
         assert_eq!(accepted_report.rejection, None);
-        assert_eq!(accepted_report.app_count, 256);
+        assert_eq!(accepted_report.footprint.applications, 256);
 
         let mut arena_257 = TermArena::default();
         let argument = arena_257.intern(0, Vec::new());
         for function in 1..=257 {
             arena_257.intern(function, vec![argument]);
         }
-        let mut rejected = CnfProblem::new();
+        let rejected = CnfProblem::new();
         let before = rejected.clone();
-        let rejected_report = try_activate_leaf_budget_completion(
-            &mut rejected,
+        let (rejected_candidate, rejected_report) = build_leaf_budget_completion_candidate(
+            &rejected,
             &arena_257,
             true,
             LeafBudgetLimits::default(),
         );
+        assert!(rejected_candidate.is_none());
         assert_eq!(
             rejected_report.rejection,
             Some(LeafBudgetRejection::AppCountCap)
@@ -8637,7 +9559,9 @@ mod tests {
             max_transitivity_clauses: 0,
             ..LeafBudgetLimits::default()
         };
-        let report = try_activate_leaf_budget_completion(&mut cnf, &arena, true, limits);
+        let (candidate, report) =
+            build_leaf_budget_completion_candidate(&cnf, &arena, true, limits);
+        assert!(candidate.is_none());
         assert_eq!(
             report.rejection,
             Some(LeafBudgetRejection::TransitivityClauseCap)
@@ -8660,10 +9584,10 @@ mod tests {
         );
 
         let empty_arena = TermArena::default();
-        let mut capacity_cnf = CnfProblem::new();
+        let capacity_cnf = CnfProblem::new();
         let capacity_before = capacity_cnf.clone();
-        let capacity_report = try_activate_leaf_budget_completion(
-            &mut capacity_cnf,
+        let (capacity_candidate, capacity_report) = build_leaf_budget_completion_candidate(
+            &capacity_cnf,
             &empty_arena,
             true,
             LeafBudgetLimits {
@@ -8671,6 +9595,7 @@ mod tests {
                 ..LeafBudgetLimits::default()
             },
         );
+        assert!(capacity_candidate.is_none());
         assert_eq!(
             capacity_report.rejection,
             Some(LeafBudgetRejection::MaterializationVariableCapacity)
@@ -8679,17 +9604,14 @@ mod tests {
 
         let mut arena = TermArena::default();
         arena.apps.push(usize::MAX);
-        let mut cnf = CnfProblem::new();
+        let cnf = CnfProblem::new();
         let before = cnf.clone();
-        let report = try_activate_leaf_budget_completion(
-            &mut cnf,
-            &arena,
-            true,
-            LeafBudgetLimits::default(),
-        );
+        let (candidate, report) =
+            build_leaf_budget_completion_candidate(&cnf, &arena, true, LeafBudgetLimits::default());
+        assert!(candidate.is_none());
         assert_eq!(
             report.rejection,
-            Some(LeafBudgetRejection::AckermannInvalidTerm)
+            Some(LeafBudgetRejection::InvalidApplicationTerm)
         );
         assert_eq!(cnf, before);
     }
@@ -8702,15 +9624,27 @@ mod tests {
         cycle.atom_lit(BoolAtomKey::Eq(2, 3));
         cycle.atom_lit(BoolAtomKey::Eq(0, 3));
 
-        let mut rejected_fill = cycle.clone();
-        assert_eq!(add_sparse_transitivity_fill(&mut rejected_fill, 4, 0), None);
-        assert_eq!(rejected_fill, cycle);
+        assert_eq!(
+            plan_sparse_transitivity_fill(&cycle, 4, 0, usize::MAX),
+            Err(SparseTransitivityFillFailure::FillEdgeCap {
+                at_least: 1,
+                pair_examinations: 1,
+            })
+        );
+        let plan = plan_sparse_transitivity_fill(&cycle, 4, 1, usize::MAX).unwrap();
+        assert_eq!(plan.edges.len(), 1);
+        assert_eq!(
+            plan_sparse_transitivity_fill(&cycle, 4, 1, plan.pair_examinations),
+            Ok(plan.clone())
+        );
+        assert!(matches!(
+            plan_sparse_transitivity_fill(&cycle, 4, 1, plan.pair_examinations.saturating_sub(1)),
+            Err(SparseTransitivityFillFailure::PairExaminationCap { .. })
+        ));
+        assert_eq!(cycle.var_count(), 4, "planning must not mutate the CNF");
 
         let mut admitted_fill = cycle;
-        assert_eq!(
-            add_sparse_transitivity_fill(&mut admitted_fill, 4, 1),
-            Some(1)
-        );
+        apply_sparse_transitivity_fill_plan(&mut admitted_fill, &plan);
         assert_eq!(
             bounded_equality_transitivity_clause_count(&admitted_fill, 4, 6),
             Ok(6)
@@ -8720,6 +9654,27 @@ mod tests {
             Err(TransitivityCountFailure::ClauseCap { at_least: 6 })
         );
         assert_eq!(equality_transitivity_clauses(&admitted_fill, 4).len(), 6);
+
+        let mut transitivity_limits = LeafBudgetLimits::default();
+        transitivity_limits.max_transitivity_clauses = 5;
+        let arena = TermArena {
+            terms: (0..4)
+                .map(|fun| Term {
+                    fun,
+                    args: Vec::new(),
+                })
+                .collect(),
+            interned: HashMap::default(),
+            apps: Vec::new(),
+        };
+        let (candidate, report) = build_leaf_budget_completion_candidate(
+            &admitted_fill,
+            &arena,
+            true,
+            transitivity_limits,
+        );
+        assert!(candidate.is_none());
+        assert_eq!(report.transitivity_clauses, BoundedCount::capped(6));
     }
 
     #[test]
