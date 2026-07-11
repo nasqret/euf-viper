@@ -16,7 +16,9 @@ SEED="${EUF_VIPER_PARSER_DIFF_SEED:-0}"
 RANDOM_GROUPS="${EUF_VIPER_PARSER_DIFF_RANDOM_GROUPS:-512}"
 TIMEOUT="${EUF_VIPER_PARSER_DIFF_TIMEOUT:-2}"
 RUN_ID="${EUF_VIPER_PARSER_DIFF_RUN_ID:-$SLURM_JOB_ID}"
-OUT="$ROOT/results/parser-diff-$RUN_ID"
+SCRATCH_ROOT="${SLURM_TMPDIR:-/tmp/${USER:?}/euf-viper-$SLURM_JOB_ID}"
+SCRATCH_OUT="$SCRATCH_ROOT/parser-diff-$RUN_ID"
+PERSIST_OUT="$ROOT/results/parser-diff-$RUN_ID"
 
 cd "$ROOT"
 mkdir -p results
@@ -33,7 +35,7 @@ sha256sum \
   "$SOLVER_ROOT/third_party/solvers/bin/yices-smt2"
 
 scripts/bench/metamorphic_parser_diff.py \
-  --out "$OUT" \
+  --out "$SCRATCH_OUT" \
   --seed "$SEED" \
   --random-groups "$RANDOM_GROUPS" \
   --timeout "$TIMEOUT" \
@@ -43,4 +45,15 @@ scripts/bench/metamorphic_parser_diff.py \
   --cvc5-command "$SOLVER_ROOT/third_party/solvers/bin/cvc5 --lang=smt2 {file}" \
   --yices-command "$SOLVER_ROOT/third_party/solvers/bin/yices-smt2 {file}"
 
-sha256sum "$OUT/manifest.jsonl" "$OUT/results.jsonl" "$OUT/summary.json"
+mkdir -p "$PERSIST_OUT"
+tar -czf "$PERSIST_OUT/cases.tar.gz" -C "$SCRATCH_OUT" cases
+install -m 0644 \
+  "$SCRATCH_OUT/manifest.jsonl" \
+  "$SCRATCH_OUT/results.jsonl" \
+  "$SCRATCH_OUT/summary.json" \
+  "$PERSIST_OUT/"
+sha256sum \
+  "$PERSIST_OUT/cases.tar.gz" \
+  "$PERSIST_OUT/manifest.jsonl" \
+  "$PERSIST_OUT/results.jsonl" \
+  "$PERSIST_OUT/summary.json"
