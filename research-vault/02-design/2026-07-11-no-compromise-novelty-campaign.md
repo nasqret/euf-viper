@@ -171,6 +171,21 @@ provenance, not rollback closure or dynamic Ackermannization. Telemetry-only M0
 must classify held-out eager wins and proof-complexity tails with balanced
 accuracy at least 0.80 and overhead below 1%.
 
+### N7: Orbit-Quotiented Forbidden-Table Automaton
+
+For finite classification formulas containing many negated complete-table
+assignments, verify the base formula's value-permutation action, quotient the
+forbidden tables into canonical orbits, and search canonical row-permutation
+tables against a compressed anti-model trie. This removes the repeated
+complete-assignment clauses from both eager SAT and lazy EUF search.
+
+The first measured trigger is a 6,013,419-byte domain-seven formula with 5,049
+assertions, of which exactly `7! = 5,040` are complete-table exclusions. The
+mechanism may return SAT only after full source-model validation and UNSAT only
+after a replayable canonical-search certificate. Extraction, equivalence,
+search, and falsification gates are specified in
+`2026-07-11-orbit-forbidden-table-automaton.md`.
+
 ## Systems Substrate
 
 Three systems mechanisms support, but do not constitute, novelty:

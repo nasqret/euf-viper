@@ -1,0 +1,26 @@
+{
+  "command": "EUF_VIPER_ORBIT_PROBE_CASE=/tmp/iso_icl_nogen001.smt2 cargo test --release --all-features forbidden_orbit_probe::tests::probe_external_formula -- --ignored --exact --nocapture",
+  "implementation_sha256": "0c8fd9c1f866f0af90306ffda679b06d06589d462ce361390fbc4561937c7466",
+  "result": {
+    "degree": 7,
+    "duplicate_exclusions": 0,
+    "exact_first_orbit_cover": true,
+    "exclusion_records": 5040,
+    "exclusions_in_first_orbit": 5040,
+    "first_table_orbit_size": 5040,
+    "function": 3,
+    "malformed_table_candidates": 0,
+    "missing_orbit_members": 0,
+    "out_of_orbit_exclusions": 0,
+    "permutations_enumerated": 5040,
+    "unique_exclusions": 5040
+  },
+  "schema_version": 1,
+  "source": {
+    "bytes": 6013419,
+    "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+    "sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0"
+  },
+  "test_binary_sha256": "088cc9eba11d689b470f4c34555df13d51987b5eab4fdf6aaeccc061ccf02ef5",
+  "test_elapsed_s": 0.14
+}

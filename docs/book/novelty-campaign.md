@@ -15,7 +15,7 @@ solver result.
 
 ## Distinct Mechanisms
 
-The planned architecture combines six independently testable mechanisms:
+The planned architecture combines seven independently testable mechanisms:
 
 1. complete EUF model scouts before CNF allocation;
 2. Boolean DAG compilation modulo checked theory congruence;
@@ -25,6 +25,8 @@ The planned architecture combines six independently testable mechanisms:
    clauses or equality e-graphs;
 6. proof-complexity-triggered migration of individual components between
    representations.
+7. orbit-quotiented forbidden-table automata for classification formulas that
+   enumerate complete anti-model tables.
 
 The first mechanism can return only a separately validated SAT model. The
 finite and quotient engines may return UNSAT only after an exact search with a
