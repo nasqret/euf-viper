@@ -25,8 +25,8 @@ cd "$ROOT"
 mkdir -p results
 
 case "$UNCONDITIONAL_QUOTIENT" in
-  off | shadow | on) ;;
-  *) echo "EUF_VIPER_PARSER_DIFF_UNCONDITIONAL_QUOTIENT must be off, shadow, or on" >&2; exit 2 ;;
+  off | shadow | on | auto) ;;
+  *) echo "EUF_VIPER_PARSER_DIFF_UNCONDITIONAL_QUOTIENT must be off, shadow, on, or auto" >&2; exit 2 ;;
 esac
 
 test -x "$VIPER_BIN"
