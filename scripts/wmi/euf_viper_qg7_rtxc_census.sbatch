@@ -10,16 +10,122 @@
 set -euo pipefail
 
 ROOT_INPUT="${EUF_VIPER_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
-QG7_DIR_INPUT="${EUF_VIPER_QG7_CENSUS_DIR:?set EUF_VIPER_QG7_CENSUS_DIR}"
+OUTPUT_INPUT="${EUF_VIPER_QG7_CENSUS_OUTPUT:-}"
+JOB_ID_INPUT="${SLURM_JOB_ID:-}"
+RUN_ID_INPUT="${EUF_VIPER_QG7_CENSUS_RUN_ID:-}"
+
+cd "$ROOT_INPUT"
+ROOT="$(pwd -P)"
+if [[ -n "$OUTPUT_INPUT" ]]; then
+  OUTPUT="$OUTPUT_INPUT"
+else
+  OUTPUT_RUN_ID="${RUN_ID_INPUT:-$JOB_ID_INPUT}"
+  if [[ -z "$OUTPUT_RUN_ID" ]]; then
+    printf 'SLURM_JOB_ID is required when EUF_VIPER_QG7_CENSUS_OUTPUT is unset\n' >&2
+    exit 2
+  fi
+  if [[ ! "$OUTPUT_RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf 'cannot derive a safe default census output from run id %q\n' \
+      "$OUTPUT_RUN_ID" >&2
+    exit 2
+  fi
+  OUTPUT="$ROOT/results/qg7-rtxc-census-$OUTPUT_RUN_ID.jsonl"
+fi
+case "$OUTPUT" in
+  *.jsonl) ;;
+  *)
+    printf 'EUF_VIPER_QG7_CENSUS_OUTPUT must end in .jsonl, got %q\n' "$OUTPUT" >&2
+    exit 2
+    ;;
+esac
+mkdir -p "$(dirname "$OUTPUT")"
+OUTPUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd -P)"
+OUTPUT_BASE="$(basename "$OUTPUT")"
+OUTPUT="$OUTPUT_DIR/$OUTPUT_BASE"
+case "$OUTPUT" in
+  "$ROOT"/results/*) ;;
+  "$ROOT"/*)
+    printf 'repo-local census output is allowed only below %s/results, got %s\n' \
+      "$ROOT" "$OUTPUT" >&2
+    exit 2
+    ;;
+esac
+
+RUN_SCRATCH=""
+PUBLISH_TMP=""
+PUBLICATION_COMPLETE=0
+fsync_directory() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+directory = sys.argv[1]
+flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+descriptor = os.open(directory, flags)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
+cleanup() {
+  status=$?
+  trap - EXIT
+  set +e
+  if ((!PUBLICATION_COMPLETE)); then
+    rm -f -- "$OUTPUT"
+    if command -v python3 >/dev/null 2>&1; then
+      fsync_directory "$OUTPUT_DIR"
+    fi
+  fi
+  if [[ -n "$PUBLISH_TMP" ]]; then
+    rm -f -- "$PUBLISH_TMP"
+  fi
+  if [[ -n "$RUN_SCRATCH" ]]; then
+    rm -rf -- "$RUN_SCRATCH"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Output-path validation above is the only pre-invalidation preflight. Once the
+# final path is known to be safe, remove it before validating any run inputs so
+# every subsequent failure leaves no stale result under this run's final name.
+rm -f -- "$OUTPUT"
+if ! command -v python3 >/dev/null 2>&1; then
+  printf 'required tool is unavailable: python3\n' >&2
+  exit 2
+fi
+fsync_directory "$OUTPUT_DIR"
+
+QG7_DIR_INPUT="${EUF_VIPER_QG7_CENSUS_DIR:-}"
 LIMIT="${EUF_VIPER_QG7_CENSUS_LIMIT:-512}"
 OFFSET="${EUF_VIPER_QG7_CENSUS_OFFSET:-0}"
-EXPECTED="${EUF_VIPER_QG7_CENSUS_EXPECTED:?set EUF_VIPER_QG7_CENSUS_EXPECTED to the positive exact record count}"
-REQUESTED_REVISION="${EUF_VIPER_GIT_REVISION:?set EUF_VIPER_GIT_REVISION to the exact 40-character commit}"
-JOB_ID="${SLURM_JOB_ID:?SLURM_JOB_ID is required}"
-RUN_ID="${EUF_VIPER_QG7_CENSUS_RUN_ID:-$JOB_ID}"
-OUTPUT_INPUT="${EUF_VIPER_QG7_CENSUS_OUTPUT:-}"
-SCRATCH_ROOT="${SLURM_TMPDIR:-/tmp/${USER:?}/euf-viper-$JOB_ID}"
+EXPECTED="${EUF_VIPER_QG7_CENSUS_EXPECTED:-}"
+REQUESTED_REVISION="${EUF_VIPER_GIT_REVISION:-}"
+JOB_ID="$JOB_ID_INPUT"
+RUN_ID="${RUN_ID_INPUT:-$JOB_ID}"
 
+if [[ -z "$JOB_ID" ]]; then
+  printf 'SLURM_JOB_ID is required\n' >&2
+  exit 2
+fi
+if [[ -z "$QG7_DIR_INPUT" ]]; then
+  printf 'set EUF_VIPER_QG7_CENSUS_DIR\n' >&2
+  exit 2
+fi
+if [[ -z "$EXPECTED" ]]; then
+  printf 'set EUF_VIPER_QG7_CENSUS_EXPECTED to the positive exact record count\n' >&2
+  exit 2
+fi
+if [[ -z "$REQUESTED_REVISION" ]]; then
+  printf 'set EUF_VIPER_GIT_REVISION to the exact 40-character commit\n' >&2
+  exit 2
+fi
 if [[ ! "$LIMIT" =~ ^[1-9][0-9]*$ ]] || ((LIMIT > 512)); then
   printf 'EUF_VIPER_QG7_CENSUS_LIMIT must be an integer in 1..512, got %q\n' "$LIMIT" >&2
   exit 2
@@ -49,57 +155,16 @@ for tool in cargo git python3 sha256sum tar; do
   fi
 done
 
-cd "$ROOT_INPUT"
-ROOT="$(pwd -P)"
 test -d "$QG7_DIR_INPUT"
 QG7_DIR="$(cd "$QG7_DIR_INPUT" && pwd -P)"
-if [[ -n "$OUTPUT_INPUT" ]]; then
-  OUTPUT="$OUTPUT_INPUT"
+if [[ -n "${SLURM_TMPDIR:-}" ]]; then
+  SCRATCH_ROOT="$SLURM_TMPDIR"
+elif [[ -n "${USER:-}" ]]; then
+  SCRATCH_ROOT="/tmp/$USER/euf-viper-$JOB_ID"
 else
-  OUTPUT="$ROOT/results/qg7-rtxc-census-$RUN_ID.jsonl"
+  printf 'USER is required when SLURM_TMPDIR is unset\n' >&2
+  exit 2
 fi
-case "$OUTPUT" in
-  *.jsonl) ;;
-  *)
-    printf 'EUF_VIPER_QG7_CENSUS_OUTPUT must end in .jsonl, got %q\n' "$OUTPUT" >&2
-    exit 2
-    ;;
-esac
-mkdir -p "$(dirname "$OUTPUT")"
-OUTPUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd -P)"
-OUTPUT_BASE="$(basename "$OUTPUT")"
-OUTPUT="$OUTPUT_DIR/$OUTPUT_BASE"
-case "$OUTPUT" in
-  "$ROOT"/results/*) ;;
-  "$ROOT"/*)
-    printf 'repo-local census output is allowed only below %s/results, got %s\n' \
-      "$ROOT" "$OUTPUT" >&2
-    exit 2
-    ;;
-esac
-
-# Remove the final name before any fallible source/build work. Until the atomic
-# rename below succeeds, absence of OUTPUT means this run has not published.
-rm -f -- "$OUTPUT"
-
-RUN_SCRATCH=""
-PUBLISH_TMP=""
-cleanup() {
-  status=$?
-  trap - EXIT
-  set +e
-  if [[ -n "$PUBLISH_TMP" ]]; then
-    rm -f -- "$PUBLISH_TMP"
-  fi
-  if [[ -n "$RUN_SCRATCH" ]]; then
-    rm -rf -- "$RUN_SCRATCH"
-  fi
-  exit "$status"
-}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 REVISION="$(git rev-parse --verify "${REQUESTED_REVISION}^{commit}")"
 HEAD_REVISION="$(git rev-parse --verify HEAD)"
@@ -285,6 +350,8 @@ PY
 test -s "$PUBLISH_TMP"
 mv -f -- "$PUBLISH_TMP" "$OUTPUT"
 PUBLISH_TMP=""
+fsync_directory "$OUTPUT_DIR"
+PUBLICATION_COMPLETE=1
 
 printf 'records=%s\n' "$EXPECTED"
 printf 'output_sha256=%s\n' "$(sha256sum "$OUTPUT" | awk '{print $1}')"
