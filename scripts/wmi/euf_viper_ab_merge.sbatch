@@ -41,11 +41,18 @@ GATE_ARGS=(
   --min-geometric-speedup "${EUF_VIPER_AB_GATE_MIN_GEOMETRIC_SPEEDUP:-1.0}"
   --max-p-value "${EUF_VIPER_AB_GATE_MAX_P_VALUE:-0.05}"
 )
-case "${EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS:-0}" in
-  0) ;;
-  1) GATE_ARGS+=(--allow-common-timeouts) ;;
+ALLOW_COMMON_TIMEOUTS="${EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS:-0}"
+ALLOW_CANDIDATE_TIMEOUT_IMPROVEMENTS="${EUF_VIPER_AB_GATE_ALLOW_CANDIDATE_TIMEOUT_IMPROVEMENTS:-0}"
+case "$ALLOW_COMMON_TIMEOUTS:$ALLOW_CANDIDATE_TIMEOUT_IMPROVEMENTS" in
+  0:0) ;;
+  1:0) GATE_ARGS+=(--allow-common-timeouts) ;;
+  0:1) GATE_ARGS+=(--allow-candidate-timeout-improvements) ;;
+  1:1)
+    echo "common-timeout and candidate-timeout-improvement policies are mutually exclusive" >&2
+    exit 2
+    ;;
   *)
-    echo "EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS must be 0 or 1" >&2
+    echo "timeout-policy controls must be 0 or 1" >&2
     exit 2
     ;;
 esac
