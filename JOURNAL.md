@@ -488,7 +488,7 @@
   SAT for quoted `|true|` and `|not|`, and exit 2 for post-query assertion.
 - Added a fail-closed paired promotion gate and made four-solver WMI scripts
   relocatable across source, solver, corpus, and binary roots. Local gates now
-  pass 165 Rust tests and 72 Python tests.
+  pass 189 Rust tests and 86 Python tests.
 - The domain-seven `iso_icl_nogen001` probe extracted 5,040 unique complete
   binary operation tables. Exact enumeration proved all are the one free
   `S_7` orbit, with no missing, malformed, or foreign table. The Boolean census
