@@ -27,3 +27,38 @@ scripts/bench/merge_viper_ab.py \
   --repeats "$REPEATS" \
   --out "results/wmi-ab-corpus-${RUN_ID}.csv" \
   --summary "results/wmi-ab-corpus-${RUN_ID}.json"
+
+GATE_ARGS=(
+  "results/wmi-ab-corpus-${RUN_ID}.csv"
+  --out "results/wmi-ab-corpus-${RUN_ID}-promotion.json"
+  --seed "${EUF_VIPER_AB_GATE_SEED:-0}"
+  --bootstrap-iterations "${EUF_VIPER_AB_GATE_BOOTSTRAP_ITERATIONS:-10000}"
+  --permutation-iterations "${EUF_VIPER_AB_GATE_PERMUTATION_ITERATIONS:-10000}"
+  --confidence-level "${EUF_VIPER_AB_GATE_CONFIDENCE_LEVEL:-0.95}"
+  --min-paired-instances "${EUF_VIPER_AB_GATE_MIN_PAIRED_INSTANCES:-1}"
+  --min-median-speedup "${EUF_VIPER_AB_GATE_MIN_MEDIAN_SPEEDUP:-1.0}"
+  --min-total-speedup "${EUF_VIPER_AB_GATE_MIN_TOTAL_SPEEDUP:-1.0}"
+  --min-geometric-speedup "${EUF_VIPER_AB_GATE_MIN_GEOMETRIC_SPEEDUP:-1.0}"
+  --max-p-value "${EUF_VIPER_AB_GATE_MAX_P_VALUE:-0.05}"
+)
+case "${EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS:-0}" in
+  0) ;;
+  1) GATE_ARGS+=(--allow-common-timeouts) ;;
+  *)
+    echo "EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+
+set +e
+scripts/bench/paired_promotion_gate.py "${GATE_ARGS[@]}"
+GATE_STATUS=$?
+set -e
+case "$GATE_STATUS" in
+  0) printf 'promotion_gate=pass\n' ;;
+  1) printf 'promotion_gate=reject\n' ;;
+  *)
+    printf 'promotion_gate=error status=%s\n' "$GATE_STATUS" >&2
+    exit "$GATE_STATUS"
+    ;;
+esac
