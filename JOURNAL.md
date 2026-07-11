@@ -645,6 +645,62 @@
   reuse. Its 121 default and all-feature tests pass; independent review and WMI
   soundness precede any timing campaign.
 
+## 2026-07-12 Broad Clause-Store Promotion And Guarded Eager Follow-Up
+
+- Flat persistent clause storage `2274c75` passed WMI soundness `144006`, a
+  320-instance timing/resource gate, and full 7,503-instance array `144072`.
+  The full merge contains 45,018 observations with zero wrong answers or
+  execution errors. Coverage improves `7,418 -> 7,419`; common-total,
+  geometric, and median speedups are `1.0071x`, `1.0309x`, and `1.0314x`.
+  Their 95% lower bounds are `1.0065x`, `1.0303x`, and `1.0304x`, with paired
+  p=`0.00009999`. The one-way timeout policy records seven candidate-only
+  repeat conversions and no reverse loss. This mechanism is promoted.
+- Cherry-pick `3c178dc` integrates flat clauses onto current main. Local
+  integration passes 228 Rust tests (four ignored research probes) and 122
+  Python tests plus 203 subtests. WMI soundness jobs `144213` and `144214`
+  passed for candidate and pre-integration baseline. Current-lineage full
+  array/merge `144224`/`144225` improves coverage `7,418 -> 7,421`, common
+  total `1.0094x`, all total `1.0073x`, geometric `1.0320x`, and median
+  `1.0323x`; every confidence bound passes. The strict merge mechanically
+  rejects one reverse timeout sample on `PEQ014_size9`, despite zero
+  baseline-only instances and eight candidate-only samples. Pinned same-node
+  31-repeat adjudication `144309` solves 31/31 in both arms and favors flat
+  clauses by `1.0225x`; retain the promotion and preserve the raw reject.
+- Auto quotient `1cd9ec4` passed soundness, a 2,041-case Boolean-data
+  differential, and its frozen 32-case gate. Full array/merge `144056`/`144061`
+  rejects default activation: coverage is `7,271 -> 7,272`, but common-total,
+  all-total, geometric, and median speed are `0.9970x`, `0.9995x`, `0.9940x`,
+  and `0.9974x`. There are two baseline-only and three candidate-only correct
+  instances, ten reverse timeout samples, and every speed confidence lower
+  bound is below parity. Preserve the selected-slice evidence only.
+- Successor `550853b` moves the exact 696-root-equality prefilter ahead of
+  quotient-plan allocation. It passes 122 all-feature tests and WMI soundness
+  `144205`. Causal hot-320 rerun `144222` preserves 320/320 coverage but is
+  neutral at `0.9998x` total and `1.0004x` geometric speed. Independent review
+  also finds that the term-count cap moved after the scan and the new test does
+  not demonstrate allocation avoidance. Do not launch a full successor gate
+  before both defects are repaired and a causal allocation result exists.
+- Forced leaf quotient plus full Ackermann is a real but unsafe interaction.
+  Six Goel profiles improve by `19.27x` geometrically, while a 32-case mixed
+  run loses `NEQ033_size6` to OOM and slows every PEQ/SEQ control. Profile
+  `144074` records 8,137 applications, 10,136,258 Ackermann clauses, and
+  341,413 fill edges before the OOM. A path-independent guard separates the
+  measured sets at 256 applications, but commit `17256eb` remains blocked by
+  review until base-CNF, arity, fill-work, and backend-routing bounds are
+  complete.
+- Polarity-aware component-local class labels project 2.57--6.79x fewer
+  completion watches than triangle transitivity on six Goel profiles. Even a
+  zero-cost triangle stage would leave the measured route about 3.07x behind
+  Yices2, and exact sort metadata is currently missing. Treat this as a
+  bounded engineering experiment, not an algorithmic novelty claim.
+- Parser and qg research campaigns remain fail-closed. Parser commit
+  `19c9a4d` closed initial hash/count/fallback defects but a second audit
+  requires expected manifest hashes, exact opened-byte execution, and atomic
+  checkpoint generations. Qg commit `fdf9dee` now builds from a clean pinned
+  `git archive` and atomically publishes validated source-bound JSONL. Final
+  wrapper audit still blocks WMI because early preflight failure can preserve a
+  stale final JSONL and the containing directory is not fsynced after rename.
+
 ## Next Entry Template
 
 - Benchmark corpus:

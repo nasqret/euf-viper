@@ -1,20 +1,17 @@
 # Research Frontier
 
-## Active Correctness Blocker
+## Soundness Status
 
-The accepted binary incorrectly reports SAT for a formula requiring three
-distinct Boolean arguments. Boolean-valued terms used only as UF arguments are
-not guaranteed to receive `BoolTerm` atoms, and backend `DontCare` assignments
-can also be skipped by validation. The immediate research order is therefore:
+The historical accepted binary had a Boolean-as-data SAT defect. The current
+lineage atomizes Boolean terms used as UF data, requires complete assignments
+for theory-relevant atoms, preserves quoted identifiers, and rejects unsupported
+query mutation. Corrected WMI differential `143698` covered 10,041 formulas
+with zero euf-viper discrepancies, and current-main soundness jobs `144213` and
+`144214` each pass 228 Rust tests plus semantic fixtures.
 
-1. restore the accepted source lineage;
-2. atomize all Boolean data terms and require total theory assignments;
-3. pass differential and WMI correctness gates;
-4. only then resume performance promotion.
-
-The exact corpus campaigns remain useful paired timing evidence, but they do
-not establish general soundness. See the dedicated soundness chapter for the
-counterexample and repair contract.
+Historical timing tables that name source `58efe9d` remain exact-corpus
+performance evidence only. New production candidates must start from the
+repaired lineage and pass differential soundness before timing.
 
 This chapter records the 2026-07-10 program for testing whether `euf-viper`
 can eventually outperform the established QF_UF solvers. It is a research
@@ -23,11 +20,29 @@ contract, not a superiority claim.
 ```{admonition} Status: no superiority claim
 :class: warning
 The current evidence supports a fast common-solve result against Z3 and cvc5
-at a two-second timeout. It also shows a coverage deficit against Z3 and a
-large speed and coverage deficit against Yices2. The focused finite
-permutation rule has not passed the complete-corpus promotion gate described
-here. None of these results establishes standalone or certifying superiority.
+at a two-second timeout and one broad low-level promotion. It still shows a
+coverage deficit against Z3 and a large speed and coverage deficit against
+Yices2. None of these results establishes standalone or certifying superiority.
 ```
+
+## Latest Promoted Mechanism
+
+**[M]** Flat persistent clause storage passed WMI soundness, a disjoint
+320-instance timing/resource gate, and full paired array `144072`. Across all
+7,503 inputs and 45,018 timing observations, coverage improves `7,418 ->
+7,419`; common-total, geometric, and median speedups are `1.0071x`, `1.0309x`,
+and `1.0314x`. Their 95% lower bounds are `1.0065x`, `1.0303x`, and `1.0304x`,
+paired p=`0.00009999`, with zero wrong answers, execution errors, or reverse
+timeout conversions. It is promoted on main as `3c178dc`.
+
+**[M]** Exact current-main array/merge `144224`/`144225` independently improves
+coverage `7,418 -> 7,421`; common-total, all-total, geometric, and median speed
+are `1.0094x`, `1.0073x`, `1.0320x`, and `1.0323x`, with all timing confidence
+bounds above parity. The strict policy flags one reverse repeat on
+`PEQ014_size9`. Same-node 31-repeat adjudication `144309` solves 31/31 in both
+arms and favors flat clauses by `1.0225x`, so the isolated reverse is not
+reproducible. The raw mechanical reject remains archived. The improvement is
+meaningful systems evidence but far smaller than the measured Yices2 gap.
 
 The labels below keep different kinds of statements separate:
 

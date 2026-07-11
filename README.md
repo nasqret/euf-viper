@@ -9,14 +9,14 @@ The long-term research target is to outperform both Z3 and Yices2 on QF_UF.
 This repository is structured so that claim can only be made after reproducible
 SMT-LIB and SMT-COMP runs.
 
-> **Soundness and claim status, 2026-07-11:** the historically measured
+> **Soundness and claim status, 2026-07-12:** the historically measured
 > `58efe9d` binary is not generally sound for Boolean values used only as UF
-> data. It also predates repairs for quoted reserved symbols and single-query
-> command ordering. The current local candidate repairs all three known
-> failures and passes 220 all-feature Rust tests plus 107 benchmark-tool tests.
-> Exact-lineage WMI soundness and parser gates pass; the new differential and
-> four-solver gates are still running. No current result establishes
-> superiority over Z3 or Yices2.
+> data. Current main repairs Boolean-as-data, quoted-symbol, and query-order
+> defects and passes 228 all-feature Rust tests plus 122 Python tests and 203
+> subtests. Flat persistent clause storage is the latest promoted optimization;
+> its full paired gate improves coverage `7,418 -> 7,419` and common-total,
+> geometric, and median speed by `1.0071x`, `1.0309x`, and `1.0314x`. This is a
+> broad implementation win, not superiority over Z3 or Yices2.
 
 ## Quick Start
 
@@ -197,17 +197,26 @@ mechanisms, not a global superiority claim. In the latest historical
 for Z3 and 7,503 for Yices2, but Yices2 was about 4.27 times faster by full
 total. That old binary has the known Boolean-data defect.
 
-The current acceptance chain is:
+Current main is public at `3c178dc`. Flat-clause parent/candidate soundness jobs
+`144214`/`144213` pass. Exact current-lineage array/merge `144224`/`144225`
+improves coverage `7,418 -> 7,421` and common-total/geometric/median speed by
+`1.0094x`/`1.0320x`/`1.0323x`. Its strict policy flags one reverse repeat on
+`PEQ014_size9`; pinned same-node adjudication `144309` solves 31/31 in both
+arms and favors flat clauses by `1.0225x`. Automatic leaf quotienting is
+separately rejected by full gate `144056`/`144061`: net coverage is +1, but two
+baseline-only instances and speed ratios below parity violate the contract.
 
-- full exact repair A/B array `143700` and merge `143701`;
-- sound candidate build `143747` at source
-  `b39706e7243c97d3950fceef636ea56a1f8b04c6`;
-- real four-solver parser metamorphics `143765` and 10,000-case optimized-path
-  differential `143776`;
-- same-binary direct-negated-root target A/B `143751` and profile `143758`;
-- fixed full four-solver 2-second array `143752` and merge `143753`.
+The active research queue is fail-closed:
 
-The leading differentiated opportunity is a verified quotient of 5,040
-forbidden degree-seven operation tables that form one exact `S_7` conjugacy
-orbit. Orbit, MDD, quotient-CSP, and Hall mechanisms remain test-only until
-their source-level preconditions and certificates are independently replayed.
+- bounded quotient-plus-Ackermann completion awaits independent audit before
+  WMI soundness or timing;
+- the one-pass parser awaits exact opened-byte and atomic-checkpoint harness
+  clearance before a 7,503-file shadow campaign;
+- the source-bound qg7 Algorithm-X census awaits final wrapper clearance and
+  remains test-only even after execution;
+- component-local class labels require exact term-sort retention and exhaustive
+  reference equivalence before any production experiment.
+
+Orbit, MDD, quotient-CSP, class-label, and Hall mechanisms cannot alter
+production answers until their source-level preconditions and certificates are
+independently replayed.

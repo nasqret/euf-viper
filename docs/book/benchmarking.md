@@ -256,3 +256,41 @@ campaign records zero mismatches on this exact corpus and remains valid timing
 evidence for these files, but it is not a general soundness or superiority
 result. The repaired exact-source candidate must repeat the correctness and
 performance gates.
+
+## Latest Paired Optimization Gate
+
+Flat persistent clause storage was tested independently from solver-routing
+changes. WMI array `144072` ran both arms three times on all 7,503 SMT-LIB 2025
+QF_UF inputs, producing 45,018 observations at a two-second timeout.
+
+| Metric | Baseline | Flat clauses |
+| --- | ---: | ---: |
+| Correct instances | 7,418 | 7,419 |
+| Timeout-charged total | 742.017s | 737.928s |
+| Common-total speed | - | 1.0071x |
+| Geometric speed | - | 1.0309x |
+| Median speed | - | 1.0314x |
+
+The common-total, geometric, and median 95% lower confidence bounds are
+`1.0065x`, `1.0303x`, and `1.0304x`, and paired p=`0.00009999`. The strict
+one-way timeout policy finds one candidate-only instance and no baseline-only
+instance; repeat-level adjudication records seven candidate-only conversions
+and no reverse conversion. Wrong-answer and execution-error lists are empty.
+
+The candidate is promoted as `3c178dc`. Current-main exact-source array/merge
+`144224`/`144225` provides a second full result:
+
+| Metric | Baseline | Flat clauses |
+| --- | ---: | ---: |
+| Correct instances | 7,418 | 7,421 |
+| Common-total speed | - | 1.0094x |
+| All-total speed | - | 1.0073x |
+| Geometric speed | - | 1.0320x |
+| Median speed | - | 1.0323x |
+
+All timing confidence checks pass, with zero wrong answers, execution errors,
+or baseline-only instances. The strict policy nevertheless rejects one reverse
+repeat on `PEQ014_size9`. Pinned same-node 31-repeat adjudication `144309`
+solves the case 31/31 in both arms and measures `1.0225x` in favor of flat
+clauses. Promotion is retained under repeated-boundary adjudication; the raw
+full-gate rejection is not relabeled.

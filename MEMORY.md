@@ -516,3 +516,33 @@
 - Auto leaf commit `1cd9ec4` encodes the exact reduction >=1000 selector and
   is locally tested. It remains default-off until review, WMI soundness,
   target reproduction, and full-corpus non-regression complete.
+
+## Flat Clause Promotion And Guarded Successors (2026-07-12)
+
+- Flat persistent clause storage passed WMI soundness, hot-320 timing/resource
+  gates, and full array `144072`. On all 7,503 files it improves coverage
+  `7,418 -> 7,419`; common-total, geometric, and median speed are `1.0071x`,
+  `1.0309x`, and `1.0314x`, with every 95% lower bound above parity, paired
+  p=`0.00009999`, and no reverse timeout conversion. It is promoted on main as
+  `3c178dc`. Current-lineage array/merge `144224`/`144225` independently gives
+  `7,418 -> 7,421` coverage and `1.0094x`/`1.0320x`/`1.0323x` common-total,
+  geometric, and median speed. Its strict policy flags one reverse repeat on
+  `PEQ014_size9`; same-node adjudication `144309` solves 31/31 in both arms and
+  favors the candidate by `1.0225x`, so the regression is not reproducible.
+- Automatic leaf quotient `1cd9ec4` passes soundness and the frozen 32-case
+  gate, but full array/merge `144056`/`144061` rejects default activation.
+  Coverage improves `7,271 -> 7,272`, while common-total/all-total/geometric/
+  median speed are `0.9970x`/`0.9995x`/`0.9940x`/`0.9974x`; two baseline-only
+  instances and ten reverse timeout samples violate quality. Its early exact
+  prefilter `550853b` is neutral on
+  hot-320 (`0.9998x` total, `1.0004x` geometric, equal coverage), so this run
+  does not justify a successor full gate.
+- Forced leaf quotient plus full Ackermann can improve six selected Goel cases
+  by `19.27x` geometrically, but an unguarded mixed run OOMs after 10,136,258
+  Ackermann clauses. Any production route must cap base CNF, applications,
+  arity, literal slots, pair examinations, and fill work before cloning, and
+  must activate only on the intended backend.
+- Component-local class labels project fewer completion watches but cannot yet
+  close the Yices2 gap and require exact term-sort retention. The streaming
+  parser and source-bound qg census remain fail-closed until their provenance,
+  opened-byte, atomic-checkpoint, and wrapper audits pass.

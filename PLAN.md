@@ -99,9 +99,11 @@ front tier of a coverage-oriented portfolio.
 - [x] Rerun the accepted standalone solver at 60 seconds. Exact campaign
   `143248`/`143249`/`143254` completed at 7,478 euf-viper, 7,490 Z3, 7,473
   cvc5, and 7,500 Yices2 solves with no wrong answers or errors.
-- [ ] Complete the accepted standalone 1,200-second timeout-only resume.
-  Prep `143382`, array `143383`, and merge `143384` are running against the
-  hash-pinned `58efe9d` binary and resume only 71 timeout observations.
+- [x] Complete the accepted standalone 1,200-second timeout-only resume.
+  Prep `143382`, array `143383`, and merge `143384` produced euf-viper
+  `7,502`, Z3 `7,500`, cvc5 `7,495`, and Yices2 `7,503` solves. The measured
+  historical binary retains the Boolean-data defect and is performance
+  evidence for the exact corpus only.
 - [x] Evaluate PGO globally and through a source-SHA-folded structural route.
   Reject global PGO for coverage and aggregate regressions; reject an external
   router because independent all-time gain is only `1.00010x` before overhead.
@@ -115,6 +117,38 @@ front tier of a coverage-oriented portfolio.
   paired speed or coverage metric.
 - [x] Run local/LTS CAS checks for the quotient-congruence artifacts.
 - [ ] Publish benchmark tables only after independent checker validation.
+
+## Live 2026-07-12 Measured Iteration
+
+- [x] Promote flat persistent clause storage as `3c178dc` after soundness,
+  hot-320, resource, and full 7,503-instance gates. Full campaign `144072`
+  improves coverage `7,418 -> 7,419`, common-total `1.0071x`, geometric
+  `1.0309x`, and median `1.0314x`, with all lower confidence bounds above one
+  and no reverse timeout conversion.
+- [x] Complete current-main exact-lineage confirmation `144224`/`144225`:
+  coverage `7,418 -> 7,421`, common/all/geometric/median speed
+  `1.0094x`/`1.0073x`/`1.0320x`/`1.0323x`, with every timing confidence bound
+  passing. The strict merge flags one reverse repeat on `PEQ014_size9`; pinned
+  31-repeat job `144309` solves 31/31 in both arms and favors flat clauses by
+  `1.0225x`, so retain promotion while preserving the mechanical rejection.
+- [x] Adjudicate and reject automatic leaf quotient full gate
+  `144056`/`144061`. Coverage improves `7,271 -> 7,272`, but two baseline-only
+  instances, ten reverse timeout samples, and `0.9970x` common-total,
+  `0.9995x` all-total, `0.9940x` geometric, and `0.9974x` median speed violate
+  the promotion contract.
+- [x] Measure early quotient prefilter `550853b` against its direct parent on
+  hot-320 (`144222`). Equal coverage and `0.9998x` total time are neutral; do
+  not launch a full successor gate without stronger causal evidence.
+- [ ] Finish and independently audit the bounded Ackermann successor. It must
+  bound base CNF and pair/fill work before clone allocation, preserve backend
+  routing, and pass soundness before a measured 32-case causal gate.
+- [ ] Finish the exact opened-byte streaming-parser harness and complete a
+  7,503-file shadow-equivalence campaign before any parser timing gate.
+- [ ] Finish the source-bound qg wrapper re-audit, then run the exact qg7
+  census. Its Algorithm-X labels remain test-only and cannot answer SMT.
+- [ ] Retain exact sort metadata before implementing a component-local class
+  label prototype; require exhaustive small-model equivalence and a frozen
+  construction-cost gate before SAT timing.
 
 ## Acceptance Criteria For A Superiority Claim
 
