@@ -16,6 +16,35 @@ END = re.compile(r"^END label=(\S+) repeat=(\d+) status=(\d+) path=(.+)$")
 RESULTS = {"sat", "unsat", "unsupported"}
 
 
+def parse_telemetry_fields(line: str) -> tuple[list[tuple[str, int]], dict | None]:
+    tokens = line.split()
+    numeric_fields = []
+    metadata_fields = {}
+    context = None
+
+    if tokens and "=" not in tokens[0] and tokens[0].startswith("profile_"):
+        context = tokens[0]
+
+    for field in tokens:
+        if "=" not in field:
+            continue
+        key, value = field.split("=", 1)
+        if context is None and key.startswith("profile_"):
+            context = key
+        try:
+            numeric_fields.append((key, int(value)))
+        except ValueError:
+            metadata_fields[key] = value
+
+    metadata = None
+    if context is not None and metadata_fields:
+        metadata = {
+            "context": context,
+            "fields": dict(sorted(metadata_fields.items())),
+        }
+    return numeric_fields, metadata
+
+
 def parse_log(path: Path) -> list[dict]:
     records = []
     current = None
@@ -31,6 +60,7 @@ def parse_log(path: Path) -> list[dict]:
                 "path": match.group(3),
                 "result": None,
                 "metrics": {},
+                "metadata": [],
             }
             continue
         if match := END.match(raw_line):
@@ -49,15 +79,9 @@ def parse_log(path: Path) -> list[dict]:
         if stripped in RESULTS:
             current["result"] = stripped
             continue
-        parsed_fields = []
-        for field in stripped.split():
-            if "=" not in field:
-                continue
-            key, value = field.split("=", 1)
-            try:
-                parsed_fields.append((key, int(value)))
-            except ValueError:
-                continue
+        parsed_fields, metadata = parse_telemetry_fields(stripped)
+        if metadata is not None:
+            current["metadata"].append(metadata)
         if (
             len(parsed_fields) == 2
             and parsed_fields[0][0].startswith("profile_")
@@ -72,6 +96,23 @@ def parse_log(path: Path) -> list[dict]:
     if current is not None:
         raise ValueError(f"{path}: unterminated BEGIN block")
     return records
+
+
+def summarize_metadata(samples: list[dict]) -> list[dict]:
+    observations = Counter()
+    for sample in samples:
+        for observation in sample.get("metadata", []):
+            fields = tuple(sorted(observation["fields"].items()))
+            observations[(observation["context"], fields)] += 1
+
+    return [
+        {
+            "context": context,
+            "fields": dict(fields),
+            "count": count,
+        }
+        for (context, fields), count in sorted(observations.items())
+    ]
 
 
 def summarize(records: list[dict]) -> dict:
@@ -100,6 +141,7 @@ def summarize(records: list[dict]) -> dict:
                 "statuses": dict(sorted(Counter(s["status"] for s in samples).items())),
                 "results": dict(sorted(Counter(s["result"] for s in samples).items())),
                 "median_metrics": medians,
+                "metadata_summary": summarize_metadata(samples),
             }
         comparison = None
         if {"baseline", "candidate"}.issubset(label_summaries):
