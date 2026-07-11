@@ -561,6 +561,13 @@ def _atomic_write_text(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def _jsonl_text(records: Sequence[Mapping[str, object]]) -> str:
+    return "".join(
+        json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        for record in records
+    )
+
+
 def _case_base_record(case: FormulaCase) -> dict[str, object]:
     digest = hashlib.sha256(case.source.encode("utf-8")).hexdigest()
     return {
@@ -705,6 +712,17 @@ def execute_campaign(
         timeout_s=timeout_s,
         commands=commands,
     )
+    manifest_text = _jsonl_text([_case_base_record(case) for case in cases])
+    results_text = _jsonl_text(case_records)
+    _atomic_write_text(output_dir / "manifest.jsonl", manifest_text)
+    _atomic_write_text(output_dir / "results.jsonl", results_text)
+    summary["artifacts"] = {
+        "cases_dir": "cases",
+        "manifest_jsonl": "manifest.jsonl",
+        "manifest_sha256": hashlib.sha256(manifest_text.encode("utf-8")).hexdigest(),
+        "results_jsonl": "results.jsonl",
+        "results_sha256": hashlib.sha256(results_text.encode("utf-8")).hexdigest(),
+    }
     _atomic_write_text(
         output_dir / "summary.json",
         json.dumps(summary, indent=2, sort_keys=True) + "\n",

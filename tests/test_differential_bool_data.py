@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -128,6 +129,21 @@ class GenerationTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["generated_cases"], 7)
             self.assertEqual(summary["counts"]["executed_cases"], 0)
             self.assertNotIn("execution", summary)
+            manifest = [
+                json.loads(line)
+                for line in (outputs[0] / "manifest.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            results = [
+                json.loads(line)
+                for line in (outputs[0] / "results.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertEqual(len(manifest), 7)
+            self.assertEqual(results, manifest)
+            self.assertEqual(summary["cases"], results)
 
     def test_every_formula_has_parser_supported_bool_data_shape(self) -> None:
         cases = CAMPAIGN.generate_cases(seed=44, random_count=80)
@@ -287,6 +303,22 @@ class ComparisonTests(unittest.TestCase):
                 (output / "summary.json").read_text(encoding="utf-8")
             )
             self.assertEqual(on_disk, summary)
+            manifest_record = json.loads(
+                (output / "manifest.jsonl").read_text(encoding="utf-8")
+            )
+            result_record = json.loads(
+                (output / "results.jsonl").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("observations", manifest_record)
+            self.assertEqual(result_record, summary["cases"][0])
+            self.assertEqual(
+                summary["artifacts"]["manifest_sha256"],
+                hashlib.sha256((output / "manifest.jsonl").read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                summary["artifacts"]["results_sha256"],
+                hashlib.sha256((output / "results.jsonl").read_bytes()).hexdigest(),
+            )
 
 
 if __name__ == "__main__":
