@@ -21,7 +21,7 @@ for ((index = 0; index < SHARDS; index++)); do
   INPUTS+=("results/wmi-ab-corpus-${RUN_ID}-shard-${index}.csv")
 done
 
-scripts/bench/merge_viper_ab.py \
+python3 scripts/bench/merge_viper_ab.py \
   "$MANIFEST" \
   "${INPUTS[@]}" \
   --repeats "$REPEATS" \
@@ -51,7 +51,7 @@ case "${EUF_VIPER_AB_GATE_ALLOW_COMMON_TIMEOUTS:-0}" in
 esac
 
 set +e
-scripts/bench/paired_promotion_gate.py "${GATE_ARGS[@]}"
+python3 scripts/bench/paired_promotion_gate.py "${GATE_ARGS[@]}"
 GATE_STATUS=$?
 set -e
 case "$GATE_STATUS" in
