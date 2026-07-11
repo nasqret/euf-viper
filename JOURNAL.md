@@ -468,6 +468,49 @@
   sample-40 A/B `143681`, and 10,000-case differential `143682` now guard the
   baseline.
 
+## 2026-07-11 Sound Candidate And Novelty Gates
+
+- Repaired the WMI differential harness after job `143682` exposed quota and
+  launcher failures. Corrected canary `143696` agreed with Z3 and cvc5 on 169
+  formulas. Full job `143698` ran 10,041 formulas: 3,729 SAT, 6,311 UNSAT, zero
+  euf-viper discrepancies, and one common timeout. Hash-pinned retry `143728`
+  returned UNSAT in all three solvers.
+- Exact sound-repair sample `143697` preserved 39/40 coverage and had zero
+  wrong answers or errors, but the repaired candidate was slightly slower:
+  `0.9940x` common-total and `0.9828x` geometric speed. The paired statistical
+  gate rejects it as an optimization; it remains a mandatory repair.
+- Full repair array `143700` and merge `143701` are running with 64 shards,
+  three measured repeats, one warmup, and identical environments.
+- Independent review found two additional parser soundness failures: quoted
+  reserved identifiers were dispatched as built-ins, and assertions after an
+  early `check-sat` were silently included. Commit `ad1a3ae` preserves quoted
+  tokens and rejects unsupported multi-query mutation. Release fixtures return
+  SAT for quoted `|true|` and `|not|`, and exit 2 for post-query assertion.
+- Added a fail-closed paired promotion gate and made four-solver WMI scripts
+  relocatable across source, solver, corpus, and binary roots. Local gates now
+  pass 165 Rust tests and 72 Python tests.
+- The domain-seven `iso_icl_nogen001` probe extracted 5,040 unique complete
+  binary operation tables. Exact enumeration proved all are the one free
+  `S_7` orbit, with no missing, malformed, or foreign table. The Boolean census
+  found 497,474 occurrences, 11,370 syntactic nodes, and only 42 additional
+  unconditional-theory quotient reductions.
+- Added test-only reference implementations for complete SAT model scouts,
+  Boolean DAG telemetry, exact table canonization, forbidden-orbit extraction,
+  bounded quotient CSP with Hall propagation, and exact base-invariance/orbit
+  certificates through degree eight.
+- Added default-off `EUF_VIPER_DIRECT_NEGATED_ROOT`. It emits one clause for a
+  root `not(and(...))` instead of a Tseitin support variable and clauses. The
+  implementation has exhaustive truth-table, edge-case, Bool-as-data, and
+  dynamic-Ackermann rebuild tests.
+- Synced exact source commit `b39706e7243c97d3950fceef636ea56a1f8b04c6`
+  to WMI. Soundness build `143747` uses node-local Cargo storage and persists
+  only the tested binary. Same-binary qg7 A/B `143751`, profile `143758`, full
+  four-solver array `143752`, and merge `143753` depend on that gate.
+- Literature and source-boundary review ranks canonical forbidden-table
+  quotienting, stabilizer-aware MDDs, EUF-structured BVA, certifying Hall/PB
+  escalation, and theory-aware vivification above another generic lazy
+  e-graph. Each mechanism has a falsifiable paired gate in the vault.
+
 ## Next Entry Template
 
 - Benchmark corpus:

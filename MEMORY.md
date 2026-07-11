@@ -407,3 +407,36 @@
 - First behavioral candidate is the complete-model scout because it can only
   return independently validated SAT and targets the broad satisfiable head.
   Orbit and DAG mechanisms begin in telemetry/reference mode in parallel.
+
+## Sound Candidate Checkpoint (2026-07-11)
+
+- Historical performance binary `58efe9d` is not generally sound. Exact repair
+  branch `53c12f7` fixes Boolean values used as UF data; main commit `ad1a3ae`
+  additionally preserves quoted reserved identifiers and rejects mutating or
+  repeated commands after the single supported `check-sat`.
+- Corrected WMI Bool-data differential `143698` ran 10,041 formulas with zero
+  euf-viper discrepancies. The one common timeout was retried as `143728` and
+  all three solvers returned UNSAT.
+- Mandatory repair sample `143697` preserved coverage but measured slightly
+  slower. Never describe the soundness repair as an optimization; full paired
+  array `143700` and merge `143701` decide its corpus cost.
+- WMI candidate build `143747` is pinned to source
+  `b39706e7243c97d3950fceef636ea56a1f8b04c6`. It builds in node-local scratch
+  and persists only the gate-tested binary. Direct-negated-root canary
+  `143751`, profile `143758`, full four-solver array `143752`, and merge
+  `143753` are dependency-chained behind it.
+- `EUF_VIPER_DIRECT_NEGATED_ROOT` is default-off. Its same-binary gate must
+  pin every other environment setting equally. A target win is followed by
+  sample, hot, hard-tail, and full-corpus promotion gates.
+- Exact probe of `qg7/iso_icl_nogen001.smt2` proved that all 5,040 forbidden
+  complete binary operation tables form one `S_7` conjugacy orbit. Treat this
+  as opportunity evidence until typed base-invariance extraction, independent
+  witness replay, and production equivalence gates pass.
+- Current exact reference mechanisms are test-only: complete SAT model scouts,
+  syntactic/theory Boolean DAG census, binary table canonization, bounded
+  quotient CSP with Hall propagation, forbidden-orbit extraction, and exact
+  base-invariance/orbit-cover certificates through degree eight.
+- The ranked unorthodox route is canonical forbidden-table quotienting,
+  stabilizer MDD/AST-guided BVA, certifying Hall/PB escalation, theory-aware
+  vivification, and search-aware congruence explanations, with composite
+  certificates developed alongside every UNSAT-capable mechanism.

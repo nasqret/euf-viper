@@ -186,6 +186,40 @@ gates, not endpoints. Superiority requires complete or leading coverage,
 `1.05x` timeout and common-total speed, `1.02x` geometric speed, lower median
 and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 
+### Live 2026-07-11 Checkpoint
+
+- [x] Repair Boolean values used as data and independently complete or reject
+  partial SAT assignments (`56c56f6`; exact accepted-lineage port `53c12f7`).
+- [x] Run corrected deterministic Bool-data differential: WMI `143698`
+  covered 10,041 formulas with zero euf-viper discrepancies. One all-solver
+  timeout was retried by hash in `143728`; all three solvers returned UNSAT.
+- [x] Repair quoted reserved symbols and single-query command ordering in
+  `ad1a3ae`. Quoted `|true|` and `|not|` now remain user symbols; mutation or a
+  repeated query after `check-sat` is rejected instead of silently changing
+  the answer.
+- [x] Add fail-closed differential parsing and a deterministic paired
+  promotion gate with bootstrap intervals, sign-flip tests, timeout parity,
+  coverage, wrong-answer, and execution-error rejection.
+- [x] Add test-only complete-model scouts, Boolean quotient-DAG telemetry,
+  exact table canonization, bounded quotient CSP, forbidden-orbit extraction,
+  and exact orbit-cover certificates. None can change a production answer.
+- [x] Prove that `qg7/iso_icl_nogen001.smt2` contains 5,040 unique forbidden
+  complete tables forming one exact `S_7` conjugacy orbit. The same input has
+  497,474 Boolean occurrences but only 11,370 syntactic nodes.
+- [ ] Finish exact repair A/B `143700`/`143701`. Sample `143697` preserved
+  39/40 coverage but measured `0.9940x` common-total speed; the mandatory
+  soundness repair is not a performance optimization.
+- [ ] Accept WMI candidate build `143747`, then evaluate same-binary direct
+  negated-root CNF canary `143751` and structural profile `143758`.
+- [ ] Complete fixed four-solver 2-second array `143752` and merge `143753`
+  against Z3, cvc5, and Yices2. No superiority claim precedes this result.
+- [ ] Promote direct negated-root CNF only if the paired target gate passes,
+  followed by sample, hot, hard-tail, and full-corpus gates. The flag remains
+  default-off.
+- [ ] Convert the exact orbit-cover reference into a production recognizer
+  only after typed base-invariance extraction and replayable certificates are
+  end-to-end tested.
+
 ### Live 2026-07-10 Candidates
 
 - **Correctness repair, mandatory first:** atomize every Boolean-valued term
@@ -247,12 +281,13 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 
 ## Current Limitation
 
-The accepted binary has a confirmed general soundness defect for unasserted
-Boolean values used as uninterpreted-function arguments. It returns SAT for a
-three-value Boolean pigeonhole formula that Z3 and cvc5 return UNSAT. Existing
-corpus runs have zero observed mismatches and remain useful timing evidence,
-but no general soundness or superiority claim is valid until the defect is
-fixed and all correctness gates pass.
+The historically measured `58efe9d` binary has a confirmed general soundness
+defect for unasserted Boolean values used as uninterpreted-function arguments.
+The local candidate repairs that defect, quoted-reserved symbol dispatch, and
+query ordering; 165 all-feature Rust tests and 72 Python tests pass. General
+soundness and superiority are still unclaimed until hash-pinned WMI build
+`143747`, full repair A/B `143700`/`143701`, differential gates, and the fixed
+four-solver campaign `143752`/`143753` all complete.
 
 At 1,200 seconds, Yices2 is faster and complete: 7,503/7,503 correct at a
 0.0278s median versus `euf-viper` at 7,478/7,503 and 0.0910s. On 7,478 common
@@ -276,6 +311,7 @@ The exact 60-second rerun solves 7,478 versus Z3's 7,490 and Yices2's 7,500.
 The exact 1,200-second continuation then reaches 7,502 versus Z3's 7,500 and
 Yices2's 7,503. Euf-viper narrowly beats Z3's full timeout-charged total,
 8,575.78s versus 8,676.80s, but loses common-solve aggregate time at 0.6939x.
-Yices2 remains complete and about 4.27x faster by full total. The measured
-binary has the known Boolean-as-data defect; no overall solver claim is allowed
-until repaired commit `53c12f7` passes WMI correctness and performance gates.
+Yices2 remains complete and about 4.27x faster by full total. These old numbers
+are opportunity evidence only. The current program must first reproduce sound
+coverage and then remove a broad head-cost factor; a narrow tail conversion or
+an opt-in comparator portfolio cannot satisfy the victory contract.
