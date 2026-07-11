@@ -9,7 +9,8 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+ROOT="${EUF_VIPER_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+cd "$ROOT"
 mkdir -p results
 
 BASELINE_BIN="${EUF_VIPER_BASELINE_BIN:?set EUF_VIPER_BASELINE_BIN}"

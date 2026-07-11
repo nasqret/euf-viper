@@ -11,6 +11,9 @@ set -euo pipefail
 
 ROOT="${EUF_VIPER_ROOT:-$PWD}"
 REFERENCE_ROOT="${EUF_VIPER_REFERENCE_ROOT:-/home/bnaskrecki/euf-viper-scoped-let-58efe9d}"
+VIPER_BIN="${EUF_VIPER_BIN:-$ROOT/target/release/euf-viper}"
+Z3_BIN="${EUF_VIPER_Z3_BIN:-$REFERENCE_ROOT/third_party/solvers/bin/z3}"
+CVC5_BIN="${EUF_VIPER_CVC5_BIN:-$REFERENCE_ROOT/third_party/solvers/bin/cvc5}"
 RANDOM_CASES="${EUF_VIPER_BOOL_DIFF_CASES:-10000}"
 SEED="${EUF_VIPER_BOOL_DIFF_SEED:-20260711}"
 TIMEOUT="${EUF_VIPER_BOOL_DIFF_TIMEOUT:-2}"
@@ -24,8 +27,8 @@ python3 scripts/bench/differential_bool_data.py \
   --seed "$SEED" \
   --random-cases "$RANDOM_CASES" \
   --timeout "$TIMEOUT" \
-  --viper-command 'target/release/euf-viper solve {file}' \
-  --z3-command "$REFERENCE_ROOT/third_party/solvers/bin/z3 -smt2 {file}" \
-  --cvc5-command "$REFERENCE_ROOT/third_party/solvers/bin/cvc5 --lang=smt2 {file}"
+  --viper-command "$VIPER_BIN solve {file}" \
+  --z3-command "$Z3_BIN {file}" \
+  --cvc5-command "$CVC5_BIN --lang=smt2 {file}"
 
 sha256sum "results/bool-data-diff-$RUN_ID/summary.json"
