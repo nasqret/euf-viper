@@ -5,7 +5,8 @@ use crate::orbit_canon::{
     BinaryTable, CheckedPermutation, LexicographicPermutations, MAX_EXHAUSTIVE_DEGREE,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use std::cmp::Ordering;
+use sha2::{Digest, Sha256};
+use std::{cmp::Ordering, fmt};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProbeError {
@@ -270,10 +271,1309 @@ pub(crate) struct ExactPatternFamily {
     pub(crate) patterns: Box<[PartialTablePattern]>,
 }
 
+/// Identity inside one SHA-256-bound parsed assertion sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct SourceAssertionId {
+    pub(crate) ordinal: usize,
+    pub(crate) fingerprint: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QgAssertionKind {
+    CarrierDistinct,
+    TableClosure,
+    LatinCoverage,
+    LatinPairwiseDistinct,
+    RightTranslationCube,
+    ForbiddenPattern { pattern: usize },
+    LocalConstraint { constraint: usize },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnconsumedAssertionReason {
+    UnrecognizedShape,
+    PatternFunctionMismatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AssertionDisposition {
+    Consumed(QgAssertionKind),
+    Unconsumed(UnconsumedAssertionReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AssertionLedgerEntry {
+    pub(crate) identity: SourceAssertionId,
+    pub(crate) disposition: AssertionDisposition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CarrierMapping {
+    pub(crate) position: usize,
+    pub(crate) term: TermId,
+    pub(crate) symbol: SymId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FunctionRole {
+    CarrierConstant,
+    TableOperation,
+    Unused,
+    Unrecognized,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FunctionUsage {
+    pub(crate) function: SymId,
+    pub(crate) declared_arity: usize,
+    pub(crate) occurrences: usize,
+    pub(crate) application_occurrences: usize,
+    pub(crate) role: FunctionRole,
+}
+
+/// Canonical Boolean formula over concrete carrier table cells.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum NormalizedLocalExpr {
+    Const(bool),
+    CellEquals(CellAssignment),
+    Not(Box<NormalizedLocalExpr>),
+    And(Box<[NormalizedLocalExpr]>),
+    Or(Box<[NormalizedLocalExpr]>),
+    Iff(Box<[NormalizedLocalExpr]>),
+    Ite(
+        Box<NormalizedLocalExpr>,
+        Box<NormalizedLocalExpr>,
+        Box<NormalizedLocalExpr>,
+    ),
+}
+
+impl NormalizedLocalExpr {
+    fn evaluate(&self, degree: usize, table: &[u8]) -> bool {
+        match self {
+            Self::Const(value) => *value,
+            Self::CellEquals(assignment) => {
+                table[assignment.row * degree + assignment.column]
+                    == u8::try_from(assignment.value).expect("qg degree is at most seven")
+            }
+            Self::Not(inner) => !inner.evaluate(degree, table),
+            Self::And(children) => children.iter().all(|child| child.evaluate(degree, table)),
+            Self::Or(children) => children.iter().any(|child| child.evaluate(degree, table)),
+            Self::Iff(children) => children.first().is_none_or(|first| {
+                let value = first.evaluate(degree, table);
+                children
+                    .iter()
+                    .skip(1)
+                    .all(|child| child.evaluate(degree, table) == value)
+            }),
+            Self::Ite(condition, then_branch, else_branch) => {
+                if condition.evaluate(degree, table) {
+                    then_branch.evaluate(degree, table)
+                } else {
+                    else_branch.evaluate(degree, table)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct DirectCellConstraint {
+    pub(crate) row: usize,
+    pub(crate) value: usize,
+    pub(crate) equal: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalConstraintEnforcement {
+    CandidateFilter,
+    Residual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NormalizedLocalConstraint {
+    pub(crate) assertion: SourceAssertionId,
+    pub(crate) formula: NormalizedLocalExpr,
+    pub(crate) enforcement: LocalConstraintEnforcement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QgColumnFilter {
+    pub(crate) column: usize,
+    pub(crate) require_cube_identity: bool,
+    pub(crate) exact_fixed_points: Option<usize>,
+    pub(crate) direct: Box<[DirectCellConstraint]>,
+}
+
+impl QgColumnFilter {
+    pub(crate) fn allows(&self, permutation: &[u8]) -> bool {
+        if self.require_cube_identity
+            && (0..permutation.len()).any(|point| {
+                let once = usize::from(permutation[point]);
+                let twice = usize::from(permutation[once]);
+                usize::from(permutation[twice]) != point
+            })
+        {
+            return false;
+        }
+        if self.exact_fixed_points.is_some_and(|expected| {
+            permutation
+                .iter()
+                .enumerate()
+                .filter(|&(point, &image)| point == usize::from(image))
+                .count()
+                != expected
+        }) {
+            return false;
+        }
+        self.direct.iter().all(|constraint| {
+            let matches = usize::from(permutation[constraint.row]) == constraint.value;
+            matches == constraint.equal
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QgIneligibility {
+    MissingBooleanProblem,
+    UnsupportedSource,
+    CarrierOutsideSupportedRange,
+    MissingTableOperation,
+    PatternFamilyRejected,
+    PatternOrbitNotExact,
+    DuplicateForbiddenPatterns,
+    MissingCarrierDistinct,
+    MissingTableClosure,
+    MissingLatinConstraint,
+    UnrecognizedFunctionUsage,
+    UnconsumedAssertions,
+}
+
+impl QgIneligibility {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::MissingBooleanProblem => "missing_boolean_problem",
+            Self::UnsupportedSource => "unsupported_source",
+            Self::CarrierOutsideSupportedRange => "carrier_outside_supported_range",
+            Self::MissingTableOperation => "missing_table_operation",
+            Self::PatternFamilyRejected => "pattern_family_rejected",
+            Self::PatternOrbitNotExact => "pattern_orbit_not_exact",
+            Self::DuplicateForbiddenPatterns => "duplicate_forbidden_patterns",
+            Self::MissingCarrierDistinct => "missing_carrier_distinct",
+            Self::MissingTableClosure => "missing_table_closure",
+            Self::MissingLatinConstraint => "missing_latin_constraint",
+            Self::UnrecognizedFunctionUsage => "unrecognized_function_usage",
+            Self::UnconsumedAssertions => "unconsumed_assertions",
+        }
+    }
+}
+
+/// Test-only, source-bound reduction ledger for the qg shadow search.
+///
+/// Eligibility requires an exact carrier/Latin basis, an exact forbidden
+/// orbit, known function usage, and a disposition for every parsed assertion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QgReduction {
+    source_sha256: [u8; 32],
+    carrier: Box<[CarrierMapping]>,
+    operation: Option<SymId>,
+    function_usage: Box<[FunctionUsage]>,
+    assertion_ledger: Box<[AssertionLedgerEntry]>,
+    local_constraints: Box<[NormalizedLocalConstraint]>,
+    column_filters: Box<[QgColumnFilter]>,
+    candidate_counts: Box<[usize]>,
+    patterns: Box<[PartialTablePattern]>,
+    pattern_report: Option<PatternOrbitReport>,
+    pattern_error: Option<ProbeError>,
+    ineligibility: Box<[QgIneligibility]>,
+}
+
+impl QgReduction {
+    pub(crate) fn audit(source: &str, problem: &Problem) -> Self {
+        audit_qg_reduction(source, problem)
+    }
+
+    pub(crate) fn source_sha256(&self) -> &[u8; 32] {
+        &self.source_sha256
+    }
+
+    pub(crate) fn source_sha256_hex(&self) -> String {
+        let mut output = String::with_capacity(64);
+        for byte in self.source_sha256 {
+            use fmt::Write;
+            write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+        output
+    }
+
+    pub(crate) fn carrier(&self) -> &[CarrierMapping] {
+        &self.carrier
+    }
+
+    pub(crate) fn degree(&self) -> usize {
+        self.carrier.len()
+    }
+
+    pub(crate) fn operation(&self) -> Option<SymId> {
+        self.operation
+    }
+
+    pub(crate) fn function_usage(&self) -> &[FunctionUsage] {
+        &self.function_usage
+    }
+
+    pub(crate) fn assertion_ledger(&self) -> &[AssertionLedgerEntry] {
+        &self.assertion_ledger
+    }
+
+    pub(crate) fn consumed_assertions(&self) -> impl Iterator<Item = SourceAssertionId> + '_ {
+        self.assertion_ledger.iter().filter_map(|entry| {
+            matches!(entry.disposition, AssertionDisposition::Consumed(_)).then_some(entry.identity)
+        })
+    }
+
+    pub(crate) fn unconsumed_assertions(&self) -> impl Iterator<Item = SourceAssertionId> + '_ {
+        self.assertion_ledger.iter().filter_map(|entry| {
+            matches!(entry.disposition, AssertionDisposition::Unconsumed(_))
+                .then_some(entry.identity)
+        })
+    }
+
+    pub(crate) fn local_constraints(&self) -> &[NormalizedLocalConstraint] {
+        &self.local_constraints
+    }
+
+    pub(crate) fn remaining_predicates(&self) -> impl Iterator<Item = &NormalizedLocalConstraint> {
+        self.local_constraints
+            .iter()
+            .filter(|constraint| constraint.enforcement == LocalConstraintEnforcement::Residual)
+    }
+
+    pub(crate) fn column_filters(&self) -> &[QgColumnFilter] {
+        &self.column_filters
+    }
+
+    pub(crate) fn candidate_counts(&self) -> &[usize] {
+        &self.candidate_counts
+    }
+
+    pub(crate) fn patterns(&self) -> &[PartialTablePattern] {
+        &self.patterns
+    }
+
+    pub(crate) fn pattern_report(&self) -> Option<&PatternOrbitReport> {
+        self.pattern_report.as_ref()
+    }
+
+    pub(crate) fn pattern_error(&self) -> Option<&ProbeError> {
+        self.pattern_error.as_ref()
+    }
+
+    pub(crate) fn ineligibility(&self) -> &[QgIneligibility] {
+        &self.ineligibility
+    }
+
+    pub(crate) fn eligible(&self) -> bool {
+        self.ineligibility.is_empty()
+    }
+
+    pub(crate) fn first_ineligibility_code(&self) -> &'static str {
+        self.ineligibility
+            .first()
+            .copied()
+            .map(QgIneligibility::code)
+            .unwrap_or("none")
+    }
+
+    pub(crate) fn validate_local_constraints(&self, table: &[u8]) -> Result<(), SourceAssertionId> {
+        let expected = self.degree().checked_mul(self.degree());
+        if expected != Some(table.len()) {
+            return Err(SourceAssertionId {
+                ordinal: usize::MAX,
+                fingerprint: 0,
+            });
+        }
+        for constraint in &self.local_constraints {
+            if !constraint.formula.evaluate(self.degree(), table) {
+                return Err(constraint.assertion);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CandidateShape {
     NotCandidate,
     Malformed,
+}
+
+const QG_MAX_DEGREE: usize = 7;
+const ASSERTION_FNV_OFFSET: u64 = 0xcbf29ce484222325;
+const ASSERTION_FNV_PRIME: u64 = 0x100000001b3;
+
+fn audit_qg_reduction(source: &str, problem: &Problem) -> QgReduction {
+    let source_sha256: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+    let mut ineligibility = Vec::new();
+    let Some(bool_problem) = problem.bool_problem.as_ref() else {
+        return QgReduction {
+            source_sha256,
+            carrier: Box::new([]),
+            operation: None,
+            function_usage: Box::new([]),
+            assertion_ledger: Box::new([]),
+            local_constraints: Box::new([]),
+            column_filters: Box::new([]),
+            candidate_counts: Box::new([]),
+            patterns: Box::new([]),
+            pattern_report: None,
+            pattern_error: None,
+            ineligibility: Box::new([QgIneligibility::MissingBooleanProblem]),
+        };
+    };
+    if !problem.unsupported.is_empty()
+        || !bool_problem.unsupported.is_empty()
+        || problem.contradiction
+    {
+        push_ineligibility(&mut ineligibility, QgIneligibility::UnsupportedSource);
+    }
+
+    let mut finite = FiniteAnalysisContext::default();
+    let domain = finite
+        .domain_analysis(&problem.arena, bool_problem)
+        .domain
+        .clone();
+    if !(2..=QG_MAX_DEGREE).contains(&domain.len()) {
+        push_ineligibility(
+            &mut ineligibility,
+            QgIneligibility::CarrierOutsideSupportedRange,
+        );
+    }
+    let domain_positions = domain
+        .iter()
+        .enumerate()
+        .map(|(position, &term)| (term, position))
+        .collect::<HashMap<_, _>>();
+    let carrier = domain
+        .iter()
+        .enumerate()
+        .filter_map(|(position, &term)| {
+            problem
+                .arena
+                .terms
+                .get(term)
+                .map(|term_data| CarrierMapping {
+                    position,
+                    term,
+                    symbol: term_data.fun,
+                })
+        })
+        .collect::<Vec<_>>();
+    if carrier.len() != domain.len()
+        || carrier.iter().any(|mapping| {
+            problem.arena.terms[mapping.term].args.len() != 0
+                || problem.arena.terms[mapping.term].fun != mapping.symbol
+        })
+    {
+        push_ineligibility(
+            &mut ineligibility,
+            QgIneligibility::CarrierOutsideSupportedRange,
+        );
+    }
+
+    let family_result = extract_forbidden_pattern_family(problem);
+    let (patterns, pattern_report, pattern_error, family_operation) = match family_result {
+        Ok(family) => {
+            if !family.report.exact_first_orbit_cover {
+                push_ineligibility(&mut ineligibility, QgIneligibility::PatternOrbitNotExact);
+            }
+            if family.report.duplicate_exclusions != 0 {
+                push_ineligibility(
+                    &mut ineligibility,
+                    QgIneligibility::DuplicateForbiddenPatterns,
+                );
+            }
+            let operation = Some(family.report.function);
+            (family.patterns, Some(family.report), None, operation)
+        }
+        Err(error) => {
+            push_ineligibility(&mut ineligibility, QgIneligibility::PatternFamilyRejected);
+            (
+                Vec::<PartialTablePattern>::new().into_boxed_slice(),
+                None,
+                Some(error),
+                None,
+            )
+        }
+    };
+    let operation = family_operation
+        .or_else(|| infer_unique_table_operation(&problem.arena, &domain_positions));
+    if operation.is_none() {
+        push_ineligibility(&mut ineligibility, QgIneligibility::MissingTableOperation);
+    }
+
+    let mut assertion_ledger = Vec::with_capacity(bool_problem.assertions.len());
+    let mut local_constraints = Vec::new();
+    let mut direct_by_column = vec![Vec::new(); domain.len()];
+    let mut pattern_index = 0;
+    let mut saw_carrier_distinct = false;
+    let mut saw_closure = false;
+    let mut saw_latin = false;
+    let mut saw_cube = false;
+
+    for (ordinal, assertion) in bool_problem.assertions.iter().enumerate() {
+        let identity = SourceAssertionId {
+            ordinal,
+            fingerprint: assertion_fingerprint(assertion, &problem.arena),
+        };
+        let mut disposition = None;
+        if let Some(operation) = operation {
+            if let Some(pattern) =
+                pattern_from_assertion(assertion, &problem.arena, &domain_positions, domain.len())
+            {
+                disposition = Some(if pattern.function == operation {
+                    let index = pattern_index;
+                    pattern_index += 1;
+                    AssertionDisposition::Consumed(QgAssertionKind::ForbiddenPattern {
+                        pattern: index,
+                    })
+                } else {
+                    AssertionDisposition::Unconsumed(
+                        UnconsumedAssertionReason::PatternFunctionMismatch,
+                    )
+                });
+            } else if is_exact_carrier_distinct(assertion, &domain_positions) {
+                saw_carrier_distinct = true;
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::CarrierDistinct,
+                ));
+            } else if is_exact_table_closure(
+                assertion,
+                &problem.arena,
+                &domain_positions,
+                domain.len(),
+                operation,
+            ) {
+                saw_closure = true;
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::TableClosure,
+                ));
+            } else if is_exact_latin_coverage(
+                assertion,
+                &problem.arena,
+                &domain_positions,
+                domain.len(),
+                operation,
+            ) {
+                saw_latin = true;
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::LatinCoverage,
+                ));
+            } else if is_exact_latin_pairwise(
+                assertion,
+                &problem.arena,
+                &domain_positions,
+                domain.len(),
+                operation,
+            ) {
+                saw_latin = true;
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::LatinPairwiseDistinct,
+                ));
+            } else if is_exact_right_translation_cube(
+                assertion,
+                &problem.arena,
+                &domain_positions,
+                domain.len(),
+                operation,
+            ) {
+                saw_cube = true;
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::RightTranslationCube,
+                ));
+            } else if let Some(formula) =
+                normalize_local_expression(assertion, &problem.arena, &domain_positions, operation)
+            {
+                let mut direct = Vec::new();
+                let fully_filtered = collect_conjunctive_direct_constraints(&formula, &mut direct);
+                direct.sort_unstable();
+                direct.dedup();
+                for &(assignment, equal) in &direct {
+                    direct_by_column[assignment.column].push(DirectCellConstraint {
+                        row: assignment.row,
+                        value: assignment.value,
+                        equal,
+                    });
+                }
+                let constraint = local_constraints.len();
+                local_constraints.push(NormalizedLocalConstraint {
+                    assertion: identity,
+                    formula,
+                    enforcement: if fully_filtered {
+                        LocalConstraintEnforcement::CandidateFilter
+                    } else {
+                        LocalConstraintEnforcement::Residual
+                    },
+                });
+                disposition = Some(AssertionDisposition::Consumed(
+                    QgAssertionKind::LocalConstraint { constraint },
+                ));
+            }
+        }
+        assertion_ledger.push(AssertionLedgerEntry {
+            identity,
+            disposition: disposition.unwrap_or(AssertionDisposition::Unconsumed(
+                UnconsumedAssertionReason::UnrecognizedShape,
+            )),
+        });
+    }
+
+    if !saw_carrier_distinct {
+        push_ineligibility(&mut ineligibility, QgIneligibility::MissingCarrierDistinct);
+    }
+    if !saw_closure {
+        push_ineligibility(&mut ineligibility, QgIneligibility::MissingTableClosure);
+    }
+    if !saw_latin {
+        push_ineligibility(&mut ineligibility, QgIneligibility::MissingLatinConstraint);
+    }
+    if assertion_ledger
+        .iter()
+        .any(|entry| matches!(entry.disposition, AssertionDisposition::Unconsumed(_)))
+    {
+        push_ineligibility(&mut ineligibility, QgIneligibility::UnconsumedAssertions);
+    }
+    if pattern_index != patterns.len() {
+        push_ineligibility(&mut ineligibility, QgIneligibility::PatternFamilyRejected);
+    }
+
+    let function_usage = collect_function_usage(problem, &carrier, operation, bool_problem);
+    if function_usage
+        .iter()
+        .any(|usage| usage.occurrences != 0 && usage.role == FunctionRole::Unrecognized)
+    {
+        push_ineligibility(
+            &mut ineligibility,
+            QgIneligibility::UnrecognizedFunctionUsage,
+        );
+    }
+
+    let mut column_filters = Vec::new();
+    let mut candidate_counts = Vec::new();
+    if (2..=QG_MAX_DEGREE).contains(&domain.len()) {
+        // Seven order-three permutations have at least one fixed point each.
+        // Latin rows make their total fixed-point count exactly seven.
+        let exact_one_fixed_point = domain.len() == 7 && saw_latin && saw_cube;
+        column_filters.reserve(domain.len());
+        candidate_counts.reserve(domain.len());
+        for column in 0..domain.len() {
+            direct_by_column[column].sort_unstable();
+            direct_by_column[column].dedup();
+            let filter = QgColumnFilter {
+                column,
+                require_cube_identity: saw_cube,
+                exact_fixed_points: exact_one_fixed_point.then_some(1),
+                direct: std::mem::take(&mut direct_by_column[column]).into_boxed_slice(),
+            };
+            candidate_counts.push(count_filter_candidates(domain.len(), &filter));
+            column_filters.push(filter);
+        }
+    }
+
+    QgReduction {
+        source_sha256,
+        carrier: carrier.into_boxed_slice(),
+        operation,
+        function_usage: function_usage.into_boxed_slice(),
+        assertion_ledger: assertion_ledger.into_boxed_slice(),
+        local_constraints: local_constraints.into_boxed_slice(),
+        column_filters: column_filters.into_boxed_slice(),
+        candidate_counts: candidate_counts.into_boxed_slice(),
+        patterns,
+        pattern_report,
+        pattern_error,
+        ineligibility: ineligibility.into_boxed_slice(),
+    }
+}
+
+fn push_ineligibility(reasons: &mut Vec<QgIneligibility>, reason: QgIneligibility) {
+    if !reasons.contains(&reason) {
+        reasons.push(reason);
+    }
+}
+
+fn infer_unique_table_operation(
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+) -> Option<SymId> {
+    let operations = arena
+        .terms
+        .iter()
+        .filter(|term| {
+            term.args.len() == 2
+                && term
+                    .args
+                    .iter()
+                    .all(|argument| domain_positions.contains_key(argument))
+        })
+        .map(|term| term.fun)
+        .collect::<HashSet<_>>();
+    (operations.len() == 1).then(|| *operations.iter().next().unwrap())
+}
+
+fn pattern_from_assertion(
+    assertion: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    degree: usize,
+) -> Option<ExtractedPattern> {
+    let BoolExpr::Not(inner) = assertion else {
+        return None;
+    };
+    let mut equalities = Vec::new();
+    collect_conjunctive_equalities(inner, &mut equalities)
+        .then(|| extract_partial_pattern(arena, domain_positions, degree, &equalities).ok())
+        .flatten()
+}
+
+fn collect_and_leaves<'a>(expression: &'a BoolExpr, output: &mut Vec<&'a BoolExpr>) {
+    match expression {
+        BoolExpr::And(children) => {
+            for child in children {
+                collect_and_leaves(child, output);
+            }
+        }
+        expression => output.push(expression),
+    }
+}
+
+fn collect_or_leaves<'a>(expression: &'a BoolExpr, output: &mut Vec<&'a BoolExpr>) {
+    match expression {
+        BoolExpr::Or(children) => {
+            for child in children {
+                collect_or_leaves(child, output);
+            }
+        }
+        expression => output.push(expression),
+    }
+}
+
+fn negative_equality(expression: &BoolExpr) -> Option<(TermId, TermId)> {
+    let BoolExpr::Not(inner) = expression else {
+        return None;
+    };
+    let BoolExpr::Atom(BoolAtomKey::Eq(left, right)) = inner.as_ref() else {
+        return None;
+    };
+    Some((*left, *right))
+}
+
+fn positive_equality(expression: &BoolExpr) -> Option<(TermId, TermId)> {
+    let BoolExpr::Atom(BoolAtomKey::Eq(left, right)) = expression else {
+        return None;
+    };
+    Some((*left, *right))
+}
+
+fn is_exact_carrier_distinct(
+    assertion: &BoolExpr,
+    domain_positions: &HashMap<TermId, usize>,
+) -> bool {
+    let degree = domain_positions.len();
+    let mut leaves = Vec::new();
+    collect_and_leaves(assertion, &mut leaves);
+    if leaves.len() != degree.saturating_mul(degree.saturating_sub(1)) / 2 {
+        return false;
+    }
+    let mut pairs = HashSet::default();
+    for leaf in leaves {
+        let Some((left, right)) = negative_equality(leaf) else {
+            return false;
+        };
+        let (Some(&left), Some(&right)) =
+            (domain_positions.get(&left), domain_positions.get(&right))
+        else {
+            return false;
+        };
+        if left == right {
+            return false;
+        }
+        pairs.insert(if left < right {
+            (left, right)
+        } else {
+            (right, left)
+        });
+    }
+    pairs.len() == leaves_pair_count(degree)
+}
+
+fn leaves_pair_count(degree: usize) -> usize {
+    degree.saturating_mul(degree.saturating_sub(1)) / 2
+}
+
+fn direct_cell_assignment(
+    expression: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+) -> Option<CellAssignment> {
+    let (left, right) = positive_equality(expression)?;
+    let (function, row, column, value) = table_cell(arena, domain_positions, left, right)
+        .or_else(|| table_cell(arena, domain_positions, right, left))?;
+    (function == operation).then_some(CellAssignment { row, column, value })
+}
+
+fn is_exact_table_closure(
+    assertion: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    degree: usize,
+    operation: SymId,
+) -> bool {
+    let mut conjuncts = Vec::new();
+    collect_and_leaves(assertion, &mut conjuncts);
+    if conjuncts.len() != degree.saturating_mul(degree) {
+        return false;
+    }
+    let mut cells = HashSet::default();
+    for conjunct in conjuncts {
+        let mut disjuncts = Vec::new();
+        collect_or_leaves(conjunct, &mut disjuncts);
+        if disjuncts.len() != degree {
+            return false;
+        }
+        let Some(first) = direct_cell_assignment(disjuncts[0], arena, domain_positions, operation)
+        else {
+            return false;
+        };
+        let mut values = HashSet::default();
+        for disjunct in disjuncts {
+            let Some(assignment) =
+                direct_cell_assignment(disjunct, arena, domain_positions, operation)
+            else {
+                return false;
+            };
+            if assignment.row != first.row || assignment.column != first.column {
+                return false;
+            }
+            values.insert(assignment.value);
+        }
+        if values.len() != degree {
+            return false;
+        }
+        cells.insert((first.row, first.column));
+    }
+    cells.len() == degree.saturating_mul(degree)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum LatinCoverageGroup {
+    RowValue { row: usize, value: usize },
+    ColumnValue { column: usize, value: usize },
+}
+
+fn is_exact_latin_coverage(
+    assertion: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    degree: usize,
+    operation: SymId,
+) -> bool {
+    let mut conjuncts = Vec::new();
+    collect_and_leaves(assertion, &mut conjuncts);
+    if conjuncts.len() != 2_usize.saturating_mul(degree).saturating_mul(degree) {
+        return false;
+    }
+    let mut groups = HashSet::default();
+    for conjunct in conjuncts {
+        let mut disjuncts = Vec::new();
+        collect_or_leaves(conjunct, &mut disjuncts);
+        if disjuncts.len() != degree {
+            return false;
+        }
+        let assignments = disjuncts
+            .iter()
+            .map(|expression| {
+                direct_cell_assignment(expression, arena, domain_positions, operation)
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(assignments) = assignments else {
+            return false;
+        };
+        let first = assignments[0];
+        if assignments
+            .iter()
+            .all(|assignment| assignment.row == first.row && assignment.value == first.value)
+            && assignments
+                .iter()
+                .map(|assignment| assignment.column)
+                .collect::<HashSet<_>>()
+                .len()
+                == degree
+        {
+            groups.insert(LatinCoverageGroup::RowValue {
+                row: first.row,
+                value: first.value,
+            });
+        } else if assignments
+            .iter()
+            .all(|assignment| assignment.column == first.column && assignment.value == first.value)
+            && assignments
+                .iter()
+                .map(|assignment| assignment.row)
+                .collect::<HashSet<_>>()
+                .len()
+                == degree
+        {
+            groups.insert(LatinCoverageGroup::ColumnValue {
+                column: first.column,
+                value: first.value,
+            });
+        } else {
+            return false;
+        }
+    }
+    groups.len() == 2 * degree * degree
+}
+
+fn direct_table_cell(
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+    term: TermId,
+) -> Option<(usize, usize)> {
+    let term = arena.terms.get(term)?;
+    let [row, column] = term.args.as_slice() else {
+        return None;
+    };
+    (term.fun == operation).then_some((*domain_positions.get(row)?, *domain_positions.get(column)?))
+}
+
+fn is_exact_latin_pairwise(
+    assertion: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    degree: usize,
+    operation: SymId,
+) -> bool {
+    let mut leaves = Vec::new();
+    collect_and_leaves(assertion, &mut leaves);
+    let expected = 2_usize
+        .saturating_mul(degree)
+        .saturating_mul(leaves_pair_count(degree));
+    if leaves.len() != expected {
+        return false;
+    }
+    let mut pairs = HashSet::default();
+    for leaf in leaves {
+        let Some((left, right)) = negative_equality(leaf) else {
+            return false;
+        };
+        let (Some(left), Some(right)) = (
+            direct_table_cell(arena, domain_positions, operation, left),
+            direct_table_cell(arena, domain_positions, operation, right),
+        ) else {
+            return false;
+        };
+        if left == right || (left.0 != right.0 && left.1 != right.1) {
+            return false;
+        }
+        pairs.insert(if left < right {
+            (left, right)
+        } else {
+            (right, left)
+        });
+    }
+    pairs.len() == expected
+}
+
+fn cube_identity_cell(
+    expression: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+) -> Option<(usize, usize)> {
+    let (left, right) = positive_equality(expression)?;
+    cube_identity_terms(arena, domain_positions, operation, left, right)
+        .or_else(|| cube_identity_terms(arena, domain_positions, operation, right, left))
+}
+
+fn cube_identity_terms(
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+    cube: TermId,
+    original: TermId,
+) -> Option<(usize, usize)> {
+    let row = *domain_positions.get(&original)?;
+    let outer = arena.terms.get(cube)?;
+    let [square, outer_column] = outer.args.as_slice() else {
+        return None;
+    };
+    if outer.fun != operation {
+        return None;
+    }
+    let middle = arena.terms.get(*square)?;
+    let [once, middle_column] = middle.args.as_slice() else {
+        return None;
+    };
+    if middle.fun != operation {
+        return None;
+    }
+    let inner = arena.terms.get(*once)?;
+    let [inner_row, inner_column] = inner.args.as_slice() else {
+        return None;
+    };
+    if inner.fun != operation || *inner_row != original {
+        return None;
+    }
+    let column = *domain_positions.get(inner_column)?;
+    (*domain_positions.get(middle_column)? == column
+        && *domain_positions.get(outer_column)? == column)
+        .then_some((row, column))
+}
+
+fn is_exact_right_translation_cube(
+    assertion: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    degree: usize,
+    operation: SymId,
+) -> bool {
+    let mut leaves = Vec::new();
+    collect_and_leaves(assertion, &mut leaves);
+    if leaves.len() != degree.saturating_mul(degree) {
+        return false;
+    }
+    let cells = leaves
+        .into_iter()
+        .map(|leaf| cube_identity_cell(leaf, arena, domain_positions, operation))
+        .collect::<Option<HashSet<_>>>();
+    cells.is_some_and(|cells| cells.len() == degree * degree)
+}
+
+fn normalize_local_expression(
+    expression: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+) -> Option<NormalizedLocalExpr> {
+    match expression {
+        BoolExpr::Const(value) => Some(NormalizedLocalExpr::Const(*value)),
+        BoolExpr::Atom(BoolAtomKey::Eq(_, _)) => {
+            direct_cell_assignment(expression, arena, domain_positions, operation)
+                .map(NormalizedLocalExpr::CellEquals)
+        }
+        BoolExpr::Atom(BoolAtomKey::BoolTerm(_)) => None,
+        BoolExpr::Not(inner) => {
+            let inner = normalize_local_expression(inner, arena, domain_positions, operation)?;
+            Some(match inner {
+                NormalizedLocalExpr::Const(value) => NormalizedLocalExpr::Const(!value),
+                NormalizedLocalExpr::Not(grandchild) => *grandchild,
+                inner => NormalizedLocalExpr::Not(Box::new(inner)),
+            })
+        }
+        BoolExpr::And(children) => {
+            normalize_local_variadic(children, arena, domain_positions, operation, true)
+        }
+        BoolExpr::Or(children) => {
+            normalize_local_variadic(children, arena, domain_positions, operation, false)
+        }
+        BoolExpr::Iff(children) => {
+            let mut normalized = children
+                .iter()
+                .map(|child| normalize_local_expression(child, arena, domain_positions, operation))
+                .collect::<Option<Vec<_>>>()?;
+            normalized.sort_unstable();
+            normalized.dedup();
+            Some(NormalizedLocalExpr::Iff(normalized.into_boxed_slice()))
+        }
+        BoolExpr::Ite(condition, then_branch, else_branch) => Some(NormalizedLocalExpr::Ite(
+            Box::new(normalize_local_expression(
+                condition,
+                arena,
+                domain_positions,
+                operation,
+            )?),
+            Box::new(normalize_local_expression(
+                then_branch,
+                arena,
+                domain_positions,
+                operation,
+            )?),
+            Box::new(normalize_local_expression(
+                else_branch,
+                arena,
+                domain_positions,
+                operation,
+            )?),
+        )),
+    }
+}
+
+fn normalize_local_variadic(
+    children: &[BoolExpr],
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    operation: SymId,
+    conjunction: bool,
+) -> Option<NormalizedLocalExpr> {
+    let mut normalized = Vec::new();
+    for child in children {
+        let child = normalize_local_expression(child, arena, domain_positions, operation)?;
+        match (conjunction, child) {
+            (true, NormalizedLocalExpr::And(grandchildren))
+            | (false, NormalizedLocalExpr::Or(grandchildren)) => {
+                normalized.extend(grandchildren.into_vec());
+            }
+            (_, child) => normalized.push(child),
+        }
+    }
+    normalized.sort_unstable();
+    normalized.dedup();
+    Some(if conjunction {
+        NormalizedLocalExpr::And(normalized.into_boxed_slice())
+    } else {
+        NormalizedLocalExpr::Or(normalized.into_boxed_slice())
+    })
+}
+
+fn collect_conjunctive_direct_constraints(
+    expression: &NormalizedLocalExpr,
+    output: &mut Vec<(CellAssignment, bool)>,
+) -> bool {
+    match expression {
+        NormalizedLocalExpr::CellEquals(assignment) => {
+            output.push((*assignment, true));
+            true
+        }
+        NormalizedLocalExpr::Not(inner) => {
+            let NormalizedLocalExpr::CellEquals(assignment) = inner.as_ref() else {
+                return false;
+            };
+            output.push((*assignment, false));
+            true
+        }
+        NormalizedLocalExpr::And(children) => children
+            .iter()
+            .all(|child| collect_conjunctive_direct_constraints(child, output)),
+        _ => false,
+    }
+}
+
+fn assertion_fingerprint(expression: &BoolExpr, arena: &super::TermArena) -> u64 {
+    let mut hash = ASSERTION_FNV_OFFSET;
+    hash_boolean_expression(&mut hash, expression, arena);
+    hash
+}
+
+fn hash_byte(hash: &mut u64, byte: u8) {
+    *hash ^= u64::from(byte);
+    *hash = hash.wrapping_mul(ASSERTION_FNV_PRIME);
+}
+
+fn hash_usize(hash: &mut u64, value: usize) {
+    for byte in value.to_le_bytes() {
+        hash_byte(hash, byte);
+    }
+}
+
+fn hash_u32(hash: &mut u64, value: u32) {
+    for byte in value.to_le_bytes() {
+        hash_byte(hash, byte);
+    }
+}
+
+fn hash_boolean_expression(hash: &mut u64, expression: &BoolExpr, arena: &super::TermArena) {
+    match expression {
+        BoolExpr::Const(value) => {
+            hash_byte(hash, 0);
+            hash_byte(hash, u8::from(*value));
+        }
+        BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+            hash_byte(hash, 1);
+            hash_term(hash, *left, arena);
+            hash_term(hash, *right, arena);
+        }
+        BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => {
+            hash_byte(hash, 2);
+            hash_term(hash, *term, arena);
+        }
+        BoolExpr::Not(inner) => {
+            hash_byte(hash, 3);
+            hash_boolean_expression(hash, inner, arena);
+        }
+        BoolExpr::And(children) => {
+            hash_byte(hash, 4);
+            hash_usize(hash, children.len());
+            for child in children {
+                hash_boolean_expression(hash, child, arena);
+            }
+        }
+        BoolExpr::Or(children) => {
+            hash_byte(hash, 5);
+            hash_usize(hash, children.len());
+            for child in children {
+                hash_boolean_expression(hash, child, arena);
+            }
+        }
+        BoolExpr::Iff(children) => {
+            hash_byte(hash, 6);
+            hash_usize(hash, children.len());
+            for child in children {
+                hash_boolean_expression(hash, child, arena);
+            }
+        }
+        BoolExpr::Ite(condition, then_branch, else_branch) => {
+            hash_byte(hash, 7);
+            hash_boolean_expression(hash, condition, arena);
+            hash_boolean_expression(hash, then_branch, arena);
+            hash_boolean_expression(hash, else_branch, arena);
+        }
+    }
+}
+
+fn hash_term(hash: &mut u64, term_id: TermId, arena: &super::TermArena) {
+    let Some(term) = arena.terms.get(term_id) else {
+        hash_byte(hash, u8::MAX);
+        hash_usize(hash, term_id);
+        return;
+    };
+    hash_u32(hash, term.fun);
+    hash_u32(hash, term.sort.0);
+    hash_usize(hash, term.args.len());
+    for argument in &term.args {
+        hash_term(hash, *argument, arena);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FunctionOccurrenceCount {
+    occurrences: usize,
+    application_occurrences: usize,
+}
+
+fn collect_function_usage(
+    problem: &Problem,
+    carrier: &[CarrierMapping],
+    operation: Option<SymId>,
+    bool_problem: &super::BoolProblem,
+) -> Vec<FunctionUsage> {
+    let mut counts: HashMap<SymId, FunctionOccurrenceCount> = HashMap::default();
+    for assertion in &bool_problem.assertions {
+        count_expression_functions(assertion, &problem.arena, &mut counts);
+    }
+    let carrier_symbols = carrier
+        .iter()
+        .map(|mapping| mapping.symbol)
+        .collect::<HashSet<_>>();
+    let mut usages = problem
+        .fun_decls
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, declaration)| {
+            let declaration = declaration.as_ref()?;
+            let function = SymId::try_from(index).ok()?;
+            let count = counts.get(&function).copied().unwrap_or_default();
+            let role = if carrier_symbols.contains(&function) {
+                FunctionRole::CarrierConstant
+            } else if operation == Some(function) {
+                FunctionRole::TableOperation
+            } else if count.occurrences == 0 {
+                FunctionRole::Unused
+            } else {
+                FunctionRole::Unrecognized
+            };
+            Some(FunctionUsage {
+                function,
+                declared_arity: declaration.arg_sorts.len(),
+                occurrences: count.occurrences,
+                application_occurrences: count.application_occurrences,
+                role,
+            })
+        })
+        .collect::<Vec<_>>();
+    usages.sort_unstable_by_key(|usage| usage.function);
+    usages
+}
+
+fn count_expression_functions(
+    expression: &BoolExpr,
+    arena: &super::TermArena,
+    counts: &mut HashMap<SymId, FunctionOccurrenceCount>,
+) {
+    match expression {
+        BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+            count_term_functions(*left, arena, counts);
+            count_term_functions(*right, arena, counts);
+        }
+        BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => {
+            count_term_functions(*term, arena, counts);
+        }
+        BoolExpr::Not(inner) => count_expression_functions(inner, arena, counts),
+        BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => {
+            for child in children {
+                count_expression_functions(child, arena, counts);
+            }
+        }
+        BoolExpr::Ite(condition, then_branch, else_branch) => {
+            count_expression_functions(condition, arena, counts);
+            count_expression_functions(then_branch, arena, counts);
+            count_expression_functions(else_branch, arena, counts);
+        }
+        BoolExpr::Const(_) => {}
+    }
+}
+
+fn count_term_functions(
+    term_id: TermId,
+    arena: &super::TermArena,
+    counts: &mut HashMap<SymId, FunctionOccurrenceCount>,
+) {
+    let Some(term) = arena.terms.get(term_id) else {
+        return;
+    };
+    let count = counts.entry(term.fun).or_default();
+    count.occurrences = count.occurrences.saturating_add(1);
+    if !term.args.is_empty() {
+        count.application_occurrences = count.application_occurrences.saturating_add(1);
+    }
+    for argument in &term.args {
+        count_term_functions(*argument, arena, counts);
+    }
+}
+
+fn count_filter_candidates(degree: usize, filter: &QgColumnFilter) -> usize {
+    if degree == 0 {
+        return 0;
+    }
+    let mut permutation = (0..degree)
+        .map(|value| u8::try_from(value).expect("qg degree is at most seven"))
+        .collect::<Vec<_>>();
+    let mut count = 0;
+    loop {
+        count += usize::from(filter.allows(&permutation));
+        if !advance_u8_permutation(&mut permutation) {
+            return count;
+        }
+    }
+}
+
+fn advance_u8_permutation(values: &mut [u8]) -> bool {
+    let Some(pivot) = (1..values.len())
+        .rev()
+        .find(|&index| values[index - 1] < values[index])
+        .map(|index| index - 1)
+    else {
+        return false;
+    };
+    let successor = (pivot + 1..values.len())
+        .rev()
+        .find(|&index| values[pivot] < values[index])
+        .expect("a permutation pivot has a successor");
+    values.swap(pivot, successor);
+    values[pivot + 1..].reverse();
+    true
 }
 
 pub(crate) fn analyze_forbidden_table_orbit(problem: &Problem) -> Result<OrbitReport, ProbeError> {
@@ -715,7 +2015,7 @@ mod tests {
         compile_forbidden_table_mvdd,
     };
     use crate::right_translation_exact_cover::{
-        ShadowCaps, ShadowOutcome, search_exact_pattern_shadow,
+        ShadowAbstainReason, ShadowCaps, ShadowOutcome, search_qg_reduction_shadow,
     };
     use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
     use std::{env, fs};
@@ -821,6 +2121,10 @@ mod tests {
              {extra_assertions}\n\
              (check-sat)\n"
         )
+    }
+
+    fn qg7_reduction_fixture() -> &'static str {
+        include_str!("../tests/fixtures/qg7_reduction_phase1.smt2")
     }
 
     fn dominant_table_exclusions(problem: &Problem) -> (usize, SymId, Vec<BinaryTable>) {
@@ -1037,10 +2341,13 @@ mod tests {
 
     fn print_qg7_shadow_record(
         path: &std::path::Path,
-        family: &ExactPatternFamily,
+        reduction: &QgReduction,
         caps: &ShadowCaps,
         outcome: &ShadowOutcome,
     ) {
+        let report = reduction
+            .pattern_report()
+            .expect("an eligible qg reduction has a pattern report");
         let telemetry = outcome.telemetry();
         let (abstain_reason, abstain_resource) = match outcome {
             ShadowOutcome::Abstain { reason, .. } => (reason.code(), reason.resource()),
@@ -1049,13 +2356,18 @@ mod tests {
         println!(
             concat!(
                 "{{\"path\":\"{}\",\"status\":\"eligible\",",
-                "\"semantics\":\"latin_pattern_avoidance\",",
+                "\"semantics\":\"audited_qg_reduction_shadow\",",
                 "\"production_routing\":false,",
+                "\"source_sha256\":\"{}\",\"assertions\":{},",
+                "\"consumed_assertions\":{},\"unconsumed_assertions\":{},",
+                "\"remaining_predicates\":{},",
                 "\"degree\":{},\"width\":{},\"records\":{},\"unique\":{},",
                 "\"orbit_size\":{},\"stabilizer_size\":{},",
                 "\"outcome\":\"{}\",\"abstain_reason\":\"{}\",",
                 "\"abstain_resource\":\"{}\",\"patterns\":{},",
-                "\"pattern_cells\":{},\"permutations\":{},\"bitset_words\":{},",
+                "\"pattern_cells\":{},\"permutations\":{},",
+                "\"column_candidates\":{},\"min_column_candidates\":{},",
+                "\"max_column_candidates\":{},\"bitset_words\":{},",
                 "\"preparation_word_ops\":{},\"preparation_pattern_checks\":{},",
                 "\"preparation_cell_updates\":{},\"search_nodes\":{},",
                 "\"candidate_checks\":{},\"exact_cover_rejections\":{},",
@@ -1068,18 +2380,26 @@ mod tests {
                 "\"cap_candidate_checks\":{},\"cap_search_bitset_word_ops\":{}}}"
             ),
             json_escape(&path.display().to_string()),
-            family.report.degree,
-            family.report.pattern_width,
-            family.report.exclusion_records,
-            family.report.unique_exclusions,
-            family.report.first_pattern_orbit_size,
-            family.report.first_pattern_stabilizer_size,
+            reduction.source_sha256_hex(),
+            reduction.assertion_ledger().len(),
+            reduction.consumed_assertions().count(),
+            reduction.unconsumed_assertions().count(),
+            reduction.remaining_predicates().count(),
+            report.degree,
+            report.pattern_width,
+            report.exclusion_records,
+            report.unique_exclusions,
+            report.first_pattern_orbit_size,
+            report.first_pattern_stabilizer_size,
             outcome.label(),
             abstain_reason,
             abstain_resource,
             telemetry.patterns,
             telemetry.pattern_cells,
             telemetry.permutations,
+            telemetry.column_candidates,
+            telemetry.min_column_candidates,
+            telemetry.max_column_candidates,
             telemetry.bitset_words,
             telemetry.preparation_word_ops,
             telemetry.preparation_pattern_checks,
@@ -1123,6 +2443,302 @@ mod tests {
         let family = extract_forbidden_pattern_family(&problem).unwrap();
         assert_eq!(family.report, partial);
         assert_eq!(family.patterns.len(), 1);
+    }
+
+    #[test]
+    fn qg7_fixture_ledger_consumes_every_assertion_and_uses_240_candidates() {
+        let source = qg7_reduction_fixture();
+        let problem = parse(source);
+        let reduction = QgReduction::audit(source, &problem);
+        assert_eq!(reduction, QgReduction::audit(source, &parse(source)));
+
+        assert!(reduction.eligible(), "{:?}", reduction.ineligibility());
+        assert_eq!(reduction.degree(), 7);
+        assert_eq!(reduction.carrier().len(), 7);
+        assert!(
+            reduction
+                .carrier()
+                .iter()
+                .enumerate()
+                .all(|(position, mapping)| mapping.position == position)
+        );
+        assert!(reduction.operation().is_some());
+        assert_eq!(
+            reduction.source_sha256_hex(),
+            "8036e595e43a208f8d9b09eec8f59190e994efe29cdd9cd8b27ced162ff92672"
+        );
+        let expected_source_hash: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+        assert_eq!(reduction.source_sha256(), &expected_source_hash);
+
+        assert_eq!(
+            reduction.assertion_ledger().len(),
+            problem.bool_problem.as_ref().unwrap().assertions.len()
+        );
+        assert_eq!(
+            reduction.consumed_assertions().count(),
+            reduction.assertion_ledger().len()
+        );
+        assert_eq!(reduction.unconsumed_assertions().count(), 0);
+        let identities = reduction
+            .assertion_ledger()
+            .iter()
+            .map(|entry| entry.identity)
+            .collect::<HashSet<_>>();
+        assert_eq!(identities.len(), reduction.assertion_ledger().len());
+        assert!(identities.iter().all(|identity| identity.fingerprint != 0));
+
+        assert_eq!(reduction.patterns().len(), 7);
+        let report = reduction.pattern_report().unwrap();
+        assert!(report.exact_first_orbit_cover);
+        assert_eq!(report.first_pattern_orbit_size, 7);
+        assert_eq!(report.first_pattern_stabilizer_size, 720);
+        assert!(reduction.pattern_error().is_none());
+
+        assert_eq!(reduction.local_constraints().len(), 2);
+        assert_eq!(reduction.remaining_predicates().count(), 1);
+        assert_eq!(reduction.candidate_counts(), &[240; 7]);
+        for (column, filter) in reduction.column_filters().iter().enumerate() {
+            assert_eq!(filter.column, column);
+            assert!(filter.require_cube_identity);
+            assert_eq!(filter.exact_fixed_points, Some(1));
+            assert!(filter.direct.contains(&DirectCellConstraint {
+                row: column,
+                value: column,
+                equal: false,
+            }));
+        }
+
+        let operation = reduction.operation().unwrap();
+        assert!(reduction.function_usage().iter().any(|usage| {
+            usage.function == operation
+                && usage.role == FunctionRole::TableOperation
+                && usage.application_occurrences > 0
+        }));
+        assert!(reduction.function_usage().iter().any(|usage| {
+            usage.declared_arity == 2
+                && usage.role == FunctionRole::Unused
+                && usage.occurrences == 0
+        }));
+    }
+
+    #[test]
+    fn qg7_candidate_filter_matches_independent_cycle_type_enumeration() {
+        let source = qg7_reduction_fixture();
+        let reduction = QgReduction::audit(source, &parse(source));
+        let mut permutation = (0_u8..7).collect::<Vec<_>>();
+        let mut independent_counts = [0_usize; 7];
+        loop {
+            let fixed_points = permutation
+                .iter()
+                .enumerate()
+                .filter(|&(point, &image)| point == usize::from(image))
+                .count();
+            let cube_identity = (0..7).all(|point| {
+                let once = usize::from(permutation[point]);
+                let twice = usize::from(permutation[once]);
+                usize::from(permutation[twice]) == point
+            });
+            for column in 0..7 {
+                let independent = cube_identity
+                    && fixed_points == 1
+                    && usize::from(permutation[column]) != column;
+                assert_eq!(
+                    reduction.column_filters()[column].allows(&permutation),
+                    independent
+                );
+                independent_counts[column] += usize::from(independent);
+            }
+            if !advance_u8_permutation(&mut permutation) {
+                break;
+            }
+        }
+        assert_eq!(independent_counts, [240; 7]);
+    }
+
+    #[test]
+    fn qg7_filter_strength_is_monotone_and_audit_gated() {
+        let diagonal = DirectCellConstraint {
+            row: 0,
+            value: 0,
+            equal: false,
+        };
+        let cases = [
+            (
+                QgColumnFilter {
+                    column: 0,
+                    require_cube_identity: false,
+                    exact_fixed_points: None,
+                    direct: Box::new([]),
+                },
+                5_040,
+            ),
+            (
+                QgColumnFilter {
+                    column: 0,
+                    require_cube_identity: false,
+                    exact_fixed_points: None,
+                    direct: Box::new([diagonal]),
+                },
+                4_320,
+            ),
+            (
+                QgColumnFilter {
+                    column: 0,
+                    require_cube_identity: true,
+                    exact_fixed_points: None,
+                    direct: Box::new([diagonal]),
+                },
+                270,
+            ),
+            (
+                QgColumnFilter {
+                    column: 0,
+                    require_cube_identity: true,
+                    exact_fixed_points: Some(1),
+                    direct: Box::new([diagonal]),
+                },
+                240,
+            ),
+        ];
+        for (filter, expected) in cases {
+            assert_eq!(count_filter_candidates(7, &filter), expected);
+        }
+
+        let malformed_cube =
+            qg7_reduction_fixture().replacen("(op (op (op e0 e0) e0) e0)", "(op (op e0 e0) e0)", 1);
+        let malformed_cube = QgReduction::audit(&malformed_cube, &parse(&malformed_cube));
+        assert!(!malformed_cube.eligible());
+        assert!(
+            malformed_cube
+                .ineligibility()
+                .contains(&QgIneligibility::UnconsumedAssertions)
+        );
+    }
+
+    #[test]
+    fn direct_fixed_point_literals_narrow_only_their_column() {
+        let source = qg7_reduction_fixture().replace(
+            "(check-sat)",
+            concat!(
+                "(assert (and (= (op e0 e1) e0) ",
+                "(not (= (op e2 e1) e2))))\n(check-sat)"
+            ),
+        );
+        let reduction = QgReduction::audit(&source, &parse(&source));
+        assert!(reduction.eligible(), "{:?}", reduction.ineligibility());
+        assert_eq!(
+            reduction.candidate_counts(),
+            &[240, 40, 240, 240, 240, 240, 240]
+        );
+        assert_eq!(
+            reduction
+                .local_constraints()
+                .iter()
+                .filter(|constraint| {
+                    constraint.enforcement == LocalConstraintEnforcement::CandidateFilter
+                })
+                .count(),
+            2
+        );
+        assert!(
+            reduction.column_filters()[1]
+                .direct
+                .contains(&DirectCellConstraint {
+                    row: 0,
+                    value: 0,
+                    equal: true,
+                })
+        );
+        assert!(
+            reduction.column_filters()[1]
+                .direct
+                .contains(&DirectCellConstraint {
+                    row: 2,
+                    value: 2,
+                    equal: false,
+                })
+        );
+    }
+
+    #[test]
+    fn qg_source_audit_abstains_on_unconsumed_or_foreign_assertions() {
+        let source =
+            qg7_reduction_fixture().replace("(check-sat)", "(assert (= e0 e0))\n(check-sat)");
+        let reduction = QgReduction::audit(&source, &parse(&source));
+        assert!(!reduction.eligible());
+        assert_eq!(reduction.unconsumed_assertions().count(), 1);
+        assert!(
+            reduction
+                .ineligibility()
+                .contains(&QgIneligibility::UnconsumedAssertions)
+        );
+        assert!(matches!(
+            search_qg_reduction_shadow(&reduction, &ShadowCaps::default()),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SourceAudit("unconsumed_assertions"),
+                ..
+            }
+        ));
+
+        let foreign = qg7_reduction_fixture().replace(
+            "(check-sat)",
+            "(assert (= (unused-op e0 e0) e0))\n(check-sat)",
+        );
+        let foreign = QgReduction::audit(&foreign, &parse(&foreign));
+        assert!(!foreign.eligible());
+        assert_eq!(foreign.unconsumed_assertions().count(), 1);
+        assert!(
+            foreign
+                .ineligibility()
+                .contains(&QgIneligibility::UnrecognizedFunctionUsage)
+        );
+        assert!(
+            foreign
+                .function_usage()
+                .iter()
+                .any(|usage| { usage.role == FunctionRole::Unrecognized && usage.occurrences > 0 })
+        );
+    }
+
+    #[test]
+    fn residual_source_predicate_rejects_a_shadow_witness_as_abstain() {
+        let source = concat!(
+            "(set-logic QF_UF)\n",
+            "(declare-sort I 0)\n",
+            "(declare-fun e0 () I)\n",
+            "(declare-fun e1 () I)\n",
+            "(declare-fun op (I I) I)\n",
+            "(assert (distinct e0 e1))\n",
+            "(assert (and ",
+            "(or (= (op e0 e0) e0) (= (op e0 e0) e1)) ",
+            "(or (= (op e0 e1) e0) (= (op e0 e1) e1)) ",
+            "(or (= (op e1 e0) e0) (= (op e1 e0) e1)) ",
+            "(or (= (op e1 e1) e0) (= (op e1 e1) e1))))\n",
+            "(assert (and ",
+            "(distinct (op e0 e0) (op e0 e1)) ",
+            "(distinct (op e1 e0) (op e1 e1)) ",
+            "(distinct (op e0 e0) (op e1 e0)) ",
+            "(distinct (op e0 e1) (op e1 e1))))\n",
+            "(assert false)\n",
+            "(assert (not (and ",
+            "(= (op e0 e0) e0) (= (op e0 e1) e0) ",
+            "(= (op e1 e0) e0) (= (op e1 e1) e0))))\n",
+            "(assert (not (and ",
+            "(= (op e0 e0) e1) (= (op e0 e1) e1) ",
+            "(= (op e1 e0) e1) (= (op e1 e1) e1))))\n",
+            "(check-sat)\n",
+        );
+        let reduction = QgReduction::audit(source, &parse(source));
+        assert!(reduction.eligible(), "{:?}", reduction.ineligibility());
+        let residual = reduction.remaining_predicates().next().unwrap();
+        assert_eq!(residual.formula, NormalizedLocalExpr::Const(false));
+        assert!(matches!(
+            search_qg_reduction_shadow(&reduction, &ShadowCaps::default()),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SourcePredicateRejected { assertion: 3 },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -1473,38 +3089,34 @@ mod tests {
         for path in paths.into_iter().skip(offset).take(limit) {
             let source = fs::read_to_string(&path).unwrap();
             let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
-            match extract_forbidden_pattern_family(&problem) {
-                Ok(family) => match shadow_ineligibility(&family.report) {
-                    Some(reason) => println!(
-                        concat!(
-                            "{{\"path\":\"{}\",\"status\":\"ineligible\",",
-                            "\"reason\":\"{}\",\"degree\":{},\"width\":{},",
-                            "\"records\":{},\"unique\":{},\"orbit_size\":{},",
-                            "\"stabilizer_size\":{},\"exact_cover\":{}}}"
-                        ),
-                        json_escape(&path.display().to_string()),
-                        reason,
-                        family.report.degree,
-                        family.report.pattern_width,
-                        family.report.exclusion_records,
-                        family.report.unique_exclusions,
-                        family.report.first_pattern_orbit_size,
-                        family.report.first_pattern_stabilizer_size,
-                        family.report.exact_first_orbit_cover,
-                    ),
-                    None => {
-                        let outcome = search_exact_pattern_shadow(&family.patterns, &caps);
-                        print_qg7_shadow_record(&path, &family, &caps, &outcome);
-                    }
-                },
-                Err(error) => println!(
+            let reduction = QgReduction::audit(&source, &problem);
+            if reduction.eligible() {
+                let outcome = search_qg_reduction_shadow(&reduction, &caps);
+                print_qg7_shadow_record(&path, &reduction, &caps, &outcome);
+            } else {
+                let unconsumed = reduction
+                    .unconsumed_assertions()
+                    .map(|identity| identity.ordinal.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                println!(
                     concat!(
                         "{{\"path\":\"{}\",\"status\":\"ineligible\",",
-                        "\"reason\":\"extraction_error\",\"detail\":\"{}\"}}"
+                        "\"reason\":\"{}\",\"source_sha256\":\"{}\",",
+                        "\"degree\":{},\"assertions\":{},",
+                        "\"consumed_assertions\":{},",
+                        "\"unconsumed_assertions\":[{}],",
+                        "\"pattern_error\":\"{}\"}}"
                     ),
                     json_escape(&path.display().to_string()),
-                    json_escape(&format!("{error:?}")),
-                ),
+                    reduction.first_ineligibility_code(),
+                    reduction.source_sha256_hex(),
+                    reduction.degree(),
+                    reduction.assertion_ledger().len(),
+                    reduction.consumed_assertions().count(),
+                    unconsumed,
+                    json_escape(&format!("{:?}", reduction.pattern_error())),
+                );
             }
         }
     }

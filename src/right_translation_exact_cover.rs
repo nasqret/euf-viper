@@ -4,7 +4,7 @@
 //! the remaining exact-cover condition. Bounded runs report non-exhaustion
 //! explicitly and therefore never promote a partial search to SAT or UNSAT.
 
-use crate::forbidden_orbit_probe::PartialTablePattern;
+use crate::forbidden_orbit_probe::{PartialTablePattern, QgColumnFilter, QgReduction};
 
 const MAX_DEGREE: usize = 5;
 
@@ -260,6 +260,10 @@ pub(crate) enum ShadowAbstainReason {
     },
     ArithmeticOverflow,
     AllocationFailed,
+    SourceAudit(&'static str),
+    SourcePredicateRejected {
+        assertion: usize,
+    },
     WitnessRejected(WitnessError),
 }
 
@@ -272,6 +276,8 @@ impl ShadowAbstainReason {
             Self::SearchCap { .. } => "search_cap",
             Self::ArithmeticOverflow => "arithmetic_overflow",
             Self::AllocationFailed => "allocation_failed",
+            Self::SourceAudit(_) => "source_audit",
+            Self::SourcePredicateRejected { .. } => "source_predicate_rejected",
             Self::WitnessRejected(_) => "witness_rejected",
         }
     }
@@ -284,6 +290,8 @@ impl ShadowAbstainReason {
             | Self::SearchCap { resource, .. } => resource,
             Self::ArithmeticOverflow => "arithmetic",
             Self::AllocationFailed => "allocation",
+            Self::SourceAudit(resource) => resource,
+            Self::SourcePredicateRejected { .. } => "source_predicate",
             Self::WitnessRejected(error) => error.code(),
         }
     }
@@ -294,6 +302,9 @@ pub(crate) struct ShadowTelemetry {
     pub(crate) patterns: usize,
     pub(crate) pattern_cells: usize,
     pub(crate) permutations: usize,
+    pub(crate) column_candidates: usize,
+    pub(crate) min_column_candidates: usize,
+    pub(crate) max_column_candidates: usize,
     pub(crate) bitset_words: usize,
     pub(crate) preparation_word_ops: usize,
     pub(crate) preparation_pattern_checks: usize,
@@ -355,8 +366,8 @@ impl ShadowOutcome {
 
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            Self::Sat { .. } => "sat",
-            Self::Unsat { .. } => "unsat",
+            Self::Sat { .. } => "shadow_witness",
+            Self::Unsat { .. } => "shadow_exhausted",
             Self::Abstain { .. } => "abstain",
         }
     }
@@ -391,14 +402,61 @@ pub(crate) fn search_exact_pattern_shadow(
     forbidden_patterns: &[PartialTablePattern],
     caps: &ShadowCaps,
 ) -> ShadowOutcome {
+    search_exact_pattern_shadow_with_filters(forbidden_patterns, None, caps)
+}
+
+/// Runs only after the source assertion audit has accounted for every assertion.
+///
+/// The result remains test-only shadow evidence. In particular, exhaustion and
+/// witnesses are not SMT answers for the source file.
+pub(crate) fn search_qg_reduction_shadow(
+    reduction: &QgReduction,
+    caps: &ShadowCaps,
+) -> ShadowOutcome {
+    if !reduction.eligible() {
+        return ShadowOutcome::Abstain {
+            reason: ShadowAbstainReason::SourceAudit(reduction.first_ineligibility_code()),
+            telemetry: ShadowTelemetry {
+                trace_hash: FNV_OFFSET,
+                ..ShadowTelemetry::default()
+            },
+        };
+    }
+    let outcome = search_exact_pattern_shadow_with_filters(
+        reduction.patterns(),
+        Some(reduction.column_filters()),
+        caps,
+    );
+    match outcome {
+        ShadowOutcome::Sat { witness, telemetry } => {
+            match reduction.validate_local_constraints(witness.table()) {
+                Ok(()) => ShadowOutcome::Sat { witness, telemetry },
+                Err(assertion) => ShadowOutcome::Abstain {
+                    reason: ShadowAbstainReason::SourcePredicateRejected {
+                        assertion: assertion.ordinal,
+                    },
+                    telemetry,
+                },
+            }
+        }
+        outcome => outcome,
+    }
+}
+
+fn search_exact_pattern_shadow_with_filters(
+    forbidden_patterns: &[PartialTablePattern],
+    column_filters: Option<&[QgColumnFilter]>,
+    caps: &ShadowCaps,
+) -> ShadowOutcome {
     let mut telemetry = ShadowTelemetry {
         trace_hash: FNV_OFFSET,
         ..ShadowTelemetry::default()
     };
-    let prepared = match PreparedShadow::new(forbidden_patterns, caps, &mut telemetry) {
-        Ok(prepared) => prepared,
-        Err(reason) => return ShadowOutcome::Abstain { reason, telemetry },
-    };
+    let prepared =
+        match PreparedShadow::new(forbidden_patterns, column_filters, caps, &mut telemetry) {
+            Ok(prepared) => prepared,
+            Err(reason) => return ShadowOutcome::Abstain { reason, telemetry },
+        };
     let live_words = match prepared
         .degree
         .checked_add(1)
@@ -525,6 +583,8 @@ struct ShadowPermutation {
 struct PreparedShadow {
     degree: usize,
     permutations: Vec<ShadowPermutation>,
+    column_candidates: Vec<Vec<usize>>,
+    column_candidate_starts: [usize; MAX_SHADOW_DEGREE + 1],
     words: usize,
     last_word_mask: u64,
     compatibility: Vec<u64>,
@@ -535,6 +595,7 @@ struct PreparedShadow {
 impl PreparedShadow {
     fn new(
         forbidden_patterns: &[PartialTablePattern],
+        column_filters: Option<&[QgColumnFilter]>,
         caps: &ShadowCaps,
         telemetry: &mut ShadowTelemetry,
     ) -> Result<Self, ShadowAbstainReason> {
@@ -547,6 +608,17 @@ impl PreparedShadow {
         if degree == 0 || degree > MAX_SHADOW_DEGREE {
             return Err(ShadowAbstainReason::UnsupportedStructure(
                 "shadow degree outside 1..=7",
+            ));
+        }
+        if column_filters.is_some_and(|filters| {
+            filters.len() != degree
+                || filters
+                    .iter()
+                    .enumerate()
+                    .any(|(column, filter)| filter.column != column)
+        }) {
+            return Err(ShadowAbstainReason::UnsupportedStructure(
+                "invalid qg column filters",
             ));
         }
         let width = first.width();
@@ -593,8 +665,24 @@ impl PreparedShadow {
             ));
         }
 
-        let permutation_count = checked_factorial(degree)?;
+        let factorial = checked_factorial(degree)?;
+        let (permutation_count, candidate_capacities) =
+            count_filtered_shadow_permutations(degree, factorial, column_filters);
         telemetry.permutations = permutation_count;
+        telemetry.column_candidates = candidate_capacities[..degree]
+            .iter()
+            .try_fold(0_usize, |total, &candidates| total.checked_add(candidates))
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        telemetry.min_column_candidates = candidate_capacities[..degree]
+            .iter()
+            .copied()
+            .min()
+            .unwrap_or(0);
+        telemetry.max_column_candidates = candidate_capacities[..degree]
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0);
         if permutation_count > caps.max_permutations {
             return Err(ShadowAbstainReason::StructuralCap {
                 resource: "permutations",
@@ -602,7 +690,12 @@ impl PreparedShadow {
                 actual: permutation_count,
             });
         }
-        let permutations = shadow_permutations(degree, permutation_count)?;
+        let (permutations, column_candidates) = shadow_permutations(
+            degree,
+            permutation_count,
+            &candidate_capacities,
+            column_filters,
+        )?;
         debug_assert_eq!(permutations.len(), permutation_count);
 
         let words = patterns
@@ -615,12 +708,17 @@ impl PreparedShadow {
         } else {
             (1_u64 << (patterns.len() % 64)) - 1
         };
-        let candidates = degree
-            .checked_mul(permutation_count)
-            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
-        let compatibility_words = candidates
+        let compatibility_words = telemetry
+            .column_candidates
             .checked_mul(words)
             .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        let mut column_candidate_starts = [0_usize; MAX_SHADOW_DEGREE + 1];
+        for column in 0..degree {
+            column_candidate_starts[column + 1] = column_candidate_starts[column]
+                .checked_add(column_candidates[column].len())
+                .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        }
+        debug_assert_eq!(column_candidate_starts[degree], telemetry.column_candidates);
         let cell_compatibility_words = degree
             .checked_mul(degree)
             .and_then(|value| value.checked_mul(degree))
@@ -682,8 +780,11 @@ impl PreparedShadow {
 
         let mut compatibility = zeroed_words(compatibility_words)?;
         for column in 0..degree {
-            for (permutation_index, permutation) in permutations.iter().enumerate() {
-                let output = (column * permutation_count + permutation_index) * words;
+            for (candidate_index, &permutation_index) in
+                column_candidates[column].iter().enumerate()
+            {
+                let permutation = &permutations[permutation_index];
+                let output = (column_candidate_starts[column] + candidate_index) * words;
                 for word in 0..words {
                     let mut compatible = if word + 1 == words {
                         last_word_mask
@@ -733,6 +834,8 @@ impl PreparedShadow {
         Ok(Self {
             degree,
             permutations,
+            column_candidates,
+            column_candidate_starts,
             words,
             last_word_mask,
             compatibility,
@@ -741,8 +844,8 @@ impl PreparedShadow {
         })
     }
 
-    fn compatibility_offset(&self, column: usize, permutation: usize) -> usize {
-        (column * self.permutations.len() + permutation) * self.words
+    fn compatibility_offset(&self, column: usize, candidate: usize) -> usize {
+        (self.column_candidate_starts[column] + candidate) * self.words
     }
 }
 
@@ -759,28 +862,78 @@ fn cell_compatibility_offset(
 fn shadow_permutations(
     degree: usize,
     permutation_count: usize,
-) -> Result<Vec<ShadowPermutation>, ShadowAbstainReason> {
+    candidate_capacities: &[usize; MAX_SHADOW_DEGREE],
+    column_filters: Option<&[QgColumnFilter]>,
+) -> Result<(Vec<ShadowPermutation>, Vec<Vec<usize>>), ShadowAbstainReason> {
     let mut output = reserved_vec(permutation_count)?;
+    let mut column_candidates = reserved_vec(degree)?;
+    for &capacity in &candidate_capacities[..degree] {
+        column_candidates.push(reserved_vec(capacity)?);
+    }
     let mut values = [0_u8; MAX_SHADOW_DEGREE];
     for (value, slot) in values[..degree].iter_mut().enumerate() {
         *slot = u8::try_from(value).expect("shadow degree is at most seven");
     }
     loop {
-        let row_value_bits = values[..degree]
-            .iter()
-            .enumerate()
-            .fold(0_u64, |bits, (row, &value)| {
-                bits | (1_u64 << (row * degree + usize::from(value)))
+        let mut allowed_columns = [false; MAX_SHADOW_DEGREE];
+        for column in 0..degree {
+            allowed_columns[column] =
+                column_filters.is_none_or(|filters| filters[column].allows(&values[..degree]));
+        }
+        if allowed_columns[..degree].iter().any(|allowed| *allowed) {
+            let permutation_index = output.len();
+            let row_value_bits = values[..degree]
+                .iter()
+                .enumerate()
+                .fold(0_u64, |bits, (row, &value)| {
+                    bits | (1_u64 << (row * degree + usize::from(value)))
+                });
+            output.push(ShadowPermutation {
+                values,
+                row_value_bits,
             });
-        output.push(ShadowPermutation {
-            values,
-            row_value_bits,
-        });
+            for column in 0..degree {
+                if allowed_columns[column] {
+                    column_candidates[column].push(permutation_index);
+                }
+            }
+        }
         if !advance_permutation(&mut values[..degree]) {
             break;
         }
     }
-    Ok(output)
+    Ok((output, column_candidates))
+}
+
+fn count_filtered_shadow_permutations(
+    degree: usize,
+    factorial: usize,
+    column_filters: Option<&[QgColumnFilter]>,
+) -> (usize, [usize; MAX_SHADOW_DEGREE]) {
+    let Some(filters) = column_filters else {
+        let mut candidates = [0; MAX_SHADOW_DEGREE];
+        candidates[..degree].fill(factorial);
+        return (factorial, candidates);
+    };
+    let mut values = [0_u8; MAX_SHADOW_DEGREE];
+    for (value, slot) in values[..degree].iter_mut().enumerate() {
+        *slot = u8::try_from(value).expect("shadow degree is at most seven");
+    }
+    let mut retained = 0;
+    let mut candidates = [0; MAX_SHADOW_DEGREE];
+    loop {
+        let mut used = false;
+        for column in 0..degree {
+            if filters[column].allows(&values[..degree]) {
+                candidates[column] += 1;
+                used = true;
+            }
+        }
+        retained += usize::from(used);
+        if !advance_permutation(&mut values[..degree]) {
+            return (retained, candidates);
+        }
+    }
 }
 
 fn reserved_vec<T>(capacity: usize) -> Result<Vec<T>, ShadowAbstainReason> {
@@ -885,10 +1038,13 @@ impl ShadowSearch<'_> {
             }
             let next_columns = assigned_columns | (1_u8 << column);
             let mut viable = 0;
-            for permutation in 0..self.prepared.permutations.len() {
+            for (candidate, &permutation) in
+                self.prepared.column_candidates[column].iter().enumerate()
+            {
                 match self.candidate_is_viable(
                     depth,
                     column,
+                    candidate,
                     permutation,
                     next_columns,
                     used_row_values,
@@ -908,10 +1064,13 @@ impl ShadowSearch<'_> {
         }
         let column = best_column.expect("an incomplete search has an unassigned column");
         let next_columns = assigned_columns | (1_u8 << column);
-        for permutation_index in 0..self.prepared.permutations.len() {
+        for (candidate_index, &permutation_index) in
+            self.prepared.column_candidates[column].iter().enumerate()
+        {
             match self.candidate_is_viable(
                 depth,
                 column,
+                candidate_index,
                 permutation_index,
                 next_columns,
                 used_row_values,
@@ -921,7 +1080,7 @@ impl ShadowSearch<'_> {
                 Err(reason) => return ShadowDfsResult::Abstain(reason),
             }
             let row_value_bits = self.prepared.permutations[permutation_index].row_value_bits;
-            if let Err(reason) = self.write_child_live(depth, column, permutation_index) {
+            if let Err(reason) = self.write_child_live(depth, column, candidate_index) {
                 return ShadowDfsResult::Abstain(reason);
             }
             for (row, &value) in self.prepared.permutations[permutation_index].values
@@ -946,6 +1105,7 @@ impl ShadowSearch<'_> {
         &mut self,
         depth: usize,
         column: usize,
+        candidate: usize,
         permutation: usize,
         next_columns: u8,
         used_row_values: u64,
@@ -965,7 +1125,7 @@ impl ShadowSearch<'_> {
             return Ok(true);
         }
         let live = depth * self.prepared.words;
-        let compatible = self.prepared.compatibility_offset(column, permutation);
+        let compatible = self.prepared.compatibility_offset(column, candidate);
         let completed = usize::from(next_columns) * self.prepared.words;
         for word in 0..self.prepared.words {
             self.record_bitset_word_op()?;
@@ -985,11 +1145,11 @@ impl ShadowSearch<'_> {
         &mut self,
         depth: usize,
         column: usize,
-        permutation: usize,
+        candidate: usize,
     ) -> Result<(), ShadowAbstainReason> {
         let parent = depth * self.prepared.words;
         let child = (depth + 1) * self.prepared.words;
-        let compatible = self.prepared.compatibility_offset(column, permutation);
+        let compatible = self.prepared.compatibility_offset(column, candidate);
         for word in 0..self.prepared.words {
             self.record_bitset_word_op()?;
             self.live_stack[child + word] =
@@ -1022,7 +1182,14 @@ impl ShadowSearch<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forbidden_orbit_probe::CellAssignment;
+    use crate::forbidden_orbit_probe::{CellAssignment, QgReduction};
+    use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
+
+    fn audited_qg7_fixture() -> QgReduction {
+        let source = include_str!("../tests/fixtures/qg7_reduction_phase1.smt2");
+        let problem = parse_problem_with_scoped_let_mode(source, ScopedLetMode::Off).unwrap();
+        QgReduction::audit(source, &problem)
+    }
 
     fn brute_force_count(problem: &RightTranslationProblem) -> usize {
         assert!(problem.degree() <= 3, "tiny-degree checker only");
@@ -1539,5 +1706,46 @@ mod tests {
             }
         ));
         assert_eq!(outcome.telemetry().permutations, 5_040);
+    }
+
+    #[test]
+    fn audited_qg7_preparation_uses_240_candidates_per_column() {
+        let reduction = audited_qg7_fixture();
+        assert!(reduction.eligible());
+
+        let mut caps = ShadowCaps::default();
+        caps.max_search_nodes = 0;
+        let outcome = search_qg_reduction_shadow(&reduction, &caps);
+        assert!(matches!(
+            outcome,
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SearchCap {
+                    resource: "search_nodes",
+                    ..
+                },
+                ..
+            }
+        ));
+        assert_eq!(outcome.telemetry().permutations, 280);
+        assert_eq!(outcome.telemetry().column_candidates, 7 * 240);
+        assert_eq!(outcome.telemetry().min_column_candidates, 240);
+        assert_eq!(outcome.telemetry().max_column_candidates, 240);
+        assert_eq!(outcome.telemetry().preparation_word_ops, 7 * 240 * 7);
+
+        caps = ShadowCaps::default();
+        caps.max_permutations = 279;
+        let capped = search_qg_reduction_shadow(&reduction, &caps);
+        assert!(matches!(
+            capped,
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::StructuralCap {
+                    resource: "permutations",
+                    limit: 279,
+                    actual: 280,
+                },
+                ..
+            }
+        ));
+        assert_eq!(capped.telemetry().column_candidates, 7 * 240);
     }
 }
