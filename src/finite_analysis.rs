@@ -732,6 +732,7 @@ mod tests {
                 unsupported: Vec::new(),
                 true_term,
                 false_term,
+                data_terms: Vec::new(),
             },
         );
 
@@ -908,6 +909,7 @@ mod tests {
             unsupported: Vec::new(),
             true_term: 6,
             false_term: 7,
+            data_terms: Vec::new(),
         };
 
         let mut cnf = CnfProblem::new();
@@ -963,6 +965,7 @@ mod tests {
             unsupported: Vec::new(),
             true_term: 6,
             false_term: 7,
+            data_terms: Vec::new(),
         };
         let mut membership = HashMap::default();
         let mut literal = 1;
