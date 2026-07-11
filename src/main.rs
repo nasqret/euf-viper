@@ -24,6 +24,8 @@ mod quotient_csp;
 #[cfg(test)]
 mod quotient_state_search;
 #[cfg(test)]
+mod right_translation_exact_cover;
+#[cfg(test)]
 mod stabilizer_order;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
