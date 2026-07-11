@@ -5348,7 +5348,7 @@ fn selected_unconditional_quotient_mode() -> Result<unconditional_leaf_quotient:
         Ok(value) => unconditional_leaf_quotient::parse_mode(Some(&value)),
         Err(env::VarError::NotPresent) => unconditional_leaf_quotient::parse_mode(None),
         Err(env::VarError::NotUnicode(_)) => Err(format!(
-            "{} must be off, shadow, or on",
+            "{} must be off, shadow, on, or auto",
             unconditional_leaf_quotient::ENV
         )),
     }
@@ -5486,14 +5486,64 @@ fn solve_problem_with_options_and_eq_abstraction(
 
 fn build_unconditional_quotient_plan(
     assertions: &[BoolExpr],
+    data_terms: &[TermId],
     term_count: usize,
     mode: unconditional_leaf_quotient::Mode,
-) -> Option<unconditional_leaf_quotient::Plan> {
+) -> (Option<unconditional_leaf_quotient::Plan>, bool) {
     if mode == unconditional_leaf_quotient::Mode::Off {
         if env::var_os("EUF_VIPER_PROFILE").is_some() {
             eprintln!("profile_unconditional_quotient_mode=off fallback=none");
         }
-        return None;
+        return (None, false);
+    }
+
+    if mode == unconditional_leaf_quotient::Mode::Auto {
+        let start = Instant::now();
+        let outcome =
+            unconditional_leaf_quotient::Plan::build_auto(assertions, data_terms, term_count);
+        let elapsed_ns = start.elapsed().as_nanos();
+        let (plan, telemetry) = outcome.into_parts();
+        profile_measurement(
+            "unconditional_quotient_plan",
+            elapsed_ns,
+            telemetry.unconditional_equality_facts,
+        );
+        profile_measurement(
+            "unconditional_quotient_projected_terms",
+            0,
+            telemetry.projected_terms,
+        );
+        if env::var_os("EUF_VIPER_PROFILE").is_some() {
+            let raw_unique_nodes = telemetry
+                .raw_unique_nodes
+                .map_or_else(|| "none".to_owned(), |count| count.to_string());
+            let projected_unique_nodes = telemetry
+                .projected_unique_nodes
+                .map_or_else(|| "none".to_owned(), |count| count.to_string());
+            let reduction = telemetry
+                .reduction
+                .map_or_else(|| "none".to_owned(), |count| count.to_string());
+            let rejection = telemetry
+                .rejection
+                .map_or("none", unconditional_leaf_quotient::AutoRejection::as_str);
+            eprintln!(
+                "profile_unconditional_quotient_auto unconditional_equality_facts={} unique_supporting_facts={} effective_equality_unions={} projected_terms={} quotiented_terms={} raw_unique_nodes={} projected_unique_nodes={} reduction={} admitted={} rejected={} build_ns={} reason={}",
+                telemetry.unconditional_equality_facts,
+                telemetry.unique_supporting_facts,
+                telemetry.effective_equality_unions,
+                telemetry.projected_terms,
+                telemetry.quotiented_terms,
+                raw_unique_nodes,
+                projected_unique_nodes,
+                reduction,
+                usize::from(telemetry.admitted),
+                usize::from(!telemetry.admitted),
+                elapsed_ns,
+                rejection,
+            );
+            eprintln!("profile_unconditional_quotient_mode=auto fallback={rejection}");
+        }
+        return (plan, telemetry.admitted);
     }
 
     let start = Instant::now();
@@ -5519,7 +5569,8 @@ fn build_unconditional_quotient_plan(
                 .map_or("none", unconditional_leaf_quotient::BuildFailure::as_str),
         );
     }
-    result.ok()
+    let active = mode == unconditional_leaf_quotient::Mode::On && result.is_ok();
+    (result.ok(), active)
 }
 
 #[cold]
@@ -5598,13 +5649,13 @@ fn solve_bool_problem(
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
-    let quotient_plan = build_unconditional_quotient_plan(
+    let (quotient_plan, quotient_active) = build_unconditional_quotient_plan(
         &bool_problem.assertions,
+        &bool_problem.data_terms,
         arena.terms.len(),
         root_cnf_options.unconditional_quotient,
     );
-    let active_quotient = (root_cnf_options.unconditional_quotient
-        == unconditional_leaf_quotient::Mode::On)
+    let active_quotient = quotient_active
         .then_some(())
         .and(quotient_plan.as_ref())
         .filter(|plan| plan.is_effective());
@@ -6933,13 +6984,34 @@ mod tests {
         term_count: usize,
         options: RootCnfOptions,
     ) -> CnfProblem {
-        let plan = match options.unconditional_quotient {
-            unconditional_leaf_quotient::Mode::Off => None,
-            unconditional_leaf_quotient::Mode::Shadow | unconditional_leaf_quotient::Mode::On => {
-                Some(unconditional_leaf_quotient::Plan::build(assertions, term_count).unwrap())
+        encode_assertions_with_quotient_and_data_terms(assertions, &[], term_count, options)
+    }
+
+    fn encode_assertions_with_quotient_and_data_terms(
+        assertions: &[BoolExpr],
+        data_terms: &[TermId],
+        term_count: usize,
+        options: RootCnfOptions,
+    ) -> CnfProblem {
+        let (plan, active) = match options.unconditional_quotient {
+            unconditional_leaf_quotient::Mode::Off => (None, false),
+            unconditional_leaf_quotient::Mode::Shadow => (
+                Some(unconditional_leaf_quotient::Plan::build(assertions, term_count).unwrap()),
+                false,
+            ),
+            unconditional_leaf_quotient::Mode::On => (
+                Some(unconditional_leaf_quotient::Plan::build(assertions, term_count).unwrap()),
+                true,
+            ),
+            unconditional_leaf_quotient::Mode::Auto => {
+                let outcome = unconditional_leaf_quotient::Plan::build_auto(
+                    assertions, data_terms, term_count,
+                );
+                let (plan, telemetry) = outcome.into_parts();
+                (plan, telemetry.admitted)
             }
         };
-        let active = (options.unconditional_quotient == unconditional_leaf_quotient::Mode::On)
+        let active = active
             .then_some(())
             .and(plan.as_ref())
             .filter(|plan| plan.is_effective());
@@ -6991,6 +7063,39 @@ mod tests {
         }
     }
 
+    fn generated_auto_pairs(pair_count: usize) -> (Vec<BoolExpr>, Vec<TermId>) {
+        let assertions = (0..pair_count)
+            .map(|pair| BoolExpr::Atom(BoolAtomKey::Eq(2 * pair, 2 * pair + 1)))
+            .collect();
+        let data_terms = (0..2 * pair_count).collect();
+        (assertions, data_terms)
+    }
+
+    fn assert_cnf_byte_identical(left: &CnfProblem, right: &CnfProblem) {
+        assert_eq!(left.clauses, right.clauses);
+        assert_eq!(left.var_atoms, right.var_atoms);
+        assert_eq!(left.atom_vars, right.atom_vars);
+        assert_eq!(left.true_lit, right.true_lit);
+    }
+
+    fn add_disjoint_pair_assignment(cnf: &mut CnfProblem, class_values: &[bool]) {
+        let atoms = cnf
+            .var_atoms
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter_map(|(variable, atom)| atom.clone().map(|atom| (variable as i32, atom)))
+            .collect::<Vec<_>>();
+        for (variable, atom) in atoms {
+            let value = match atom {
+                BoolAtomKey::Eq(left, right) => left / 2 == right / 2,
+                BoolAtomKey::BoolTerm(term) => class_values.get(term / 2).copied().unwrap_or(false),
+            };
+            cnf.clauses
+                .push(vec![if value { variable } else { -variable }]);
+        }
+    }
+
     #[test]
     fn unconditional_quotient_off_and_shadow_are_byte_identical() {
         let assertions = vec![
@@ -7025,6 +7130,124 @@ mod tests {
             assert_eq!(shadow.var_atoms, off.var_atoms);
             assert_eq!(shadow.atom_vars, off.atom_vars);
             assert_eq!(shadow.true_lit, off.true_lit);
+        }
+    }
+
+    #[test]
+    fn unconditional_quotient_on_is_byte_identical_to_direct_legacy_plan_encoding() {
+        let assertions = vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(1, 0)),
+            BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                BoolExpr::Atom(BoolAtomKey::Eq(1, 2)),
+                BoolExpr::Atom(BoolAtomKey::BoolTerm(1)),
+            ]))),
+        ];
+        let plan = unconditional_leaf_quotient::Plan::build(&assertions, 3).unwrap();
+        for (direct_root_cnf, direct_negated_root) in [(false, false), (true, false), (true, true)]
+        {
+            let actual = encode_assertions_with_quotient(
+                &assertions,
+                3,
+                quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::On,
+                ),
+            );
+            let mut legacy = CnfProblem::new();
+            for assertion in &assertions {
+                if direct_root_cnf {
+                    legacy.add_direct_assertion_with_quotient(
+                        assertion,
+                        direct_negated_root,
+                        Some(&plan),
+                    );
+                } else {
+                    legacy.add_assertion_with_quotient(assertion, Some(&plan));
+                }
+            }
+            assert_cnf_byte_identical(&actual, &legacy);
+        }
+    }
+
+    #[test]
+    fn unconditional_quotient_auto_prefilter_rejections_are_byte_identical_to_off() {
+        let (facts_assertions, facts_data_terms) = generated_auto_pairs(695);
+
+        let (mut union_assertions, union_data_terms) = generated_auto_pairs(521);
+        union_assertions.extend(std::iter::repeat_n(
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+            175,
+        ));
+
+        let mut quotiented_assertions = (0..522)
+            .map(|term| BoolExpr::Atom(BoolAtomKey::Eq(term, term + 1)))
+            .collect::<Vec<_>>();
+        quotiented_assertions.extend(std::iter::repeat_n(
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+            174,
+        ));
+        let quotiented_data_terms = (0..523).collect::<Vec<_>>();
+
+        for (assertions, data_terms, term_count) in [
+            (&facts_assertions, &facts_data_terms, 1_390),
+            (&union_assertions, &union_data_terms, 1_042),
+            (&quotiented_assertions, &quotiented_data_terms, 523),
+        ] {
+            for (direct_root_cnf, direct_negated_root) in
+                [(false, false), (true, false), (true, true)]
+            {
+                let off = encode_assertions_with_quotient_and_data_terms(
+                    assertions,
+                    data_terms,
+                    term_count,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Off,
+                    ),
+                );
+                let auto = encode_assertions_with_quotient_and_data_terms(
+                    assertions,
+                    data_terms,
+                    term_count,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Auto,
+                    ),
+                );
+                assert_cnf_byte_identical(&auto, &off);
+            }
+        }
+    }
+
+    #[test]
+    fn unconditional_quotient_auto_boundary_changes_only_at_exact_1000() {
+        for (pair_count, admitted) in [(999, false), (1_000, true)] {
+            let (mut assertions, data_terms) = generated_auto_pairs(pair_count);
+            assertions.push(BoolExpr::Atom(BoolAtomKey::BoolTerm(1)));
+            let off = encode_assertions_with_quotient_and_data_terms(
+                &assertions,
+                &data_terms,
+                2 * pair_count,
+                quotient_root_options(true, true, unconditional_leaf_quotient::Mode::Off),
+            );
+            let auto = encode_assertions_with_quotient_and_data_terms(
+                &assertions,
+                &data_terms,
+                2 * pair_count,
+                quotient_root_options(true, true, unconditional_leaf_quotient::Mode::Auto),
+            );
+
+            if admitted {
+                assert!(off.atom_vars.contains_key(&BoolAtomKey::BoolTerm(1)));
+                assert!(!off.atom_vars.contains_key(&BoolAtomKey::BoolTerm(0)));
+                assert!(auto.atom_vars.contains_key(&BoolAtomKey::BoolTerm(0)));
+                assert!(!auto.atom_vars.contains_key(&BoolAtomKey::BoolTerm(1)));
+            } else {
+                assert_cnf_byte_identical(&auto, &off);
+            }
         }
     }
 
@@ -7165,6 +7388,60 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_full_ackermann_rebuild_reuses_admitted_auto_decision_and_plan() {
+        let (mut assertions, data_terms) = generated_auto_pairs(1_000);
+        assertions.push(BoolExpr::Atom(BoolAtomKey::BoolTerm(1)));
+        let bool_problem = BoolProblem {
+            assertions,
+            unsupported: Vec::new(),
+            true_term: 0,
+            false_term: 2,
+            data_terms,
+        };
+        let arena = TermArena {
+            terms: (0..2_000)
+                .map(|fun| Term {
+                    fun: fun as SymId,
+                    args: Vec::new(),
+                })
+                .collect(),
+            interned: HashMap::default(),
+            apps: Vec::new(),
+        };
+        let outcome = unconditional_leaf_quotient::Plan::build_auto(
+            &bool_problem.assertions,
+            &bool_problem.data_terms,
+            arena.terms.len(),
+        );
+        assert!(outcome.telemetry.admitted);
+        assert_eq!(outcome.telemetry.reduction, Some(1_000));
+        let (plan, _) = outcome.into_parts();
+        let plan = plan.unwrap();
+
+        let mut initial = CnfProblem::new();
+        atomize_bool_data_terms(&mut initial, &bool_problem);
+        for assertion in &bool_problem.assertions {
+            initial.add_direct_assertion_with_quotient(assertion, true, Some(&plan));
+        }
+        let (completed, _) = solve_dynamic_full_ackermann_with_negated_root_and_quotient(
+            &arena,
+            &bool_problem,
+            &[],
+            true,
+            Some(&plan),
+        );
+
+        assert_cnf_byte_identical(&completed, &initial);
+        let projected = completed.atom_vars[&BoolAtomKey::BoolTerm(0)];
+        assert!(
+            completed
+                .clauses
+                .iter()
+                .any(|clause| clause == &[projected])
+        );
+    }
+
+    #[test]
     fn unconditional_quotient_preserves_mandatory_congruence_unsat() {
         let input = "
             (set-logic QF_UF)
@@ -7269,6 +7546,58 @@ mod tests {
                         "quotient mismatch for {assertions:?}, options={on_options:?}, assignment={assignment}"
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn admitted_auto_quotient_has_exhaustive_semantic_parity() {
+        let (mut assertions, data_terms) = generated_auto_pairs(1_000);
+        assertions.push(BoolExpr::Ite(
+            Box::new(BoolExpr::Atom(BoolAtomKey::BoolTerm(1))),
+            Box::new(BoolExpr::Or(vec![
+                BoolExpr::Atom(BoolAtomKey::Eq(1, 2)),
+                BoolExpr::Atom(BoolAtomKey::BoolTerm(3)),
+            ])),
+            Box::new(BoolExpr::Iff(vec![
+                BoolExpr::Atom(BoolAtomKey::BoolTerm(5)),
+                BoolExpr::Not(Box::new(BoolExpr::Atom(BoolAtomKey::BoolTerm(0)))),
+            ])),
+        ));
+
+        for (direct_root_cnf, direct_negated_root) in [(false, false), (true, false), (true, true)]
+        {
+            for assignment in 0..8usize {
+                let class_values = (0..3)
+                    .map(|class| assignment & (1 << class) != 0)
+                    .collect::<Vec<_>>();
+                let mut off = encode_assertions_with_quotient_and_data_terms(
+                    &assertions,
+                    &data_terms,
+                    2_000,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Off,
+                    ),
+                );
+                let mut auto = encode_assertions_with_quotient_and_data_terms(
+                    &assertions,
+                    &data_terms,
+                    2_000,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Auto,
+                    ),
+                );
+                add_disjoint_pair_assignment(&mut off, &class_values);
+                add_disjoint_pair_assignment(&mut auto, &class_values);
+                assert_eq!(
+                    cnf_is_satisfiable(&auto),
+                    cnf_is_satisfiable(&off),
+                    "auto quotient mismatch for options=({direct_root_cnf}, {direct_negated_root}), assignment={assignment}"
+                );
             }
         }
     }
