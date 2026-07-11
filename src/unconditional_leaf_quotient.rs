@@ -16,6 +16,28 @@ const AUTO_MIN_UNCONDITIONAL_FACTS: usize = 696;
 const AUTO_MIN_EFFECTIVE_UNIONS: usize = 522;
 const AUTO_MIN_QUOTIENTED_TERMS: usize = 788;
 
+// Count deterministic heap-backed construction sites without replacing the global allocator.
+#[cfg(test)]
+std::thread_local! {
+    static PLAN_HEAP_VECTOR_CONSTRUCTIONS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn record_plan_heap_vector_construction() {
+    PLAN_HEAP_VECTOR_CONSTRUCTIONS.with(|count| count.set(count.get() + 1));
+}
+
+#[cfg(test)]
+fn reset_plan_heap_vector_constructions() {
+    PLAN_HEAP_VECTOR_CONSTRUCTIONS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn plan_heap_vector_constructions() -> usize {
+    PLAN_HEAP_VECTOR_CONSTRUCTIONS.with(std::cell::Cell::get)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
     Off,
@@ -215,6 +237,17 @@ impl Plan {
         config: AutoConfig,
     ) -> AutoOutcome {
         let mut telemetry = AutoTelemetry::default();
+        let plan_limits = Limits::default();
+        // Preserve the plan's cheap hard-limit failure before the prefilter allocates or scans.
+        if term_count > plan_limits.max_terms {
+            telemetry.rejection = Some(AutoRejection::Plan(BuildFailure::TermLimit));
+            return AutoOutcome {
+                plan: None,
+                telemetry,
+            };
+        }
+
+        // Every path that can admit still reaches Plan and data-term validation below.
         telemetry.unconditional_equality_facts = match count_unconditional_equality_facts(
             assertions,
             config.limits.max_equality_facts,
@@ -236,7 +269,7 @@ impl Plan {
             };
         }
 
-        let plan = match Self::build(assertions, term_count) {
+        let plan = match Self::build_with_limits(assertions, term_count, plan_limits) {
             Ok(plan) => plan,
             Err(failure) => {
                 telemetry.rejection = Some(AutoRejection::Plan(failure));
@@ -342,7 +375,11 @@ impl Plan {
             });
         }
 
+        #[cfg(test)]
+        record_plan_heap_vector_construction();
         let mut representatives = (0..term_count).collect::<Vec<_>>();
+        #[cfg(test)]
+        record_plan_heap_vector_construction();
         let mut facts = supporting_facts.iter().copied().collect::<Vec<_>>();
         facts.sort_unstable();
         for (left, right) in facts {
@@ -1074,10 +1111,55 @@ mod tests {
     }
 
     #[test]
-    fn fact_prefilter_runs_before_plan_allocation() {
-        let outcome = Plan::build_auto(&[], &[], DEFAULT_MAX_TERMS + 1);
+    fn auto_term_limit_precedes_fact_scan() {
+        reset_plan_heap_vector_constructions();
+        let outcome = Plan::build_auto(&[eq(0, 1)], &[], DEFAULT_MAX_TERMS + 1);
 
+        assert_eq!(plan_heap_vector_constructions(), 0);
         assert_eq!(outcome.telemetry.unconditional_equality_facts, 0);
+        assert_eq!(outcome.telemetry.unique_supporting_facts, 0);
+        assert_eq!(outcome.telemetry.effective_equality_unions, 0);
+        assert_eq!(outcome.telemetry.projected_terms, 0);
+        assert_eq!(outcome.telemetry.quotiented_terms, 0);
+        assert_eq!(outcome.telemetry.raw_unique_nodes, None);
+        assert_eq!(outcome.telemetry.projected_unique_nodes, None);
+        assert_eq!(outcome.telemetry.reduction, None);
+        assert!(!outcome.telemetry.admitted);
+        assert_eq!(
+            outcome.telemetry.rejection,
+            Some(AutoRejection::Plan(BuildFailure::TermLimit))
+        );
+        assert!(outcome.plan.is_none());
+    }
+
+    #[test]
+    fn fact_prefilter_skips_allocating_plan_construction_for_valid_695_pairs() {
+        let pair_count = AUTO_MIN_UNCONDITIONAL_FACTS - 1;
+        let term_count = 2 * pair_count;
+        let (assertions, data_terms) = generated_disjoint_pairs(pair_count);
+
+        reset_plan_heap_vector_constructions();
+        let direct_plan = Plan::build(&assertions, term_count).unwrap();
+        assert_eq!(direct_plan.representatives.len(), term_count);
+        assert!(direct_plan.representatives.capacity() >= term_count);
+        assert_eq!(direct_plan.supporting_facts.len(), pair_count);
+        assert!(direct_plan.supporting_facts.capacity() > 0);
+        assert_eq!(plan_heap_vector_constructions(), 2);
+        drop(direct_plan);
+
+        reset_plan_heap_vector_constructions();
+        let outcome = Plan::build_auto(&assertions, &data_terms, term_count);
+
+        assert_eq!(plan_heap_vector_constructions(), 0);
+        assert_eq!(outcome.telemetry.unconditional_equality_facts, pair_count);
+        assert_eq!(outcome.telemetry.unique_supporting_facts, 0);
+        assert_eq!(outcome.telemetry.effective_equality_unions, 0);
+        assert_eq!(outcome.telemetry.projected_terms, 0);
+        assert_eq!(outcome.telemetry.quotiented_terms, 0);
+        assert_eq!(outcome.telemetry.raw_unique_nodes, None);
+        assert_eq!(outcome.telemetry.projected_unique_nodes, None);
+        assert_eq!(outcome.telemetry.reduction, None);
+        assert!(!outcome.telemetry.admitted);
         assert_eq!(
             outcome.telemetry.rejection,
             Some(AutoRejection::PrefilterFacts)
