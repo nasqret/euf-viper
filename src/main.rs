@@ -5603,12 +5603,11 @@ fn solve_bool_problem(
         arena.terms.len(),
         root_cnf_options.unconditional_quotient,
     );
-    let active_quotient =
-        if root_cnf_options.unconditional_quotient == unconditional_leaf_quotient::Mode::On {
-            quotient_plan.as_ref()
-        } else {
-            None
-        };
+    let active_quotient = (root_cnf_options.unconditional_quotient
+        == unconditional_leaf_quotient::Mode::On)
+        .then_some(())
+        .and(quotient_plan.as_ref())
+        .filter(|plan| plan.is_effective());
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
@@ -6942,7 +6941,8 @@ mod tests {
         };
         let active = (options.unconditional_quotient == unconditional_leaf_quotient::Mode::On)
             .then_some(())
-            .and(plan.as_ref());
+            .and(plan.as_ref())
+            .filter(|plan| plan.is_effective());
         let mut cnf = CnfProblem::new();
         for assertion in assertions {
             if options.direct_root_cnf {

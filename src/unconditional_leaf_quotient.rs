@@ -102,6 +102,14 @@ impl Plan {
             )?;
         }
 
+        if supporting_facts.iter().all(|(left, right)| left == right) {
+            return Ok(Self {
+                representatives: Vec::new(),
+                supporting_facts,
+                projected_terms: 0,
+            });
+        }
+
         let mut representatives = (0..term_count).collect::<Vec<_>>();
         let mut facts = supporting_facts.iter().copied().collect::<Vec<_>>();
         facts.sort_unstable();
@@ -125,6 +133,9 @@ impl Plan {
     }
 
     pub(crate) fn project(&self, atom: &BoolAtomKey) -> ProjectedLeaf {
+        if self.representatives.is_empty() {
+            return ProjectedLeaf::Atom(atom.clone());
+        }
         match *atom {
             BoolAtomKey::Eq(left, right) => {
                 let raw = normalized_pair(left, right);
@@ -152,6 +163,10 @@ impl Plan {
 
     pub(crate) fn projected_term_count(&self) -> usize {
         self.projected_terms
+    }
+
+    pub(crate) fn is_effective(&self) -> bool {
+        self.projected_terms != 0
     }
 }
 
@@ -319,5 +334,16 @@ mod tests {
             Plan::build_with_limits(&[BoolExpr::Not(Box::new(eq(0, 3)))], 3, tiny),
             Err(BuildFailure::InvalidTerm)
         );
+    }
+
+    #[test]
+    fn formulas_without_effective_supporting_facts_have_no_identity_map() {
+        let atom = BoolAtomKey::BoolTerm(2);
+        let plan = Plan::build(&[eq(1, 1), BoolExpr::Not(Box::new(eq(0, 1)))], 3).unwrap();
+
+        assert!(!plan.is_effective());
+        assert!(plan.representatives.is_empty());
+        assert_eq!(plan.supporting_fact_count(), 1);
+        assert_eq!(plan.project(&atom), ProjectedLeaf::Atom(atom));
     }
 }
