@@ -160,6 +160,32 @@ Every candidate remains default-off until it passes the same-binary targeted
 gate, hot-path gate, hard-tail gate, and complete 7,503-instance gate. A
 target-family win is evidence for routing, not evidence for promotion.
 
+## 2026-07-11 No-Compromise Novelty Campaign
+
+The active campaign is specified in
+`research-vault/02-design/2026-07-11-no-compromise-novelty-campaign.md`.
+Primary novelty candidates, in execution order, are:
+
+1. pre-CNF complete-model scouts with independent SAT-model validation;
+2. theory-conditioned quotient compilation of the Boolean DAG;
+3. proof-carrying stabilizer-chain orbit quotienting for finite tables;
+4. bit-sliced quotient-model swarms;
+5. canonical quotient RAM and frontier quotient-state search;
+6. proof-complexity-triggered per-component representation migration.
+
+The exclusion map forbids novelty claims for eager encoding, rollback
+congruence closure, dynamic Ackermannization, ordinary symmetry clauses,
+Hall propagation, DAG hash-consing, portfolios, certificates, or low-level
+optimization considered separately. Every mechanism starts in shadow or
+reference mode and is killed before timing if its opportunity or semantic
+distinction is absent.
+
+The broad Yices2-changing envelope is `TABLE_CORE OR GRAPH_32`, covering
+7,305/7,503 formulas. Narrow domain-7 and graph-2500 populations are mechanism
+gates, not endpoints. Superiority requires complete or leading coverage,
+`1.05x` timeout and common-total speed, `1.02x` geometric speed, lower median
+and p95, two CPU classes, two repeats, held-out data, and checked evidence.
+
 ### Live 2026-07-10 Candidates
 
 - **Correctness repair, mandatory first:** atomize every Boolean-valued term
@@ -246,8 +272,10 @@ Z3's 7,176, cvc5's 6,926, and Yices2's 7,434. On 6,907 common euf-viper/Z3
 solves it is `1.119x` faster by aggregate and `2.083x` geometrically, but Z3's
 228 net coverage advantage still wins timeout-charged total time. Yices2 is
 about `3.46x` faster on common aggregate time and adds 486 net solves.
-The exact 60-second rerun is complete: euf-viper solves 7,478 versus Z3's
-7,490 and Yices2's 7,500. Euf-viper retains a 1.888x geometric advantage over
-Z3 on common solves, but loses common aggregate time at 0.723x because of its
-hard tail. The exact 1,200-second timeout-only continuation is running. No
-overall Z3 or Yices2 superiority claim is allowed.
+The exact 60-second rerun solves 7,478 versus Z3's 7,490 and Yices2's 7,500.
+The exact 1,200-second continuation then reaches 7,502 versus Z3's 7,500 and
+Yices2's 7,503. Euf-viper narrowly beats Z3's full timeout-charged total,
+8,575.78s versus 8,676.80s, but loses common-solve aggregate time at 0.6939x.
+Yices2 remains complete and about 4.27x faster by full total. The measured
+binary has the known Boolean-as-data defect; no overall solver claim is allowed
+until repaired commit `53c12f7` passes WMI correctness and performance gates.

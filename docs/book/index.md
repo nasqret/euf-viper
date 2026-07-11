@@ -11,9 +11,10 @@ congruence-closure model validator with lazy theory-lemma fallback.
 At a two-second budget on 7,503 SMT-LIB 2025 QF_UF instances, `euf-viper` is
 faster than Z3 on most jointly solved inputs but has lower coverage. Yices2 is
 both faster and substantially more complete than the current implementation.
-The exact 60-second campaign solves 7,478 instances, versus 7,490 for Z3 and
-7,500 for Yices2. A critical Boolean-as-data counterexample also shows that the
-accepted binary is not sound for every parser-supported input. Broad soundness
-and superiority claims are suspended until that defect is repaired and all
-correctness and performance gates are rerun.
+The exact 1,200-second campaign solves 7,502 instances, versus 7,500 for Z3 and
+7,503 for Yices2. It narrowly beats Z3's timeout-charged total on this corpus,
+but remains about 4.27x slower than Yices2. A critical Boolean-as-data
+counterexample also shows that the measured binary is not sound for every
+parser-supported input. Broad soundness and superiority claims are suspended
+until repaired commit `53c12f7` passes all correctness and performance gates.
 ```

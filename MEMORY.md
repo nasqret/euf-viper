@@ -378,3 +378,32 @@
 - Restore the accepted source lineage, atomize all Boolean data terms, require
   total theory assignments, and rerun correctness gates before promoting any
   performance route or restoring soundness claims.
+
+## Exact 1,200-Second Frontier (2026-07-11)
+
+- Campaign `143382`/`143383`/`143384` completed all 64 shards and the strict
+  merge. Coverage is 7,502 euf-viper, 7,500 Z3, 7,495 cvc5, and 7,503 Yices2,
+  with zero observed wrong answers or errors.
+- Euf-viper's full timeout-charged total is 8,575.78s versus Z3's 8,676.80s,
+  but its common-solve aggregate ratio is only `0.6939x`; do not describe this
+  as a uniform timing victory. Yices2 totals 2,010.00s and remains complete.
+- The measured `58efe9d` binary retains the known Boolean-as-data defect, so
+  the campaign is exact-corpus performance evidence only.
+- The repaired exact-baseline branch is `soundness/accepted-58efe` at
+  `53c12f7`. It must pass WMI differential and paired gates before acceptance.
+
+## Novelty Campaign (2026-07-11)
+
+- Do not claim novelty for eager SAT reduction, partial-trail e-graphs,
+  Ackermannization, ordinary symmetry, Hall propagation, DAG sharing,
+  portfolios, certificates, or systems optimization in isolation.
+- The active differentiated mechanisms are pre-CNF complete-model scouts,
+  theory-conditioned Boolean quotient compilation, proof-carrying multi-table
+  orbit quotienting, bit-sliced quotient swarms, SAT-native quotient-state
+  search, and per-component proof-system migration.
+- Yices2 cannot be reached by tail repair alone. The frozen rank-changing
+  envelope `TABLE_CORE OR GRAPH_32` contains 7,305/7,503 formulas; broad head
+  acceleration is mandatory.
+- First behavioral candidate is the complete-model scout because it can only
+  return independently validated SAT and targets the broad satisfiable head.
+  Orbit and DAG mechanisms begin in telemetry/reference mode in parallel.

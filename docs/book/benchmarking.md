@@ -229,3 +229,30 @@ Coverage delta was +9. Candidate speedup was 1.0169x over all instances,
 observations were present; wrong-answer and execution-error lists were empty.
 The one-repeat run is an acceptance A/B, not a precision estimate, and it does
 not replace the older 60-second or 1,200-second four-solver campaigns.
+
+## Current Exact Long-Timeout Checkpoint
+
+The later exact-source campaign used accepted source `58efe9d`, frozen binary
+SHA-256
+`4d5431135c95a2c528d287efd2803eaf895a5ec526c9642a570797b02fd47eb7`,
+and jobs `143382`/`143383`/`143384`. It resumed only the timeout observations
+from the complete 60-second matrix. All 64 shards and the strict merge
+completed.
+
+| Solver | Correct | Timeouts | Median | Timeout-charged total |
+|---|---:|---:|---:|---:|
+| euf-viper | 7,502 | 1 | 0.0471s | 8,575.78s |
+| Z3 4.16.0 | 7,500 | 3 | 0.1285s | 8,676.80s |
+| cvc5 1.3.4 | 7,495 | 8 | 0.1888s | 19,511.55s |
+| Yices2 2.7.0 | 7,503 | 0 | 0.0243s | 2,010.00s |
+
+Euf-viper narrowly exceeds Z3 on coverage and full timeout-charged total, and
+is `1.868x` faster geometrically on 7,499 common solves. Its common-solve
+aggregate is nevertheless worse, at 7,315.49s versus 5,075.91s. Yices2 is
+complete and about `4.27x` faster by full total.
+
+The measured binary has the confirmed Boolean-as-data soundness defect. The
+campaign records zero mismatches on this exact corpus and remains valid timing
+evidence for these files, but it is not a general soundness or superiority
+result. The repaired exact-source candidate must repeat the correctness and
+performance gates.

@@ -6,4 +6,5 @@ chapters:
   - file: implementation
   - file: benchmarking
   - file: frontier
+  - file: novelty-campaign
   - file: operations

@@ -2,8 +2,8 @@
 
 Date: 2026-07-10
 
-Status: global PGO rejected; PGO router not promoted; exact 60-second campaign
-complete; exact 1,200-second resume running.
+Status: global PGO rejected; PGO router not promoted; exact 60-second and
+1,200-second campaigns complete.
 
 ## Fixed Baseline
 
@@ -114,10 +114,19 @@ four-solver oracle solves all 7,503 instances; euf-viper is uniquely correct on
 ## Competition-Budget Resume
 
 The exact 1,200-second continuation is prep `143382`, array `143383`, and merge
-`143384`. It resumes run `143248` with `retry_results=timeout`, so only the 71
-timeout observations execute. Prep verified the baseline binary hash and the
-7,503-row manifest hash before releasing the array. This campaign is running;
-no final coverage values are recorded yet.
+`143384`. It resumed run `143248` with `retry_results=timeout`, so only the 71
+timeout observations executed. All 64 shards and the strict merge completed.
+
+Coverage is 7,502 euf-viper, 7,500 Z3, 7,495 cvc5, and 7,503 Yices2. Full
+timeout-charged totals are 8,575.78s, 8,676.80s, 19,511.55s, and 2,010.00s,
+respectively. Euf-viper therefore narrowly exceeds Z3 on coverage and the full
+timeout-charged metric, but loses common-solve aggregate time at `0.6939x`.
+Yices2 remains complete and about `4.27x` faster by full total.
+
+The measured binary has the separately confirmed Boolean-as-data soundness
+defect. These are valid exact-corpus timings with zero observed mismatches, not
+a general superiority claim. Full details are in
+`2026-07-11-qf-uf-1200s-143382.md`.
 
 ## Artifacts
 
@@ -125,6 +134,8 @@ no final coverage values are recorded yet.
 - `results/wmi/pgo-sample40-143302/structural-router-independent.json`.
 - `results/wmi/four-solver-60s-143248/`, containing 326 campaign files and the
   exact manifest.
+- `results/wmi/four-solver-1200s-143382/`, containing 330 campaign files,
+  strict merge logs, metadata, and merged analysis.
 - Merged CSV SHA-256:
   `f255208a70c7af4ef34039a577ba6642002397097ef3bb8ac73041293b980863`.
 - Merged analysis SHA-256:

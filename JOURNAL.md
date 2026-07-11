@@ -442,6 +442,31 @@
   cases, Boolean-DAG hash-consing over 174 large closed-table cases, and a
   conflict-only partial-trail rollback e-graph over the 39 large non-table
   equality graphs. Each has a strict targeted gate before broader testing.
+- Completed and fetched the exact 1,200-second continuation
+  `143382`/`143383`/`143384`. Coverage is 7,502 euf-viper, 7,500 Z3, 7,495
+  cvc5, and 7,503 Yices2, with zero wrong answers or errors. Euf-viper narrowly
+  beats Z3 by full timeout-charged total, 8,575.78s versus 8,676.80s, but loses
+  common-solve aggregate time at `0.6939x`. Yices2 totals 2,010.00s and remains
+  the overall target.
+- Reverted rejected source commit `5f67b6f` as `bb07f2e`, then committed the
+  global Boolean-data and total-model repair as `56c56f6`. The same repair was
+  ported onto exact accepted source `58efe9d` as branch
+  `soundness/accepted-58efe`, commit `53c12f7`. The exact branch passes 91
+  all-feature tests and returns UNSAT on the counterexample through all four
+  local backend routes.
+- Launched the no-compromise novelty program with six independent agent
+  audits. The primary-source exclusion map rejects fifteen false novelty
+  claims; the Z3/Yices source audit confirms that another rollback e-graph,
+  dynamic Ackermannizer, or symmetry-clause pass would reproduce occupied
+  design space.
+- Froze six distinct mechanism tracks: pre-CNF complete-model scouts,
+  theory-conditioned Boolean quotient compilation, certified multi-table
+  orbit quotienting, bit-sliced quotient swarms, SAT-native quotient-state
+  search, and proof-complexity-triggered component migration. Initial WMI job
+  `143674` failed before computation because of a submit-directory mistake;
+  its blocked dependents were cancelled. Corrected soundness `143680`,
+  sample-40 A/B `143681`, and 10,000-case differential `143682` now guard the
+  baseline.
 
 ## Next Entry Template
 
