@@ -2510,6 +2510,36 @@ impl BoundedCount {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TelemetryCount {
+    NotComputed,
+    Unavailable,
+    Exact(usize),
+    #[allow(dead_code)]
+    LowerBound(usize),
+}
+
+impl TelemetryCount {
+    fn profile_parts(self) -> (Option<usize>, &'static str) {
+        match self {
+            Self::NotComputed => (None, "not_computed"),
+            Self::Unavailable => (None, "unavailable"),
+            Self::Exact(value) => (Some(value), "exact"),
+            Self::LowerBound(value) => (Some(value), "lower_bound"),
+        }
+    }
+
+    fn profile_fields(self) -> (String, &'static str) {
+        let (value, state) = self.profile_parts();
+        (
+            value
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            state,
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct LeafBudgetFootprint {
     terms: usize,
@@ -2595,7 +2625,9 @@ struct LeafBudgetCompletionReport {
     activated: bool,
     rejection: Option<LeafBudgetRejection>,
     footprint: LeafBudgetFootprint,
-    ackermann: Option<AckermannEstimate>,
+    ackermann_estimate: Option<AckermannEstimate>,
+    ackermann_clauses: TelemetryCount,
+    ackermann_literal_slots: TelemetryCount,
     fill_edges: BoundedCount,
     fill_pair_examinations: BoundedCount,
     transitivity_clauses: BoundedCount,
@@ -2613,7 +2645,9 @@ impl LeafBudgetCompletionReport {
                 applications: arena.apps.len(),
                 ..LeafBudgetFootprint::default()
             },
-            ackermann: None,
+            ackermann_estimate: None,
+            ackermann_clauses: TelemetryCount::NotComputed,
+            ackermann_literal_slots: TelemetryCount::NotComputed,
             fill_edges: BoundedCount::default(),
             fill_pair_examinations: BoundedCount::default(),
             transitivity_clauses: BoundedCount::default(),
@@ -2624,6 +2658,20 @@ impl LeafBudgetCompletionReport {
         self.rejection = Some(rejection);
         self
     }
+}
+
+fn reject_ackermann_estimate_failure(
+    mut report: LeafBudgetCompletionReport,
+    failure: AckermannEstimateFailure,
+) -> LeafBudgetCompletionReport {
+    report.ackermann_clauses = TelemetryCount::Unavailable;
+    report.ackermann_literal_slots = TelemetryCount::Unavailable;
+    report.reject(match failure {
+        AckermannEstimateFailure::InvalidTerm => LeafBudgetRejection::AckermannInvalidTerm,
+        AckermannEstimateFailure::ArithmeticOverflow => {
+            LeafBudgetRejection::AckermannArithmeticOverflow
+        }
+    })
 }
 
 fn build_leaf_budget_completion_candidate(
@@ -2638,7 +2686,7 @@ fn build_leaf_budget_completion_candidate(
     }
 
     let estimate = report
-        .ackermann
+        .ackermann_estimate
         .expect("successful leaf-budget precheck has an estimate");
     let mut candidate = cnf.clone();
     let ackermann_start = candidate.clauses.len();
@@ -2848,14 +2896,11 @@ fn leaf_budget_completion_precheck(
 
     let estimate = match full_ackermann_estimate(cnf, arena) {
         Ok(estimate) => estimate,
-        Err(AckermannEstimateFailure::InvalidTerm) => {
-            return report.reject(LeafBudgetRejection::AckermannInvalidTerm);
-        }
-        Err(AckermannEstimateFailure::ArithmeticOverflow) => {
-            return report.reject(LeafBudgetRejection::AckermannArithmeticOverflow);
-        }
+        Err(failure) => return reject_ackermann_estimate_failure(report, failure),
     };
-    report.ackermann = Some(estimate);
+    report.ackermann_estimate = Some(estimate);
+    report.ackermann_clauses = TelemetryCount::Exact(estimate.clauses);
+    report.ackermann_literal_slots = TelemetryCount::Exact(estimate.literal_slots);
     if estimate.clauses > limits.max_ackermann_clauses {
         return report.reject(LeafBudgetRejection::AckermannClauseCap);
     }
@@ -2879,9 +2924,12 @@ fn profile_leaf_budget_completion(report: &LeafBudgetCompletionReport) {
     if env::var_os("EUF_VIPER_PROFILE").is_none() {
         return;
     }
-    let estimate = report.ackermann.unwrap_or_default();
+    let (ackermann_clause_value, ackermann_clause_state) =
+        report.ackermann_clauses.profile_fields();
+    let (ackermann_literal_value, ackermann_literal_state) =
+        report.ackermann_literal_slots.profile_fields();
     eprintln!(
-        "profile_full_ackermann_leaf_budget attempt=1 admitted={} rejected={} reason={} terms={} vars={} base_clauses={} base_literal_slots_lower_bound={} base_literal_slots_exact={} app_count={} max_arity_lower_bound={} max_arity_exact={} app_argument_slots_lower_bound={} app_argument_slots_exact={} ackermann_clauses={} ackermann_literal_slots={} fill_edges_lower_bound={} fill_edges_exact={} fill_pair_examinations_lower_bound={} fill_pair_examinations_exact={} transitivity_clauses_lower_bound={} transitivity_clauses_exact={}",
+        "profile_full_ackermann_leaf_budget attempt=1 admitted={} rejected={} reason={} terms={} vars={} base_clauses={} base_literal_slots_lower_bound={} base_literal_slots_exact={} app_count={} max_arity_lower_bound={} max_arity_exact={} app_argument_slots_lower_bound={} app_argument_slots_exact={} ackermann_clauses={} ackermann_clauses_state={} ackermann_literal_slots={} ackermann_literal_slots_state={} fill_edges_lower_bound={} fill_edges_exact={} fill_pair_examinations_lower_bound={} fill_pair_examinations_exact={} transitivity_clauses_lower_bound={} transitivity_clauses_exact={}",
         usize::from(report.activated),
         usize::from(!report.activated),
         report.rejection.map_or("none", LeafBudgetRejection::as_str),
@@ -2895,8 +2943,10 @@ fn profile_leaf_budget_completion(report: &LeafBudgetCompletionReport) {
         usize::from(report.footprint.max_arity.exact),
         report.footprint.app_argument_slots.lower_bound,
         usize::from(report.footprint.app_argument_slots.exact),
-        estimate.clauses,
-        estimate.literal_slots,
+        ackermann_clause_value,
+        ackermann_clause_state,
+        ackermann_literal_value,
+        ackermann_literal_state,
         report.fill_edges.lower_bound,
         usize::from(report.fill_edges.exact),
         report.fill_pair_examinations.lower_bound,
@@ -4561,9 +4611,24 @@ fn use_eager_congruence_for_first_pass(
     }
 }
 
+#[cfg(test)]
 fn auto_prefers_cadical(app_count: usize, finite_added: usize, app_threshold: usize) -> bool {
+    auto_prefers_cadical_with_platform(
+        app_count,
+        finite_added,
+        app_threshold,
+        !cfg!(all(target_os = "linux", target_arch = "x86_64")),
+    )
+}
+
+fn auto_prefers_cadical_with_platform(
+    app_count: usize,
+    finite_added: usize,
+    app_threshold: usize,
+    finite_routes_to_cadical: bool,
+) -> bool {
     (app_threshold > 0 && app_count >= app_threshold)
-        || (finite_added > 0 && !cfg!(all(target_os = "linux", target_arch = "x86_64")))
+        || (finite_added > 0 && finite_routes_to_cadical)
 }
 
 fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
@@ -4655,8 +4720,26 @@ fn dynamic_full_ackermann_before_refinement(
 enum EagerSolveOutcome {
     Solved(SolveResult),
     InvalidTheoryModel(usize),
-    #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
-    Unavailable,
+    Unavailable(EagerUnavailableReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EagerUnavailableReason {
+    BackendBeforeSat,
+    SolveError,
+    Interrupted,
+    ModelUnavailable,
+}
+
+impl EagerUnavailableReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::BackendBeforeSat => "backend_before_sat",
+            Self::SolveError => "solve_error",
+            Self::Interrupted => "interrupted",
+            Self::ModelUnavailable => "model_unavailable",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4668,6 +4751,18 @@ struct EagerSolveAttempt {
 impl EagerSolveAttempt {
     fn new(outcome: EagerSolveOutcome, sat_calls: usize) -> Self {
         Self { outcome, sat_calls }
+    }
+}
+
+type EagerSolveRunner = fn(&CnfProblem, &TermArena, TermId, TermId, bool) -> EagerSolveAttempt;
+
+fn classify_rustsat_eager_result(
+    result: RustSatResult,
+) -> Result<Option<SolveResult>, EagerUnavailableReason> {
+    match result {
+        RustSatResult::Sat => Ok(None),
+        RustSatResult::Unsat => Ok(Some(SolveResult::Unsat)),
+        RustSatResult::Interrupted => Err(EagerUnavailableReason::Interrupted),
     }
 }
 
@@ -4739,11 +4834,17 @@ fn solve_kissat_euf_once_counted(
         };
     }
     if !complete_cnf_assignment(cnf, &mut assignment) {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+            1,
+        );
     }
     let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
     else {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+            1,
+        );
     };
     if conflicts.is_empty() {
         EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Sat), 1)
@@ -4774,11 +4875,17 @@ fn solve_kissat_euf_once_counted(
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
     if configure_kissat(&mut solver).is_none() {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::BackendBeforeSat),
+            0,
+        );
     }
     for clause in &cnf.clauses {
         if solver.add_clause(rustsat_clause(clause)).is_err() {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
+            return EagerSolveAttempt::new(
+                EagerSolveOutcome::Unavailable(EagerUnavailableReason::BackendBeforeSat),
+                0,
+            );
         }
     }
     profile_phase("kissat_base_load", load_start, cnf.clauses.len());
@@ -4789,7 +4896,10 @@ fn solve_kissat_euf_once_counted(
     let transitivity_load_start = Instant::now();
     for clause in transitivity {
         if solver.add_clause(rustsat_clause(&clause)).is_err() {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
+            return EagerSolveAttempt::new(
+                EagerSolveOutcome::Unavailable(EagerUnavailableReason::BackendBeforeSat),
+                0,
+            );
         }
     }
     profile_phase("kissat_transitivity_load", transitivity_load_start, 0);
@@ -4804,33 +4914,45 @@ fn solve_kissat_euf_once_counted(
     let congruence_load_start = Instant::now();
     for clause in congruence {
         if solver.add_clause(rustsat_clause(&clause)).is_err() {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 0);
+            return EagerSolveAttempt::new(
+                EagerSolveOutcome::Unavailable(EagerUnavailableReason::BackendBeforeSat),
+                0,
+            );
         }
     }
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
     let Ok(result) = solver.solve() else {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::SolveError),
+            1,
+        );
     };
     profile_phase("kissat_solve", sat_start, 0);
-    match result {
-        RustSatResult::Unsat => {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Unsat), 1);
+    match classify_rustsat_eager_result(result) {
+        Ok(Some(result)) => {
+            return EagerSolveAttempt::new(EagerSolveOutcome::Solved(result), 1);
         }
-        RustSatResult::Interrupted => {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        Err(reason) => {
+            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable(reason), 1);
         }
-        RustSatResult::Sat => {}
+        Ok(None) => {}
     }
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
     for (var, value) in assignment.iter_mut().enumerate().skip(1) {
         let Ok(literal) = RustSatLit::from_ipasir(var as i32) else {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+            return EagerSolveAttempt::new(
+                EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+                1,
+            );
         };
         let Ok(literal_value) = solver.lit_val(literal) else {
-            return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+            return EagerSolveAttempt::new(
+                EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+                1,
+            );
         };
         *value = match literal_value {
             TernaryVal::True => 1,
@@ -4839,11 +4961,17 @@ fn solve_kissat_euf_once_counted(
         };
     }
     if !complete_cnf_assignment(cnf, &mut assignment) {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+            1,
+        );
     }
     let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
     else {
-        return EagerSolveAttempt::new(EagerSolveOutcome::Unavailable, 1);
+        return EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::ModelUnavailable),
+            1,
+        );
     };
     if conflicts.is_empty() {
         EagerSolveAttempt::new(EagerSolveOutcome::Solved(SolveResult::Sat), 1)
@@ -6505,13 +6633,15 @@ fn rebuild_dynamic_cnf(
     completed
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 struct BoolSolveRouting<'a> {
     backend: &'a str,
     full_ackermann_setting: Option<&'a str>,
     finite_domain: bool,
     auto_cadical_app_threshold: usize,
+    auto_finite_routes_to_cadical: bool,
     leaf_budget_limits: LeafBudgetLimits,
+    leaf_budget_eager_solver: EagerSolveRunner,
 }
 
 fn solve_bool_problem(
@@ -6537,7 +6667,9 @@ fn solve_bool_problem(
             full_ackermann_setting: full_ackermann_setting.as_deref(),
             finite_domain,
             auto_cadical_app_threshold,
+            auto_finite_routes_to_cadical: !cfg!(all(target_os = "linux", target_arch = "x86_64")),
             leaf_budget_limits: LeafBudgetLimits::default(),
+            leaf_budget_eager_solver: solve_kissat_euf_once_counted,
         },
     )
 }
@@ -6608,10 +6740,11 @@ fn solve_bool_problem_with_routing(
         let full_ackermann_mode = parse_full_ackermann_mode(full_ackermann_setting);
         let full_ackermann_forced = force_full_ackermann(full_ackermann_setting);
         let auto_uses_cadical = backend == "auto"
-            && auto_prefers_cadical(
+            && auto_prefers_cadical_with_platform(
                 arena.apps.len(),
                 finite_added,
                 routing.auto_cadical_app_threshold,
+                routing.auto_finite_routes_to_cadical,
             );
         let leaf_budget_backend_active =
             backend == "kissat" || (backend == "auto" && !auto_uses_cadical);
@@ -6632,7 +6765,7 @@ fn solve_bool_problem_with_routing(
             );
             profile_leaf_budget_completion(&report);
             if let Some(completed) = completed {
-                let attempt = solve_kissat_euf_once_counted(
+                let attempt = (routing.leaf_budget_eager_solver)(
                     &completed,
                     arena,
                     bool_problem.true_term,
@@ -6658,12 +6791,18 @@ fn solve_bool_problem_with_routing(
                             conflict_count,
                         );
                     }
-                    EagerSolveOutcome::Unavailable => {
+                    EagerSolveOutcome::Unavailable(reason) => {
                         profile_measurement(
                             "full_ackermann_leaf_budget_unavailable",
                             1,
                             leaf_budget_sat_calls,
                         );
+                        if env::var_os("EUF_VIPER_PROFILE").is_some() {
+                            eprintln!(
+                                "profile_full_ackermann_leaf_budget_unavailable_reason={}",
+                                reason.as_str()
+                            );
+                        }
                     }
                 }
             }
@@ -6766,7 +6905,7 @@ fn solve_bool_problem_with_routing(
                             EagerSolveOutcome::InvalidTheoryModel(_) => {
                                 completed_cnf = Some(completed);
                             }
-                            EagerSolveOutcome::Unavailable => {}
+                            EagerSolveOutcome::Unavailable(_) => {}
                         }
                     }
                     if use_cadical_refine_after_invalid_model() {
@@ -6790,7 +6929,7 @@ fn solve_bool_problem_with_routing(
                         }
                     }
                 }
-                EagerSolveOutcome::Unavailable => {}
+                EagerSolveOutcome::Unavailable(_) => {}
             }
         }
         if backend == "cadical" {
@@ -8056,8 +8195,23 @@ mod tests {
             full_ackermann_setting,
             finite_domain: false,
             auto_cadical_app_threshold: 1_000,
+            auto_finite_routes_to_cadical: !cfg!(all(target_os = "linux", target_arch = "x86_64")),
             leaf_budget_limits: LeafBudgetLimits::default(),
+            leaf_budget_eager_solver: solve_kissat_euf_once_counted,
         }
+    }
+
+    fn unavailable_before_sat(
+        _cnf: &CnfProblem,
+        _arena: &TermArena,
+        _true_term: TermId,
+        _false_term: TermId,
+        _eager_congruence: bool,
+    ) -> EagerSolveAttempt {
+        EagerSolveAttempt::new(
+            EagerSolveOutcome::Unavailable(EagerUnavailableReason::BackendBeforeSat),
+            0,
+        )
     }
 
     fn admitted_auto_leaf_problem() -> (TermArena, BoolProblem) {
@@ -9156,6 +9310,61 @@ mod tests {
     }
 
     #[test]
+    fn ackermann_telemetry_distinguishes_missing_exact_and_lower_bound_counts() {
+        let mut arena = TermArena::default();
+        let argument = arena.intern(0, Vec::new());
+        let other_argument = arena.intern(2, Vec::new());
+        arena.intern(1, vec![argument]);
+        arena.intern(1, vec![other_argument]);
+        let cnf = CnfProblem::new();
+
+        let not_computed = leaf_budget_completion_precheck(
+            &cnf,
+            &arena,
+            true,
+            LeafBudgetLimits {
+                max_terms: 0,
+                ..LeafBudgetLimits::default()
+            },
+        );
+        assert_eq!(not_computed.ackermann_clauses, TelemetryCount::NotComputed);
+        assert_eq!(
+            not_computed.ackermann_literal_slots,
+            TelemetryCount::NotComputed
+        );
+
+        let exact =
+            leaf_budget_completion_precheck(&cnf, &arena, true, LeafBudgetLimits::default());
+        assert_eq!(exact.ackermann_clauses, TelemetryCount::Exact(1));
+        assert_eq!(exact.ackermann_literal_slots, TelemetryCount::Exact(2));
+        let unavailable = reject_ackermann_estimate_failure(
+            LeafBudgetCompletionReport::new(&cnf, &arena),
+            AckermannEstimateFailure::ArithmeticOverflow,
+        );
+        assert_eq!(unavailable.ackermann_clauses, TelemetryCount::Unavailable);
+        assert_eq!(
+            unavailable.ackermann_literal_slots,
+            TelemetryCount::Unavailable
+        );
+        assert_eq!(
+            TelemetryCount::NotComputed.profile_fields(),
+            ("none".to_owned(), "not_computed")
+        );
+        assert_eq!(
+            TelemetryCount::Unavailable.profile_fields(),
+            ("none".to_owned(), "unavailable")
+        );
+        assert_eq!(
+            TelemetryCount::Exact(11).profile_fields(),
+            ("11".to_owned(), "exact")
+        );
+        assert_eq!(
+            TelemetryCount::LowerBound(17).profile_fields(),
+            ("17".to_owned(), "lower_bound")
+        );
+    }
+
+    #[test]
     fn leaf_budget_preclone_validation_rejects_invalid_endpoints() {
         let mut arena = TermArena::default();
         let a = arena.intern(0, Vec::new());
@@ -9257,6 +9466,127 @@ mod tests {
             leaf.2 > off.2,
             "accepted candidate must report its added CNF"
         );
+    }
+
+    #[test]
+    fn solve_bool_problem_linux_auto_kissat_route_admits_leaf_budget() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let mut leaf_routing = test_bool_routing("auto", Some("leaf-budget"));
+        leaf_routing.auto_finite_routes_to_cadical = false;
+        let mut off_routing = leaf_routing;
+        off_routing.full_ackermann_setting = Some("off");
+        let leaf = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            leaf_routing,
+        )
+        .unwrap();
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            off_routing,
+        )
+        .unwrap();
+        assert!(!auto_prefers_cadical_with_platform(
+            arena.apps.len(),
+            1,
+            leaf_routing.auto_cadical_app_threshold,
+            false,
+        ));
+        assert_eq!(leaf.0, SolveResult::Sat);
+        assert_eq!(leaf.4, 1);
+        assert!(leaf.2 > off.2);
+    }
+
+    #[test]
+    fn solve_bool_problem_linux_auto_kissat_route_rejects_leaf_budget_cap() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let mut rejected_routing = test_bool_routing("auto", Some("leaf-budget"));
+        rejected_routing.auto_finite_routes_to_cadical = false;
+        rejected_routing.leaf_budget_limits.max_ackermann_clauses = 0;
+        let base = admitted_auto_quotient_cnf(&arena, &bool_problem);
+        let (candidate, report) = build_leaf_budget_completion_candidate(
+            &base,
+            &arena,
+            true,
+            rejected_routing.leaf_budget_limits,
+        );
+        assert!(candidate.is_none());
+        assert_eq!(
+            report.rejection,
+            Some(LeafBudgetRejection::AckermannClauseCap)
+        );
+        assert!(matches!(
+            report.ackermann_clauses,
+            TelemetryCount::Exact(value) if value > 0
+        ));
+        assert!(matches!(
+            report.ackermann_literal_slots,
+            TelemetryCount::Exact(value) if value > 0
+        ));
+        let mut off_routing = rejected_routing;
+        off_routing.full_ackermann_setting = Some("off");
+        let rejected = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            rejected_routing,
+        );
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            off_routing,
+        );
+        assert_eq!(rejected, off);
+    }
+
+    #[test]
+    fn solve_bool_problem_pre_sat_unavailable_does_not_increment_sat_calls() {
+        let (arena, bool_problem) = admitted_auto_leaf_problem();
+        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
+        let mut unavailable_routing = test_bool_routing("auto", Some("leaf-budget"));
+        unavailable_routing.auto_finite_routes_to_cadical = false;
+        unavailable_routing.leaf_budget_eager_solver = unavailable_before_sat;
+        let mut off_routing = unavailable_routing;
+        off_routing.full_ackermann_setting = Some("off");
+        let unavailable = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            unavailable_routing,
+        );
+        let off = solve_bool_problem_with_routing(
+            &arena,
+            &bool_problem,
+            options,
+            EqAbstractionMode::Off,
+            off_routing,
+        );
+        assert_eq!(unavailable, off);
+        assert_eq!(unavailable.unwrap().4, off.unwrap().4);
+    }
+
+    #[test]
+    fn rustsat_interruption_is_classified_without_timing() {
+        assert_eq!(
+            classify_rustsat_eager_result(RustSatResult::Interrupted),
+            Err(EagerUnavailableReason::Interrupted)
+        );
+        assert_eq!(
+            classify_rustsat_eager_result(RustSatResult::Unsat),
+            Ok(Some(SolveResult::Unsat))
+        );
+        assert_eq!(classify_rustsat_eager_result(RustSatResult::Sat), Ok(None));
     }
 
     #[test]
@@ -9566,7 +9896,7 @@ mod tests {
             report.rejection,
             Some(LeafBudgetRejection::TransitivityClauseCap)
         );
-        assert_eq!(report.ackermann.unwrap().clauses, 1);
+        assert_eq!(report.ackermann_clauses, TelemetryCount::Exact(1));
         assert_eq!(cnf, before);
     }
 
