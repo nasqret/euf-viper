@@ -215,6 +215,27 @@ impl Plan {
         config: AutoConfig,
     ) -> AutoOutcome {
         let mut telemetry = AutoTelemetry::default();
+        telemetry.unconditional_equality_facts = match count_unconditional_equality_facts(
+            assertions,
+            config.limits.max_equality_facts,
+        ) {
+            Ok(facts) => facts,
+            Err(rejection) => {
+                telemetry.rejection = Some(rejection);
+                return AutoOutcome {
+                    plan: None,
+                    telemetry,
+                };
+            }
+        };
+        if telemetry.unconditional_equality_facts < config.min_unconditional_facts {
+            telemetry.rejection = Some(AutoRejection::PrefilterFacts);
+            return AutoOutcome {
+                plan: None,
+                telemetry,
+            };
+        }
+
         let plan = match Self::build(assertions, term_count) {
             Ok(plan) => plan,
             Err(failure) => {
@@ -239,24 +260,8 @@ impl Plan {
             };
         }
 
-        telemetry.unconditional_equality_facts = match count_unconditional_equality_facts(
-            assertions,
-            config.limits.max_equality_facts,
-        ) {
-            Ok(facts) => facts,
-            Err(rejection) => {
-                telemetry.rejection = Some(rejection);
-                return AutoOutcome {
-                    plan: None,
-                    telemetry,
-                };
-            }
-        };
-
         let prefilter_rejection =
-            if telemetry.unconditional_equality_facts < config.min_unconditional_facts {
-                Some(AutoRejection::PrefilterFacts)
-            } else if telemetry.effective_equality_unions < config.min_effective_unions {
+            if telemetry.effective_equality_unions < config.min_effective_unions {
                 Some(AutoRejection::PrefilterEffectiveUnions)
             } else if telemetry.quotiented_terms < config.min_quotiented_terms {
                 Some(AutoRejection::PrefilterQuotientedTerms)
@@ -1066,6 +1071,18 @@ mod tests {
             assert!(!outcome.telemetry.admitted);
             assert!(outcome.plan.is_none());
         }
+    }
+
+    #[test]
+    fn fact_prefilter_runs_before_plan_allocation() {
+        let outcome = Plan::build_auto(&[], &[], DEFAULT_MAX_TERMS + 1);
+
+        assert_eq!(outcome.telemetry.unconditional_equality_facts, 0);
+        assert_eq!(
+            outcome.telemetry.rejection,
+            Some(AutoRejection::PrefilterFacts)
+        );
+        assert!(outcome.plan.is_none());
     }
 
     #[test]
