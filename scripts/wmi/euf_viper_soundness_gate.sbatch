@@ -15,10 +15,15 @@ FIXTURE="${EUF_VIPER_SOUNDNESS_FIXTURE:-tests/fixtures/bool_data_pigeonhole_unsa
 cd "$ROOT"
 mkdir -p results
 export PATH="$HOME/.cargo/bin:$PATH"
+TARGET_DIR="${CARGO_TARGET_DIR:-${SLURM_TMPDIR:-$ROOT}/euf-viper-target}"
+export CARGO_TARGET_DIR="$TARGET_DIR"
+BIN="$TARGET_DIR/release/euf-viper"
+REVISION="${EUF_VIPER_GIT_REVISION:-unknown}"
+PERSIST_BIN="${EUF_VIPER_PERSIST_BIN:-$ROOT/artifacts/euf-viper-$REVISION}"
 
 cargo test --all-features
 cargo build --release --all-features
-sha256sum target/release/euf-viper
+sha256sum "$BIN"
 
 run_expected() {
   local backend="$1"
@@ -27,7 +32,7 @@ run_expected() {
   local result
 
   result="$(env EUF_VIPER_BACKEND="$backend" \
-    target/release/euf-viper solve "$fixture")"
+    "$BIN" solve "$fixture")"
   printf 'backend=%s fixture=%s result=%s\n' "$backend" "$fixture" "$result"
   test "$result" = "$expected_result"
 }
@@ -39,7 +44,7 @@ for backend in auto varisat cadical cadical-refine; do
 done
 
 set +e
-query_order_output="$(target/release/euf-viper solve \
+query_order_output="$("$BIN" solve \
   tests/fixtures/early_check_sat_rejected.smt2 2>&1)"
 query_order_status=$?
 set -e
@@ -50,5 +55,11 @@ printf 'fixture=%s exit=%s output=%s\n' \
 test "$query_order_status" -eq 2
 test "$query_order_output" = \
   "command \`assert\` after \`check-sat\` is unsupported in single-query mode"
+
+mkdir -p "$(dirname "$PERSIST_BIN")"
+install -m 0755 "$BIN" "$PERSIST_BIN"
+printf 'revision=%s\n' "$REVISION"
+printf 'candidate_binary=%s\n' "$PERSIST_BIN"
+printf 'candidate_sha256=%s\n' "$(sha256sum "$PERSIST_BIN" | awk '{print $1}')"
 
 printf 'soundness_gate=pass\n'
