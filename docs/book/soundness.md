@@ -70,13 +70,19 @@ soundness or solver-superiority claim is allowed.
 
 ## Current Evidence
 
-- Local all-feature suite: 198 passed, three environment-gated probes ignored.
-- Local benchmark-tool suite: 86 passed.
+- Local all-feature suite: 220 passed, four environment-gated probes ignored.
+- Local benchmark-tool suite: 107 passed.
 - Corrected WMI Boolean-data differential `143698`: 10,041 generated formulas,
   zero euf-viper discrepancies. One common timeout was retried by exact hash in
   `143728`; euf-viper, Z3, and cvc5 all returned UNSAT.
 - Mandatory repair sample `143697`: unchanged 39/40 coverage, zero wrong
   answers or errors, but a small timing regression. It is correctness work,
   not a promoted optimization.
-- Full repair A/B `143700`/`143701`, candidate soundness build `143747`, and
-  fixed four-solver campaign `143752`/`143753` are pending or running.
+- Full repair A/B `143700`/`143701` completed with zero wrong answers, but the
+  mandatory repair is slower and loses two boundary solves; it is not a
+  performance promotion.
+- Exact-lineage commit `ebf8e27` passed soundness gate `143794` on all four
+  backend routes. Parser campaign `143811` gave euf-viper zero failed cases or
+  groups across 1,620 cases; comparator parser anomalies remain recorded.
+- Exact Boolean-data differential `143810` and four-solver arrays
+  `143752`/`143753` and `143798`/`143799` are pending or running.

@@ -536,6 +536,18 @@
   fixture, and no compile-disabled typed-parser residue. WMI soundness
   `143794`, differential `143796`, parser `143797`, full array `143798`, and
   merge `143799` are hash-pinned to this lineage.
+- Exact soundness `143794` passed: 100 branch tests, the Boolean-data UNSAT and
+  quoted SAT fixtures through `auto`, `varisat`, `cadical`, and
+  `cadical-refine`, plus exact query-order rejection. Persisted binary SHA-256
+  is `38421e03b51fae69c354258614f25d507409a689e7fb70981b51328f23e4412a`.
+- Exact parser gate `143811` passed candidate policy on all 1,620 cases and 550
+  groups with zero euf-viper failures. Generated cases now live on node scratch
+  and are persisted as one compressed source archive plus manifest, results,
+  and summary, preventing WMI file-quota failures without losing replayability.
+- Integrated four new test-only research references: exact multi-valued table
+  MDDs, globally checked stabilizer-aware cell ordering within caps,
+  certificate-replayable quotient-state search, and table-aware semantic BVA.
+  The integrated suite passes 220 Rust and 107 Python tests.
 
 ## Next Entry Template
 

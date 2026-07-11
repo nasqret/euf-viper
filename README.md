@@ -13,10 +13,10 @@ SMT-LIB and SMT-COMP runs.
 > `58efe9d` binary is not generally sound for Boolean values used only as UF
 > data. It also predates repairs for quoted reserved symbols and single-query
 > command ordering. The current local candidate repairs all three known
-> failures and passes 198 all-feature Rust tests plus 86 benchmark-tool tests,
-> but it is not promoted until the hash-pinned WMI differential, full paired,
-> and four-solver gates complete. No current result establishes superiority
-> over Z3 or Yices2.
+> failures and passes 220 all-feature Rust tests plus 107 benchmark-tool tests.
+> Exact-lineage WMI soundness and parser gates pass; the new differential and
+> four-solver gates are still running. No current result establishes
+> superiority over Z3 or Yices2.
 
 ## Quick Start
 

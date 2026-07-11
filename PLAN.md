@@ -298,7 +298,7 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 The historically measured `58efe9d` binary has a confirmed general soundness
 defect for unasserted Boolean values used as uninterpreted-function arguments.
 The local candidate repairs that defect, quoted-reserved symbol dispatch, and
-query ordering; 198 all-feature Rust tests and 86 Python tests pass at the last
+query ordering; 220 all-feature Rust tests and 107 Python tests pass at the last
 integrated checkpoint. General soundness and superiority are still unclaimed
 until exact-lineage WMI build `143794`, its differential/parser gates, and the
 fixed four-solver campaigns `143752`/`143753` and `143798`/`143799` complete.

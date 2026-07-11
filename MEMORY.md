@@ -418,16 +418,20 @@
   euf-viper discrepancies. The one common timeout was retried as `143728` and
   all three solvers returned UNSAT.
 - Mandatory repair sample `143697` preserved coverage but measured slightly
-  slower. Never describe the soundness repair as an optimization; full paired
-  array `143700` and merge `143701` decide its corpus cost.
+  slower. Full paired array `143700` and merge `143701` confirmed the cost:
+  zero wrong answers, but `0.9974x` total, `0.9940x` geometric, `0.9963x`
+  median speed, and two fewer boundary solves. Never describe the mandatory
+  repair as an optimization.
 - WMI candidate build `143747` is pinned to source
   `b39706e7243c97d3950fceef636ea56a1f8b04c6`. It builds in node-local scratch
   and persists only the gate-tested binary. Direct-negated-root canary
   `143751`, profile `143758`, full four-solver array `143752`, and merge
   `143753` are dependency-chained behind it.
 - `EUF_VIPER_DIRECT_NEGATED_ROOT` is default-off. Its same-binary gate must
-  pin every other environment setting equally. A target win is followed by
-  sample, hot, hard-tail, and full-corpus promotion gates.
+  pin every other environment setting equally. Gate `143792` timed out in both
+  arms on all 14 qg7 targets; despite removing 15,120 CNF items on the exemplar,
+  it achieved only `1.00004x` timeout-charged speed. Reject it as a hard-tail
+  mechanism and do not broaden it without a different causal hypothesis.
 - Exact probe of `qg7/iso_icl_nogen001.smt2` proved that all 5,040 forbidden
   complete binary operation tables form one `S_7` conjugacy orbit. Treat this
   as opportunity evidence until typed base-invariance extraction, independent
@@ -435,8 +439,19 @@
 - Current exact reference mechanisms are test-only: complete SAT model scouts,
   syntactic/theory Boolean DAG census, binary table canonization, bounded
   quotient CSP with Hall propagation, forbidden-orbit extraction, and exact
-  base-invariance/orbit-cover certificates through degree eight.
+  base-invariance/orbit-cover certificates through degree eight. Added exact
+  multi-valued table MDD, stabilizer-order, table-aware BVA, and certified
+  quotient-state search oracles; none changes production answers.
 - The ranked unorthodox route is canonical forbidden-table quotienting,
   stabilizer MDD/AST-guided BVA, certifying Hall/PB escalation, theory-aware
   vivification, and search-aware congruence explanations, with composite
   certificates developed alongside every UNSAT-capable mechanism.
+- Fastest sound exact branch is `soundness/exact-parser-negroot` at `ebf8e27`.
+  WMI gate `143794` passed 100 tests, all four backend routes on the Boolean
+  data counterexample, quoted-symbol fixtures, and query-order rejection. Its
+  persisted binary SHA-256 is
+  `38421e03b51fae69c354258614f25d507409a689e7fb70981b51328f23e4412a`.
+- Exact parser campaign `143811` executed 1,620 cases in 550 groups with zero
+  euf-viper case or group failures. Strict comparator findings are preserved:
+  21 failed cases/groups across cvc5, Yices2, and Z3 behavior. Differential
+  rerun `143810` and full exact array `143798`/merge `143799` remain live.
