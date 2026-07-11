@@ -11,6 +11,7 @@ set -euo pipefail
 
 ROOT="${EUF_VIPER_ROOT:-$PWD}"
 FIXTURE="${EUF_VIPER_SOUNDNESS_FIXTURE:-tests/fixtures/bool_data_pigeonhole_unsat.smt2}"
+UNCONDITIONAL_QUOTIENT="${EUF_VIPER_SOUNDNESS_UNCONDITIONAL_QUOTIENT:-off}"
 
 cd "$ROOT"
 mkdir -p results
@@ -21,6 +22,14 @@ export CARGO_TARGET_DIR="$TARGET_DIR"
 BIN="$TARGET_DIR/release/euf-viper"
 REVISION="${EUF_VIPER_GIT_REVISION:-unknown}"
 PERSIST_BIN="${EUF_VIPER_PERSIST_BIN:-$ROOT/artifacts/euf-viper-$REVISION}"
+
+case "$UNCONDITIONAL_QUOTIENT" in
+  off | shadow | on) ;;
+  *)
+    echo "EUF_VIPER_SOUNDNESS_UNCONDITIONAL_QUOTIENT must be off, shadow, or on" >&2
+    exit 2
+    ;;
+esac
 
 cargo test --all-features
 cargo build --release --all-features
@@ -33,6 +42,7 @@ run_expected() {
   local result
 
   result="$(env EUF_VIPER_BACKEND="$backend" \
+    EUF_VIPER_UNCONDITIONAL_QUOTIENT="$UNCONDITIONAL_QUOTIENT" \
     "$BIN" solve "$fixture")"
   printf 'backend=%s fixture=%s result=%s\n' "$backend" "$fixture" "$result"
   test "$result" = "$expected_result"
@@ -45,7 +55,8 @@ for backend in auto varisat cadical cadical-refine; do
 done
 
 set +e
-query_order_output="$("$BIN" solve \
+query_order_output="$(env EUF_VIPER_UNCONDITIONAL_QUOTIENT="$UNCONDITIONAL_QUOTIENT" \
+  "$BIN" solve \
   tests/fixtures/early_check_sat_rejected.smt2 2>&1)"
 query_order_status=$?
 set -e
@@ -60,6 +71,7 @@ test "$query_order_output" = \
 mkdir -p "$(dirname "$PERSIST_BIN")"
 install -m 0755 "$BIN" "$PERSIST_BIN"
 printf 'revision=%s\n' "$REVISION"
+printf 'unconditional_quotient=%s\n' "$UNCONDITIONAL_QUOTIENT"
 printf 'candidate_binary=%s\n' "$PERSIST_BIN"
 printf 'candidate_sha256=%s\n' "$(sha256sum "$PERSIST_BIN" | awk '{print $1}')"
 

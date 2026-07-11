@@ -15,6 +15,7 @@ VIPER_BIN="${EUF_VIPER_BIN:-$ROOT/target/release/euf-viper}"
 SEED="${EUF_VIPER_PARSER_DIFF_SEED:-0}"
 RANDOM_GROUPS="${EUF_VIPER_PARSER_DIFF_RANDOM_GROUPS:-512}"
 TIMEOUT="${EUF_VIPER_PARSER_DIFF_TIMEOUT:-2}"
+UNCONDITIONAL_QUOTIENT="${EUF_VIPER_PARSER_DIFF_UNCONDITIONAL_QUOTIENT:-off}"
 RUN_ID="${EUF_VIPER_PARSER_DIFF_RUN_ID:-$SLURM_JOB_ID}"
 SCRATCH_ROOT="${SLURM_TMPDIR:-/tmp/${USER:?}/euf-viper-$SLURM_JOB_ID}"
 SCRATCH_OUT="$SCRATCH_ROOT/parser-diff-$RUN_ID"
@@ -22,6 +23,11 @@ PERSIST_OUT="$ROOT/results/parser-diff-$RUN_ID"
 
 cd "$ROOT"
 mkdir -p results
+
+case "$UNCONDITIONAL_QUOTIENT" in
+  off | shadow | on) ;;
+  *) echo "EUF_VIPER_PARSER_DIFF_UNCONDITIONAL_QUOTIENT must be off, shadow, or on" >&2; exit 2 ;;
+esac
 
 test -x "$VIPER_BIN"
 test -x "$SOLVER_ROOT/third_party/solvers/bin/z3"
@@ -40,7 +46,7 @@ scripts/bench/metamorphic_parser_diff.py \
   --random-groups "$RANDOM_GROUPS" \
   --timeout "$TIMEOUT" \
   --gate candidate \
-  --viper-command "$VIPER_BIN solve {file}" \
+  --viper-command "env EUF_VIPER_UNCONDITIONAL_QUOTIENT=$UNCONDITIONAL_QUOTIENT $VIPER_BIN solve {file}" \
   --z3-command "$SOLVER_ROOT/third_party/solvers/bin/z3 {file}" \
   --cvc5-command "$SOLVER_ROOT/third_party/solvers/bin/cvc5 --lang=smt2 {file}" \
   --yices-command "$SOLVER_ROOT/third_party/solvers/bin/yices-smt2 {file}"
