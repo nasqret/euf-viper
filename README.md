@@ -5,9 +5,18 @@ uninterpreted functions. It parses ground SMT-LIB Boolean structure, builds a
 Tseitin CNF, runs an eager finite-domain/EUF encoding through SAT backends, and
 validates candidate SAT models with congruence closure before accepting them.
 
-The long-term research target is to outperform Z3 on QF_UF benchmark families.
+The long-term research target is to outperform both Z3 and Yices2 on QF_UF.
 This repository is structured so that claim can only be made after reproducible
 SMT-LIB and SMT-COMP runs.
+
+> **Soundness and claim status, 2026-07-11:** the historically measured
+> `58efe9d` binary is not generally sound for Boolean values used only as UF
+> data. It also predates repairs for quoted reserved symbols and single-query
+> command ordering. The current local candidate repairs all three known
+> failures and passes 165 all-feature Rust tests plus 86 benchmark-tool tests,
+> but it is not promoted until the hash-pinned WMI differential, full paired,
+> and four-solver gates complete. No current result establishes superiority
+> over Z3 or Yices2.
 
 ## Quick Start
 
@@ -40,7 +49,11 @@ Expected solver output is one of:
 `unsupported` is reserved for syntax or resource boundaries that are not
 implemented soundly; it is distinct from a timeout.
 
-## Local Canary
+## Historical Benchmark Checkpoints
+
+The results below remain useful as exact-corpus opportunity evidence. They are
+not general soundness evidence because the measured binaries predate the
+Boolean-data repair.
 
 On 2026-07-08, with Z3 4.16.0 installed via Homebrew, `euf-viper` beat Z3 on
 three generated conjunction-heavy canaries after warm-up.  It also proved an
@@ -147,6 +160,10 @@ negative results and immutable WMI job identifiers are retained under
 
 - `src/main.rs`: SMT-LIB parser, Boolean CNF encoder, SAT portfolio,
   congruence-closure validator, CLI, and unit tests.
+- `src/model_scout.rs`, `src/quotient_csp.rs`, `src/orbit_canon.rs`,
+  `src/orbit_cover.rs`, `src/forbidden_table_mdd.rs`, and
+  `src/hall_certificate.rs`: test-only semantic and certificate references;
+  none can alter production answers.
 - `benches/`: local comparator harnesses.
 - `scripts/wmi/`: WMI SLURM preflight, sync, and benchmark campaign scripts.
 - `scripts/cert/`: pinned DRAT checker setup and independent certificate replay.
@@ -174,12 +191,23 @@ negative results and immutable WMI job identifiers are retained under
 
 ## Current Boundary
 
-The evidence supports a fast-head QF_UF tier, not a global superiority claim.
-The hard tail is concentrated in finite-model and pigeonhole-shaped families.
-At 1,200 seconds, Yices 2.7.0 covers all 7,503 instances, Z3 covers 7,500, and
-`euf-viper` covers 7,478. Certificate v1 checks the exact SAT refutation plus
-all EUF clauses but still trusts the SMT-to-base-CNF translation. The opt-in
-structural portfolio covers 7,503 and improves paired aggregate time over
-Yices by 1.046x, while depending on Yices and losing the geometric metric. The
-new dynamic Ackermann route passes a full two-second standalone A/B gate, but
-its competition-budget coverage has not yet been remeasured.
+The evidence supports a fast-head QF_UF tier and several serious research
+mechanisms, not a global superiority claim. In the latest historical
+1,200-second opportunity run, the old binary solved 7,502/7,503, versus 7,500
+for Z3 and 7,503 for Yices2, but Yices2 was about 4.27 times faster by full
+total. That old binary has the known Boolean-data defect.
+
+The current acceptance chain is:
+
+- full exact repair A/B array `143700` and merge `143701`;
+- sound candidate build `143747` at source
+  `b39706e7243c97d3950fceef636ea56a1f8b04c6`;
+- real four-solver parser metamorphics `143765` and 10,000-case optimized-path
+  differential `143776`;
+- same-binary direct-negated-root target A/B `143751` and profile `143758`;
+- fixed full four-solver 2-second array `143752` and merge `143753`.
+
+The leading differentiated opportunity is a verified quotient of 5,040
+forbidden degree-seven operation tables that form one exact `S_7` conjugacy
+orbit. Orbit, MDD, quotient-CSP, and Hall mechanisms remain test-only until
+their source-level preconditions and certificates are independently replayed.
