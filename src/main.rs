@@ -6644,6 +6644,17 @@ struct BoolSolveRouting<'a> {
     leaf_budget_eager_solver: EagerSolveRunner,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct BoolSolveRouteTrace {
+    finite_added: usize,
+    auto_uses_cadical: bool,
+    leaf_budget_backend_active: bool,
+    leaf_budget_attempted: bool,
+    leaf_budget_activated: bool,
+    leaf_budget_candidate_dispatched: bool,
+    leaf_budget_rejection: Option<LeafBudgetRejection>,
+}
+
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -6680,6 +6691,24 @@ fn solve_bool_problem_with_routing(
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
     routing: BoolSolveRouting<'_>,
+) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    solve_bool_problem_with_routing_and_trace(
+        arena,
+        bool_problem,
+        root_cnf_options,
+        eq_abstraction_mode,
+        routing,
+        None,
+    )
+}
+
+fn solve_bool_problem_with_routing_and_trace(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    root_cnf_options: RootCnfOptions,
+    eq_abstraction_mode: EqAbstractionMode,
+    routing: BoolSolveRouting<'_>,
+    mut route_trace: Option<&mut BoolSolveRouteTrace>,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let (quotient_plan, quotient_active) = build_unconditional_quotient_plan(
         &bool_problem.assertions,
@@ -6735,6 +6764,9 @@ fn solve_bool_problem_with_routing(
             } else {
                 0
             };
+        if let Some(trace) = route_trace.as_deref_mut() {
+            trace.finite_added = finite_added;
+        }
         let refinement_mode = selected_refinement_mode();
         let full_ackermann_setting = routing.full_ackermann_setting;
         let full_ackermann_mode = parse_full_ackermann_mode(full_ackermann_setting);
@@ -6748,6 +6780,10 @@ fn solve_bool_problem_with_routing(
             );
         let leaf_budget_backend_active =
             backend == "kissat" || (backend == "auto" && !auto_uses_cadical);
+        if let Some(trace) = route_trace.as_deref_mut() {
+            trace.auto_uses_cadical = auto_uses_cadical;
+            trace.leaf_budget_backend_active = leaf_budget_backend_active;
+        }
         let mut leaf_budget_sat_calls = 0usize;
         if full_ackermann_forced {
             add_full_ackermann_completion(&mut cnf, arena);
@@ -6763,8 +6799,16 @@ fn solve_bool_problem_with_routing(
                 auto_leaf_active,
                 routing.leaf_budget_limits,
             );
+            if let Some(trace) = route_trace.as_deref_mut() {
+                trace.leaf_budget_attempted = true;
+                trace.leaf_budget_activated = report.activated;
+                trace.leaf_budget_rejection = report.rejection;
+            }
             profile_leaf_budget_completion(&report);
             if let Some(completed) = completed {
+                if let Some(trace) = route_trace.as_deref_mut() {
+                    trace.leaf_budget_candidate_dispatched = true;
+                }
                 let attempt = (routing.leaf_budget_eager_solver)(
                     &completed,
                     arena,
@@ -9469,76 +9513,46 @@ mod tests {
     }
 
     #[test]
-    fn solve_bool_problem_linux_auto_kissat_route_admits_leaf_budget() {
-        let (arena, bool_problem) = admitted_auto_leaf_problem();
+    fn solve_bool_problem_linux_auto_with_finite_axioms_routes_candidate_and_cap_fallback() {
+        let (arena, bool_problem) = admitted_auto_finite_problem();
         let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
         let mut leaf_routing = test_bool_routing("auto", Some("leaf-budget"));
         leaf_routing.auto_finite_routes_to_cadical = false;
-        let mut off_routing = leaf_routing;
-        off_routing.full_ackermann_setting = Some("off");
-        let leaf = solve_bool_problem_with_routing(
+        assert!(arena.apps.len() < leaf_routing.auto_cadical_app_threshold);
+
+        let mut admitted_trace = BoolSolveRouteTrace::default();
+        let admitted = solve_bool_problem_with_routing_and_trace(
             &arena,
             &bool_problem,
             options,
             EqAbstractionMode::Off,
             leaf_routing,
+            Some(&mut admitted_trace),
         )
         .unwrap();
-        let off = solve_bool_problem_with_routing(
-            &arena,
-            &bool_problem,
-            options,
-            EqAbstractionMode::Off,
-            off_routing,
-        )
-        .unwrap();
-        assert!(!auto_prefers_cadical_with_platform(
-            arena.apps.len(),
-            1,
-            leaf_routing.auto_cadical_app_threshold,
-            false,
-        ));
-        assert_eq!(leaf.0, SolveResult::Sat);
-        assert_eq!(leaf.4, 1);
-        assert!(leaf.2 > off.2);
-    }
+        assert!(admitted_trace.finite_added > 0);
+        assert!(!admitted_trace.auto_uses_cadical);
+        assert!(admitted_trace.leaf_budget_backend_active);
+        assert!(admitted_trace.leaf_budget_attempted);
+        assert!(admitted_trace.leaf_budget_activated);
+        assert!(admitted_trace.leaf_budget_candidate_dispatched);
+        assert_eq!(admitted_trace.leaf_budget_rejection, None);
+        assert_eq!(admitted.0, SolveResult::Sat);
+        assert_eq!(admitted.4, 1);
 
-    #[test]
-    fn solve_bool_problem_linux_auto_kissat_route_rejects_leaf_budget_cap() {
-        let (arena, bool_problem) = admitted_auto_leaf_problem();
-        let options = quotient_root_options(true, false, unconditional_leaf_quotient::Mode::Auto);
-        let mut rejected_routing = test_bool_routing("auto", Some("leaf-budget"));
-        rejected_routing.auto_finite_routes_to_cadical = false;
+        let mut rejected_routing = leaf_routing;
         rejected_routing.leaf_budget_limits.max_ackermann_clauses = 0;
-        let base = admitted_auto_quotient_cnf(&arena, &bool_problem);
-        let (candidate, report) = build_leaf_budget_completion_candidate(
-            &base,
-            &arena,
-            true,
-            rejected_routing.leaf_budget_limits,
-        );
-        assert!(candidate.is_none());
-        assert_eq!(
-            report.rejection,
-            Some(LeafBudgetRejection::AckermannClauseCap)
-        );
-        assert!(matches!(
-            report.ackermann_clauses,
-            TelemetryCount::Exact(value) if value > 0
-        ));
-        assert!(matches!(
-            report.ackermann_literal_slots,
-            TelemetryCount::Exact(value) if value > 0
-        ));
-        let mut off_routing = rejected_routing;
-        off_routing.full_ackermann_setting = Some("off");
-        let rejected = solve_bool_problem_with_routing(
+        let mut rejected_trace = BoolSolveRouteTrace::default();
+        let rejected = solve_bool_problem_with_routing_and_trace(
             &arena,
             &bool_problem,
             options,
             EqAbstractionMode::Off,
             rejected_routing,
+            Some(&mut rejected_trace),
         );
+        let mut off_routing = rejected_routing;
+        off_routing.full_ackermann_setting = Some("off");
         let off = solve_bool_problem_with_routing(
             &arena,
             &bool_problem,
@@ -9546,7 +9560,19 @@ mod tests {
             EqAbstractionMode::Off,
             off_routing,
         );
+
+        assert_eq!(rejected_trace.finite_added, admitted_trace.finite_added);
+        assert!(!rejected_trace.auto_uses_cadical);
+        assert!(rejected_trace.leaf_budget_backend_active);
+        assert!(rejected_trace.leaf_budget_attempted);
+        assert!(!rejected_trace.leaf_budget_activated);
+        assert!(!rejected_trace.leaf_budget_candidate_dispatched);
+        assert_eq!(
+            rejected_trace.leaf_budget_rejection,
+            Some(LeafBudgetRejection::AckermannClauseCap)
+        );
         assert_eq!(rejected, off);
+        assert!(admitted.2 > off.unwrap().2);
     }
 
     #[test]
