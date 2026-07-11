@@ -282,3 +282,94 @@ leave a broad Ackermann tail.
 Every behavioral mechanism is default-off and receives a same-binary paired
 gate. No combination is timed until its constituent mechanisms individually
 pass correctness, target speed, full-corpus total, and coverage gates.
+
+## 2024-2026 Expert Watchlist
+
+This section records newer work by Armin Biere and collaborators that changes
+the control experiments or proof obligations. These mechanisms are occupied
+prior art; the project may use them, but cannot claim them as its novelty.
+
+### Clausal congruence closure and local simple probing
+
+The 2024 clausal congruence-closure work reconstructs AND, XOR, and ITE gates
+from CNF, uses local hyper-binary resolution plus equivalent-literal
+substitution, and can solve isomorphic miters before CDCL. Its experiments also
+show that this pass and structured BVA are orthogonal. The reported generic
+cost was about 4.41% on one competition set, which is too high for an
+unconditional euf-viper front-end pass.
+
+Project consequence: add a local HBR/equivalence-sweeping control on frozen
+`GRAPH_32` components. Any theory-aware vivification result must beat this
+purely clausal control after its full analysis overhead. EUF structure may seed
+the candidate binary equivalences, but every substitution remains RUP/DRUP
+replayable.
+
+Source:
+
+- [Clausal Congruence Closure](https://cca.informatik.uni-freiburg.de/papers/BiereFazekasFleuryFroleyks-SAT24.pdf)
+
+### Vivification scheduling and clause retention
+
+The 2025 vivification study reports that retaining more clauses during
+vivification caused a cumulative slowdown on factoring benchmarks. The key
+lesson is not merely to vivify, but to measure scheduling, retained-clause
+policy, and interaction with later database reduction.
+
+Project consequence: a theory-aware vivifier receives a strict component
+budget and may not automatically protect every strengthened theory clause.
+Telemetry must separate clauses removed, clauses shortened, clauses retained,
+and their later use in conflict analysis.
+
+Source:
+
+- [Revisiting Clause Vivification](https://cca.informatik.uni-freiburg.de/papers/PollittFleuryBiereSakallahHeuleChenFisseha-POS25.pdf)
+
+### Unlearning by criticality and recent use
+
+`Learn to Unlearn` shows that keeping all clauses hurts both SAT and UNSAT,
+periodically deleting nearly everything remains competitive on SAT but harms
+UNSAT, and retaining a critical size/LBD tier plus recently used clauses is a
+strong simple policy. The paper also documents a real regression caused by
+granting strengthened clauses an extra retention chance.
+
+Project consequence: do not infer permanent value from a clause merely because
+it came from EUF, Hall, or orbit reasoning. Record a representation-neutral
+critical bit and a recent-use bit; evaluate deletion policies separately on
+SAT and UNSAT strata without using expected status in runtime routing.
+
+Source:
+
+- [Learn to Unlearn](https://cca.informatik.uni-freiburg.de/papers/GstreinPollittSchidlerFleuryBiere-SAT25.pdf)
+
+### Extended-redundancy incremental inprocessing
+
+The 2025 incremental inprocessing calculus explicitly covers clause additions
+based on BVA, BCA, extended resolution, cardinality reasoning, and decision
+diagrams. This closes a proof-design gap: a dynamic BVA or MDD mechanism cannot
+be justified only as an informal equisatisfiable rewrite when incremental SAT
+state is retained.
+
+Project consequence: the first MDD/BVA prototype is static and default-off. A
+later dynamic form must log extension-variable introduction and deletion under
+an extended-redundancy checker before it can be promoted.
+
+Source:
+
+- [Incremental Inprocessing Rules beyond Resolution](https://cca.informatik.uni-freiburg.de/papers/FazekasPollittFleuryBiere-POS25.pdf)
+
+### Disjoint projected enumeration without blocking clauses
+
+The 2025 TabularAllSAT/AllSMT work combines chronological backtracking with
+aggressive implicant shrinking to enumerate disjoint projected regions without
+accumulating blocking clauses. This is close prior art for any claim that an
+anti-model table automaton is novel merely because it avoids 5,040 explicit
+blocking clauses.
+
+Project consequence: compare the canonical forbidden-table search against a
+chronological projected-enumeration control. The differentiated hypothesis is
+the verified operation-table action, orbit quotient, and typed source
+certificate, not blocking-clause avoidance alone.
+
+Source:
+
+- [Disjoint Projected Enumeration for SAT and SMT without Blocking Clauses](https://cca.informatik.uni-freiburg.de/papers/SpallittaSebastianiBiere-AIJ25.pdf)
