@@ -1,0 +1,8 @@
+(set-logic QF_UF)
+(declare-sort U 0)
+(declare-fun p () Bool)
+(declare-fun q () Bool)
+(declare-fun r () Bool)
+(declare-fun f (Bool) U)
+(assert (distinct (f p) (f q) (f r)))
+(check-sat)
