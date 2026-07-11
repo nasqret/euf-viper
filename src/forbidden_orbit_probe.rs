@@ -263,6 +263,12 @@ pub(crate) struct PatternOrbitReport {
     pub(crate) extraction: ExtractionTelemetry,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExactPatternFamily {
+    pub(crate) report: PatternOrbitReport,
+    pub(crate) patterns: Box<[PartialTablePattern]>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CandidateShape {
     NotCandidate,
@@ -314,6 +320,12 @@ pub(crate) fn analyze_forbidden_table_orbit(problem: &Problem) -> Result<OrbitRe
 pub(crate) fn analyze_forbidden_pattern_orbit(
     problem: &Problem,
 ) -> Result<PatternOrbitReport, ProbeError> {
+    extract_forbidden_pattern_family(problem).map(|family| family.report)
+}
+
+pub(crate) fn extract_forbidden_pattern_family(
+    problem: &Problem,
+) -> Result<ExactPatternFamily, ProbeError> {
     let (degree, extracted, telemetry) = extract_exact_patterns(problem)?;
     if extracted.is_empty() {
         return Err(ProbeError::NoExactPatterns);
@@ -328,11 +340,15 @@ pub(crate) fn analyze_forbidden_pattern_orbit(
     if by_function.len() != 1 {
         return Err(ProbeError::MultiplePatternFunctions(by_function.len()));
     }
-    let (&function, patterns) = by_function
-        .iter()
-        .max_by_key(|(function, patterns)| (patterns.len(), std::cmp::Reverse(**function)))
-        .expect("nonempty extraction has a function group");
-    report_for_patterns(degree, function, patterns, telemetry)
+    let (function, patterns) = by_function
+        .into_iter()
+        .next()
+        .expect("nonempty single-function extraction has one group");
+    let report = report_for_patterns(degree, function, &patterns, telemetry)?;
+    Ok(ExactPatternFamily {
+        report,
+        patterns: patterns.into_boxed_slice(),
+    })
 }
 
 fn extract_exact_patterns(
@@ -647,6 +663,9 @@ mod tests {
         ConstructionCap as MultiValuedConstructionCap, Telemetry as MultiValuedTelemetry,
         compile_forbidden_table_mvdd,
     };
+    use crate::right_translation_exact_cover::{
+        ShadowCaps, ShadowOutcome, search_exact_pattern_shadow,
+    };
     use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
     use std::{env, fs};
 
@@ -848,6 +867,160 @@ mod tests {
         );
     }
 
+    fn env_usize(name: &str, default: usize) -> usize {
+        match env::var(name) {
+            Ok(value) => value
+                .parse::<usize>()
+                .unwrap_or_else(|_| panic!("{name} must be a nonnegative integer, got {value:?}")),
+            Err(env::VarError::NotPresent) => default,
+            Err(error) => panic!("failed to read {name}: {error}"),
+        }
+    }
+
+    fn qg7_shadow_caps_from_env() -> ShadowCaps {
+        let defaults = ShadowCaps::default();
+        ShadowCaps {
+            max_patterns: env_usize("EUF_VIPER_QG7_RTXC_MAX_PATTERNS", defaults.max_patterns),
+            max_pattern_cells: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_PATTERN_CELLS",
+                defaults.max_pattern_cells,
+            ),
+            max_permutations: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_PERMUTATIONS",
+                defaults.max_permutations,
+            ),
+            max_bitset_words: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_BITSET_WORDS",
+                defaults.max_bitset_words,
+            ),
+            max_preparation_word_ops: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_PREPARATION_WORD_OPS",
+                defaults.max_preparation_word_ops,
+            ),
+            max_preparation_pattern_checks: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_PREPARATION_PATTERN_CHECKS",
+                defaults.max_preparation_pattern_checks,
+            ),
+            max_search_nodes: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_SEARCH_NODES",
+                defaults.max_search_nodes,
+            ),
+            max_candidate_checks: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_CANDIDATE_CHECKS",
+                defaults.max_candidate_checks,
+            ),
+            max_bitset_word_ops: env_usize(
+                "EUF_VIPER_QG7_RTXC_MAX_SEARCH_BITSET_WORD_OPS",
+                defaults.max_bitset_word_ops,
+            ),
+        }
+    }
+
+    fn json_escape(text: &str) -> String {
+        let mut escaped = String::with_capacity(text.len());
+        for character in text.chars() {
+            match character {
+                '"' => escaped.push_str("\\\""),
+                '\\' => escaped.push_str("\\\\"),
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                character if character.is_control() => {
+                    use std::fmt::Write;
+                    write!(&mut escaped, "\\u{:04x}", u32::from(character)).unwrap();
+                }
+                character => escaped.push(character),
+            }
+        }
+        escaped
+    }
+
+    fn shadow_ineligibility(report: &PatternOrbitReport) -> Option<&'static str> {
+        if report.degree != 7 {
+            return Some("degree_not_seven");
+        }
+        if report.extraction.malformed_pattern_candidates != 0 {
+            return Some("malformed_pattern_candidates");
+        }
+        if report.duplicate_exclusions != 0 {
+            return Some("duplicate_pattern_records");
+        }
+        if !report.exact_first_orbit_cover {
+            return Some("non_exact_first_orbit_cover");
+        }
+        None
+    }
+
+    fn print_qg7_shadow_record(
+        path: &std::path::Path,
+        family: &ExactPatternFamily,
+        caps: &ShadowCaps,
+        outcome: &ShadowOutcome,
+    ) {
+        let telemetry = outcome.telemetry();
+        let (abstain_reason, abstain_resource) = match outcome {
+            ShadowOutcome::Abstain { reason, .. } => (reason.code(), reason.resource()),
+            ShadowOutcome::Sat { .. } | ShadowOutcome::Unsat { .. } => ("none", "none"),
+        };
+        println!(
+            concat!(
+                "{{\"path\":\"{}\",\"status\":\"eligible\",",
+                "\"semantics\":\"latin_pattern_avoidance\",",
+                "\"production_routing\":false,",
+                "\"degree\":{},\"width\":{},\"records\":{},\"unique\":{},",
+                "\"orbit_size\":{},\"stabilizer_size\":{},",
+                "\"outcome\":\"{}\",\"abstain_reason\":\"{}\",",
+                "\"abstain_resource\":\"{}\",\"patterns\":{},",
+                "\"pattern_cells\":{},\"permutations\":{},\"bitset_words\":{},",
+                "\"preparation_word_ops\":{},\"preparation_pattern_checks\":{},",
+                "\"preparation_cell_updates\":{},\"search_nodes\":{},",
+                "\"candidate_checks\":{},\"exact_cover_rejections\":{},",
+                "\"forbidden_rejections\":{},\"search_bitset_word_ops\":{},",
+                "\"branch_attempts\":{},\"witness_checks\":{},\"max_depth\":{},",
+                "\"trace_hash\":\"{:016x}\",\"cap_patterns\":{},",
+                "\"cap_pattern_cells\":{},\"cap_permutations\":{},",
+                "\"cap_bitset_words\":{},\"cap_preparation_word_ops\":{},",
+                "\"cap_preparation_pattern_checks\":{},\"cap_search_nodes\":{},",
+                "\"cap_candidate_checks\":{},\"cap_search_bitset_word_ops\":{}}}"
+            ),
+            json_escape(&path.display().to_string()),
+            family.report.degree,
+            family.report.pattern_width,
+            family.report.exclusion_records,
+            family.report.unique_exclusions,
+            family.report.first_pattern_orbit_size,
+            family.report.first_pattern_stabilizer_size,
+            outcome.label(),
+            abstain_reason,
+            abstain_resource,
+            telemetry.patterns,
+            telemetry.pattern_cells,
+            telemetry.permutations,
+            telemetry.bitset_words,
+            telemetry.preparation_word_ops,
+            telemetry.preparation_pattern_checks,
+            telemetry.preparation_cell_updates,
+            telemetry.search_nodes,
+            telemetry.candidate_checks,
+            telemetry.exact_cover_rejections,
+            telemetry.forbidden_rejections,
+            telemetry.bitset_word_ops,
+            telemetry.branch_attempts,
+            telemetry.witness_checks,
+            telemetry.max_depth,
+            telemetry.trace_hash,
+            caps.max_patterns,
+            caps.max_pattern_cells,
+            caps.max_permutations,
+            caps.max_bitset_words,
+            caps.max_preparation_word_ops,
+            caps.max_preparation_pattern_checks,
+            caps.max_search_nodes,
+            caps.max_candidate_checks,
+            caps.max_bitset_word_ops,
+        );
+    }
+
     #[test]
     fn extracts_a_typed_complete_binary_table() {
         let problem = parse(&degree_three_source(true));
@@ -863,6 +1036,9 @@ mod tests {
         assert_eq!(partial.pattern_width, 9);
         assert_eq!(partial.extraction.exact_patterns, 1);
         assert_eq!(partial.canonical_first_pattern.representative.width(), 9);
+        let family = extract_forbidden_pattern_family(&problem).unwrap();
+        assert_eq!(family.report, partial);
+        assert_eq!(family.patterns.len(), 1);
     }
 
     #[test]
@@ -963,6 +1139,10 @@ mod tests {
             assert_eq!(report.first_pattern_orbit_size, 5_040);
             assert_eq!(report.first_pattern_stabilizer_size, 1);
             assert!(report.orbit_stabilizer_verified);
+            assert_eq!(
+                shadow_ineligibility(&report),
+                Some("non_exact_first_orbit_cover")
+            );
             assert_eq!(
                 rigid
                     .conjugated_by(&report.canonical_first_pattern.witness)
@@ -1175,15 +1355,10 @@ mod tests {
     #[ignore = "requires EUF_VIPER_QG7_CENSUS_DIR; bounded to at most 512 files"]
     fn bounded_qg7_partial_pattern_census() {
         let directory = env::var("EUF_VIPER_QG7_CENSUS_DIR").unwrap();
-        let requested = env::var("EUF_VIPER_QG7_CENSUS_LIMIT")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(4);
+        let requested = env_usize("EUF_VIPER_QG7_CENSUS_LIMIT", 4);
         let limit = requested.clamp(1, 512);
-        let offset = env::var("EUF_VIPER_QG7_CENSUS_OFFSET")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0);
+        let offset = env_usize("EUF_VIPER_QG7_CENSUS_OFFSET", 0);
+        let caps = qg7_shadow_caps_from_env();
         let mut paths = fs::read_dir(directory)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -1198,28 +1373,37 @@ mod tests {
         for path in paths.into_iter().skip(offset).take(limit) {
             let source = fs::read_to_string(&path).unwrap();
             let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
-            match analyze_forbidden_pattern_orbit(&problem) {
-                Ok(report) => println!(
-                    concat!(
-                        "{{\"path\":\"{}\",\"status\":\"analyzed\",",
-                        "\"degree\":{},\"width\":{},\"records\":{},",
-                        "\"unique\":{},\"orbit_size\":{},",
-                        "\"stabilizer_size\":{},\"exact_cover\":{},",
-                        "\"malformed\":{}}}"
+            match extract_forbidden_pattern_family(&problem) {
+                Ok(family) => match shadow_ineligibility(&family.report) {
+                    Some(reason) => println!(
+                        concat!(
+                            "{{\"path\":\"{}\",\"status\":\"ineligible\",",
+                            "\"reason\":\"{}\",\"degree\":{},\"width\":{},",
+                            "\"records\":{},\"unique\":{},\"orbit_size\":{},",
+                            "\"stabilizer_size\":{},\"exact_cover\":{}}}"
+                        ),
+                        json_escape(&path.display().to_string()),
+                        reason,
+                        family.report.degree,
+                        family.report.pattern_width,
+                        family.report.exclusion_records,
+                        family.report.unique_exclusions,
+                        family.report.first_pattern_orbit_size,
+                        family.report.first_pattern_stabilizer_size,
+                        family.report.exact_first_orbit_cover,
                     ),
-                    path.display(),
-                    report.degree,
-                    report.pattern_width,
-                    report.exclusion_records,
-                    report.unique_exclusions,
-                    report.first_pattern_orbit_size,
-                    report.first_pattern_stabilizer_size,
-                    report.exact_first_orbit_cover,
-                    report.extraction.malformed_pattern_candidates,
-                ),
+                    None => {
+                        let outcome = search_exact_pattern_shadow(&family.patterns, &caps);
+                        print_qg7_shadow_record(&path, &family, &caps, &outcome);
+                    }
+                },
                 Err(error) => println!(
-                    "{{\"path\":\"{}\",\"status\":\"ineligible\",\"reason\":\"{error:?}\"}}",
-                    path.display(),
+                    concat!(
+                        "{{\"path\":\"{}\",\"status\":\"ineligible\",",
+                        "\"reason\":\"extraction_error\",\"detail\":\"{}\"}}"
+                    ),
+                    json_escape(&path.display().to_string()),
+                    json_escape(&format!("{error:?}")),
                 ),
             }
         }

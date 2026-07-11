@@ -4,6 +4,8 @@
 //! the remaining exact-cover condition. Bounded runs report non-exhaustion
 //! explicitly and therefore never promote a partial search to SAT or UNSAT.
 
+use crate::forbidden_orbit_probe::PartialTablePattern;
+
 const MAX_DEGREE: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,9 +209,764 @@ fn advance_permutation(values: &mut [u8]) -> bool {
     true
 }
 
+const MAX_SHADOW_DEGREE: usize = 7;
+const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShadowCaps {
+    pub(crate) max_patterns: usize,
+    pub(crate) max_pattern_cells: usize,
+    pub(crate) max_permutations: usize,
+    pub(crate) max_bitset_words: usize,
+    pub(crate) max_preparation_word_ops: usize,
+    pub(crate) max_preparation_pattern_checks: usize,
+    pub(crate) max_search_nodes: usize,
+    pub(crate) max_candidate_checks: usize,
+    pub(crate) max_bitset_word_ops: usize,
+}
+
+impl Default for ShadowCaps {
+    fn default() -> Self {
+        Self {
+            max_patterns: 6_000,
+            max_pattern_cells: 300_000,
+            max_permutations: 5_040,
+            max_bitset_words: 3_200_000,
+            max_preparation_word_ops: 30_000_000,
+            max_preparation_pattern_checks: 1_000_000,
+            max_search_nodes: 1_000_000,
+            max_candidate_checks: 50_000_000,
+            max_bitset_word_ops: 100_000_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShadowAbstainReason {
+    UnsupportedStructure(&'static str),
+    StructuralCap {
+        resource: &'static str,
+        limit: usize,
+        actual: usize,
+    },
+    PreparationCap {
+        resource: &'static str,
+        limit: usize,
+    },
+    SearchCap {
+        resource: &'static str,
+        limit: usize,
+    },
+    ArithmeticOverflow,
+    AllocationFailed,
+    WitnessRejected(WitnessError),
+}
+
+impl ShadowAbstainReason {
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedStructure(_) => "unsupported_structure",
+            Self::StructuralCap { .. } => "structural_cap",
+            Self::PreparationCap { .. } => "preparation_cap",
+            Self::SearchCap { .. } => "search_cap",
+            Self::ArithmeticOverflow => "arithmetic_overflow",
+            Self::AllocationFailed => "allocation_failed",
+            Self::WitnessRejected(_) => "witness_rejected",
+        }
+    }
+
+    pub(crate) fn resource(&self) -> &'static str {
+        match self {
+            Self::UnsupportedStructure(resource)
+            | Self::StructuralCap { resource, .. }
+            | Self::PreparationCap { resource, .. }
+            | Self::SearchCap { resource, .. } => resource,
+            Self::ArithmeticOverflow => "arithmetic",
+            Self::AllocationFailed => "allocation",
+            Self::WitnessRejected(error) => error.code(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ShadowTelemetry {
+    pub(crate) patterns: usize,
+    pub(crate) pattern_cells: usize,
+    pub(crate) permutations: usize,
+    pub(crate) bitset_words: usize,
+    pub(crate) preparation_word_ops: usize,
+    pub(crate) preparation_pattern_checks: usize,
+    pub(crate) preparation_cell_updates: usize,
+    pub(crate) search_nodes: usize,
+    pub(crate) candidate_checks: usize,
+    pub(crate) exact_cover_rejections: usize,
+    pub(crate) forbidden_rejections: usize,
+    pub(crate) bitset_word_ops: usize,
+    pub(crate) branch_attempts: usize,
+    pub(crate) witness_checks: usize,
+    pub(crate) max_depth: usize,
+    pub(crate) trace_hash: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShadowWitness {
+    degree: usize,
+    table: Box<[u8]>,
+}
+
+impl ShadowWitness {
+    pub(crate) fn degree(&self) -> usize {
+        self.degree
+    }
+
+    pub(crate) fn table(&self) -> &[u8] {
+        &self.table
+    }
+}
+
+/// Outcome for the Latin-table pattern-avoidance abstraction only.
+///
+/// `Unsat` is emitted only after exhaustive search. This test-only result is
+/// never an answer for the source SMT problem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShadowOutcome {
+    Sat {
+        witness: ShadowWitness,
+        telemetry: ShadowTelemetry,
+    },
+    Unsat {
+        telemetry: ShadowTelemetry,
+    },
+    Abstain {
+        reason: ShadowAbstainReason,
+        telemetry: ShadowTelemetry,
+    },
+}
+
+impl ShadowOutcome {
+    pub(crate) fn telemetry(&self) -> &ShadowTelemetry {
+        match self {
+            Self::Sat { telemetry, .. }
+            | Self::Unsat { telemetry }
+            | Self::Abstain { telemetry, .. } => telemetry,
+        }
+    }
+
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Sat { .. } => "sat",
+            Self::Unsat { .. } => "unsat",
+            Self::Abstain { .. } => "abstain",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WitnessError {
+    DegreeOutOfRange,
+    WrongTableSize { expected: usize, actual: usize },
+    ValueOutOfRange { cell: usize, value: u8 },
+    RowIsNotPermutation { row: usize },
+    ColumnIsNotPermutation { column: usize },
+    PatternDegreeMismatch { pattern: usize },
+    ForbiddenPatternMatched { pattern: usize },
+}
+
+impl WitnessError {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::DegreeOutOfRange => "witness_degree",
+            Self::WrongTableSize { .. } => "witness_table_size",
+            Self::ValueOutOfRange { .. } => "witness_value",
+            Self::RowIsNotPermutation { .. } => "witness_row",
+            Self::ColumnIsNotPermutation { .. } => "witness_column",
+            Self::PatternDegreeMismatch { .. } => "witness_pattern_degree",
+            Self::ForbiddenPatternMatched { .. } => "witness_forbidden_pattern",
+        }
+    }
+}
+
+pub(crate) fn search_exact_pattern_shadow(
+    forbidden_patterns: &[PartialTablePattern],
+    caps: &ShadowCaps,
+) -> ShadowOutcome {
+    let mut telemetry = ShadowTelemetry {
+        trace_hash: FNV_OFFSET,
+        ..ShadowTelemetry::default()
+    };
+    let prepared = match PreparedShadow::new(forbidden_patterns, caps, &mut telemetry) {
+        Ok(prepared) => prepared,
+        Err(reason) => return ShadowOutcome::Abstain { reason, telemetry },
+    };
+    let live_words = match prepared
+        .degree
+        .checked_add(1)
+        .and_then(|depths| depths.checked_mul(prepared.words))
+    {
+        Some(words) => words,
+        None => {
+            return ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::ArithmeticOverflow,
+                telemetry,
+            };
+        }
+    };
+    let mut live_stack = match zeroed_words(live_words) {
+        Ok(words) => words,
+        Err(reason) => return ShadowOutcome::Abstain { reason, telemetry },
+    };
+    live_stack[..prepared.words].fill(u64::MAX);
+    live_stack[prepared.words - 1] = prepared.last_word_mask;
+
+    let mut search = ShadowSearch {
+        prepared: &prepared,
+        caps,
+        telemetry,
+        live_stack,
+        table: vec![0; prepared.degree * prepared.degree],
+    };
+    let result = search.dfs(0, 0, 0);
+    let mut telemetry = search.telemetry;
+    match result {
+        ShadowDfsResult::Sat(table) => {
+            telemetry.witness_checks += 1;
+            match validate_shadow_witness(prepared.degree, &prepared.patterns, &table) {
+                Ok(()) => ShadowOutcome::Sat {
+                    witness: ShadowWitness {
+                        degree: prepared.degree,
+                        table: table.into_boxed_slice(),
+                    },
+                    telemetry,
+                },
+                Err(error) => ShadowOutcome::Abstain {
+                    reason: ShadowAbstainReason::WitnessRejected(error),
+                    telemetry,
+                },
+            }
+        }
+        ShadowDfsResult::Unsat => ShadowOutcome::Unsat { telemetry },
+        ShadowDfsResult::Abstain(reason) => ShadowOutcome::Abstain { reason, telemetry },
+    }
+}
+
+pub(crate) fn validate_shadow_witness(
+    degree: usize,
+    forbidden_patterns: &[PartialTablePattern],
+    table: &[u8],
+) -> Result<(), WitnessError> {
+    if degree == 0 || degree > MAX_SHADOW_DEGREE {
+        return Err(WitnessError::DegreeOutOfRange);
+    }
+    let expected = degree * degree;
+    if table.len() != expected {
+        return Err(WitnessError::WrongTableSize {
+            expected,
+            actual: table.len(),
+        });
+    }
+    let all_values = (1_u16 << degree) as u8 - 1;
+    for (cell, &value) in table.iter().enumerate() {
+        if usize::from(value) >= degree {
+            return Err(WitnessError::ValueOutOfRange { cell, value });
+        }
+    }
+    for row in 0..degree {
+        let mut values = 0_u8;
+        for column in 0..degree {
+            values |= 1_u8 << table[row * degree + column];
+        }
+        if values != all_values {
+            return Err(WitnessError::RowIsNotPermutation { row });
+        }
+    }
+    for column in 0..degree {
+        let mut values = 0_u8;
+        for row in 0..degree {
+            values |= 1_u8 << table[row * degree + column];
+        }
+        if values != all_values {
+            return Err(WitnessError::ColumnIsNotPermutation { column });
+        }
+    }
+    for (index, pattern) in forbidden_patterns.iter().enumerate() {
+        if pattern.degree() != degree {
+            return Err(WitnessError::PatternDegreeMismatch { pattern: index });
+        }
+        if pattern.assignments().iter().all(|assignment| {
+            table[assignment.row * degree + assignment.column]
+                == u8::try_from(assignment.value).expect("degree is at most seven")
+        }) {
+            return Err(WitnessError::ForbiddenPatternMatched { pattern: index });
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct ShadowPermutation {
+    values: Box<[u8]>,
+    row_value_bits: u64,
+}
+
+struct PreparedShadow {
+    degree: usize,
+    patterns: Box<[PartialTablePattern]>,
+    permutations: Box<[ShadowPermutation]>,
+    words: usize,
+    last_word_mask: u64,
+    compatibility: Box<[u64]>,
+    completed_patterns: Box<[u64]>,
+    completed_nonempty: Box<[bool]>,
+}
+
+impl PreparedShadow {
+    fn new(
+        forbidden_patterns: &[PartialTablePattern],
+        caps: &ShadowCaps,
+        telemetry: &mut ShadowTelemetry,
+    ) -> Result<Self, ShadowAbstainReason> {
+        let first = forbidden_patterns
+            .first()
+            .ok_or(ShadowAbstainReason::UnsupportedStructure(
+                "empty forbidden pattern family",
+            ))?;
+        let degree = first.degree();
+        if degree == 0 || degree > MAX_SHADOW_DEGREE {
+            return Err(ShadowAbstainReason::UnsupportedStructure(
+                "shadow degree outside 1..=7",
+            ));
+        }
+        let width = first.width();
+        let mut patterns = forbidden_patterns.to_vec();
+        patterns.sort_unstable();
+        for (index, pattern) in patterns.iter().enumerate() {
+            if pattern.degree() != degree {
+                return Err(ShadowAbstainReason::UnsupportedStructure(
+                    "mixed pattern degrees",
+                ));
+            }
+            if pattern.width() != width {
+                return Err(ShadowAbstainReason::UnsupportedStructure(
+                    "nonuniform pattern width",
+                ));
+            }
+            if index > 0 && patterns[index - 1] == *pattern {
+                return Err(ShadowAbstainReason::UnsupportedStructure(
+                    "duplicate forbidden patterns",
+                ));
+            }
+        }
+
+        telemetry.patterns = patterns.len();
+        if telemetry.patterns > caps.max_patterns {
+            return Err(ShadowAbstainReason::StructuralCap {
+                resource: "patterns",
+                limit: caps.max_patterns,
+                actual: telemetry.patterns,
+            });
+        }
+        telemetry.pattern_cells = patterns.iter().try_fold(0_usize, |total, pattern| {
+            total
+                .checked_add(pattern.width())
+                .ok_or(ShadowAbstainReason::ArithmeticOverflow)
+        })?;
+        if telemetry.pattern_cells > caps.max_pattern_cells {
+            return Err(ShadowAbstainReason::StructuralCap {
+                resource: "pattern_cells",
+                limit: caps.max_pattern_cells,
+                actual: telemetry.pattern_cells,
+            });
+        }
+
+        let permutation_count = checked_factorial(degree)?;
+        telemetry.permutations = permutation_count;
+        if permutation_count > caps.max_permutations {
+            return Err(ShadowAbstainReason::StructuralCap {
+                resource: "permutations",
+                limit: caps.max_permutations,
+                actual: permutation_count,
+            });
+        }
+        let permutations = permutations(degree)
+            .into_iter()
+            .map(|values| {
+                let row_value_bits = values
+                    .iter()
+                    .enumerate()
+                    .fold(0_u64, |bits, (row, &value)| {
+                        bits | (1_u64 << (row * degree + usize::from(value)))
+                    });
+                ShadowPermutation {
+                    values,
+                    row_value_bits,
+                }
+            })
+            .collect::<Vec<_>>();
+        debug_assert_eq!(permutations.len(), permutation_count);
+
+        let words = patterns
+            .len()
+            .checked_add(63)
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?
+            / 64;
+        let last_word_mask = if patterns.len() % 64 == 0 {
+            u64::MAX
+        } else {
+            (1_u64 << (patterns.len() % 64)) - 1
+        };
+        let candidates = degree
+            .checked_mul(permutation_count)
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        let compatibility_words = candidates
+            .checked_mul(words)
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        let cell_compatibility_words = degree
+            .checked_mul(degree)
+            .and_then(|value| value.checked_mul(degree))
+            .and_then(|value| value.checked_mul(words))
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        let subset_count = 1_usize
+            .checked_shl(u32::try_from(degree).expect("degree is at most seven"))
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        let completed_words = subset_count
+            .checked_mul(words)
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        telemetry.bitset_words = compatibility_words
+            .checked_add(cell_compatibility_words)
+            .and_then(|value| value.checked_add(completed_words))
+            .and_then(|value| value.checked_add((degree + 1) * words))
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+        if telemetry.bitset_words > caps.max_bitset_words {
+            return Err(ShadowAbstainReason::StructuralCap {
+                resource: "bitset_words",
+                limit: caps.max_bitset_words,
+                actual: telemetry.bitset_words,
+            });
+        }
+
+        let mut cell_compatibility = zeroed_words(cell_compatibility_words)?;
+        for block in cell_compatibility.chunks_exact_mut(words) {
+            block.fill(u64::MAX);
+            block[words - 1] = last_word_mask;
+        }
+        let mut supports = vec![0_u8; patterns.len()];
+        for (pattern_index, pattern) in patterns.iter().enumerate() {
+            let pattern_word = pattern_index / 64;
+            let pattern_bit = 1_u64 << (pattern_index % 64);
+            for assignment in pattern.assignments() {
+                supports[pattern_index] |= 1_u8 << assignment.column;
+                for selected in 0..degree {
+                    if selected == assignment.value {
+                        continue;
+                    }
+                    telemetry.preparation_cell_updates = telemetry
+                        .preparation_cell_updates
+                        .checked_add(1)
+                        .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+                    let offset = cell_compatibility_offset(
+                        degree,
+                        words,
+                        assignment.column,
+                        assignment.row,
+                        selected,
+                    );
+                    cell_compatibility[offset + pattern_word] &= !pattern_bit;
+                }
+            }
+        }
+
+        let mut compatibility = zeroed_words(compatibility_words)?;
+        for column in 0..degree {
+            for (permutation_index, permutation) in permutations.iter().enumerate() {
+                let output = (column * permutation_count + permutation_index) * words;
+                for word in 0..words {
+                    let mut compatible = if word + 1 == words {
+                        last_word_mask
+                    } else {
+                        u64::MAX
+                    };
+                    for row in 0..degree {
+                        add_preparation_work(
+                            &mut telemetry.preparation_word_ops,
+                            1,
+                            caps.max_preparation_word_ops,
+                            "preparation_word_ops",
+                        )?;
+                        let input = cell_compatibility_offset(
+                            degree,
+                            words,
+                            column,
+                            row,
+                            usize::from(permutation.values[row]),
+                        );
+                        compatible &= cell_compatibility[input + word];
+                    }
+                    compatibility[output + word] = compatible;
+                }
+            }
+        }
+        drop(cell_compatibility);
+
+        let mut completed_patterns = zeroed_words(completed_words)?;
+        let mut completed_nonempty = vec![false; subset_count];
+        for subset in 0..subset_count {
+            let subset_mask = u8::try_from(subset).expect("degree is at most seven");
+            let output = subset * words;
+            for (pattern_index, &support) in supports.iter().enumerate() {
+                add_preparation_pattern_check(
+                    &mut telemetry.preparation_pattern_checks,
+                    caps.max_preparation_pattern_checks,
+                )?;
+                if support & !subset_mask == 0 {
+                    completed_patterns[output + pattern_index / 64] |=
+                        1_u64 << (pattern_index % 64);
+                    completed_nonempty[subset] = true;
+                }
+            }
+        }
+
+        Ok(Self {
+            degree,
+            patterns: patterns.into_boxed_slice(),
+            permutations: permutations.into_boxed_slice(),
+            words,
+            last_word_mask,
+            compatibility: compatibility.into_boxed_slice(),
+            completed_patterns: completed_patterns.into_boxed_slice(),
+            completed_nonempty: completed_nonempty.into_boxed_slice(),
+        })
+    }
+
+    fn compatibility_offset(&self, column: usize, permutation: usize) -> usize {
+        (column * self.permutations.len() + permutation) * self.words
+    }
+}
+
+fn cell_compatibility_offset(
+    degree: usize,
+    words: usize,
+    column: usize,
+    row: usize,
+    value: usize,
+) -> usize {
+    ((column * degree * degree + row * degree + value) * words) as usize
+}
+
+fn zeroed_words(length: usize) -> Result<Vec<u64>, ShadowAbstainReason> {
+    let mut words = Vec::new();
+    words
+        .try_reserve_exact(length)
+        .map_err(|_| ShadowAbstainReason::AllocationFailed)?;
+    words.resize(length, 0);
+    Ok(words)
+}
+
+fn checked_factorial(degree: usize) -> Result<usize, ShadowAbstainReason> {
+    (1..=degree).try_fold(1_usize, |product, value| {
+        product
+            .checked_mul(value)
+            .ok_or(ShadowAbstainReason::ArithmeticOverflow)
+    })
+}
+
+fn add_preparation_work(
+    counter: &mut usize,
+    amount: usize,
+    limit: usize,
+    resource: &'static str,
+) -> Result<(), ShadowAbstainReason> {
+    let next = counter
+        .checked_add(amount)
+        .ok_or(ShadowAbstainReason::ArithmeticOverflow)?;
+    if next > limit {
+        return Err(ShadowAbstainReason::PreparationCap { resource, limit });
+    }
+    *counter = next;
+    Ok(())
+}
+
+fn add_preparation_pattern_check(
+    counter: &mut usize,
+    limit: usize,
+) -> Result<(), ShadowAbstainReason> {
+    add_preparation_work(counter, 1, limit, "preparation_pattern_checks")
+}
+
+enum ShadowDfsResult {
+    Sat(Vec<u8>),
+    Unsat,
+    Abstain(ShadowAbstainReason),
+}
+
+struct ShadowSearch<'a> {
+    prepared: &'a PreparedShadow,
+    caps: &'a ShadowCaps,
+    telemetry: ShadowTelemetry,
+    live_stack: Vec<u64>,
+    table: Vec<u8>,
+}
+
+impl ShadowSearch<'_> {
+    fn dfs(&mut self, depth: usize, assigned_columns: u8, used_row_values: u64) -> ShadowDfsResult {
+        if self.telemetry.search_nodes >= self.caps.max_search_nodes {
+            return ShadowDfsResult::Abstain(ShadowAbstainReason::SearchCap {
+                resource: "search_nodes",
+                limit: self.caps.max_search_nodes,
+            });
+        }
+        self.telemetry.search_nodes += 1;
+        self.telemetry.max_depth = self.telemetry.max_depth.max(depth);
+        if depth == self.prepared.degree {
+            return ShadowDfsResult::Sat(self.table.clone());
+        }
+
+        let mut best_column = None;
+        let mut best_count = usize::MAX;
+        for column in 0..self.prepared.degree {
+            if assigned_columns & (1_u8 << column) != 0 {
+                continue;
+            }
+            let next_columns = assigned_columns | (1_u8 << column);
+            let mut viable = 0;
+            for permutation in 0..self.prepared.permutations.len() {
+                match self.candidate_is_viable(
+                    depth,
+                    column,
+                    permutation,
+                    next_columns,
+                    used_row_values,
+                ) {
+                    Ok(true) => viable += 1,
+                    Ok(false) => {}
+                    Err(reason) => return ShadowDfsResult::Abstain(reason),
+                }
+            }
+            if viable == 0 {
+                return ShadowDfsResult::Unsat;
+            }
+            if viable < best_count {
+                best_count = viable;
+                best_column = Some(column);
+            }
+        }
+        let column = best_column.expect("an incomplete search has an unassigned column");
+        let next_columns = assigned_columns | (1_u8 << column);
+        for permutation_index in 0..self.prepared.permutations.len() {
+            match self.candidate_is_viable(
+                depth,
+                column,
+                permutation_index,
+                next_columns,
+                used_row_values,
+            ) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(reason) => return ShadowDfsResult::Abstain(reason),
+            }
+            let row_value_bits = self.prepared.permutations[permutation_index].row_value_bits;
+            if let Err(reason) = self.write_child_live(depth, column, permutation_index) {
+                return ShadowDfsResult::Abstain(reason);
+            }
+            for (row, &value) in self.prepared.permutations[permutation_index]
+                .values
+                .iter()
+                .enumerate()
+            {
+                self.table[row * self.prepared.degree + column] = value;
+            }
+            self.telemetry.branch_attempts += 1;
+            self.record_trace(column, permutation_index);
+            match self.dfs(depth + 1, next_columns, used_row_values | row_value_bits) {
+                ShadowDfsResult::Sat(table) => return ShadowDfsResult::Sat(table),
+                ShadowDfsResult::Unsat => {}
+                ShadowDfsResult::Abstain(reason) => return ShadowDfsResult::Abstain(reason),
+            }
+        }
+        ShadowDfsResult::Unsat
+    }
+
+    fn candidate_is_viable(
+        &mut self,
+        depth: usize,
+        column: usize,
+        permutation: usize,
+        next_columns: u8,
+        used_row_values: u64,
+    ) -> Result<bool, ShadowAbstainReason> {
+        if self.telemetry.candidate_checks >= self.caps.max_candidate_checks {
+            return Err(ShadowAbstainReason::SearchCap {
+                resource: "candidate_checks",
+                limit: self.caps.max_candidate_checks,
+            });
+        }
+        self.telemetry.candidate_checks += 1;
+        if self.prepared.permutations[permutation].row_value_bits & used_row_values != 0 {
+            self.telemetry.exact_cover_rejections += 1;
+            return Ok(false);
+        }
+        if !self.prepared.completed_nonempty[usize::from(next_columns)] {
+            return Ok(true);
+        }
+        let live = depth * self.prepared.words;
+        let compatible = self.prepared.compatibility_offset(column, permutation);
+        let completed = usize::from(next_columns) * self.prepared.words;
+        for word in 0..self.prepared.words {
+            self.record_bitset_word_op()?;
+            if self.live_stack[live + word]
+                & self.prepared.compatibility[compatible + word]
+                & self.prepared.completed_patterns[completed + word]
+                != 0
+            {
+                self.telemetry.forbidden_rejections += 1;
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn write_child_live(
+        &mut self,
+        depth: usize,
+        column: usize,
+        permutation: usize,
+    ) -> Result<(), ShadowAbstainReason> {
+        let parent = depth * self.prepared.words;
+        let child = (depth + 1) * self.prepared.words;
+        let compatible = self.prepared.compatibility_offset(column, permutation);
+        for word in 0..self.prepared.words {
+            self.record_bitset_word_op()?;
+            self.live_stack[child + word] =
+                self.live_stack[parent + word] & self.prepared.compatibility[compatible + word];
+        }
+        Ok(())
+    }
+
+    fn record_bitset_word_op(&mut self) -> Result<(), ShadowAbstainReason> {
+        if self.telemetry.bitset_word_ops >= self.caps.max_bitset_word_ops {
+            return Err(ShadowAbstainReason::SearchCap {
+                resource: "bitset_word_ops",
+                limit: self.caps.max_bitset_word_ops,
+            });
+        }
+        self.telemetry.bitset_word_ops += 1;
+        Ok(())
+    }
+
+    fn record_trace(&mut self, column: usize, permutation: usize) {
+        for word in [column, permutation] {
+            for byte in word.to_le_bytes() {
+                self.telemetry.trace_hash ^= u64::from(byte);
+                self.telemetry.trace_hash = self.telemetry.trace_hash.wrapping_mul(FNV_PRIME);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::forbidden_orbit_probe::CellAssignment;
 
     fn brute_force_count(problem: &RightTranslationProblem) -> usize {
         assert!(problem.degree() <= 3, "tiny-degree checker only");
@@ -325,5 +1082,341 @@ mod tests {
             search_right_translations(&problem, Some(0)),
             Err(ExactCoverError::ZeroSolutionLimit)
         );
+    }
+
+    fn forbidden_pattern(
+        degree: usize,
+        assignments: &[(usize, usize, usize)],
+    ) -> PartialTablePattern {
+        PartialTablePattern::new(
+            degree,
+            assignments
+                .iter()
+                .map(|&(row, column, value)| CellAssignment { row, column, value })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    fn complete_pattern(degree: usize, table: &[u8]) -> PartialTablePattern {
+        forbidden_pattern(
+            degree,
+            &table
+                .iter()
+                .enumerate()
+                .map(|(cell, &value)| (cell / degree, cell % degree, usize::from(value)))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn brute_force_shadow_witness(
+        degree: usize,
+        forbidden_patterns: &[PartialTablePattern],
+    ) -> Option<Vec<u8>> {
+        assert!(degree <= 3, "independent checker is intentionally tiny");
+        let cells = degree * degree;
+        let tables = degree.pow(u32::try_from(cells).unwrap());
+        let mut table = vec![0_u8; cells];
+        for mut encoding in 0..tables {
+            for value in &mut table {
+                *value = u8::try_from(encoding % degree).unwrap();
+                encoding /= degree;
+            }
+            if independently_is_latin(degree, &table)
+                && forbidden_patterns.iter().all(|pattern| {
+                    pattern.assignments().iter().any(|assignment| {
+                        table[assignment.row * degree + assignment.column]
+                            != u8::try_from(assignment.value).unwrap()
+                    })
+                })
+            {
+                return Some(table.clone());
+            }
+        }
+        None
+    }
+
+    fn independently_is_latin(degree: usize, table: &[u8]) -> bool {
+        for row in 0..degree {
+            let mut counts = vec![0; degree];
+            for column in 0..degree {
+                counts[usize::from(table[row * degree + column])] += 1;
+            }
+            if counts.iter().any(|&count| count != 1) {
+                return false;
+            }
+        }
+        for column in 0..degree {
+            let mut counts = vec![0; degree];
+            for row in 0..degree {
+                counts[usize::from(table[row * degree + column])] += 1;
+            }
+            if counts.iter().any(|&count| count != 1) {
+                return false;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn shadow_sat_and_unsat_match_independent_tiny_table_enumeration() {
+        let first = complete_pattern(2, &[0, 1, 1, 0]);
+        let second = complete_pattern(2, &[1, 0, 0, 1]);
+        let cases = [
+            vec![first.clone()],
+            vec![first, second],
+            vec![forbidden_pattern(2, &[(0, 0, 0), (1, 0, 0)])],
+        ];
+        for patterns in cases {
+            let expected = brute_force_shadow_witness(2, &patterns);
+            let outcome = search_exact_pattern_shadow(&patterns, &ShadowCaps::default());
+            match (expected, outcome) {
+                (Some(_), ShadowOutcome::Sat { witness, .. }) => {
+                    validate_shadow_witness(2, &patterns, witness.table()).unwrap();
+                }
+                (None, ShadowOutcome::Unsat { .. }) => {}
+                (expected, actual) => {
+                    panic!("independent result {expected:?} disagrees with {actual:?}")
+                }
+            }
+        }
+
+        let degree_three = [forbidden_pattern(3, &[(0, 0, 0), (1, 1, 1)])];
+        assert!(brute_force_shadow_witness(3, &degree_three).is_some());
+        assert!(matches!(
+            search_exact_pattern_shadow(&degree_three, &ShadowCaps::default()),
+            ShadowOutcome::Sat { .. }
+        ));
+    }
+
+    #[test]
+    fn shadow_sat_witness_replay_rejects_mutations() {
+        let patterns = [complete_pattern(2, &[0, 1, 1, 0])];
+        let ShadowOutcome::Sat { witness, .. } =
+            search_exact_pattern_shadow(&patterns, &ShadowCaps::default())
+        else {
+            panic!("one forbidden degree-two Latin table leaves a model");
+        };
+        assert_eq!(witness.degree(), 2);
+        validate_shadow_witness(2, &patterns, witness.table()).unwrap();
+
+        let mut non_latin = witness.table().to_vec();
+        non_latin[0] = non_latin[1];
+        assert!(matches!(
+            validate_shadow_witness(2, &patterns, &non_latin),
+            Err(WitnessError::RowIsNotPermutation { .. })
+        ));
+        assert!(matches!(
+            validate_shadow_witness(2, &patterns, &[0, 1, 1]),
+            Err(WitnessError::WrongTableSize { .. })
+        ));
+
+        let forbidden_witness = [complete_pattern(2, witness.table())];
+        assert_eq!(
+            validate_shadow_witness(2, &forbidden_witness, witness.table()),
+            Err(WitnessError::ForbiddenPatternMatched { pattern: 0 })
+        );
+    }
+
+    #[test]
+    fn multiword_pattern_bitsets_match_independent_enumeration() {
+        let patterns = (0..65)
+            .map(|mut encoding| {
+                let mut table = vec![0_u8; 9];
+                for value in &mut table {
+                    *value = u8::try_from(encoding % 3).unwrap();
+                    encoding /= 3;
+                }
+                complete_pattern(3, &table)
+            })
+            .collect::<Vec<_>>();
+        let expected = brute_force_shadow_witness(3, &patterns);
+        let outcome = search_exact_pattern_shadow(&patterns, &ShadowCaps::default());
+        assert_eq!(outcome.telemetry().patterns, 65);
+        assert!(outcome.telemetry().bitset_words > 64);
+        match (expected, outcome) {
+            (Some(_), ShadowOutcome::Sat { witness, .. }) => {
+                validate_shadow_witness(3, &patterns, witness.table()).unwrap();
+            }
+            (None, ShadowOutcome::Unsat { .. }) => {}
+            (expected, actual) => {
+                panic!("independent result {expected:?} disagrees with {actual:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn every_shadow_cap_abstains_without_an_unsat_claim() {
+        let patterns = [complete_pattern(2, &[0, 1, 1, 0])];
+
+        let mut caps = ShadowCaps::default();
+        caps.max_patterns = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::StructuralCap {
+                    resource: "patterns",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_pattern_cells = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::StructuralCap {
+                    resource: "pattern_cells",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_permutations = 1;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::StructuralCap {
+                    resource: "permutations",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_bitset_words = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::StructuralCap {
+                    resource: "bitset_words",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_preparation_word_ops = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::PreparationCap {
+                    resource: "preparation_word_ops",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_preparation_pattern_checks = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::PreparationCap {
+                    resource: "preparation_pattern_checks",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_search_nodes = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SearchCap {
+                    resource: "search_nodes",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_candidate_checks = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SearchCap {
+                    resource: "candidate_checks",
+                    ..
+                },
+                ..
+            }
+        ));
+
+        caps = ShadowCaps::default();
+        caps.max_bitset_word_ops = 0;
+        assert!(matches!(
+            search_exact_pattern_shadow(&patterns, &caps),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SearchCap {
+                    resource: "bitset_word_ops",
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn shadow_rejects_unsupported_families_and_is_deterministic() {
+        let first = complete_pattern(2, &[0, 1, 1, 0]);
+        assert!(matches!(
+            search_exact_pattern_shadow(&[first.clone(), first], &ShadowCaps::default()),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::UnsupportedStructure("duplicate forbidden patterns"),
+                ..
+            }
+        ));
+        assert!(matches!(
+            search_exact_pattern_shadow(
+                &[
+                    forbidden_pattern(2, &[(0, 0, 0)]),
+                    forbidden_pattern(2, &[(0, 0, 0), (1, 1, 1)]),
+                ],
+                &ShadowCaps::default(),
+            ),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::UnsupportedStructure("nonuniform pattern width"),
+                ..
+            }
+        ));
+
+        let patterns = [forbidden_pattern(3, &[(0, 0, 0), (1, 1, 1)])];
+        let first = search_exact_pattern_shadow(&patterns, &ShadowCaps::default());
+        let second = search_exact_pattern_shadow(&patterns, &ShadowCaps::default());
+        assert_eq!(first, second);
+        assert_ne!(first.telemetry().trace_hash, FNV_OFFSET);
+    }
+
+    #[test]
+    fn degree_seven_shadow_preparation_is_bounded_before_search() {
+        let patterns = [forbidden_pattern(
+            7,
+            &[(0, 6, 4), (1, 6, 0), (2, 4, 6), (3, 5, 5), (4, 2, 2)],
+        )];
+        let mut caps = ShadowCaps::default();
+        caps.max_search_nodes = 0;
+        let outcome = search_exact_pattern_shadow(&patterns, &caps);
+        assert!(matches!(
+            outcome,
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SearchCap {
+                    resource: "search_nodes",
+                    ..
+                },
+                ..
+            }
+        ));
+        assert_eq!(outcome.telemetry().permutations, 5_040);
     }
 }
