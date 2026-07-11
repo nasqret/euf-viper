@@ -12,6 +12,8 @@ mod novelty_census;
 #[allow(dead_code)]
 mod orbit_canon;
 #[cfg(test)]
+mod orbit_cover;
+#[cfg(test)]
 mod quotient_csp;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
