@@ -19,6 +19,25 @@ def write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
+def write_valid_census_output(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "record_type": "provenance",
+            "schema": "euf-viper.qg7-rtxc-census.v1",
+        },
+        {
+            "record_type": "case",
+            "path": "/fixture/case.smt2",
+            "status": "parse_error",
+        },
+    ]
+    path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+
 def install_fsync_probe(base: Path) -> tuple[Path, Path]:
     probe_dir = base / "fsync-probe"
     probe_dir.mkdir()
@@ -79,7 +98,7 @@ class CensusWrapperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             output = base / "census.jsonl"
-            output.write_text('{"stale":true}\n', encoding="utf-8")
+            write_valid_census_output(output)
             probe_dir, fsync_log = install_fsync_probe(base)
             environment = wrapper_environment(
                 root=ROOT,
@@ -109,6 +128,95 @@ class CensusWrapperTests(unittest.TestCase):
                 ),
                 1,
             )
+
+    def test_invalid_root_removes_valid_explicit_stale_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            output = base / "output" / "census.jsonl"
+            write_valid_census_output(output)
+            probe_dir, fsync_log = install_fsync_probe(base)
+            missing_root = base / "missing-root"
+            environment = wrapper_environment(
+                root=missing_root,
+                corpus=base / "corpus",
+                output=output,
+                scratch=base / "scratch",
+                revision="0" * 40,
+            )
+            environment["PYTHONPATH"] = str(probe_dir)
+            environment["FSYNC_LOG"] = str(fsync_log)
+
+            completed = subprocess.run(
+                ["bash", str(WRAPPER)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn("cannot resolve EUF_VIPER_ROOT", completed.stderr)
+            self.assertFalse(output.exists())
+            self.assertIn(
+                "directory", fsync_log.read_text(encoding="utf-8").splitlines()
+            )
+
+    def test_invalid_root_preserves_unrecognized_explicit_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            output = base / "output" / "census.jsonl"
+            output.parent.mkdir()
+            stale_content = '{"unrelated":true}\n'
+            output.write_text(stale_content, encoding="utf-8")
+            environment = wrapper_environment(
+                root=base / "missing-root",
+                corpus=base / "corpus",
+                output=output,
+                scratch=base / "scratch",
+                revision="0" * 40,
+            )
+
+            completed = subprocess.run(
+                ["bash", str(WRAPPER)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn("unrecognized explicit census output", completed.stderr)
+            self.assertEqual(output.read_text(encoding="utf-8"), stale_content)
+
+    def test_rejected_repo_local_output_does_not_create_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            repository = base / "repository"
+            repository.mkdir()
+            forbidden_parent = repository / "generated" / "nested"
+            output = forbidden_parent / "census.jsonl"
+            environment = wrapper_environment(
+                root=repository,
+                corpus=base / "corpus",
+                output=output,
+                scratch=base / "scratch",
+                revision="0" * 40,
+            )
+
+            completed = subprocess.run(
+                ["bash", str(WRAPPER)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn("repo-local census output is allowed only", completed.stderr)
+            self.assertFalse(forbidden_parent.exists())
 
     def test_atomic_publication_fsyncs_file_then_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -191,7 +299,7 @@ print(marker + json.dumps(case, separators=(",", ":")))
             output_dir = base / "output"
             output_dir.mkdir()
             output = output_dir / "census.jsonl"
-            output.write_text('{"stale":true}\n', encoding="utf-8")
+            write_valid_census_output(output)
             scratch = base / "scratch"
             home = base / "home"
             home.mkdir()

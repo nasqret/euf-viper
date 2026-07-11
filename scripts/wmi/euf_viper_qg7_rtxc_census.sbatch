@@ -14,46 +14,16 @@ OUTPUT_INPUT="${EUF_VIPER_QG7_CENSUS_OUTPUT:-}"
 JOB_ID_INPUT="${SLURM_JOB_ID:-}"
 RUN_ID_INPUT="${EUF_VIPER_QG7_CENSUS_RUN_ID:-}"
 
-cd "$ROOT_INPUT"
-ROOT="$(pwd -P)"
-if [[ -n "$OUTPUT_INPUT" ]]; then
-  OUTPUT="$OUTPUT_INPUT"
-else
-  OUTPUT_RUN_ID="${RUN_ID_INPUT:-$JOB_ID_INPUT}"
-  if [[ -z "$OUTPUT_RUN_ID" ]]; then
-    printf 'SLURM_JOB_ID is required when EUF_VIPER_QG7_CENSUS_OUTPUT is unset\n' >&2
-    exit 2
-  fi
-  if [[ ! "$OUTPUT_RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-    printf 'cannot derive a safe default census output from run id %q\n' \
-      "$OUTPUT_RUN_ID" >&2
-    exit 2
-  fi
-  OUTPUT="$ROOT/results/qg7-rtxc-census-$OUTPUT_RUN_ID.jsonl"
-fi
-case "$OUTPUT" in
-  *.jsonl) ;;
-  *)
-    printf 'EUF_VIPER_QG7_CENSUS_OUTPUT must end in .jsonl, got %q\n' "$OUTPUT" >&2
-    exit 2
-    ;;
-esac
-mkdir -p "$(dirname "$OUTPUT")"
-OUTPUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd -P)"
-OUTPUT_BASE="$(basename "$OUTPUT")"
-OUTPUT="$OUTPUT_DIR/$OUTPUT_BASE"
-case "$OUTPUT" in
-  "$ROOT"/results/*) ;;
-  "$ROOT"/*)
-    printf 'repo-local census output is allowed only below %s/results, got %s\n' \
-      "$ROOT" "$OUTPUT" >&2
-    exit 2
-    ;;
-esac
-
+ROOT=""
+ROOT_RESOLVED=0
+OUTPUT=""
+OUTPUT_DIR=""
+OUTPUT_BASE=""
+OUTPUT_READY=0
 RUN_SCRATCH=""
 PUBLISH_TMP=""
 PUBLICATION_COMPLETE=0
+
 fsync_directory() {
   python3 - "$1" <<'PY'
 import os
@@ -69,11 +39,80 @@ finally:
 PY
 }
 
+canonical_output_path() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import sys
+
+path, base = sys.argv[1:]
+if not os.path.isabs(path):
+    path = os.path.join(base, path)
+path = os.path.abspath(path)
+parent = os.path.realpath(os.path.dirname(path))
+print(os.path.join(parent, os.path.basename(path)))
+PY
+}
+
+is_recognized_census_output() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+records = []
+with open(sys.argv[1], encoding="utf-8") as source:
+    for line in source:
+        if line.strip():
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise SystemExit(1)
+            records.append(record)
+
+if not records:
+    raise SystemExit(1)
+if records[0].get("record_type") != "provenance":
+    raise SystemExit(1)
+if records[0].get("schema") != "euf-viper.qg7-rtxc-census.v1":
+    raise SystemExit(1)
+if sum(record.get("record_type") == "provenance" for record in records) != 1:
+    raise SystemExit(1)
+if any(record.get("record_type") not in {"provenance", "case"} for record in records):
+    raise SystemExit(1)
+PY
+}
+
+reject_repo_local_output() {
+  case "$OUTPUT" in
+    "$ROOT"/results/*) return 1 ;;
+    "$ROOT"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+authorize_existing_explicit_output() {
+  if [[ ! -e "$OUTPUT" && ! -L "$OUTPUT" ]]; then
+    return
+  fi
+  if [[ -L "$OUTPUT" || ! -f "$OUTPUT" ]]; then
+    printf 'refusing to replace non-regular explicit census output: %s\n' "$OUTPUT" >&2
+    exit 2
+  fi
+  if ! is_recognized_census_output "$OUTPUT"; then
+    printf 'refusing to remove unrecognized explicit census output: %s\n' "$OUTPUT" >&2
+    exit 2
+  fi
+}
+
+invalidate_output() {
+  OUTPUT_READY=1
+  rm -f -- "$OUTPUT"
+  fsync_directory "$OUTPUT_DIR"
+}
+
 cleanup() {
   status=$?
   trap - EXIT
   set +e
-  if ((!PUBLICATION_COMPLETE)); then
+  if ((OUTPUT_READY && !PUBLICATION_COMPLETE)); then
     rm -f -- "$OUTPUT"
     if command -v python3 >/dev/null 2>&1; then
       fsync_directory "$OUTPUT_DIR"
@@ -92,15 +131,83 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Output-path validation above is the only pre-invalidation preflight. Once the
-# final path is known to be safe, remove it before validating any run inputs so
-# every subsequent failure leaves no stale result under this run's final name.
-rm -f -- "$OUTPUT"
 if ! command -v python3 >/dev/null 2>&1; then
   printf 'required tool is unavailable: python3\n' >&2
   exit 2
 fi
-fsync_directory "$OUTPUT_DIR"
+
+if ROOT="$(cd "$ROOT_INPUT" 2>/dev/null && pwd -P)"; then
+  ROOT_RESOLVED=1
+fi
+
+if [[ -n "$OUTPUT_INPUT" ]]; then
+  case "$OUTPUT_INPUT" in
+    *.jsonl) ;;
+    *)
+      printf 'EUF_VIPER_QG7_CENSUS_OUTPUT must end in .jsonl, got %q\n' \
+        "$OUTPUT_INPUT" >&2
+      exit 2
+      ;;
+  esac
+  if [[ "$OUTPUT_INPUT" != /* && "$ROOT_RESOLVED" -ne 1 ]]; then
+    printf 'cannot resolve relative census output without EUF_VIPER_ROOT\n' >&2
+    exit 2
+  fi
+  OUTPUT="$(canonical_output_path "$OUTPUT_INPUT" "${ROOT:-$PWD}")"
+  OUTPUT_DIR="$(dirname "$OUTPUT")"
+  OUTPUT_BASE="$(basename "$OUTPUT")"
+
+  if ((ROOT_RESOLVED)) && reject_repo_local_output; then
+    printf 'repo-local census output is allowed only below %s/results, got %s\n' \
+      "$ROOT" "$OUTPUT" >&2
+    exit 2
+  fi
+
+  if ((!ROOT_RESOLVED)); then
+    authorize_existing_explicit_output
+    if [[ -d "$OUTPUT_DIR" ]]; then
+      invalidate_output
+    fi
+    printf 'cannot resolve EUF_VIPER_ROOT: %s\n' "$ROOT_INPUT" >&2
+    exit 2
+  fi
+
+  mkdir -p "$OUTPUT_DIR"
+  OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
+  OUTPUT="$OUTPUT_DIR/$OUTPUT_BASE"
+  if reject_repo_local_output; then
+    printf 'repo-local census output is allowed only below %s/results, got %s\n' \
+      "$ROOT" "$OUTPUT" >&2
+    exit 2
+  fi
+  authorize_existing_explicit_output
+else
+  if ((!ROOT_RESOLVED)); then
+    printf 'cannot resolve EUF_VIPER_ROOT: %s\n' "$ROOT_INPUT" >&2
+    exit 2
+  fi
+  OUTPUT_RUN_ID="${RUN_ID_INPUT:-$JOB_ID_INPUT}"
+  if [[ -z "$OUTPUT_RUN_ID" ]]; then
+    printf 'SLURM_JOB_ID is required when EUF_VIPER_QG7_CENSUS_OUTPUT is unset\n' >&2
+    exit 2
+  fi
+  if [[ ! "$OUTPUT_RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf 'cannot derive a safe default census output from run id %q\n' \
+      "$OUTPUT_RUN_ID" >&2
+    exit 2
+  fi
+  OUTPUT_DIR="$ROOT/results"
+  OUTPUT_BASE="qg7-rtxc-census-$OUTPUT_RUN_ID.jsonl"
+  mkdir -p "$OUTPUT_DIR"
+  OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
+  OUTPUT="$OUTPUT_DIR/$OUTPUT_BASE"
+fi
+
+# The explicit target is either absent or a recognized prior census, and any
+# repo-local target has passed policy checks before parent creation. Arm cleanup
+# and durably invalidate the final name before all remaining run preflights.
+invalidate_output
+cd "$ROOT"
 
 QG7_DIR_INPUT="${EUF_VIPER_QG7_CENSUS_DIR:-}"
 LIMIT="${EUF_VIPER_QG7_CENSUS_LIMIT:-512}"
