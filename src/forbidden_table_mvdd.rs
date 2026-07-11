@@ -232,7 +232,10 @@ impl fmt::Display for CompileError {
                 row,
                 expected,
                 actual,
-            } => write!(output, "forbidden row {row} has length {actual}, expected {expected}"),
+            } => write!(
+                output,
+                "forbidden row {row} has length {actual}, expected {expected}"
+            ),
             Self::RowValueOutOfRange {
                 row,
                 cell,
@@ -263,7 +266,9 @@ impl fmt::Display for CompileError {
                 output,
                 "{node_count} MVDD nodes starting at auxiliary {first_auxiliary} exceed the DIMACS range"
             ),
-            Self::ArithmeticOverflow => output.write_str("arithmetic overflow during MVDD construction"),
+            Self::ArithmeticOverflow => {
+                output.write_str("arithmetic overflow during MVDD construction")
+            }
         }
     }
 }
@@ -1716,16 +1721,18 @@ mod tests {
     #[test]
     fn auxiliary_range_is_checked_before_cnf_emission() {
         let mapping = vec![vec![1, 2]];
-        assert!(compile_forbidden_table_mvdd(
-            &[vec![0]],
-            1,
-            2,
-            &[0],
-            &mapping,
-            MAX_DIMACS_VARIABLE,
-            ConstructionCap::default()
-        )
-        .is_ok());
+        assert!(
+            compile_forbidden_table_mvdd(
+                &[vec![0]],
+                1,
+                2,
+                &[0],
+                &mapping,
+                MAX_DIMACS_VARIABLE,
+                ConstructionCap::default()
+            )
+            .is_ok()
+        );
 
         let mapping = vec![vec![1, 2], vec![3, 4]];
         assert!(matches!(

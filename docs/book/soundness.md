@@ -70,7 +70,7 @@ soundness or solver-superiority claim is allowed.
 
 ## Current Evidence
 
-- Local all-feature suite: 189 passed, three environment-gated probes ignored.
+- Local all-feature suite: 198 passed, three environment-gated probes ignored.
 - Local benchmark-tool suite: 86 passed.
 - Corrected WMI Boolean-data differential `143698`: 10,041 generated formulas,
   zero euf-viper discrepancies. One common timeout was retried by exact hash in

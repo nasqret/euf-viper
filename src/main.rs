@@ -7,6 +7,8 @@ mod forbidden_orbit_probe;
 #[cfg(test)]
 mod forbidden_table_mdd;
 #[cfg(test)]
+mod forbidden_table_mvdd;
+#[cfg(test)]
 mod hall_certificate;
 #[cfg(test)]
 mod model_scout;

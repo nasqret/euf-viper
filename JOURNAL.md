@@ -488,7 +488,7 @@
   SAT for quoted `|true|` and `|not|`, and exit 2 for post-query assertion.
 - Added a fail-closed paired promotion gate and made four-solver WMI scripts
   relocatable across source, solver, corpus, and binary roots. Local gates now
-  pass 189 Rust tests and 86 Python tests.
+  pass 198 Rust tests and 86 Python tests.
 - The domain-seven `iso_icl_nogen001` probe extracted 5,040 unique complete
   binary operation tables. Exact enumeration proved all are the one free
   `S_7` orbit, with no missing, malformed, or foreign table. The Boolean census
@@ -498,6 +498,11 @@
   Boolean DAG telemetry, exact table canonization, forbidden-orbit extraction,
   bounded quotient CSP with Hall propagation, and exact base-invariance/orbit
   certificates through degree eight.
+- Added a fail-closed multi-valued decision-diagram oracle for forbidden
+  operation tables. Its exhaustive checker covers every binary two-cell
+  forbidden subset under two orders, ternary singleton subsets, and the full
+  19,683-table degree-three space; it remains test-only until corpus telemetry
+  demonstrates a clause or propagation advantage over one-hot CNF.
 - Added default-off `EUF_VIPER_DIRECT_NEGATED_ROOT`. It emits one clause for a
   root `not(and(...))` instead of a Tseitin support variable and clauses. The
   implementation has exhaustive truth-table, edge-case, Bool-as-data, and
