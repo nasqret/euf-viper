@@ -5,6 +5,8 @@ mod finite_analysis;
 #[cfg(test)]
 mod forbidden_orbit_probe;
 #[cfg(test)]
+mod forbidden_table_mdd;
+#[cfg(test)]
 mod model_scout;
 #[cfg(test)]
 mod novelty_census;

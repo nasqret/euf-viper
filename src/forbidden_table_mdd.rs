@@ -213,7 +213,9 @@ impl fmt::Display for CompileError {
                 output,
                 "{node_count} MDD nodes starting at auxiliary {first_auxiliary} exceed the DIMACS variable range"
             ),
-            Self::ArithmeticOverflow => output.write_str("arithmetic overflow during MDD construction"),
+            Self::ArithmeticOverflow => {
+                output.write_str("arithmetic overflow during MDD construction")
+            }
         }
     }
 }
@@ -987,10 +989,12 @@ mod tests {
                 .unwrap();
 
         assert_eq!(compiled.variable_order, order);
-        assert!(compiled
-            .nodes
-            .iter()
-            .all(|node| order.contains(&node.tested_atom)));
+        assert!(
+            compiled
+                .nodes
+                .iter()
+                .all(|node| order.contains(&node.tested_atom))
+        );
         assert_truth_tables_equal(&forbidden, &order, &compiled);
     }
 
