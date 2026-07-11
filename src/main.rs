@@ -1,5 +1,6 @@
 mod eq_abstraction;
 mod finite_analysis;
+mod smt2_stream;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
@@ -5907,7 +5908,7 @@ fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
 }
 
 fn parse_problem(input: &str) -> Result<Problem, String> {
-    parse_problem_with_scoped_let_mode(input, selected_scoped_let_mode()?)
+    smt2_stream::parse_problem(input, selected_scoped_let_mode()?)
 }
 
 fn parse_problem_with_scoped_let_mode(
@@ -8759,6 +8760,25 @@ mod tests {
             parse_sexps("|unterminated"),
             Err("unterminated quoted symbol".to_owned())
         );
+    }
+
+    #[test]
+    fn stream_parser_modes_integrate_without_changing_the_tree_default() {
+        let input = include_str!("../tests/fixtures/predicate_congruence_unsat.smt2");
+        assert_eq!(
+            smt2_stream::parse_parser_mode(None),
+            Ok(smt2_stream::ParserMode::Tree)
+        );
+        for parser_mode in [
+            smt2_stream::ParserMode::Tree,
+            smt2_stream::ParserMode::Shadow,
+            smt2_stream::ParserMode::Stream,
+        ] {
+            let problem =
+                smt2_stream::parse_problem_with_mode(input, ScopedLetMode::Off, parser_mode)
+                    .unwrap();
+            assert_eq!(solve_problem(problem, false).result, SolveResult::Unsat);
+        }
     }
 
     #[test]
