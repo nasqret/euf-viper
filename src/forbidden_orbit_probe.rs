@@ -18,6 +18,7 @@ pub(crate) enum ProbeError {
     TableAction,
     Pattern(PatternError),
     OrbitStabilizerMismatch,
+    MalformedPatternCandidates(usize),
     MultiplePatternFunctions(usize),
     NonuniformPatternWidth { expected: usize, actual: usize },
 }
@@ -327,6 +328,11 @@ pub(crate) fn extract_forbidden_pattern_family(
     problem: &Problem,
 ) -> Result<ExactPatternFamily, ProbeError> {
     let (degree, extracted, telemetry) = extract_exact_patterns(problem)?;
+    if telemetry.malformed_pattern_candidates != 0 {
+        return Err(ProbeError::MalformedPatternCandidates(
+            telemetry.malformed_pattern_candidates,
+        ));
+    }
     if extracted.is_empty() {
         return Err(ProbeError::NoExactPatterns);
     }
@@ -383,6 +389,11 @@ fn extract_exact_patterns(
         telemetry.negated_conjunctions += 1;
         let mut equalities = Vec::new();
         if !collect_conjunctive_equalities(inner, &mut equalities) {
+            if expression_mentions_domain_table_equality(inner, &problem.arena, &domain_positions) {
+                telemetry.table_shaped_conjunctions += 1;
+                telemetry.malformed_pattern_candidates += 1;
+                telemetry.malformed_table_candidates += 1;
+            }
             continue;
         }
         match extract_partial_pattern(&problem.arena, &domain_positions, domain.len(), &equalities)
@@ -401,6 +412,46 @@ fn extract_exact_patterns(
         }
     }
     Ok((domain.len(), extracted, telemetry))
+}
+
+fn expression_mentions_domain_table_equality(
+    expression: &BoolExpr,
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+) -> bool {
+    match expression {
+        BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+            term_contains_domain_table(arena, domain_positions, *left)
+                || term_contains_domain_table(arena, domain_positions, *right)
+        }
+        BoolExpr::Not(inner) => {
+            expression_mentions_domain_table_equality(inner, arena, domain_positions)
+        }
+        BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => children
+            .iter()
+            .any(|child| expression_mentions_domain_table_equality(child, arena, domain_positions)),
+        BoolExpr::Ite(condition, then_branch, else_branch) => {
+            expression_mentions_domain_table_equality(condition, arena, domain_positions)
+                || expression_mentions_domain_table_equality(then_branch, arena, domain_positions)
+                || expression_mentions_domain_table_equality(else_branch, arena, domain_positions)
+        }
+        BoolExpr::Const(_) | BoolExpr::Atom(BoolAtomKey::BoolTerm(_)) => false,
+    }
+}
+
+fn term_contains_domain_table(
+    arena: &super::TermArena,
+    domain_positions: &HashMap<TermId, usize>,
+    term_id: TermId,
+) -> bool {
+    let Some(term) = arena.terms.get(term_id) else {
+        return false;
+    };
+    term_mentions_domain_table(arena, domain_positions, term_id)
+        || term
+            .args
+            .iter()
+            .any(|argument| term_contains_domain_table(arena, domain_positions, *argument))
 }
 
 fn collect_conjunctive_equalities<'a>(
@@ -736,6 +787,39 @@ mod tests {
              (assert (not (and {})))\n\
              (check-sat)\n",
             equalities.join(" ")
+        )
+    }
+
+    fn pattern_family_source(patterns: &[PartialTablePattern], extra_assertions: &str) -> String {
+        let exclusions = patterns
+            .iter()
+            .map(|pattern| {
+                let equalities = pattern
+                    .assignments()
+                    .iter()
+                    .map(|assignment| {
+                        format!(
+                            "(= (op e{} e{}) e{})",
+                            assignment.row, assignment.column, assignment.value
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("(assert (not (and {equalities})))")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "(set-logic QF_UF)\n\
+             (declare-sort I 0)\n\
+             (declare-fun e0 () I)\n\
+             (declare-fun e1 () I)\n\
+             (declare-fun e2 () I)\n\
+             (declare-fun op (I I) I)\n\
+             (assert (distinct e0 e1 e2))\n\
+             {exclusions}\n\
+             {extra_assertions}\n\
+             (check-sat)\n"
         )
     }
 
@@ -1209,6 +1293,22 @@ mod tests {
     }
 
     #[test]
+    fn transparent_wrapper_cannot_hide_a_table_restriction() {
+        let orbit = pattern_orbit(&pattern(3, &[(0, 0, 0), (0, 1, 2)]));
+        let unrelated = pattern_family_source(&orbit, "(assert (not (and true (= e0 e1))))");
+        let family = extract_forbidden_pattern_family(&parse(&unrelated)).unwrap();
+        assert!(family.report.exact_first_orbit_cover);
+        assert_eq!(family.report.extraction.malformed_pattern_candidates, 0);
+
+        let table_restricting =
+            pattern_family_source(&orbit, "(assert (not (and true (= (op e0 e0) e0))))");
+        assert_eq!(
+            extract_forbidden_pattern_family(&parse(&table_restricting)),
+            Err(ProbeError::MalformedPatternCandidates(1))
+        );
+    }
+
+    #[test]
     fn malformed_partial_candidates_fail_closed() {
         let cases = [
             partial_source(&["(= (op e0 e0) e0)", "(= (op e0 e0) e1)"], ""),
@@ -1229,7 +1329,7 @@ mod tests {
         for source in cases {
             assert_eq!(
                 analyze_forbidden_pattern_orbit(&parse(&source)),
-                Err(ProbeError::NoExactPatterns)
+                Err(ProbeError::MalformedPatternCandidates(1))
             );
         }
     }
