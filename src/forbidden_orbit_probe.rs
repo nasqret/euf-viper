@@ -1,5 +1,6 @@
 use super::{
-    BoolAtomKey, BoolExpr, Problem, SymId, TermId, finite_analysis::FiniteAnalysisContext,
+    BoolAtomKey, BoolExpr, Problem, ScopedLetMode, SymId, TermId,
+    finite_analysis::FiniteAnalysisContext, parse_problem_with_scoped_let_mode,
 };
 use crate::orbit_canon::{
     BinaryTable, CheckedPermutation, LexicographicPermutations, MAX_EXHAUSTIVE_DEGREE,
@@ -434,6 +435,8 @@ impl QgColumnFilter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QgIneligibility {
+    SourceParseError,
+    SourceProblemMismatch,
     MissingBooleanProblem,
     UnsupportedSource,
     CarrierOutsideSupportedRange,
@@ -451,6 +454,8 @@ pub(crate) enum QgIneligibility {
 impl QgIneligibility {
     pub(crate) fn code(self) -> &'static str {
         match self {
+            Self::SourceParseError => "source_parse_error",
+            Self::SourceProblemMismatch => "source_problem_mismatch",
             Self::MissingBooleanProblem => "missing_boolean_problem",
             Self::UnsupportedSource => "unsupported_source",
             Self::CarrierOutsideSupportedRange => "carrier_outside_supported_range",
@@ -467,13 +472,36 @@ impl QgIneligibility {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QgSourceProblemBinding {
+    Verified,
+    SourceParseError,
+    ProblemMismatch,
+}
+
+impl QgSourceProblemBinding {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::SourceParseError => "source_parse_error",
+            Self::ProblemMismatch => "problem_mismatch",
+        }
+    }
+}
+
 /// Test-only, source-bound reduction ledger for the qg shadow search.
 ///
+/// Auditing reparses the exact source bytes in `auto` scoped-let mode and
+/// compares a deterministic transcript with the separately supplied problem.
 /// Eligibility requires an exact carrier/Latin basis, an exact forbidden
 /// orbit, known function usage, and a disposition for every parsed assertion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QgReduction {
     source_sha256: [u8; 32],
+    parsed_problem_sha256: Option<[u8; 32]>,
+    supplied_problem_sha256: [u8; 32],
+    audit_binding_sha256: Option<[u8; 32]>,
+    source_problem_binding: QgSourceProblemBinding,
     carrier: Box<[CarrierMapping]>,
     operation: Option<SymId>,
     function_usage: Box<[FunctionUsage]>,
@@ -497,12 +525,23 @@ impl QgReduction {
     }
 
     pub(crate) fn source_sha256_hex(&self) -> String {
-        let mut output = String::with_capacity(64);
-        for byte in self.source_sha256 {
-            use fmt::Write;
-            write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
-        }
-        output
+        sha256_hex(&self.source_sha256)
+    }
+
+    pub(crate) fn parsed_problem_sha256_hex(&self) -> Option<String> {
+        self.parsed_problem_sha256.as_ref().map(sha256_hex)
+    }
+
+    pub(crate) fn supplied_problem_sha256_hex(&self) -> String {
+        sha256_hex(&self.supplied_problem_sha256)
+    }
+
+    pub(crate) fn audit_binding_sha256_hex(&self) -> Option<String> {
+        self.audit_binding_sha256.as_ref().map(sha256_hex)
+    }
+
+    pub(crate) fn source_problem_binding(&self) -> QgSourceProblemBinding {
+        self.source_problem_binding
     }
 
     pub(crate) fn carrier(&self) -> &[CarrierMapping] {
@@ -610,13 +649,297 @@ enum CandidateShape {
 const QG_MAX_DEGREE: usize = 7;
 const ASSERTION_FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const ASSERTION_FNV_PRIME: u64 = 0x100000001b3;
+const QG_PROBLEM_TRANSCRIPT_SCHEMA: &str = "euf-viper.qg-problem-transcript.v1";
+const QG_AUDIT_BINDING_SCHEMA: &str = "euf-viper.qg-source-problem-binding.v1";
+const QG_AUDIT_PARSE_MODE: ScopedLetMode = ScopedLetMode::Auto;
 
-fn audit_qg_reduction(source: &str, problem: &Problem) -> QgReduction {
-    let source_sha256: [u8; 32] = Sha256::digest(source.as_bytes()).into();
+#[derive(Default)]
+struct CanonicalTranscript(Vec<u8>);
+
+impl CanonicalTranscript {
+    fn byte(&mut self, value: u8) {
+        self.0.push(value);
+    }
+
+    fn boolean(&mut self, value: bool) {
+        self.byte(u8::from(value));
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.0.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn usize(&mut self, value: usize) {
+        self.0.extend_from_slice(&(value as u64).to_le_bytes());
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        self.usize(value.len());
+        self.0.extend_from_slice(value);
+    }
+
+    fn text(&mut self, value: &str) {
+        self.bytes(value.as_bytes());
+    }
+}
+
+fn write_bool_expr(transcript: &mut CanonicalTranscript, expression: &BoolExpr) {
+    match expression {
+        BoolExpr::Const(value) => {
+            transcript.byte(0);
+            transcript.boolean(*value);
+        }
+        BoolExpr::Atom(atom) => {
+            transcript.byte(1);
+            match atom {
+                BoolAtomKey::Eq(left, right) => {
+                    transcript.byte(0);
+                    transcript.usize(*left);
+                    transcript.usize(*right);
+                }
+                BoolAtomKey::BoolTerm(term) => {
+                    transcript.byte(1);
+                    transcript.usize(*term);
+                }
+            }
+        }
+        BoolExpr::Not(inner) => {
+            transcript.byte(2);
+            write_bool_expr(transcript, inner);
+        }
+        BoolExpr::And(children) => {
+            transcript.byte(3);
+            transcript.usize(children.len());
+            for child in children {
+                write_bool_expr(transcript, child);
+            }
+        }
+        BoolExpr::Or(children) => {
+            transcript.byte(4);
+            transcript.usize(children.len());
+            for child in children {
+                write_bool_expr(transcript, child);
+            }
+        }
+        BoolExpr::Iff(children) => {
+            transcript.byte(5);
+            transcript.usize(children.len());
+            for child in children {
+                write_bool_expr(transcript, child);
+            }
+        }
+        BoolExpr::Ite(condition, then_branch, else_branch) => {
+            transcript.byte(6);
+            write_bool_expr(transcript, condition);
+            write_bool_expr(transcript, then_branch);
+            write_bool_expr(transcript, else_branch);
+        }
+    }
+}
+
+fn canonical_problem_transcript(problem: &Problem) -> Vec<u8> {
+    let mut transcript = CanonicalTranscript::default();
+    transcript.text(QG_PROBLEM_TRANSCRIPT_SCHEMA);
+
+    transcript.usize(problem.sorts.names.len());
+    for name in &problem.sorts.names {
+        transcript.text(name);
+    }
+    let mut sort_ids = problem
+        .sorts
+        .ids
+        .iter()
+        .map(|(&symbol, &sort)| (symbol, sort.0))
+        .collect::<Vec<_>>();
+    sort_ids.sort_unstable();
+    transcript.usize(sort_ids.len());
+    for (symbol, sort) in sort_ids {
+        transcript.u32(symbol);
+        transcript.u32(sort);
+    }
+
+    transcript.usize(problem.fun_decls.slots.len());
+    for declaration in &problem.fun_decls.slots {
+        transcript.boolean(declaration.is_some());
+        if let Some(declaration) = declaration {
+            transcript.usize(declaration.arg_sorts.len());
+            for sort in &declaration.arg_sorts {
+                transcript.u32(sort.0);
+            }
+            transcript.u32(declaration.result_sort.0);
+        }
+    }
+
+    transcript.usize(problem.arena.terms.len());
+    for term in &problem.arena.terms {
+        transcript.u32(term.fun);
+        transcript.usize(term.args.len());
+        for argument in &term.args {
+            transcript.usize(*argument);
+        }
+        transcript.u32(term.sort.0);
+    }
+    let mut interned = problem
+        .arena
+        .interned
+        .iter()
+        .map(|(key, &term)| (key.fun, key.args.as_slice(), term))
+        .collect::<Vec<_>>();
+    interned.sort_unstable_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+    transcript.usize(interned.len());
+    for (function, arguments, term) in interned {
+        transcript.u32(function);
+        transcript.usize(arguments.len());
+        for argument in arguments {
+            transcript.usize(*argument);
+        }
+        transcript.usize(term);
+    }
+    transcript.usize(problem.arena.apps.len());
+    for application in &problem.arena.apps {
+        transcript.usize(*application);
+    }
+
+    for relations in [&problem.eqs, &problem.diseqs] {
+        transcript.usize(relations.len());
+        for &(left, right) in relations {
+            transcript.usize(left);
+            transcript.usize(right);
+        }
+    }
+    transcript.usize(problem.unsupported.len());
+    for unsupported in &problem.unsupported {
+        transcript.text(unsupported);
+    }
+
+    transcript.boolean(problem.bool_problem.is_some());
+    if let Some(bool_problem) = &problem.bool_problem {
+        transcript.usize(bool_problem.assertions.len());
+        for assertion in &bool_problem.assertions {
+            write_bool_expr(&mut transcript, assertion);
+        }
+        transcript.usize(bool_problem.unsupported.len());
+        for unsupported in &bool_problem.unsupported {
+            transcript.text(unsupported);
+        }
+        transcript.usize(bool_problem.true_term);
+        transcript.usize(bool_problem.false_term);
+        transcript.usize(bool_problem.data_terms.len());
+        for term in &bool_problem.data_terms {
+            transcript.usize(*term);
+        }
+    }
+    transcript.boolean(problem.contradiction);
+    transcript.0
+}
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+fn sha256_hex(hash: &[u8; 32]) -> String {
+    let mut output = String::with_capacity(64);
+    for byte in hash {
+        use fmt::Write;
+        write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+    }
+    output
+}
+
+fn audit_binding_sha256(source_sha256: &[u8; 32], problem_sha256: &[u8; 32]) -> [u8; 32] {
+    let mut transcript = CanonicalTranscript::default();
+    transcript.text(QG_AUDIT_BINDING_SCHEMA);
+    transcript.text(QG_AUDIT_PARSE_MODE.as_str());
+    transcript.bytes(source_sha256);
+    transcript.bytes(problem_sha256);
+    sha256(&transcript.0)
+}
+
+fn empty_qg_reduction(
+    source_sha256: [u8; 32],
+    supplied_problem_sha256: [u8; 32],
+    reason: QgIneligibility,
+) -> QgReduction {
+    QgReduction {
+        source_sha256,
+        parsed_problem_sha256: None,
+        supplied_problem_sha256,
+        audit_binding_sha256: None,
+        source_problem_binding: QgSourceProblemBinding::SourceParseError,
+        carrier: Box::new([]),
+        operation: None,
+        function_usage: Box::new([]),
+        assertion_ledger: Box::new([]),
+        local_constraints: Box::new([]),
+        column_filters: Box::new([]),
+        candidate_counts: Box::new([]),
+        patterns: Box::new([]),
+        pattern_report: None,
+        pattern_error: None,
+        ineligibility: Box::new([reason]),
+    }
+}
+
+fn audit_qg_reduction(source: &str, supplied_problem: &Problem) -> QgReduction {
+    let source_sha256 = sha256(source.as_bytes());
+    let supplied_transcript = canonical_problem_transcript(supplied_problem);
+    let supplied_problem_sha256 = sha256(&supplied_transcript);
+    let parsed_problem = match parse_problem_with_scoped_let_mode(source, QG_AUDIT_PARSE_MODE) {
+        Ok(problem) => problem,
+        Err(_) => {
+            return empty_qg_reduction(
+                source_sha256,
+                supplied_problem_sha256,
+                QgIneligibility::SourceParseError,
+            );
+        }
+    };
+    let parsed_transcript = canonical_problem_transcript(&parsed_problem);
+    let parsed_problem_sha256 = sha256(&parsed_transcript);
+    let source_problem_binding = if parsed_transcript == supplied_transcript {
+        QgSourceProblemBinding::Verified
+    } else {
+        QgSourceProblemBinding::ProblemMismatch
+    };
+    let binding_sha256 = audit_binding_sha256(&source_sha256, &parsed_problem_sha256);
+    let mut reduction = audit_bound_qg_reduction(
+        source_sha256,
+        parsed_problem_sha256,
+        supplied_problem_sha256,
+        binding_sha256,
+        source_problem_binding,
+        &parsed_problem,
+    );
+    if source_problem_binding == QgSourceProblemBinding::ProblemMismatch {
+        let mut ineligibility = Vec::with_capacity(reduction.ineligibility.len() + 1);
+        ineligibility.push(QgIneligibility::SourceProblemMismatch);
+        ineligibility.extend(reduction.ineligibility.iter().copied());
+        reduction.ineligibility = ineligibility.into_boxed_slice();
+    }
+    reduction
+}
+
+fn audit_bound_qg_reduction(
+    source_sha256: [u8; 32],
+    parsed_problem_sha256: [u8; 32],
+    supplied_problem_sha256: [u8; 32],
+    audit_binding_sha256: [u8; 32],
+    source_problem_binding: QgSourceProblemBinding,
+    problem: &Problem,
+) -> QgReduction {
     let mut ineligibility = Vec::new();
     let Some(bool_problem) = problem.bool_problem.as_ref() else {
         return QgReduction {
             source_sha256,
+            parsed_problem_sha256: Some(parsed_problem_sha256),
+            supplied_problem_sha256,
+            audit_binding_sha256: Some(audit_binding_sha256),
+            source_problem_binding,
             carrier: Box::new([]),
             operation: None,
             function_usage: Box::new([]),
@@ -881,6 +1204,10 @@ fn audit_qg_reduction(source: &str, problem: &Problem) -> QgReduction {
 
     QgReduction {
         source_sha256,
+        parsed_problem_sha256: Some(parsed_problem_sha256),
+        supplied_problem_sha256,
+        audit_binding_sha256: Some(audit_binding_sha256),
+        source_problem_binding,
         carrier: carrier.into_boxed_slice(),
         operation,
         function_usage: function_usage.into_boxed_slice(),
@@ -2018,7 +2345,10 @@ mod tests {
         ShadowAbstainReason, ShadowCaps, ShadowOutcome, search_qg_reduction_shadow,
     };
     use crate::{ScopedLetMode, parse_problem_with_scoped_let_mode};
-    use std::{env, fs};
+    use std::{
+        env, fs, io,
+        path::{Path, PathBuf},
+    };
 
     fn parse(source: &str) -> Problem {
         parse_problem_with_scoped_let_mode(source, ScopedLetMode::Off).unwrap()
@@ -2265,6 +2595,51 @@ mod tests {
         }
     }
 
+    fn required_positive_env_usize(name: &str) -> usize {
+        let value = env::var(name).unwrap_or_else(|error| panic!("failed to read {name}: {error}"));
+        let parsed = value
+            .parse::<usize>()
+            .unwrap_or_else(|_| panic!("{name} must be a positive integer, got {value:?}"));
+        assert!(parsed > 0, "{name} must be positive, got {value:?}");
+        parsed
+    }
+
+    const QG7_CENSUS_MAX_LIMIT: usize = 512;
+    const QG7_CENSUS_JSON_PREFIX: &str = "QG7_CENSUS_JSON:";
+    const QG7_CENSUS_SCHEMA: &str = "euf-viper.qg7-rtxc-census.v1";
+
+    fn select_qg7_census_paths(
+        mut paths: Vec<PathBuf>,
+        offset: usize,
+        limit: usize,
+        expected: usize,
+    ) -> Result<Vec<PathBuf>, String> {
+        if limit == 0 || limit > QG7_CENSUS_MAX_LIMIT {
+            return Err(format!(
+                "census limit must be in 1..={QG7_CENSUS_MAX_LIMIT}, got {limit}"
+            ));
+        }
+        if expected == 0 || expected > limit {
+            return Err(format!(
+                "expected record count must be in 1..={limit}, got {expected}"
+            ));
+        }
+        paths.sort();
+        let available = paths.len();
+        let selected = paths
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect::<Vec<_>>();
+        if selected.len() != expected {
+            return Err(format!(
+                "sorted *.smt2 selection skip({offset}).take({limit}) from {available} paths produced {} records; expected {expected}",
+                selected.len()
+            ));
+        }
+        Ok(selected)
+    }
+
     fn qg7_shadow_caps_from_env() -> ShadowCaps {
         let defaults = ShadowCaps::default();
         ShadowCaps {
@@ -2339,26 +2714,39 @@ mod tests {
         None
     }
 
-    fn print_qg7_shadow_record(
-        path: &std::path::Path,
+    fn qg7_shadow_record(
+        path: &Path,
         reduction: &QgReduction,
         caps: &ShadowCaps,
         outcome: &ShadowOutcome,
-    ) {
+    ) -> String {
         let report = reduction
             .pattern_report()
             .expect("an eligible qg reduction has a pattern report");
+        let parsed_problem_sha256 = reduction
+            .parsed_problem_sha256_hex()
+            .unwrap_or_else(|| "none".to_owned());
+        let audit_binding_sha256 = reduction
+            .audit_binding_sha256_hex()
+            .unwrap_or_else(|| "none".to_owned());
         let telemetry = outcome.telemetry();
         let (abstain_reason, abstain_resource) = match outcome {
             ShadowOutcome::Abstain { reason, .. } => (reason.code(), reason.resource()),
             ShadowOutcome::Sat { .. } | ShadowOutcome::Unsat { .. } => ("none", "none"),
         };
-        println!(
+        format!(
             concat!(
-                "{{\"path\":\"{}\",\"status\":\"eligible\",",
+                "{{\"record_type\":\"case\",\"path\":\"{}\",",
+                "\"status\":\"eligible\",",
                 "\"semantics\":\"audited_qg_reduction_shadow\",",
                 "\"production_routing\":false,",
-                "\"source_sha256\":\"{}\",\"assertions\":{},",
+                "\"parse_mode\":\"{}\",",
+                "\"problem_transcript_schema\":\"{}\",",
+                "\"source_problem_binding\":\"{}\",",
+                "\"source_sha256\":\"{}\",",
+                "\"parsed_problem_sha256\":\"{}\",",
+                "\"supplied_problem_sha256\":\"{}\",",
+                "\"audit_binding_sha256\":\"{}\",\"assertions\":{},",
                 "\"consumed_assertions\":{},\"unconsumed_assertions\":{},",
                 "\"remaining_predicates\":{},",
                 "\"degree\":{},\"width\":{},\"records\":{},\"unique\":{},",
@@ -2380,7 +2768,13 @@ mod tests {
                 "\"cap_candidate_checks\":{},\"cap_search_bitset_word_ops\":{}}}"
             ),
             json_escape(&path.display().to_string()),
+            QG_AUDIT_PARSE_MODE.as_str(),
+            QG_PROBLEM_TRANSCRIPT_SCHEMA,
+            reduction.source_problem_binding().code(),
             reduction.source_sha256_hex(),
+            parsed_problem_sha256,
+            reduction.supplied_problem_sha256_hex(),
+            audit_binding_sha256,
             reduction.assertion_ledger().len(),
             reduction.consumed_assertions().count(),
             reduction.unconsumed_assertions().count(),
@@ -2422,7 +2816,131 @@ mod tests {
             caps.max_search_nodes,
             caps.max_candidate_checks,
             caps.max_bitset_word_ops,
-        );
+        )
+    }
+
+    fn qg7_ineligible_record(path: &Path, reduction: &QgReduction) -> String {
+        let unconsumed = reduction
+            .unconsumed_assertions()
+            .map(|identity| identity.ordinal.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let parsed_problem_sha256 = reduction
+            .parsed_problem_sha256_hex()
+            .unwrap_or_else(|| "none".to_owned());
+        let audit_binding_sha256 = reduction
+            .audit_binding_sha256_hex()
+            .unwrap_or_else(|| "none".to_owned());
+        format!(
+            concat!(
+                "{{\"record_type\":\"case\",\"path\":\"{}\",",
+                "\"status\":\"ineligible\",\"reason\":\"{}\",",
+                "\"parse_mode\":\"{}\",",
+                "\"problem_transcript_schema\":\"{}\",",
+                "\"source_problem_binding\":\"{}\",",
+                "\"source_sha256\":\"{}\",",
+                "\"parsed_problem_sha256\":\"{}\",",
+                "\"supplied_problem_sha256\":\"{}\",",
+                "\"audit_binding_sha256\":\"{}\",",
+                "\"degree\":{},\"assertions\":{},",
+                "\"consumed_assertions\":{},",
+                "\"unconsumed_assertions\":[{}],",
+                "\"pattern_error\":\"{}\"}}"
+            ),
+            json_escape(&path.display().to_string()),
+            reduction.first_ineligibility_code(),
+            QG_AUDIT_PARSE_MODE.as_str(),
+            QG_PROBLEM_TRANSCRIPT_SCHEMA,
+            reduction.source_problem_binding().code(),
+            reduction.source_sha256_hex(),
+            parsed_problem_sha256,
+            reduction.supplied_problem_sha256_hex(),
+            audit_binding_sha256,
+            reduction.degree(),
+            reduction.assertion_ledger().len(),
+            reduction.consumed_assertions().count(),
+            unconsumed,
+            json_escape(&format!("{:?}", reduction.pattern_error())),
+        )
+    }
+
+    fn qg7_parse_error_record(path: &Path, source: &str, error: &str) -> String {
+        format!(
+            concat!(
+                "{{\"record_type\":\"case\",\"path\":\"{}\",",
+                "\"status\":\"parse_error\",",
+                "\"reason\":\"smt2_parse_error\",",
+                "\"parse_mode\":\"{}\",",
+                "\"source_sha256\":\"{}\",\"error\":\"{}\"}}"
+            ),
+            json_escape(&path.display().to_string()),
+            QG_AUDIT_PARSE_MODE.as_str(),
+            sha256_hex(&sha256(source.as_bytes())),
+            json_escape(error),
+        )
+    }
+
+    fn qg7_read_error_record(path: &Path, error: &io::Error) -> String {
+        format!(
+            concat!(
+                "{{\"record_type\":\"case\",\"path\":\"{}\",",
+                "\"status\":\"read_error\",\"reason\":\"source_read_error\",",
+                "\"error_kind\":\"{}\"}}"
+            ),
+            json_escape(&path.display().to_string()),
+            json_escape(&format!("{:?}", error.kind())),
+        )
+    }
+
+    fn qg7_census_case_record(
+        path: &Path,
+        source: io::Result<String>,
+        caps: &ShadowCaps,
+    ) -> String {
+        let source = match source {
+            Ok(source) => source,
+            Err(error) => return qg7_read_error_record(path, &error),
+        };
+        let problem = match parse_problem_with_scoped_let_mode(&source, QG_AUDIT_PARSE_MODE) {
+            Ok(problem) => problem,
+            Err(error) => return qg7_parse_error_record(path, &source, &error),
+        };
+        let reduction = QgReduction::audit(&source, &problem);
+        if reduction.eligible() {
+            let outcome = search_qg_reduction_shadow(&reduction, caps);
+            qg7_shadow_record(path, &reduction, caps, &outcome)
+        } else {
+            qg7_ineligible_record(path, &reduction)
+        }
+    }
+
+    fn qg7_census_provenance_record(
+        directory: &Path,
+        revision: &str,
+        offset: usize,
+        limit: usize,
+        expected: usize,
+        selected: usize,
+    ) -> String {
+        format!(
+            concat!(
+                "{{\"record_type\":\"provenance\",\"schema\":\"{}\",",
+                "\"revision\":\"{}\",\"directory\":\"{}\",",
+                "\"path_order\":\"lexicographic\",",
+                "\"selection\":\"sorted_smt2_paths_skip_offset_take_limit\",",
+                "\"offset\":{},\"limit\":{},\"expected_records\":{},",
+                "\"selected_records\":{},\"parse_mode\":\"{}\",",
+                "\"production_routing\":false}}"
+            ),
+            QG7_CENSUS_SCHEMA,
+            json_escape(revision),
+            json_escape(&directory.display().to_string()),
+            offset,
+            limit,
+            expected,
+            selected,
+            QG_AUDIT_PARSE_MODE.as_str(),
+        )
     }
 
     #[test]
@@ -2453,6 +2971,15 @@ mod tests {
         assert_eq!(reduction, QgReduction::audit(source, &parse(source)));
 
         assert!(reduction.eligible(), "{:?}", reduction.ineligibility());
+        assert_eq!(
+            reduction.source_problem_binding(),
+            QgSourceProblemBinding::Verified
+        );
+        assert_eq!(
+            reduction.parsed_problem_sha256_hex(),
+            Some(reduction.supplied_problem_sha256_hex())
+        );
+        assert!(reduction.audit_binding_sha256_hex().is_some());
         assert_eq!(reduction.degree(), 7);
         assert_eq!(reduction.carrier().len(), 7);
         assert!(
@@ -2519,6 +3046,35 @@ mod tests {
                 && usage.role == FunctionRole::Unused
                 && usage.occurrences == 0
         }));
+    }
+
+    #[test]
+    fn qg_source_audit_rejects_a_problem_parsed_from_different_bytes() {
+        let source = qg7_reduction_fixture();
+        let different_source = source.replace("(check-sat)", "(assert (= e0 e0))\n(check-sat)");
+        let mismatched_problem = parse(&different_source);
+        let reduction = QgReduction::audit(source, &mismatched_problem);
+
+        assert!(!reduction.eligible());
+        assert_eq!(
+            reduction.source_problem_binding(),
+            QgSourceProblemBinding::ProblemMismatch
+        );
+        assert_eq!(
+            reduction.first_ineligibility_code(),
+            "source_problem_mismatch"
+        );
+        assert_ne!(
+            reduction.parsed_problem_sha256_hex(),
+            Some(reduction.supplied_problem_sha256_hex())
+        );
+        assert!(matches!(
+            search_qg_reduction_shadow(&reduction, &ShadowCaps::default()),
+            ShadowOutcome::Abstain {
+                reason: ShadowAbstainReason::SourceAudit("source_problem_mismatch"),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -3068,56 +3624,119 @@ mod tests {
     }
 
     #[test]
+    fn qg7_census_selection_is_sorted_explicit_and_fail_closed() {
+        let paths = ["z.smt2", "a.smt2", "m.smt2"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            select_qg7_census_paths(paths.clone(), 1, 2, 2).unwrap(),
+            vec![PathBuf::from("m.smt2"), PathBuf::from("z.smt2")]
+        );
+        assert!(select_qg7_census_paths(paths.clone(), 0, 0, 1).is_err());
+        assert!(select_qg7_census_paths(paths.clone(), 0, QG7_CENSUS_MAX_LIMIT + 1, 1).is_err());
+        assert!(select_qg7_census_paths(paths.clone(), 0, 2, 0).is_err());
+        assert!(select_qg7_census_paths(paths.clone(), 0, 2, 3).is_err());
+        assert!(select_qg7_census_paths(paths, 2, 2, 2).is_err());
+    }
+
+    #[test]
+    fn qg7_census_emits_parse_errors_and_accounts_for_every_selected_file() {
+        let caps = ShadowCaps::default();
+        let malformed = "(set-logic QF_UF".to_owned();
+        let cases = vec![
+            (
+                PathBuf::from("a-valid.smt2"),
+                Ok("(set-logic QF_UF)\n(check-sat)\n".to_owned()),
+            ),
+            (PathBuf::from("b-malformed.smt2"), Ok(malformed.clone())),
+            (
+                PathBuf::from("c-unreadable.smt2"),
+                Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            ),
+        ];
+        let expected = cases.len();
+        let records = cases
+            .into_iter()
+            .map(|(path, source)| qg7_census_case_record(&path, source, &caps))
+            .collect::<Vec<_>>();
+
+        assert_eq!(records.len(), expected);
+        assert!(
+            records
+                .iter()
+                .all(|record| record.starts_with("{\"record_type\":\"case\","))
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.contains("\"status\":\"parse_error\""))
+                .count(),
+            1
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.contains("\"status\":\"read_error\""))
+                .count(),
+            1
+        );
+        let repeated = qg7_parse_error_record(Path::new("b-malformed.smt2"), &malformed, "x");
+        assert_eq!(
+            repeated,
+            qg7_parse_error_record(Path::new("b-malformed.smt2"), &malformed, "x")
+        );
+        assert!(records[1].contains(&format!(
+            "\"source_sha256\":\"{}\"",
+            sha256_hex(&sha256(malformed.as_bytes()))
+        )));
+    }
+
+    #[test]
     #[ignore = "requires EUF_VIPER_QG7_CENSUS_DIR; bounded to at most 512 files"]
     fn bounded_qg7_partial_pattern_census() {
-        let directory = env::var("EUF_VIPER_QG7_CENSUS_DIR").unwrap();
-        let requested = env_usize("EUF_VIPER_QG7_CENSUS_LIMIT", 4);
-        let limit = requested.clamp(1, 512);
+        let directory = PathBuf::from(
+            env::var("EUF_VIPER_QG7_CENSUS_DIR")
+                .unwrap_or_else(|error| panic!("failed to read census directory: {error}")),
+        );
+        let revision = env::var("EUF_VIPER_GIT_REVISION")
+            .unwrap_or_else(|error| panic!("failed to read census revision: {error}"));
+        assert!(!revision.is_empty(), "census revision must not be empty");
+        let limit = required_positive_env_usize("EUF_VIPER_QG7_CENSUS_LIMIT");
         let offset = env_usize("EUF_VIPER_QG7_CENSUS_OFFSET", 0);
+        let expected = required_positive_env_usize("EUF_VIPER_QG7_CENSUS_EXPECTED");
         let caps = qg7_shadow_caps_from_env();
-        let mut paths = fs::read_dir(directory)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension == "smt2")
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        assert!(!paths.is_empty(), "qg7 census directory has no SMT2 files");
-
-        for path in paths.into_iter().skip(offset).take(limit) {
-            let source = fs::read_to_string(&path).unwrap();
-            let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
-            let reduction = QgReduction::audit(&source, &problem);
-            if reduction.eligible() {
-                let outcome = search_qg_reduction_shadow(&reduction, &caps);
-                print_qg7_shadow_record(&path, &reduction, &caps, &outcome);
-            } else {
-                let unconsumed = reduction
-                    .unconsumed_assertions()
-                    .map(|identity| identity.ordinal.to_string())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                println!(
-                    concat!(
-                        "{{\"path\":\"{}\",\"status\":\"ineligible\",",
-                        "\"reason\":\"{}\",\"source_sha256\":\"{}\",",
-                        "\"degree\":{},\"assertions\":{},",
-                        "\"consumed_assertions\":{},",
-                        "\"unconsumed_assertions\":[{}],",
-                        "\"pattern_error\":\"{}\"}}"
-                    ),
-                    json_escape(&path.display().to_string()),
-                    reduction.first_ineligibility_code(),
-                    reduction.source_sha256_hex(),
-                    reduction.degree(),
-                    reduction.assertion_ledger().len(),
-                    reduction.consumed_assertions().count(),
-                    unconsumed,
-                    json_escape(&format!("{:?}", reduction.pattern_error())),
-                );
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()));
+        let mut paths = Vec::new();
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|error| panic!("failed to enumerate census directory: {error}"))
+                .path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "smt2")
+            {
+                paths.push(path);
             }
+        }
+        let paths = select_qg7_census_paths(paths, offset, limit, expected)
+            .unwrap_or_else(|error| panic!("invalid census selection: {error}"));
+        println!(
+            "{QG7_CENSUS_JSON_PREFIX}{}",
+            qg7_census_provenance_record(
+                &directory,
+                &revision,
+                offset,
+                limit,
+                expected,
+                paths.len(),
+            )
+        );
+
+        for path in paths {
+            let record = qg7_census_case_record(&path, fs::read_to_string(&path), &caps);
+            println!("{QG7_CENSUS_JSON_PREFIX}{record}");
         }
     }
 
