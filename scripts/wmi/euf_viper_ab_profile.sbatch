@@ -9,7 +9,9 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+ROOT="${EUF_VIPER_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+CORPUS_ROOT="${EUF_VIPER_CORPUS_ROOT:-$ROOT}"
+cd "$ROOT"
 export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
 if [ "${EUF_VIPER_PROFILE_BUILD:-1}" = 1 ]; then
@@ -22,6 +24,8 @@ BASELINE_BACKEND="${EUF_VIPER_BASELINE_BACKEND:-auto}"
 CANDIDATE_BACKEND="${EUF_VIPER_CANDIDATE_BACKEND:-auto}"
 BASELINE_DIRECT_ROOT_CNF="${EUF_VIPER_BASELINE_DIRECT_ROOT_CNF:-0}"
 CANDIDATE_DIRECT_ROOT_CNF="${EUF_VIPER_CANDIDATE_DIRECT_ROOT_CNF:-1}"
+BASELINE_DIRECT_NEGATED_ROOT="${EUF_VIPER_BASELINE_DIRECT_NEGATED_ROOT:-0}"
+CANDIDATE_DIRECT_NEGATED_ROOT="${EUF_VIPER_CANDIDATE_DIRECT_NEGATED_ROOT:-0}"
 BASELINE_SCOPED_LET="${EUF_VIPER_BASELINE_SCOPED_LET:-auto}"
 CANDIDATE_SCOPED_LET="${EUF_VIPER_CANDIDATE_SCOPED_LET:-auto}"
 BASELINE_CADICAL_MODE="${EUF_VIPER_BASELINE_CADICAL_MODE:-plain}"
@@ -77,12 +81,13 @@ if [ -n "${EUF_VIPER_PROFILE_CASES:-}" ]; then
 fi
 
 for relative_path in "${CASES[@]}"; do
-  input="$PWD/benchmarks/smtlib-2025/QF_UF/$relative_path"
+  input="$CORPUS_ROOT/benchmarks/smtlib-2025/QF_UF/$relative_path"
   for label in baseline candidate; do
     if [ "$label" = baseline ]; then
       binary="$BASELINE_BIN"
       backend="$BASELINE_BACKEND"
       direct_root_cnf="$BASELINE_DIRECT_ROOT_CNF"
+      direct_negated_root="$BASELINE_DIRECT_NEGATED_ROOT"
       scoped_let="$BASELINE_SCOPED_LET"
       cadical_mode="$BASELINE_CADICAL_MODE"
       cadical_search_mode="$BASELINE_CADICAL_SEARCH_MODE"
@@ -107,6 +112,7 @@ for relative_path in "${CASES[@]}"; do
       binary="$CANDIDATE_BIN"
       backend="$CANDIDATE_BACKEND"
       direct_root_cnf="$CANDIDATE_DIRECT_ROOT_CNF"
+      direct_negated_root="$CANDIDATE_DIRECT_NEGATED_ROOT"
       scoped_let="$CANDIDATE_SCOPED_LET"
       cadical_mode="$CANDIDATE_CADICAL_MODE"
       cadical_search_mode="$CANDIDATE_CADICAL_SEARCH_MODE"
@@ -133,6 +139,7 @@ for relative_path in "${CASES[@]}"; do
       if env \
         EUF_VIPER_BACKEND="$backend" \
         EUF_VIPER_DIRECT_ROOT_CNF="$direct_root_cnf" \
+        EUF_VIPER_DIRECT_NEGATED_ROOT="$direct_negated_root" \
         EUF_VIPER_SCOPED_LET="$scoped_let" \
         EUF_VIPER_CADICAL_MODE="$cadical_mode" \
         EUF_VIPER_CADICAL_SEARCH_MODE="$cadical_search_mode" \
