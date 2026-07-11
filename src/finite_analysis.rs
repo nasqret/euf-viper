@@ -387,7 +387,7 @@ pub(crate) fn add_permutation_support(
     let start_clause_count = cnf.clauses.len();
     for clique in &cliques {
         for &value in domain {
-            cnf.clauses.push(
+            cnf.add_clause(
                 clique
                     .iter()
                     .map(|term| membership[&(*term, value)])

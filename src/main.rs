@@ -1985,9 +1985,188 @@ impl<'a> ExplainingTheory<'a> {
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct FlatClauses {
+    literals: Vec<i32>,
+    end_offsets: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlatClauseStoreError {
+    LiteralCapacityExceeded,
+    AllocationFailed,
+}
+
+impl std::fmt::Display for FlatClauseStoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LiteralCapacityExceeded => {
+                formatter.write_str("flat clause literal capacity exceeds u32::MAX")
+            }
+            Self::AllocationFailed => formatter.write_str("flat clause allocation failed"),
+        }
+    }
+}
+
+impl FlatClauses {
+    fn new() -> Self {
+        Self {
+            literals: Vec::new(),
+            end_offsets: vec![0],
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.end_offsets.len() - 1
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn iter(&self) -> FlatClauseIter<'_> {
+        FlatClauseIter {
+            literals: &self.literals,
+            end_offsets: self.end_offsets.windows(2),
+        }
+    }
+
+    #[cfg(test)]
+    fn last(&self) -> Option<&[i32]> {
+        self.len().checked_sub(1).map(|index| &self[index])
+    }
+
+    fn checked_end_offset(
+        literal_count: usize,
+        additional_literals: usize,
+        max_end_offset: u32,
+    ) -> Result<u32, FlatClauseStoreError> {
+        let end_offset = literal_count
+            .checked_add(additional_literals)
+            .and_then(|count| u32::try_from(count).ok())
+            .ok_or(FlatClauseStoreError::LiteralCapacityExceeded)?;
+        if end_offset > max_end_offset {
+            return Err(FlatClauseStoreError::LiteralCapacityExceeded);
+        }
+        Ok(end_offset)
+    }
+
+    fn try_push(&mut self, clause: Vec<i32>) -> Result<(), FlatClauseStoreError> {
+        self.try_push_with_max_end_offset(clause, u32::MAX)
+    }
+
+    fn try_push_with_max_end_offset(
+        &mut self,
+        clause: Vec<i32>,
+        max_end_offset: u32,
+    ) -> Result<(), FlatClauseStoreError> {
+        let end_offset =
+            Self::checked_end_offset(self.literals.len(), clause.len(), max_end_offset)?;
+
+        self.literals
+            .try_reserve(clause.len())
+            .map_err(|_| FlatClauseStoreError::AllocationFailed)?;
+        self.end_offsets
+            .try_reserve(1)
+            .map_err(|_| FlatClauseStoreError::AllocationFailed)?;
+
+        self.literals.extend(clause);
+        self.end_offsets.push(end_offset);
+        Ok(())
+    }
+
+    #[track_caller]
+    fn push(&mut self, clause: Vec<i32>) {
+        if let Err(error) = self.try_push(clause) {
+            panic!("{error}");
+        }
+    }
+}
+
+impl Default for FlatClauses {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for FlatClauses {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::ops::Index<usize> for FlatClauses {
+    type Output = [i32];
+
+    fn index(&self, index: usize) -> &Self::Output {
+        let start = self.end_offsets[index] as usize;
+        let end = self.end_offsets[index + 1] as usize;
+        &self.literals[start..end]
+    }
+}
+
+impl Extend<Vec<i32>> for FlatClauses {
+    fn extend<T: IntoIterator<Item = Vec<i32>>>(&mut self, clauses: T) {
+        for clause in clauses {
+            self.push(clause);
+        }
+    }
+}
+
+impl PartialEq<Vec<Vec<i32>>> for FlatClauses {
+    fn eq(&self, other: &Vec<Vec<i32>>) -> bool {
+        self.len() == other.len()
+            && self
+                .iter()
+                .zip(other)
+                .all(|(left, right)| left == right.as_slice())
+    }
+}
+
+#[derive(Clone)]
+struct FlatClauseIter<'a> {
+    literals: &'a [i32],
+    end_offsets: std::slice::Windows<'a, u32>,
+}
+
+impl<'a> Iterator for FlatClauseIter<'a> {
+    type Item = &'a [i32];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.end_offsets
+            .next()
+            .map(|bounds| &self.literals[bounds[0] as usize..bounds[1] as usize])
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.end_offsets.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for FlatClauseIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.end_offsets
+            .next_back()
+            .map(|bounds| &self.literals[bounds[0] as usize..bounds[1] as usize])
+    }
+}
+
+impl ExactSizeIterator for FlatClauseIter<'_> {}
+impl std::iter::FusedIterator for FlatClauseIter<'_> {}
+
+impl<'a> IntoIterator for &'a FlatClauses {
+    type Item = &'a [i32];
+    type IntoIter = FlatClauseIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[derive(Debug)]
 struct CnfProblem {
-    clauses: Vec<Vec<i32>>,
+    clauses: FlatClauses,
     var_atoms: Vec<Option<BoolAtomKey>>,
     atom_vars: HashMap<BoolAtomKey, i32>,
     true_lit: Option<i32>,
@@ -2055,7 +2234,7 @@ struct CertificateManifest {
 impl CnfProblem {
     fn new() -> Self {
         Self {
-            clauses: Vec::new(),
+            clauses: FlatClauses::new(),
             var_atoms: vec![None],
             atom_vars: HashMap::default(),
             true_lit: None,
@@ -2066,6 +2245,10 @@ impl CnfProblem {
 
     fn var_count(&self) -> usize {
         self.var_atoms.len().saturating_sub(1)
+    }
+
+    pub(crate) fn add_clause(&mut self, clause: Vec<i32>) {
+        self.clauses.push(clause);
     }
 
     fn new_var(&mut self, atom: Option<BoolAtomKey>) -> i32 {
@@ -3828,7 +4011,7 @@ impl<'a> DpllSolver<'a> {
     fn initial_units(&self, assignment: &mut [i8]) -> Option<Vec<usize>> {
         let mut pending = Vec::new();
         for clause in &self.cnf.clauses {
-            match clause.as_slice() {
+            match clause {
                 [] => return None,
                 [lit] => {
                     let var = lit.unsigned_abs() as usize;
@@ -5643,7 +5826,7 @@ fn integrate_equality_abstraction_facts(
     let unit_literals = cnf
         .clauses
         .iter()
-        .filter_map(|clause| match clause.as_slice() {
+        .filter_map(|clause| match clause {
             [literal] => Some(*literal),
             _ => None,
         })
@@ -6997,6 +7180,152 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flat_clauses_preserve_empty_and_unit_clauses() {
+        let mut clauses = FlatClauses::new();
+        assert!(clauses.is_empty());
+        assert_eq!(clauses.len(), 0);
+        assert_eq!(clauses.iter().next(), None);
+        assert_eq!(clauses.last(), None);
+        assert_eq!(clauses.end_offsets, vec![0]);
+
+        clauses.push(vec![17]);
+        assert!(!clauses.is_empty());
+        assert_eq!(clauses.len(), 1);
+        assert_eq!(&clauses[0], &[17]);
+        assert_eq!(clauses.last(), Some(&[17][..]));
+        assert_eq!(clauses.end_offsets, vec![0, 1]);
+    }
+
+    #[test]
+    fn flat_clauses_preserve_wide_clause_literal_order() {
+        let wide = (1..=70_000).collect::<Vec<i32>>();
+        let mut clauses = FlatClauses::new();
+        clauses.push(wide.clone());
+
+        assert_eq!(clauses.len(), 1);
+        assert_eq!(&clauses[0], wide.as_slice());
+        assert_eq!(clauses.end_offsets, vec![0, 70_000]);
+    }
+
+    #[test]
+    fn flat_clauses_preserve_duplicates_and_repeated_empty_clauses() {
+        let expected = vec![
+            Vec::new(),
+            Vec::new(),
+            vec![4, 4, -2],
+            vec![4, 4, -2],
+            Vec::new(),
+        ];
+        let mut clauses = FlatClauses::new();
+        clauses.extend(expected.clone());
+
+        assert_eq!(clauses, expected);
+        assert_eq!(clauses.clone(), clauses);
+        assert_eq!(clauses.end_offsets, vec![0, 0, 0, 3, 6, 6]);
+        assert_eq!(format!("{clauses:?}"), format!("{expected:?}"));
+    }
+
+    #[test]
+    fn flat_clauses_keep_indexed_lookup_stable_across_growth() {
+        let mut clauses = FlatClauses::new();
+        clauses.push(vec![11, -12]);
+        clauses.push(Vec::new());
+        clauses.push(vec![13]);
+
+        for index in 0..2_048 {
+            clauses.push(vec![index, -(index + 1)]);
+        }
+
+        assert_eq!(&clauses[0], &[11, -12]);
+        assert_eq!(&clauses[1], &[] as &[i32]);
+        assert_eq!(&clauses[2], &[13]);
+        assert_eq!(&clauses[3], &[0, -1]);
+        assert_eq!(&clauses[2_050], &[2_047, -2_048]);
+    }
+
+    #[test]
+    fn flat_clauses_iterate_sequentially_in_exact_order() {
+        let expected = vec![vec![3, 1, 3], Vec::new(), vec![-7], vec![9, 8]];
+        let mut clauses = FlatClauses::new();
+        clauses.extend(expected.clone());
+
+        let mut iterator = clauses.iter();
+        assert_eq!(iterator.len(), expected.len());
+        assert_eq!(iterator.next(), Some(expected[0].as_slice()));
+        assert_eq!(iterator.next(), Some(expected[1].as_slice()));
+        assert_eq!(iterator.next(), Some(expected[2].as_slice()));
+        assert_eq!(iterator.next(), Some(expected[3].as_slice()));
+        assert_eq!(iterator.next(), None);
+    }
+
+    #[test]
+    fn flat_clauses_grow_across_literal_and_offset_reallocations() {
+        let expected = (0..4_096)
+            .map(|clause_id| {
+                (0..=clause_id % 19)
+                    .map(|literal| clause_id * 100 + literal)
+                    .collect::<Vec<i32>>()
+            })
+            .collect::<Vec<_>>();
+        let expected_literal_count = expected.iter().map(Vec::len).sum::<usize>();
+        let mut clauses = FlatClauses::new();
+        clauses.extend(expected.clone());
+
+        assert_eq!(clauses, expected);
+        assert_eq!(clauses.literals.len(), expected_literal_count);
+        assert_eq!(clauses.end_offsets.len(), expected.len() + 1);
+        assert_eq!(clauses.end_offsets[0], 0);
+        assert_eq!(
+            clauses.end_offsets.last().copied(),
+            Some(expected_literal_count as u32)
+        );
+    }
+
+    #[test]
+    fn flat_clauses_reject_offset_overflow_atomically() {
+        let mut clauses = FlatClauses::new();
+        clauses.push(vec![1, -2]);
+        let before = clauses.clone();
+
+        assert_eq!(
+            clauses.try_push_with_max_end_offset(vec![3], 2),
+            Err(FlatClauseStoreError::LiteralCapacityExceeded)
+        );
+        assert_eq!(clauses, before);
+        assert_eq!(
+            FlatClauses::checked_end_offset(u32::MAX as usize, 1, u32::MAX),
+            Err(FlatClauseStoreError::LiteralCapacityExceeded)
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn flat_clauses_keep_dimacs_bytes_exact() {
+        let mut cnf = CnfProblem::new();
+        for _ in 0..3 {
+            cnf.new_var(None);
+        }
+        cnf.clauses.push(vec![3, -1, 3]);
+        cnf.clauses.push(Vec::new());
+        cnf.clauses.push(vec![2]);
+        cnf.clauses.push(Vec::new());
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "euf-viper-flat-clauses-{}-{unique}.cnf",
+            process::id()
+        ));
+        write_dimacs(&path, &cnf).expect("write flat clause DIMACS");
+        let bytes = fs::read(&path).expect("read flat clause DIMACS");
+        fs::remove_file(&path).expect("remove flat clause DIMACS");
+
+        assert_eq!(bytes, b"p cnf 3 4\n3 -1 3 0\n0\n2 0\n0\n");
+    }
+
+    #[test]
     fn structural_router_uses_only_bounded_lexical_features() {
         assert!(structural_router_prefers_euf(
             b"(set-logic QF_UF) (declare-fun a () Bool) (assert a)"
@@ -7247,7 +7576,7 @@ mod tests {
         assert_eq!(integration.accepted_fresh_facts, 0);
         assert_eq!(integration.accepted_edges, vec![(2, 7)]);
         assert_eq!(cnf.clauses.len(), clauses_before + 1);
-        assert_eq!(cnf.clauses.last(), Some(&vec![equality]));
+        assert_eq!(cnf.clauses.last(), Some(&[equality][..]));
         assert_eq!(cnf.var_count(), vars_before);
     }
 
