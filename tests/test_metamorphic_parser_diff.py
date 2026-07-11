@@ -408,7 +408,9 @@ class CampaignTests(unittest.TestCase):
                 timeout_s=1.0,
             )
             self.assertFalse(summary["success"])
+            self.assertTrue(summary["candidate_success"])
             self.assertEqual(summary["counts"]["failed_cases"], len(cases))
+            self.assertEqual(summary["counts"]["candidate_failed_cases"], 0)
             self.assertTrue(
                 any(key.startswith("yices:") for key in summary["anomaly_counts"])
             )
@@ -486,6 +488,50 @@ class CampaignTests(unittest.TestCase):
             )
             self.assertFalse(summary["success"])
             self.assertGreater(summary["counts"]["failed_cases"], 0)
+
+    def test_candidate_gate_records_but_does_not_inherit_reference_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser metamorphic candidate gate ") as temp:
+            root = Path(temp)
+            fake = write_fake_solver(root)
+
+            def command(mode: str) -> str:
+                return shlex.join(fake_command(fake, mode))
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--out",
+                    str(root / "candidate-output"),
+                    "--random-groups",
+                    "0",
+                    "--timeout",
+                    "1",
+                    "--gate",
+                    "candidate",
+                    "--viper-command",
+                    command("viper"),
+                    "--z3-command",
+                    command("reference"),
+                    "--cvc5-command",
+                    command("error-stdout"),
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            summary = json.loads(
+                (root / "candidate-output" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertFalse(summary["success"])
+            self.assertTrue(summary["candidate_success"])
+            self.assertGreater(summary["counts"]["failed_cases"], 0)
+            self.assertEqual(summary["counts"]["candidate_failed_cases"], 0)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,7 @@ scripts/bench/metamorphic_parser_diff.py \
   --seed "$SEED" \
   --random-groups "$RANDOM_GROUPS" \
   --timeout "$TIMEOUT" \
+  --gate candidate \
   --viper-command "$VIPER_BIN solve {file}" \
   --z3-command "$SOLVER_ROOT/third_party/solvers/bin/z3 {file}" \
   --cvc5-command "$SOLVER_ROOT/third_party/solvers/bin/cvc5 --lang=smt2 {file}" \

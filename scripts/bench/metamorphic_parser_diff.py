@@ -7,11 +7,11 @@ The generated corpus targets two classes of parser mistakes:
 * commands following the sole ``check-sat`` in euf-viper's single-query mode.
 
 Every ordinary case has a generator-known result.  Z3, cvc5, optional Yices,
-and euf-viper must all return that result.  Negative command-ordering probes
-instead require the reference solvers to return the prefix query's result and
-euf-viper to reject the unsupported suffix with a configured process exit.
-No oracle majority is used.  Unknown, timeout, malformed output, disagreement,
-or any SMT-LIB ``(error ...)`` response fails the campaign.
+and euf-viper are checked independently against it.  Negative command-ordering
+probes instead require euf-viper to reject the unsupported suffix with a
+configured process exit.  No oracle majority is used.  Strict mode fails on
+any solver anomaly.  Candidate mode still records every comparator anomaly but
+gates only euf-viper's expected-result and metamorphic obligations.
 """
 
 from __future__ import annotations
@@ -39,6 +39,8 @@ OUTPUT_LIMIT = 8192
 DECISIVE_RESULTS = {"sat", "unsat"}
 CONSENSUS_POLICY = "consensus"
 VIPER_REJECT_POLICY = "viper-rejects-post-query"
+STRICT_GATE = "strict"
+CANDIDATE_GATE = "candidate"
 SOLVER_ORDER = ("euf-viper", "z3", "cvc5", "yices")
 MANDATORY_SOLVERS = ("euf-viper", "z3", "cvc5")
 CASE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
@@ -815,6 +817,12 @@ def evaluate_case(
     return anomalies
 
 
+def candidate_anomalies(anomalies: Sequence[str]) -> list[str]:
+    """Select obligations owned by euf-viper from the full differential audit."""
+
+    return [anomaly for anomaly in anomalies if anomaly.startswith("euf-viper:")]
+
+
 def analyze_metamorphic_groups(
     cases: Sequence[FormulaCase],
     observations: Mapping[str, Mapping[str, SolverResult]],
@@ -856,6 +864,8 @@ def analyze_metamorphic_groups(
                 "solver_results": solver_results,
                 "anomalies": anomalies,
                 "passed": not anomalies,
+                "candidate_anomalies": candidate_anomalies(anomalies),
+                "candidate_passed": not candidate_anomalies(anomalies),
             }
         )
     return records
@@ -996,6 +1006,8 @@ def execute_campaign(
                     },
                     "anomalies": anomalies,
                     "passed": not anomalies,
+                    "candidate_anomalies": candidate_anomalies(anomalies),
+                    "candidate_passed": not candidate_anomalies(anomalies),
                 }
             )
 
@@ -1017,17 +1029,29 @@ def execute_campaign(
         anomaly_counts.update(record["anomalies"])
     failed_cases = sum(not record["passed"] for record in result_records)
     failed_groups = sum(not record["passed"] for record in metamorphic_records)
+    candidate_failed_cases = sum(
+        not record["candidate_passed"] for record in result_records
+    )
+    candidate_failed_groups = sum(
+        not record["candidate_passed"] for record in metamorphic_records
+    )
     success = generation_only or (failed_cases == 0 and failed_groups == 0)
+    candidate_success = generation_only or (
+        candidate_failed_cases == 0 and candidate_failed_groups == 0
+    )
     summary: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "mode": mode,
         "success": success,
+        "candidate_success": candidate_success,
         "counts": {
             "generated_cases": len(cases),
             "executed_cases": len(result_records),
             "metamorphic_groups": len({case.group_id for case in cases}),
             "failed_cases": failed_cases,
             "failed_groups": failed_groups,
+            "candidate_failed_cases": candidate_failed_cases,
+            "candidate_failed_groups": candidate_failed_groups,
         },
         "anomaly_counts": dict(sorted(anomaly_counts.items())),
         "artifacts": {
@@ -1052,6 +1076,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=2.0)
     parser.add_argument("--generate-only", action="store_true")
     parser.add_argument("--viper-reject-exit-code", type=int, default=2)
+    parser.add_argument(
+        "--gate",
+        choices=(STRICT_GATE, CANDIDATE_GATE),
+        default=STRICT_GATE,
+        help=(
+            "strict fails on any solver anomaly; candidate records comparator "
+            "anomalies but gates only euf-viper"
+        ),
+    )
     parser.add_argument(
         "--viper-command",
         default="target/release/euf-viper solve {file}",
@@ -1107,9 +1140,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"executed {counts['executed_cases']} cases in "
         f"{counts['metamorphic_groups']} groups; "
         f"failed cases {counts['failed_cases']}; "
-        f"failed groups {counts['failed_groups']}"
+        f"failed groups {counts['failed_groups']}; "
+        f"candidate failed cases {counts['candidate_failed_cases']}; "
+        f"candidate failed groups {counts['candidate_failed_groups']}"
     )
-    return 0 if summary["success"] else 1
+    gate_key = "success" if args.gate == STRICT_GATE else "candidate_success"
+    return 0 if summary[gate_key] else 1
 
 
 if __name__ == "__main__":
