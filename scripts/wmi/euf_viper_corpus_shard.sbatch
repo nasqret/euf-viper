@@ -9,8 +9,11 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
-export PATH="$PWD/third_party/solvers/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+ROOT="${EUF_VIPER_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+SOLVER_ROOT="${EUF_VIPER_SOLVER_ROOT:-$ROOT}"
+VIPER_BIN="${EUF_VIPER_BIN:-$ROOT/target/release/euf-viper}"
+cd "$ROOT"
+export PATH="$SOLVER_ROOT/third_party/solvers/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 
 RUN_ID="${EUF_VIPER_RUN_ID:?set EUF_VIPER_RUN_ID}"
 SHARDS="${EUF_VIPER_CORPUS_SHARDS:?set EUF_VIPER_CORPUS_SHARDS}"
@@ -19,7 +22,7 @@ TIMEOUT="${EUF_VIPER_CORPUS_TIMEOUT:?set EUF_VIPER_CORPUS_TIMEOUT}"
 JOBS="${EUF_VIPER_CORPUS_JOBS:-${SLURM_CPUS_PER_TASK:-1}}"
 SHARD_DIR="$PWD/benchmarks/smtlib-2025/shards-$RUN_ID"
 SHARD_MANIFEST="$SHARD_DIR/qf_uf_${INDEX}.jsonl"
-CAMPAIGN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl"
+CAMPAIGN_MANIFEST="${EUF_VIPER_CORPUS_MANIFEST:-$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl}"
 OUT_PREFIX="results/qf-uf-corpus-${RUN_ID}-shard-${INDEX}"
 RESUME_RUN_ID="${EUF_VIPER_CORPUS_RESUME_RUN_ID:-}"
 RETRY_SOLVERS="${EUF_VIPER_CORPUS_RETRY_SOLVERS:-}"
@@ -44,10 +47,10 @@ scripts/bench/shard_manifest.py \
 
 ARGS=(
   "$SHARD_MANIFEST"
-  --viper "$PWD/target/release/euf-viper"
-  --z3 "$PWD/third_party/solvers/bin/z3"
-  --cvc5 "$PWD/third_party/solvers/bin/cvc5"
-  --yices "$PWD/third_party/solvers/bin/yices-smt2"
+  --viper "$VIPER_BIN"
+  --z3 "$SOLVER_ROOT/third_party/solvers/bin/z3"
+  --cvc5 "$SOLVER_ROOT/third_party/solvers/bin/cvc5"
+  --yices "$SOLVER_ROOT/third_party/solvers/bin/yices-smt2"
   --timeout "$TIMEOUT"
   --jobs "$JOBS"
   --out "${OUT_PREFIX}.csv"

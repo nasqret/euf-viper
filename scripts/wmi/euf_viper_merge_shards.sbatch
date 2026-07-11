@@ -9,7 +9,8 @@
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+ROOT="${EUF_VIPER_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}}"
+cd "$ROOT"
 
 RUN_ID="${EUF_VIPER_RUN_ID:?set EUF_VIPER_RUN_ID}"
 SHARDS="${EUF_VIPER_CORPUS_SHARDS:?set EUF_VIPER_CORPUS_SHARDS}"
@@ -27,7 +28,7 @@ if [ -n "$RETRY_RESULTS" ] && \
   echo "retry results must be a comma-separated shell-safe result list" >&2
   exit 2
 fi
-CAMPAIGN_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl"
+CAMPAIGN_MANIFEST="${EUF_VIPER_CORPUS_MANIFEST:-$PWD/benchmarks/smtlib-2025/qf_uf_campaign_${RUN_ID}.jsonl}"
 INPUTS=()
 for ((index = 0; index < SHARDS; index++)); do
   INPUTS+=("results/qf-uf-corpus-${RUN_ID}-shard-${index}.csv")

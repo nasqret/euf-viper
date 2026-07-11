@@ -447,6 +447,20 @@ def classify_completed_process(
             _limited(stderr),
         )
 
+    error_lines = [
+        line.strip()
+        for line in (*stdout.splitlines(), *stderr.splitlines())
+        if line.strip().lower().startswith("(error")
+    ]
+    if error_lines:
+        return SolverResult(
+            "error",
+            "solver_error_output",
+            return_code,
+            _limited(stdout),
+            _limited(stderr),
+        )
+
     recognized = [
         line.strip().lower()
         for line in stdout.splitlines()

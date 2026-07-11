@@ -41,6 +41,9 @@ elif mode == "malformed":
 elif mode == "ambiguous":
     print("sat")
     print("unsat")
+elif mode == "solver-error":
+    print('(error "bad term")')
+    print("sat")
 elif mode == "failure":
     print("sat")
     print("synthetic failure", file=sys.stderr)
@@ -157,6 +160,7 @@ class SolverExecutionTests(unittest.TestCase):
                 "unknown": ("unknown", "solver_unknown"),
                 "malformed": ("error", "malformed_output"),
                 "ambiguous": ("error", "ambiguous_output"),
+                "solver-error": ("error", "solver_error_output"),
                 "failure": ("error", "nonzero_exit"),
                 "timeout": ("unknown", "timeout"),
             }
