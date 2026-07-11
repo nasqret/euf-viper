@@ -1,5 +1,6 @@
 mod eq_abstraction;
 mod finite_analysis;
+mod unconditional_leaf_quotient;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
@@ -1658,47 +1659,80 @@ impl CnfProblem {
         lit
     }
 
+    fn formula_atom_lit(
+        &mut self,
+        atom: &BoolAtomKey,
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) -> i32 {
+        match quotient.map(|plan| plan.project(atom)) {
+            Some(unconditional_leaf_quotient::ProjectedLeaf::Const(value)) => {
+                self.literal_const(value)
+            }
+            Some(unconditional_leaf_quotient::ProjectedLeaf::Atom(atom)) => self.atom_lit(atom),
+            None => self.atom_lit(atom.clone()),
+        }
+    }
+
     fn add_assertion(&mut self, expr: &BoolExpr) {
-        let literal = self.encode_expr(expr);
+        self.add_assertion_with_quotient(expr, None);
+    }
+
+    fn add_assertion_with_quotient(
+        &mut self,
+        expr: &BoolExpr,
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) {
+        let literal = self.encode_expr_with_quotient(expr, quotient);
         self.clauses.push(vec![literal]);
     }
 
     #[cold]
     #[inline(never)]
+    #[cfg(test)]
     fn add_direct_assertion(&mut self, expr: &BoolExpr) {
         self.add_direct_assertion_with_negated_root(expr, false);
     }
 
     #[cold]
     #[inline(never)]
+    #[cfg(test)]
     fn add_direct_assertion_with_negated_root(
         &mut self,
         expr: &BoolExpr,
         direct_negated_root: bool,
     ) {
+        self.add_direct_assertion_with_quotient(expr, direct_negated_root, None);
+    }
+
+    fn add_direct_assertion_with_quotient(
+        &mut self,
+        expr: &BoolExpr,
+        direct_negated_root: bool,
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) {
         match expr {
             BoolExpr::Const(true) => {}
             BoolExpr::Const(false) => self.clauses.push(Vec::new()),
             BoolExpr::Atom(atom) => {
-                let literal = self.atom_lit(atom.clone());
+                let literal = self.formula_atom_lit(atom, quotient);
                 self.clauses.push(vec![literal]);
             }
             BoolExpr::Not(child) if direct_negated_root => {
-                self.add_direct_negated_assertion(child);
+                self.add_direct_negated_assertion_with_quotient(child, quotient);
             }
             BoolExpr::Not(child) => {
-                let literal = self.encode_expr(child);
+                let literal = self.encode_expr_with_quotient(child, quotient);
                 self.clauses.push(vec![-literal]);
             }
             BoolExpr::And(children) => {
                 for child in children {
-                    self.add_direct_assertion_with_negated_root(child, direct_negated_root);
+                    self.add_direct_assertion_with_quotient(child, direct_negated_root, quotient);
                 }
             }
             BoolExpr::Or(children) => {
                 let clause = children
                     .iter()
-                    .map(|child| self.encode_expr(child))
+                    .map(|child| self.encode_expr_with_quotient(child, quotient))
                     .collect();
                 self.clauses.push(clause);
             }
@@ -1706,65 +1740,73 @@ impl CnfProblem {
                 let Some((first, rest)) = children.split_first() else {
                     return;
                 };
-                let first = self.encode_expr(first);
+                let first = self.encode_expr_with_quotient(first, quotient);
                 for child in rest {
-                    let child = self.encode_expr(child);
+                    let child = self.encode_expr_with_quotient(child, quotient);
                     self.clauses.push(vec![-first, child]);
                     self.clauses.push(vec![first, -child]);
                 }
             }
             BoolExpr::Ite(cond, then_expr, else_expr) => {
-                let cond = self.encode_expr(cond);
-                let then_expr = self.encode_expr(then_expr);
-                let else_expr = self.encode_expr(else_expr);
+                let cond = self.encode_expr_with_quotient(cond, quotient);
+                let then_expr = self.encode_expr_with_quotient(then_expr, quotient);
+                let else_expr = self.encode_expr_with_quotient(else_expr, quotient);
                 self.clauses.push(vec![-cond, then_expr]);
                 self.clauses.push(vec![cond, else_expr]);
             }
         }
     }
 
-    fn add_direct_negated_assertion(&mut self, expr: &BoolExpr) {
+    fn add_direct_negated_assertion_with_quotient(
+        &mut self,
+        expr: &BoolExpr,
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) {
         match expr {
             BoolExpr::Const(true) => self.clauses.push(Vec::new()),
             BoolExpr::Const(false) => {}
             BoolExpr::Atom(atom) => {
-                let literal = self.atom_lit(atom.clone());
+                let literal = self.formula_atom_lit(atom, quotient);
                 self.clauses.push(vec![-literal]);
             }
             BoolExpr::Not(child) => {
-                self.add_direct_assertion_with_negated_root(child, true);
+                self.add_direct_assertion_with_quotient(child, true, quotient);
             }
             BoolExpr::And(children) => {
                 let clause = children
                     .iter()
-                    .map(|child| -self.encode_expr(child))
+                    .map(|child| -self.encode_expr_with_quotient(child, quotient))
                     .collect();
                 self.clauses.push(clause);
             }
             BoolExpr::Or(children) => {
                 for child in children {
-                    self.add_direct_negated_assertion(child);
+                    self.add_direct_negated_assertion_with_quotient(child, quotient);
                 }
             }
             BoolExpr::Iff(_) | BoolExpr::Ite(_, _, _) => {
-                let literal = self.encode_expr(expr);
+                let literal = self.encode_expr_with_quotient(expr, quotient);
                 self.clauses.push(vec![-literal]);
             }
         }
     }
 
-    fn encode_expr(&mut self, expr: &BoolExpr) -> i32 {
+    fn encode_expr_with_quotient(
+        &mut self,
+        expr: &BoolExpr,
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) -> i32 {
         match expr {
             BoolExpr::Const(value) => self.literal_const(*value),
-            BoolExpr::Atom(atom) => self.atom_lit(atom.clone()),
-            BoolExpr::Not(child) => -self.encode_expr(child),
-            BoolExpr::And(children) => self.encode_and(children),
-            BoolExpr::Or(children) => self.encode_or(children),
-            BoolExpr::Iff(children) => self.encode_iff(children),
+            BoolExpr::Atom(atom) => self.formula_atom_lit(atom, quotient),
+            BoolExpr::Not(child) => -self.encode_expr_with_quotient(child, quotient),
+            BoolExpr::And(children) => self.encode_and(children, quotient),
+            BoolExpr::Or(children) => self.encode_or(children, quotient),
+            BoolExpr::Iff(children) => self.encode_iff(children, quotient),
             BoolExpr::Ite(cond, then_expr, else_expr) => {
-                let c = self.encode_expr(cond);
-                let t = self.encode_expr(then_expr);
-                let e = self.encode_expr(else_expr);
+                let c = self.encode_expr_with_quotient(cond, quotient);
+                let t = self.encode_expr_with_quotient(then_expr, quotient);
+                let e = self.encode_expr_with_quotient(else_expr, quotient);
                 let p = self.new_var(None);
                 self.clauses.push(vec![-c, -t, p]);
                 self.clauses.push(vec![-c, t, -p]);
@@ -1775,14 +1817,18 @@ impl CnfProblem {
         }
     }
 
-    fn encode_and(&mut self, children: &[BoolExpr]) -> i32 {
+    fn encode_and(
+        &mut self,
+        children: &[BoolExpr],
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) -> i32 {
         match children {
             [] => self.literal_const(true),
-            [single] => self.encode_expr(single),
+            [single] => self.encode_expr_with_quotient(single, quotient),
             _ => {
                 let lits = children
                     .iter()
-                    .map(|child| self.encode_expr(child))
+                    .map(|child| self.encode_expr_with_quotient(child, quotient))
                     .collect::<Vec<_>>();
                 let p = self.new_var(None);
                 for &lit in &lits {
@@ -1797,14 +1843,18 @@ impl CnfProblem {
         }
     }
 
-    fn encode_or(&mut self, children: &[BoolExpr]) -> i32 {
+    fn encode_or(
+        &mut self,
+        children: &[BoolExpr],
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) -> i32 {
         match children {
             [] => self.literal_const(false),
-            [single] => self.encode_expr(single),
+            [single] => self.encode_expr_with_quotient(single, quotient),
             _ => {
                 let lits = children
                     .iter()
-                    .map(|child| self.encode_expr(child))
+                    .map(|child| self.encode_expr_with_quotient(child, quotient))
                     .collect::<Vec<_>>();
                 let p = self.new_var(None);
                 for &lit in &lits {
@@ -1819,12 +1869,16 @@ impl CnfProblem {
         }
     }
 
-    fn encode_iff(&mut self, children: &[BoolExpr]) -> i32 {
+    fn encode_iff(
+        &mut self,
+        children: &[BoolExpr],
+        quotient: Option<&unconditional_leaf_quotient::Plan>,
+    ) -> i32 {
         match children {
             [] | [_] => self.literal_const(true),
             [left, right] => {
-                let a = self.encode_expr(left);
-                let b = self.encode_expr(right);
+                let a = self.encode_expr_with_quotient(left, quotient);
+                let b = self.encode_expr_with_quotient(right, quotient);
                 let p = self.new_var(None);
                 self.clauses.push(vec![-p, -a, b]);
                 self.clauses.push(vec![-p, a, -b]);
@@ -1838,7 +1892,7 @@ impl CnfProblem {
                 for child in &children[1..] {
                     pairs.push(BoolExpr::Iff(vec![first.clone(), child.clone()]));
                 }
-                self.encode_and(&pairs)
+                self.encode_and(&pairs, quotient)
             }
         }
     }
@@ -4912,13 +4966,16 @@ const SCOPED_LET_AUTO_THRESHOLD: usize = 512;
 struct RootCnfOptions {
     direct_root_cnf: bool,
     direct_negated_root: bool,
+    unconditional_quotient: unconditional_leaf_quotient::Mode,
 }
 
 impl RootCnfOptions {
+    #[cfg(test)]
     fn existing_behavior(direct_root_cnf: bool) -> Self {
         Self {
             direct_root_cnf,
             direct_negated_root: false,
+            unconditional_quotient: unconditional_leaf_quotient::Mode::Off,
         }
     }
 }
@@ -5265,6 +5322,7 @@ fn parse_zero_one_setting_with_default(
     }
 }
 
+#[cfg(test)]
 fn parse_zero_one_setting(name: &str, value: Option<&str>) -> Result<bool, String> {
     parse_zero_one_setting_with_default(name, value, true)
 }
@@ -5285,13 +5343,26 @@ fn direct_negated_root_enabled() -> Result<bool, String> {
     zero_one_env_setting(DIRECT_NEGATED_ROOT_ENV, false)
 }
 
+fn selected_unconditional_quotient_mode() -> Result<unconditional_leaf_quotient::Mode, String> {
+    match env::var(unconditional_leaf_quotient::ENV) {
+        Ok(value) => unconditional_leaf_quotient::parse_mode(Some(&value)),
+        Err(env::VarError::NotPresent) => unconditional_leaf_quotient::parse_mode(None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!(
+            "{} must be off, shadow, or on",
+            unconditional_leaf_quotient::ENV
+        )),
+    }
+}
+
 fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
+        unconditional_quotient: selected_unconditional_quotient_mode()?,
     })
 }
 
+#[cfg(test)]
 fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
     solve_problem_with_root_cnf_options(problem, RootCnfOptions::existing_behavior(direct_root_cnf))
 }
@@ -5307,6 +5378,7 @@ fn solve_problem_with_root_cnf_options(
     )
 }
 
+#[cfg(test)]
 fn solve_problem_with_eq_abstraction(
     problem: Problem,
     direct_root_cnf: bool,
@@ -5412,8 +5484,47 @@ fn solve_problem_with_options_and_eq_abstraction(
     }
 }
 
+fn build_unconditional_quotient_plan(
+    assertions: &[BoolExpr],
+    term_count: usize,
+    mode: unconditional_leaf_quotient::Mode,
+) -> Option<unconditional_leaf_quotient::Plan> {
+    if mode == unconditional_leaf_quotient::Mode::Off {
+        if env::var_os("EUF_VIPER_PROFILE").is_some() {
+            eprintln!("profile_unconditional_quotient_mode=off fallback=none");
+        }
+        return None;
+    }
+
+    let start = Instant::now();
+    let result = unconditional_leaf_quotient::Plan::build(assertions, term_count);
+    let count = result
+        .as_ref()
+        .map_or(0, unconditional_leaf_quotient::Plan::supporting_fact_count);
+    profile_phase("unconditional_quotient_plan", start, count);
+    if let Ok(plan) = &result {
+        profile_measurement(
+            "unconditional_quotient_projected_terms",
+            0,
+            plan.projected_term_count(),
+        );
+    }
+    if env::var_os("EUF_VIPER_PROFILE").is_some() {
+        eprintln!(
+            "profile_unconditional_quotient_mode={} fallback={}",
+            mode.as_str(),
+            result
+                .as_ref()
+                .err()
+                .map_or("none", unconditional_leaf_quotient::BuildFailure::as_str),
+        );
+    }
+    result.ok()
+}
+
 #[cold]
 #[inline(never)]
+#[cfg(test)]
 fn solve_dynamic_full_ackermann(
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -5429,17 +5540,36 @@ fn solve_dynamic_full_ackermann(
 
 #[cold]
 #[inline(never)]
+#[cfg(test)]
 fn solve_dynamic_full_ackermann_with_negated_root(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     accepted_equality_facts: &[(TermId, TermId)],
     direct_negated_root: bool,
 ) -> (CnfProblem, EagerSolveOutcome) {
+    solve_dynamic_full_ackermann_with_negated_root_and_quotient(
+        arena,
+        bool_problem,
+        accepted_equality_facts,
+        direct_negated_root,
+        None,
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn solve_dynamic_full_ackermann_with_negated_root_and_quotient(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    accepted_equality_facts: &[(TermId, TermId)],
+    direct_negated_root: bool,
+    quotient: Option<&unconditional_leaf_quotient::Plan>,
+) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
     atomize_bool_data_terms(&mut completed, bool_problem);
     for assertion in &bool_problem.assertions {
-        completed.add_direct_assertion_with_negated_root(assertion, direct_negated_root);
+        completed.add_direct_assertion_with_quotient(assertion, direct_negated_root, quotient);
     }
     for &(left, right) in accepted_equality_facts {
         let (left, right) = normalized_pair(left, right);
@@ -5468,19 +5598,31 @@ fn solve_bool_problem(
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    let quotient_plan = build_unconditional_quotient_plan(
+        &bool_problem.assertions,
+        arena.terms.len(),
+        root_cnf_options.unconditional_quotient,
+    );
+    let active_quotient =
+        if root_cnf_options.unconditional_quotient == unconditional_leaf_quotient::Mode::On {
+            quotient_plan.as_ref()
+        } else {
+            None
+        };
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
     if root_cnf_options.direct_root_cnf {
         for assertion in &bool_problem.assertions {
-            cnf.add_direct_assertion_with_negated_root(
+            cnf.add_direct_assertion_with_quotient(
                 assertion,
                 root_cnf_options.direct_negated_root,
+                active_quotient,
             );
         }
     } else {
         for assertion in &bool_problem.assertions {
-            cnf.add_assertion(assertion);
+            cnf.add_assertion_with_quotient(assertion, active_quotient);
         }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
@@ -5584,11 +5726,12 @@ fn solve_bool_problem(
                     ) {
                         profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
                         let (completed, completed_outcome) =
-                            solve_dynamic_full_ackermann_with_negated_root(
+                            solve_dynamic_full_ackermann_with_negated_root_and_quotient(
                                 arena,
                                 bool_problem,
                                 &accepted_equality_facts,
                                 root_cnf_options.direct_negated_root,
+                                active_quotient,
                             );
                         prior_sat_calls += 1;
                         match completed_outcome {
@@ -6774,6 +6917,362 @@ mod tests {
         solver.solve().expect("Varisat should solve test CNF")
     }
 
+    fn quotient_root_options(
+        direct_root_cnf: bool,
+        direct_negated_root: bool,
+        mode: unconditional_leaf_quotient::Mode,
+    ) -> RootCnfOptions {
+        RootCnfOptions {
+            direct_root_cnf,
+            direct_negated_root,
+            unconditional_quotient: mode,
+        }
+    }
+
+    fn encode_assertions_with_quotient(
+        assertions: &[BoolExpr],
+        term_count: usize,
+        options: RootCnfOptions,
+    ) -> CnfProblem {
+        let plan = match options.unconditional_quotient {
+            unconditional_leaf_quotient::Mode::Off => None,
+            unconditional_leaf_quotient::Mode::Shadow | unconditional_leaf_quotient::Mode::On => {
+                Some(unconditional_leaf_quotient::Plan::build(assertions, term_count).unwrap())
+            }
+        };
+        let active = (options.unconditional_quotient == unconditional_leaf_quotient::Mode::On)
+            .then_some(())
+            .and(plan.as_ref());
+        let mut cnf = CnfProblem::new();
+        for assertion in assertions {
+            if options.direct_root_cnf {
+                cnf.add_direct_assertion_with_quotient(
+                    assertion,
+                    options.direct_negated_root,
+                    active,
+                );
+            } else {
+                cnf.add_assertion_with_quotient(assertion, active);
+            }
+        }
+        cnf
+    }
+
+    fn add_small_quotient_semantic_assignment(
+        cnf: &mut CnfProblem,
+        eq_class_to_two: bool,
+        class_bool: bool,
+        term_two_bool: bool,
+    ) {
+        let atoms = cnf
+            .var_atoms
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter_map(|(variable, atom)| atom.clone().map(|atom| (variable as i32, atom)))
+            .collect::<Vec<_>>();
+        for (variable, atom) in atoms {
+            let value = match atom {
+                BoolAtomKey::Eq(left, right) => {
+                    let left = if left <= 1 { 0 } else { left };
+                    let right = if right <= 1 { 0 } else { right };
+                    left == right || (normalized_pair(left, right) == (0, 2) && eq_class_to_two)
+                }
+                BoolAtomKey::BoolTerm(term) => {
+                    if term <= 1 {
+                        class_bool
+                    } else {
+                        term_two_bool
+                    }
+                }
+            };
+            cnf.clauses
+                .push(vec![if value { variable } else { -variable }]);
+        }
+    }
+
+    #[test]
+    fn unconditional_quotient_off_and_shadow_are_byte_identical() {
+        let assertions = vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(1, 0)),
+            BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                BoolExpr::Atom(BoolAtomKey::Eq(1, 2)),
+                BoolExpr::Atom(BoolAtomKey::BoolTerm(1)),
+            ]))),
+        ];
+        for (direct_root_cnf, direct_negated_root) in [(false, false), (true, false), (true, true)]
+        {
+            let off = encode_assertions_with_quotient(
+                &assertions,
+                3,
+                quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::Off,
+                ),
+            );
+            let shadow = encode_assertions_with_quotient(
+                &assertions,
+                3,
+                quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::Shadow,
+                ),
+            );
+
+            assert_eq!(shadow.clauses, off.clauses);
+            assert_eq!(shadow.var_atoms, off.var_atoms);
+            assert_eq!(shadow.atom_vars, off.atom_vars);
+            assert_eq!(shadow.true_lit, off.true_lit);
+        }
+    }
+
+    #[test]
+    fn supporting_and_guarded_equalities_keep_their_required_roles() {
+        let supporting = BoolExpr::Atom(BoolAtomKey::Eq(1, 0));
+        let guarded = BoolExpr::Or(vec![
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(2)),
+            BoolExpr::Atom(BoolAtomKey::Eq(3, 2)),
+        ]);
+        let assertions = vec![supporting, guarded];
+        let plan = unconditional_leaf_quotient::Plan::build(&assertions, 4).unwrap();
+        assert_eq!(plan.supporting_fact_count(), 1);
+
+        let cnf = encode_assertions_with_quotient(
+            &assertions,
+            4,
+            quotient_root_options(true, true, unconditional_leaf_quotient::Mode::On),
+        );
+        let support_lit = cnf.atom_vars[&BoolAtomKey::Eq(0, 1)];
+        assert!(cnf.clauses.iter().any(|clause| clause == &[support_lit]));
+        assert!(cnf.atom_vars.contains_key(&BoolAtomKey::Eq(2, 3)));
+    }
+
+    #[test]
+    fn same_class_equalities_fold_in_both_polarities_and_root_encoders() {
+        let supporting = vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+            BoolExpr::Atom(BoolAtomKey::Eq(1, 2)),
+        ];
+        for (direct_root_cnf, direct_negated_root) in [(false, false), (true, false), (true, true)]
+        {
+            let options = quotient_root_options(
+                direct_root_cnf,
+                direct_negated_root,
+                unconditional_leaf_quotient::Mode::On,
+            );
+            let mut positive = supporting.clone();
+            positive.push(BoolExpr::Or(vec![
+                BoolExpr::Const(false),
+                BoolExpr::Atom(BoolAtomKey::Eq(0, 2)),
+            ]));
+            let positive = encode_assertions_with_quotient(&positive, 3, options);
+            assert!(cnf_is_satisfiable(&positive));
+            assert!(!positive.atom_vars.contains_key(&BoolAtomKey::Eq(0, 2)));
+
+            let mut negative = supporting.clone();
+            negative.push(BoolExpr::Not(Box::new(BoolExpr::Atom(BoolAtomKey::Eq(
+                0, 2,
+            )))));
+            let negative = encode_assertions_with_quotient(&negative, 3, options);
+            assert!(!cnf_is_satisfiable(&negative));
+            assert!(!negative.atom_vars.contains_key(&BoolAtomKey::Eq(0, 2)));
+        }
+    }
+
+    #[test]
+    fn bool_terms_project_only_at_formula_leaves() {
+        let assertions = vec![
+            BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+            BoolExpr::Or(vec![BoolExpr::Atom(BoolAtomKey::BoolTerm(1))]),
+        ];
+        let plan = unconditional_leaf_quotient::Plan::build(&assertions, 3).unwrap();
+        let mut cnf = CnfProblem::new();
+        for assertion in &assertions {
+            cnf.add_direct_assertion_with_quotient(assertion, true, Some(&plan));
+        }
+        assert!(cnf.atom_vars.contains_key(&BoolAtomKey::BoolTerm(0)));
+        assert!(!cnf.atom_vars.contains_key(&BoolAtomKey::BoolTerm(1)));
+
+        let bool_problem = BoolProblem {
+            assertions: assertions.clone(),
+            unsupported: Vec::new(),
+            true_term: 0,
+            false_term: 2,
+            data_terms: vec![1],
+        };
+        atomize_bool_data_terms(&mut cnf, &bool_problem);
+        let raw_bool = cnf.atom_vars[&BoolAtomKey::BoolTerm(1)];
+        let raw_equality = cnf.atom_lit(BoolAtomKey::Eq(1, 2));
+        assert_eq!(
+            cnf.var_atoms[raw_bool as usize],
+            Some(BoolAtomKey::BoolTerm(1))
+        );
+        assert_eq!(
+            cnf.var_atoms[raw_equality as usize],
+            Some(BoolAtomKey::Eq(1, 2))
+        );
+    }
+
+    #[test]
+    fn dynamic_full_ackermann_rebuild_reuses_the_leaf_quotient_plan() {
+        let arena = TermArena {
+            terms: vec![
+                Term {
+                    fun: 0,
+                    args: Vec::new(),
+                },
+                Term {
+                    fun: 1,
+                    args: Vec::new(),
+                },
+                Term {
+                    fun: 2,
+                    args: Vec::new(),
+                },
+            ],
+            interned: HashMap::default(),
+            apps: Vec::new(),
+        };
+        let bool_problem = BoolProblem {
+            assertions: vec![
+                BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+                BoolExpr::Or(vec![BoolExpr::Atom(BoolAtomKey::BoolTerm(1))]),
+            ],
+            unsupported: Vec::new(),
+            true_term: 0,
+            false_term: 2,
+            data_terms: Vec::new(),
+        };
+        let plan = unconditional_leaf_quotient::Plan::build(&bool_problem.assertions, 3).unwrap();
+        let mut initial = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            initial.add_direct_assertion_with_quotient(assertion, true, Some(&plan));
+        }
+
+        let (completed, _) = solve_dynamic_full_ackermann_with_negated_root_and_quotient(
+            &arena,
+            &bool_problem,
+            &[],
+            true,
+            Some(&plan),
+        );
+        assert_eq!(completed.clauses, initial.clauses);
+        assert_eq!(completed.var_atoms, initial.var_atoms);
+        assert!(completed.atom_vars.contains_key(&BoolAtomKey::BoolTerm(0)));
+        assert!(!completed.atom_vars.contains_key(&BoolAtomKey::BoolTerm(1)));
+    }
+
+    #[test]
+    fn unconditional_quotient_preserves_mandatory_congruence_unsat() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        ";
+        for (direct_root_cnf, direct_negated_root) in [(false, false), (true, false), (true, true)]
+        {
+            let report = solve_problem_with_options_and_eq_abstraction(
+                parse_problem(input).unwrap(),
+                quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::On,
+                ),
+                EqAbstractionMode::Off,
+            );
+            assert_eq!(report.result, SolveResult::Unsat);
+        }
+    }
+
+    #[test]
+    fn unconditional_quotient_has_exhaustive_small_formula_semantic_parity() {
+        let base = vec![
+            BoolExpr::Const(false),
+            BoolExpr::Const(true),
+            BoolExpr::Atom(BoolAtomKey::Eq(1, 2)),
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(1)),
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(2)),
+        ];
+        let mut formulas = base
+            .iter()
+            .cloned()
+            .map(|expr| BoolExpr::Not(Box::new(expr)))
+            .collect::<Vec<_>>();
+        for left in &base {
+            for right in &base {
+                formulas.push(BoolExpr::Not(Box::new(BoolExpr::And(vec![
+                    left.clone(),
+                    right.clone(),
+                ]))));
+                formulas.push(BoolExpr::Not(Box::new(BoolExpr::Or(vec![
+                    left.clone(),
+                    right.clone(),
+                ]))));
+                formulas.push(BoolExpr::Not(Box::new(BoolExpr::Iff(vec![
+                    left.clone(),
+                    right.clone(),
+                ]))));
+            }
+        }
+        for condition in &base {
+            for then_expr in &base {
+                for else_expr in &base {
+                    formulas.push(BoolExpr::Not(Box::new(BoolExpr::Ite(
+                        Box::new(condition.clone()),
+                        Box::new(then_expr.clone()),
+                        Box::new(else_expr.clone()),
+                    ))));
+                }
+            }
+        }
+
+        for formula in formulas {
+            let assertions = vec![BoolExpr::Atom(BoolAtomKey::Eq(0, 1)), formula];
+            for (direct_root_cnf, direct_negated_root) in
+                [(false, false), (true, false), (true, true)]
+            {
+                let off_options = quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::Off,
+                );
+                let on_options = quotient_root_options(
+                    direct_root_cnf,
+                    direct_negated_root,
+                    unconditional_leaf_quotient::Mode::On,
+                );
+                for assignment in 0..8usize {
+                    let mut off = encode_assertions_with_quotient(&assertions, 3, off_options);
+                    let mut on = encode_assertions_with_quotient(&assertions, 3, on_options);
+                    add_small_quotient_semantic_assignment(
+                        &mut off,
+                        assignment & 1 != 0,
+                        assignment & 2 != 0,
+                        assignment & 4 != 0,
+                    );
+                    add_small_quotient_semantic_assignment(
+                        &mut on,
+                        assignment & 1 != 0,
+                        assignment & 2 != 0,
+                        assignment & 4 != 0,
+                    );
+                    assert_eq!(
+                        cnf_is_satisfiable(&on),
+                        cnf_is_satisfiable(&off),
+                        "quotient mismatch for {assertions:?}, options={on_options:?}, assignment={assignment}"
+                    );
+                }
+            }
+        }
+    }
+
     fn assertion_is_satisfiable(
         expression: &BoolExpr,
         direct_root_cnf: bool,
@@ -6813,11 +7312,13 @@ mod tests {
             RootCnfOptions {
                 direct_root_cnf: false,
                 direct_negated_root: false,
+                unconditional_quotient: unconditional_leaf_quotient::Mode::Off,
             },
             RootCnfOptions::existing_behavior(true),
             RootCnfOptions {
                 direct_root_cnf: true,
                 direct_negated_root: true,
+                unconditional_quotient: unconditional_leaf_quotient::Mode::Off,
             },
         ];
         for assignment_bits in 0..(1usize << atom_count) {
