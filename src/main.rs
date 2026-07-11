@@ -1,5 +1,12 @@
+#[cfg(test)]
+mod bool_dag_telemetry;
 mod eq_abstraction;
 mod finite_analysis;
+#[cfg(test)]
+mod model_scout;
+#[cfg(test)]
+#[allow(dead_code)]
+mod orbit_canon;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
