@@ -528,36 +528,45 @@ candidate and rejects several tempting explanations.
 
 | Candidate | Correctness gate | Measured outcome | Decision |
 | --- | --- | --- | --- |
-| Inline clauses, `SmallVec<[i32;4]>` | Soundness plus 80- and 320-instance paired gates | Holdout: 1.016x total, 1.038x geometric, 1.033x median; all lower bounds above one | Advance to full 7,503 |
+| Inline clauses, `SmallVec<[i32;4]>` | Soundness, 80/320 targets, RSS, and full 7,503 | Full timing passes at 1.009x total, 1.038x geometric, 1.033x median; one baseline-only instance and net -1 sample coverage | Reject global default |
 | Inline-clause RSS | 320 instances, three paired GNU-time measurements | Summed median RSS ratio 0.9847; geometric ratio 0.9917 | No memory veto |
 | Direct Kissat short-clause load | Soundness plus 31 targets | 0.995x common total, 0.999x all total | Reject isolated adapter change |
 | Borrowed parser atoms | Metamorphic differential plus parser targets | Parse phase improves 1.26--1.36x; end-to-end geometric 1.001x | Retain scanner, replace whole tree |
 | `x86-64-v3` | Soundness plus hot-80 | 1.0004x total; intervals cross loss | Reject ISA explanation |
-| Deep-let automatic permutations | Soundness, 2s and 60s on all 17 selected files | +4 solves at 2s; 1.636x total and 1.859x geometric at 60s; median lower 0.9984 | Refine selector, do not weaken gate |
-| Unconditional leaf quotient | Soundness, 2,041 Boolean-data cases, 1,620 parser cases | +2 Goel solves, but 0.985x median and p=0.366 | Reject general route |
+| Deep-let automatic permutations | Soundness, 2s and 60s on all 17 selected files | +4 solves at 2s; domain-six refinement then loses all 15 causal pairs | Reject refined selector |
+| Unconditional leaf quotient | Soundness, 2,041 Boolean-data cases, 1,620 parser cases | Uniform Goel route gains eight solves but has 0.985x median; reduction >=1000 slice gains two solves and 2.627x total | Advance structural auto only |
 
-The SmallVec result is not merely a selected-set point estimate. Its disjoint
-320-instance gate has 244 wins, a paired sign-flip p-value below `0.0001`, and
-positive bootstrap lower bounds for total, geometric, and median speed. The
-complete-corpus array remains mandatory because the selected hot population
-contains no timeout censoring.
+The SmallVec result is a real systems effect but not an admissible default. Its
+full-corpus timing intervals all clear parity, yet `PEQ019_size7` becomes a
+repeat-stable baseline-only solve and net repeat coverage falls by one. A
+coverage-preserving structural router retains only a negligible 1.00006x
+all-total gain. This rejects the implementation while preserving the evidence
+for a denser flat clause arena.
 
-The deep-let result illustrates why a single universal promotion statistic is
-not enough to characterize a narrow route but is still binding once
-pre-registered. Its total and geometric evidence is strong, yet the median
-interval narrowly crosses parity. The next candidate therefore changes the
-mechanism prospectively: automatic support is admitted only for a verified
-finite domain of at least six. Explicit user modes keep their original
-semantics.
+The deep-let result illustrates why causal comparison is binding. Requiring a
+verified domain of at least six adds one boundary solve against baseline, but
+it is slower than the original mechanism on all 15 common cases. That
+refinement is rejected rather than promoted from the favorable baseline-only
+view.
 
-The full qg7 census finds 174 exact first-orbit forbidden-pattern families
-among 418 files. A test-only right-translation exact-cover search now explores
+The hardened qg7 census finds 164 final eligible first-orbit pattern families
+among 418 files. A test-only right-translation exact-cover search explores
 the Latin pattern-avoidance abstraction with deterministic MRV, multiword
-bitsets, explicit caps, and independent SAT-witness replay. This abstraction
-is intentionally weaker than the SMT formula. Neither abstract SAT nor
-abstract UNSAT can become a production answer until a checked reduction proves
-that all source models satisfy the Latin conditions and lifts a witness or
-certificate back to typed source terms.
+bitsets, explicit caps, and independent SAT-witness replay. Every one of the
+164 searches is abstract SAT, so the current abstraction has no UNSAT power.
+It remains useful only as a possible model seed or as a base to strengthen
+with omitted source constraints. The source audit requires a fail-closed
+assertion ledger and finds that anti-idempotent local cycle constraints reduce
+each right-translation domain from 5,040 to 240 candidates.
+
+The structural leaf route gives the first narrow coverage improvement with a
+frozen semantic selector. Canonical unique Boolean-node reduction of at least
+1,000 selects 32 formulas; the candidate improves 30 -> 32 solves and passes
+all timing bounds at 60 seconds. A four-solver check also sets the scale of the
+remaining problem: the candidate covers more than Z3 and cvc5 on this slice,
+but Yices2 solves all 32 and wins every common timing pair by a 23.11x
+geometric factor. The next leaf work therefore profiles SAT search rather than
+optimizing selector overhead.
 
 The parser successor is similarly staged. A borrowed event scanner removes
 the token vector, and a direct semantic reducer removes the whole S-expression

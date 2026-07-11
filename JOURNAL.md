@@ -597,6 +597,53 @@
 - Started exact-lineage one-pass parser branch `perf-exact-stream-parser`.
   The design keeps the tree parser as oracle/fallback and requires semantic
   snapshot parity in `shadow` mode before any timing run.
+- Full SmallVec array `143842` and merge `143843` completed 45,018 observations
+  over all 7,503 instances. Every timing check passed: 1.0089x total, 1.0380x
+  geometric, 1.0328x median, all 95% lower bounds above one, and paired
+  p=`0.00009999`. The strict quality gate still rejects global promotion:
+  `PEQ019_size7` is baseline-only correct, there are 11 baseline-only versus
+  10 candidate-only samples, and sample coverage is -1. A path-independent
+  depth-two router preserves coverage but retains only 1.00006x all-total and
+  1.0010x geometric speed, so routing this representation is also rejected.
+- Domain-six deep-let refinement `88bcede` passed soundness `143876`. Exact
+  gate `143877` improved coverage 14 -> 15, but the causal comparison
+  `143878` against the original deep-let candidate lost all 15 common cases
+  and measured 0.9825x total. Reject the refinement; retain the original
+  deep-let mechanism as default-off, unpromoted research.
+- Leaf quotient Goel-20 `143865` solved 20/20 versus 18/20 and improved common
+  total/geometric time by 2.8368x/3.4791x. The broader 773-case Goel run
+  `143887` solved 760 versus 752 with no baseline-only result, but regressed
+  median speed to 0.9852x; reject uniform activation.
+- A frozen, path-independent structural rule, canonical unique Boolean-node
+  reduction at least 1,000, selected 32 formulas. At 60 seconds and three
+  repeats, `143923` improved coverage 30 -> 32 and common total/geometric/
+  median speed by 2.6275x/2.2127x/1.4464x, with all lower bounds above one.
+  Commit `d2f3946` adds a fail-closed promotion policy that accepts only
+  baseline-timeout to candidate-correct gains and still rejects every reverse
+  transition; the structural route passes that policy.
+- Four-solver structural-slice job `143950` prevents an inflated claim. Forced
+  leaf quotient solves 31/32, versus Z3 29/32 and cvc5 26/32, but Yices2 solves
+  32/32. On 31 common euf-viper/Yices2 solves, Yices2 wins every instance and
+  is 23.11x faster geometrically; total correct time is 5.96s versus 97.58s.
+  The route is a coverage mechanism against Z3/cvc5, not a Yices2 timing win.
+- Hardened RTXC census `143938` analyzed all 418 qg7 records. Exactly 164 pass
+  the final structural eligibility checks, and every one of the 164 abstract
+  searches is SAT; there are zero abstract UNSAT or ABSTAIN outcomes. The weak
+  Latin pattern-avoidance abstraction is rejected as an UNSAT engine.
+- Source audit of those 164 cases found 146 source-SAT `brn` formulas and 18
+  source-UNSAT `icl` formulas. The shadow search omits `R_y^3=id`, diagonal,
+  left-fixed-point, absorption, involution, implication, and 314 Skolem-symbol
+  obligations. In anti-idempotent cases, checked local cycle constraints reduce
+  each right-translation domain from 5,040 to 240 candidates. The next RTXC
+  version must consume every source assertion or abstain.
+- Stream-parser commit `86b1266` passed WMI soundness `143952` with 122 tests
+  and all backend fixtures. Independent review closed internal-symbol,
+  speculative-mutation, token-boundary, and deep-nesting blockers. Timing is
+  still blocked on a parse-only full-corpus shadow gate.
+- Auto leaf-route commit `1cd9ec4` implements the exact reduction-at-least-1000
+  rule with fail-closed caps, profile telemetry, and dynamic-Ackermann plan
+  reuse. Its 121 default and all-feature tests pass; independent review and WMI
+  soundness precede any timing campaign.
 
 ## Next Entry Template
 

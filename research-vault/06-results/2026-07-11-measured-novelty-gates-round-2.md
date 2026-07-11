@@ -72,10 +72,16 @@ builder.
   paired median RSS is 0.9847 candidate/baseline, geometric RSS is 0.9917,
   and median RSS ratio is 0.9992. Their 95% bootstrap intervals remain below
   1.0. Maximum RSS is effectively unchanged, 37,112 versus 37,096 KiB.
-- Full 7,503-instance array `143842` and merge/gate `143843` are running.
+- Full 7,503-instance array `143842` and merge/gate `143843` completed. Timing
+  passes decisively: 1.0089x total, 1.0380x geometric, 1.0328x median, with
+  lower bounds 1.0064x, 1.0354x, and 1.0310x and p=`0.00009999`. Quality does
+  not pass: one baseline-only instance, 11 baseline-only samples versus 10
+  candidate-only samples, and net sample coverage -1.
 
-Decision: promoted through target and holdout gates; do not merge before the
-complete-corpus result.
+Decision: reject global promotion despite the real broad timing and RSS gain.
+A path-independent depth-two router preserves coverage but retains only
+1.00006x all-total and 1.0010x geometric speed, which does not justify runtime
+or maintenance complexity.
 
 ### Rejected isolated mechanisms
 
@@ -108,11 +114,12 @@ after the existing scoped-let selector reaches 512 lexical lets.
 The near-neutral losses concentrate in small verified domains. Candidate
 `88bcede` pre-registers a semantics-based refinement: automatic focused
 support requires verified domain size at least six; explicit `focused` and
-`all` remain unchanged. Soundness `143876`, exact comparison `143877`, and
-causal comparison against `3426e63` in `143878` are running.
+`all` remain unchanged. Soundness `143876` passed. Exact comparison `143877`
+improved coverage 14 -> 15, but causal comparison `143878` against `3426e63`
+lost all 15 common solves and measured 0.9825x total speed.
 
-Decision: retain as a narrow high-value route; no global promotion until a
-pre-registered refinement passes without weakening statistics.
+Decision: reject the domain-six refinement. Retain the original deep-let route
+only as default-off research; no selector is promoted.
 
 ### Unconditional leaf quotient
 
@@ -126,11 +133,20 @@ projects only Boolean leaves; theory and finite-domain structures remain raw.
   has geometric lower bound 0.9390, and paired p=`0.3657`.
 - The candidate is slower on 38 of 64 common solves. Reduction percentage by
   itself does not predict timing reliably.
-- Exploratory 60-second Goel-20 job `143865` is running only to determine
-  whether the two-second coverage gain extends into the tail.
+- Exploratory Goel-20 `143865` solves 20/20 versus 18/20 and improves common
+  total/geometric time by 2.8368x/3.4791x. Broad Goel-773 `143887` gains eight
+  solves with no baseline-only result, but regresses median speed to 0.9852x.
+- Frozen structural subset `canonical unique-node reduction >=1000` contains
+  32 formulas. Three-repeat 60-second job `143923` improves coverage 30 -> 32,
+  common total/geometric/median speed by 2.6275x/2.2127x/1.4464x, and all lower
+  confidence bounds remain above one. Candidate-timeout-improvement policy
+  `d2f3946` promotes this route while still rejecting every reverse loss.
+- External job `143950` solves 31/32 with forced quotienting, versus Z3 29/32,
+  cvc5 26/32, and Yices2 32/32. Yices2 wins all 31 common timing pairs and is
+  23.11x faster geometrically.
 
-Decision: reject as a general route. Preserve the sound projection primitive
-for a future Boolean e-graph or a separately pre-registered Goel-tail rule.
+Decision: reject uniform activation; advance only the exact structural auto
+route. It is a coverage win over Z3/cvc5 on this slice, not a Yices2 speed win.
 
 ### Right-translation exact cover
 
@@ -148,9 +164,13 @@ right translations.
 - Outcomes concern only the `latin_pattern_avoidance` abstraction and cannot
   answer the source SMT formula.
 
-The next gate runs only the 174 exact qg7 orbit-cover cases. Production use
-would additionally require a checked reduction proving that the source formula
-forces the Latin abstraction and a replayable lift back to the original terms.
+Hardened census `143938` leaves 164 eligible cases after duplicate-pattern and
+extraction checks. All 164 abstract searches are SAT, with zero UNSAT and zero
+ABSTAIN. The current abstraction is therefore rejected as an UNSAT engine.
+Source audit finds that it omits the predicates separating 146 source-SAT BRN
+cases from 18 source-UNSAT ICL cases. A replacement must ledger and consume
+every assertion or abstain. In globally anti-idempotent cases, exact local
+cycle constraints reduce each right-translation domain from 5,040 to 240.
 
 ## Literature connections
 
@@ -173,14 +193,15 @@ forces the Latin abstraction and a replayable lift back to the original terms.
 
 ## Next measured order
 
-1. Finish SmallVec full-corpus gate `143842`/`143843`; merge only on semantic,
-   coverage, timing, and RSS passage.
-2. Gate the domain-six deep-let refinement `143876`--`143878`.
-3. Run the reviewed RTXC shadow census on the exact 174 qg7 cases.
-4. Complete the one-pass semantic parser in `tree|shadow|stream` mode and run
+1. Review and WMI-gate the exact structural leaf auto route `1cd9ec4`.
+2. Complete the one-pass semantic parser in `tree|shadow|stream` mode and run
    full-corpus shadow parity before timing.
-5. If SmallVec survives, compare a flat literal slab directly against
-   SmallVec, not against the older `Vec<Vec<i32>>` baseline.
+3. Profile the Goel structural slice by parse, CNF, SAT load, SAT search, and
+   theory validation to isolate the 23.11x geometric gap to Yices2.
+4. Implement a fail-closed source assertion ledger and exact local candidate
+   filters before another RTXC census.
+5. Prototype a flat literal slab against the accepted clause store, using the
+   rejected SmallVec run only as evidence that locality matters.
 6. Measure dense finite-membership storage, reusable symmetry verification,
    triangle-native transitivity, application-pair congruence joins, and bulk
    SAT model readback one mechanism at a time.

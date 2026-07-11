@@ -485,3 +485,34 @@
 - Resource harness commits are `bc27b33` and `dcd9bf5`; 113 Python tests pass.
   Main WMI candidate variables explicitly default unconditional quotienting
   off in commit `6724be2`, preventing environment leakage between gates.
+
+## Round-2 Adjudication (2026-07-11)
+
+- SmallVec `0a37b0f` passes every full-corpus timing statistic on 7,503 files
+  (`1.0089x` total, `1.0380x` geometric, `1.0328x` median) but is rejected as a
+  global default because one instance and one net repeat lose coverage. Its
+  coverage-preserving structural router retains only a negligible 1.00006x
+  all-total gain. Preserve the cache-locality evidence; do not merge this
+  implementation.
+- The verified-domain-six deep-let refinement loses causally to the original
+  candidate on all 15 common solves. Reject `88bcede`; do not reinterpret its
+  extra boundary solve as a mechanism win.
+- Uniform leaf quotienting is rejected, but exact canonical unique-node
+  reduction >=1000 is a promoted structural hypothesis: 30 -> 32 solves and
+  2.6275x/2.2127x/1.4464x common total/geometric/median speed on 32 frozen
+  formulas at 60 seconds. The generic policy in `d2f3946` permits only
+  candidate timeout improvements and remains strict against reverse losses.
+- External comparison `143950` shows the same forced leaf route at 31/32,
+  ahead of Z3 29/32 and cvc5 26/32 but behind Yices2 32/32. Yices2 is 23.11x
+  faster geometrically on common solves and wins every pair. Never present the
+  leaf slice as a Yices2 victory.
+- RTXC `143938` finds 164 eligible qg7 abstractions and all 164 are abstract
+  SAT. The shadow engine omits the predicates that distinguish the 18
+  source-UNSAT ICL cases from 146 source-SAT BRN cases. Require a source
+  assertion ledger with fail-closed consumption; anti-idempotent local cycle
+  filters reduce a column from 5,040 to 240 candidates.
+- Stream parser `86b1266` passes WMI soundness `143952` and independent review.
+  Require parse-only shadow parity over all 7,503 files before timing.
+- Auto leaf commit `1cd9ec4` encodes the exact reduction >=1000 selector and
+  is locally tested. It remains default-off until review, WMI soundness,
+  target reproduction, and full-corpus non-regression complete.

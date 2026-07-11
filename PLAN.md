@@ -302,28 +302,45 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
 - [x] Pass SmallVec soundness, hot-80, disjoint hot-320, and peak-RSS gates.
   Candidate `0a37b0f` has equal correctness, statistically supported speed,
   and no memory regression.
-- [ ] Finish SmallVec full array `143842` and merge/gate `143843`. Merge only
-  if wrong answers, coverage, timeout policy, all timing intervals, and RSS
-  remain acceptable.
+- [x] Finish SmallVec full array `143842` and merge/gate `143843`. All timing
+  checks pass, but one baseline-only instance and net -1 repeat coverage reject
+  global promotion. A coverage-preserving router retains only 1.00006x
+  all-total speed, so do not merge it.
 - [x] Reject direct Kissat short-clause loading, borrowed atoms alone, and
   `x86-64-v3` as isolated performance mechanisms.
 - [x] Preserve deep-let focused permutations as a narrow candidate after
   +4 two-second solves and 1.636x sixty-second common-total speed; do not
   weaken the failed median confidence gate.
-- [ ] Finish verified-domain-six refinement soundness `143876`, exact A/B
-  `143877`, and causal A/B `143878`.
+- [x] Reject the verified-domain-six refinement after soundness `143876` and
+  exact gate `143877`: causal job `143878` loses all 15 common pairs against
+  the original mechanism.
 - [x] Reject unconditional leaf quotient as a general route after target-90
   median 0.9854x and nonsignificant paired evidence, despite two extra Goel
-  solves. Treat `143865` as tail exploration only.
+  solves. Goel-773 confirms +8 coverage but 0.9852x median, so uniform routing
+  remains rejected.
+- [x] Promote the frozen structural leaf hypothesis `unique Boolean-node
+  reduction >=1000` on its 32-case, 60-second, three-repeat gate: 30 -> 32
+  solves and all timing lower bounds above one.
+- [x] Run four-solver structural comparison `143950`. The leaf candidate beats
+  Z3/cvc5 coverage but loses every common timing pair to Yices2; use this to
+  target Goel SAT search rather than claiming superiority.
 - [x] Complete qg7 census `143840`: 174 exact orbit covers among 418 files.
-- [ ] Review and run test-only RTXC shadow search `a1749dc` on the exact 174;
-  never lift an abstract SAT/UNSAT result to SMT without a checked reduction.
+- [x] Review and run hardened RTXC census `143938`: 164 final eligible cases,
+  all abstract SAT and zero abstract UNSAT. Reject the current abstraction as
+  an UNSAT engine.
+- [ ] Implement a fail-closed qg assertion ledger that consumes every source
+  predicate or abstains, then add exact local `R_y^3`, diagonal, and cycle
+  filters before another RTXC census.
 - [ ] Complete exact-lineage one-pass parser in `tree|shadow|stream` mode,
   then require full-corpus semantic shadow parity before parser-phase timing.
-- [ ] If SmallVec passes full corpus, compare a flat literal slab directly
-  against SmallVec. Follow with dense membership, reusable symmetry checking,
-  triangle-native transitivity, existing-application congruence joins, and
-  bulk model readback as separately gated candidates.
+- [ ] Prototype a flat literal slab against the original accepted clause store,
+  using SmallVec's positive cache/RSS evidence but not its rejected binary.
+  Follow with dense membership, reusable symmetry checking, triangle-native
+  transitivity, existing-application congruence joins, and bulk model readback
+  as separately gated candidates.
+- [ ] Review and WMI-gate auto leaf route `1cd9ec4`, first reproducing the
+  frozen 32-case structural result and then requiring full-corpus
+  non-regression before any default change.
 
 ## Current Limitation
 
