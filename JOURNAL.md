@@ -549,6 +549,55 @@
   certificate-replayable quotient-state search, and table-aware semantic BVA.
   The integrated suite passes 220 Rust and 107 Python tests.
 
+## 2026-07-11 Measured Novelty Gates, Round 2
+
+- Repaired the exact Boolean differential artifact contract in `7929e87`.
+  Computation `143810` covered 10,041 formulas with zero reference failures
+  and zero euf-viper discrepancies; the old wrapper failure was solely missing
+  persisted manifest/results files.
+- Full novelty census `143814` parsed 7,503/7,503 formulas. The current two
+  complete-model scouts hit only 4/3,142 SAT cases and are rejected. The
+  unconditional quotient affects 4,058 formulas and removes 668,507 unique
+  Boolean nodes, 3.8935% globally and 7.4559% among affected formulas.
+- Rejected isolated Kissat loading, borrowed atoms, and `x86-64-v3` after
+  soundness gates: none produced a statistically supported end-to-end win.
+  Borrowed atoms still cut parser phase medians by 1.26--1.36x and therefore
+  motivate a whole-tree elimination rather than another ownership tweak.
+- SmallVec clause storage `0a37b0f` passed hot-80 `143825` and disjoint
+  hot-320 `143826`. The holdout has 320/320 correctness, 244 wins, 1.0160x
+  total, 1.0376x geometric, 1.0326x median, all lower confidence bounds above
+  one, and p=`0.00009999`.
+- Resource gate `143861` adds 1,920 paired observations. Candidate summed
+  median RSS is 0.9847 of baseline and geometric RSS is 0.9917, with both 95%
+  intervals below parity; maximum RSS is unchanged. Full array `143842` and
+  merge/gate `143843` now decide promotion.
+- Automatic deep-let candidate `3426e63` passed soundness. At two seconds it
+  improves coverage 9 -> 13 and common total by 1.3146x. At 60 seconds
+  `143851` solves all 17 in both arms and improves total/geometric speed by
+  1.6357x/1.8593x, but its median lower bound is 0.9984. The gate remains
+  rejected without changing thresholds.
+- Pre-registered refinement `88bcede` enables automatic focused permutation
+  support only for verified domain size at least six while preserving explicit
+  overrides. Soundness `143876`, exact A/B `143877`, and causal A/B `143878`
+  are running.
+- Leaf quotient `414b109` passed soundness `143829`, 2,041-case Boolean-data
+  differential `143832`, and parser differential `143866` with zero candidate
+  failures. Target-90 `143830` adds two Goel solves but loses median speed at
+  0.9854x and has p=`0.3657`; reject it as a general route. Exploratory Goel-20
+  60-second job `143865` tests tail value only.
+- Qg7 census `143840` persisted all 418 cases: 174 exact first-orbit covers,
+  122 partial width-49 patterns, and 122 without exact patterns. Exact cases
+  split into 120 width-6, 52 width-49, and 2 width-5 formulas.
+- Added test-only degree-7 right-translation Algorithm-X shadow search in
+  `a1749dc`: deterministic MRV, flat pattern bitsets, explicit caps, and
+  independent SAT-witness replay. SAT/UNSAT refer only to the Latin
+  pattern-avoidance abstraction and cannot answer the SMT formula.
+- Added a hashed GNU-time peak-resource comparator and WMI wrapper in
+  `bc27b33`/`dcd9bf5`. Main now passes 113 Python tests.
+- Started exact-lineage one-pass parser branch `perf-exact-stream-parser`.
+  The design keeps the tree parser as oracle/fallback and requires semantic
+  snapshot parity in `shadow` mode before any timing run.
+
 ## Next Entry Template
 
 - Benchmark corpus:

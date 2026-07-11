@@ -293,6 +293,38 @@ and p95, two CPU classes, two repeats, held-out data, and checked evidence.
   Unconditional activation failed the full-corpus gate; a predeclared
   lexical-let threshold now decides whether the scoped path is used.
 
+### Live Round-2 Promotion Queue
+
+- [x] Reject the current fixed complete-model scouts after full census:
+  4/3,142 validated SAT hits is below the 5% opportunity threshold.
+- [x] Measure unconditional quotient opportunity on all 7,503 formulas:
+  4,058 affected, 668,507 unique nodes removed, 1,200 at or above 10%.
+- [x] Pass SmallVec soundness, hot-80, disjoint hot-320, and peak-RSS gates.
+  Candidate `0a37b0f` has equal correctness, statistically supported speed,
+  and no memory regression.
+- [ ] Finish SmallVec full array `143842` and merge/gate `143843`. Merge only
+  if wrong answers, coverage, timeout policy, all timing intervals, and RSS
+  remain acceptable.
+- [x] Reject direct Kissat short-clause loading, borrowed atoms alone, and
+  `x86-64-v3` as isolated performance mechanisms.
+- [x] Preserve deep-let focused permutations as a narrow candidate after
+  +4 two-second solves and 1.636x sixty-second common-total speed; do not
+  weaken the failed median confidence gate.
+- [ ] Finish verified-domain-six refinement soundness `143876`, exact A/B
+  `143877`, and causal A/B `143878`.
+- [x] Reject unconditional leaf quotient as a general route after target-90
+  median 0.9854x and nonsignificant paired evidence, despite two extra Goel
+  solves. Treat `143865` as tail exploration only.
+- [x] Complete qg7 census `143840`: 174 exact orbit covers among 418 files.
+- [ ] Review and run test-only RTXC shadow search `a1749dc` on the exact 174;
+  never lift an abstract SAT/UNSAT result to SMT without a checked reduction.
+- [ ] Complete exact-lineage one-pass parser in `tree|shadow|stream` mode,
+  then require full-corpus semantic shadow parity before parser-phase timing.
+- [ ] If SmallVec passes full corpus, compare a flat literal slab directly
+  against SmallVec. Follow with dense membership, reusable symmetry checking,
+  triangle-native transitivity, existing-application congruence joins, and
+  bulk model readback as separately gated candidates.
+
 ## Current Limitation
 
 The historically measured `58efe9d` binary has a confirmed general soundness

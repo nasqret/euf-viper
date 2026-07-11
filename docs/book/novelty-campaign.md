@@ -67,3 +67,29 @@ families, expected statuses, hashes, or historical timing.
 
 The full research contract and mechanism specifications are maintained in the
 dated design and literature notes in the repository knowledge vault.
+
+## Current Experimental Checkpoint
+
+The first full census rejects the two fixed complete-model scouts: they
+validate only four of 3,142 SAT formulas. Theory-conditioned Boolean quotient
+opportunity is broader but modest in aggregate: 4,058 formulas change, 668,507
+unique nodes disappear, and 1,200 formulas lose at least 10% of their nodes.
+The first production leaf projection passes differential tests but fails its
+timing gate, so quotient percentage alone is not a routing criterion.
+
+The first broad accepted mechanism candidate is instead a representation
+change: inline storage for clauses of width at most four. It passes independent
+80- and 320-instance timing gates and reduces paired RSS. Its full-corpus gate
+is still running, so it is not yet part of the default solver.
+
+The finite-structure track now has a complete qg7 population count. Of 418
+files, 174 contain one exact forbidden-pattern orbit suitable for the current
+right-translation abstraction. The degree-7 Algorithm-X implementation is
+test-only and explicitly labels every cap as ABSTAIN. It cannot answer SMT
+until the abstraction and certificate lift are proved.
+
+The parser track is moving beyond borrowed atoms. The active candidate parses
+events directly into the retained semantic IR, with the existing tree parser
+as both fallback and shadow oracle. This is a systems mechanism, not the
+claimed solver novelty, but Yices2 cannot be challenged while two temporary
+syntax representations dominate large easy inputs.

@@ -455,3 +455,33 @@
   euf-viper case or group failures. Strict comparator findings are preserved:
   21 failed cases/groups across cvc5, Yices2, and Z3 behavior. Differential
   rerun `143810` and full exact array `143798`/merge `143799` remain live.
+
+## Active Measured Candidates (2026-07-11, Round 2)
+
+- SmallVec clause candidate `0a37b0f` is the only broad mechanism currently
+  past two independent timing gates. Hot-80 `143825` and disjoint hot-320
+  `143826` both pass all statistical checks at equal coverage. Resource job
+  `143861` finds no RSS cost and a 1.53% reduction in summed paired median RSS.
+  Full 7,503-instance array `143842` and merge `143843` are mandatory before
+  merge or default promotion.
+- Deep-let automatic focused permutations `3426e63` materially improve the
+  17 selected NEQ instances, including +4 solves at two seconds and 1.636x
+  common-total speed at 60 seconds. It remains unpromoted because the
+  pre-registered median lower bound is 0.9984. Refinement `88bcede` adds a
+  verified-domain-size >=6 guard; jobs `143876`--`143878` are live.
+- Unconditional leaf quotient `414b109` is sound on current fixture,
+  Boolean-data, and parser gates but is rejected as a general timing route:
+  target-90 median is 0.9854x and p=`0.3657`, despite two extra Goel solves.
+- Qg7 census `143840` covers 418/418 formulas and identifies 174 exact
+  first-orbit pattern families. Test-only RTXC commit `a1749dc` searches the
+  Latin pattern-avoidance abstraction with Algorithm X, caps, and independent
+  witness replay. Its SAT/UNSAT labels are not SMT answers.
+- Current complete-model scouts hit only 4/3,142 SAT formulas and are rejected.
+  Unconditional quotient telemetry remains useful: 4,058 affected formulas,
+  668,507 unique nodes removed, and 1,200 formulas above 10% reduction.
+- Isolated direct Kissat loading, borrowed atoms, and `x86-64-v3` are rejected.
+  Borrowed atoms retain parser-phase evidence only; the active successor is an
+  exact-lineage `tree|shadow|stream` one-pass semantic parser.
+- Resource harness commits are `bc27b33` and `dcd9bf5`; 113 Python tests pass.
+  Main WMI candidate variables explicitly default unconditional quotienting
+  off in commit `6724be2`, preventing environment leakage between gates.

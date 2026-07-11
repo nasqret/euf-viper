@@ -521,6 +521,60 @@ Local timing remains a smoke test. Benchmark-name routing, content-hash answer
 caches, comparator fallback, and acceptance of SAT without full model
 validation are explicit non-goals.
 
+## July 11 Round-2 Evidence
+
+The first round that isolates representation cost identifies one broad
+candidate and rejects several tempting explanations.
+
+| Candidate | Correctness gate | Measured outcome | Decision |
+| --- | --- | --- | --- |
+| Inline clauses, `SmallVec<[i32;4]>` | Soundness plus 80- and 320-instance paired gates | Holdout: 1.016x total, 1.038x geometric, 1.033x median; all lower bounds above one | Advance to full 7,503 |
+| Inline-clause RSS | 320 instances, three paired GNU-time measurements | Summed median RSS ratio 0.9847; geometric ratio 0.9917 | No memory veto |
+| Direct Kissat short-clause load | Soundness plus 31 targets | 0.995x common total, 0.999x all total | Reject isolated adapter change |
+| Borrowed parser atoms | Metamorphic differential plus parser targets | Parse phase improves 1.26--1.36x; end-to-end geometric 1.001x | Retain scanner, replace whole tree |
+| `x86-64-v3` | Soundness plus hot-80 | 1.0004x total; intervals cross loss | Reject ISA explanation |
+| Deep-let automatic permutations | Soundness, 2s and 60s on all 17 selected files | +4 solves at 2s; 1.636x total and 1.859x geometric at 60s; median lower 0.9984 | Refine selector, do not weaken gate |
+| Unconditional leaf quotient | Soundness, 2,041 Boolean-data cases, 1,620 parser cases | +2 Goel solves, but 0.985x median and p=0.366 | Reject general route |
+
+The SmallVec result is not merely a selected-set point estimate. Its disjoint
+320-instance gate has 244 wins, a paired sign-flip p-value below `0.0001`, and
+positive bootstrap lower bounds for total, geometric, and median speed. The
+complete-corpus array remains mandatory because the selected hot population
+contains no timeout censoring.
+
+The deep-let result illustrates why a single universal promotion statistic is
+not enough to characterize a narrow route but is still binding once
+pre-registered. Its total and geometric evidence is strong, yet the median
+interval narrowly crosses parity. The next candidate therefore changes the
+mechanism prospectively: automatic support is admitted only for a verified
+finite domain of at least six. Explicit user modes keep their original
+semantics.
+
+The full qg7 census finds 174 exact first-orbit forbidden-pattern families
+among 418 files. A test-only right-translation exact-cover search now explores
+the Latin pattern-avoidance abstraction with deterministic MRV, multiword
+bitsets, explicit caps, and independent SAT-witness replay. This abstraction
+is intentionally weaker than the SMT formula. Neither abstract SAT nor
+abstract UNSAT can become a production answer until a checked reduction proves
+that all source models satisfy the Latin conditions and lifts a witness or
+certificate back to typed source terms.
+
+The parser successor is similarly staged. A borrowed event scanner removes
+the token vector, and a direct semantic reducer removes the whole S-expression
+tree on supported QF_UF commands. `tree` stays the default, `shadow` compares a
+complete deterministic semantic snapshot, and `stream` falls back atomically
+to the tree parser on any unsupported construct. The full corpus must pass
+shadow parity before timing.
+
+These experiments refine two primary-source ideas rather than reproduce their
+original architecture. Bryant and Velev's sparse/chordal transitivity result
+suggests direct triangle-native generation over the known equality graph, and
+clausal congruence closure suggests normalizing equivalent Boolean gates. In
+euf-viper both can operate before CNF, where source structure is still present,
+instead of recovering gates from clauses. See
+[Boolean Satisfiability with Transitivity Constraints](https://www.cs.cmu.edu/~bryant/pubdir/tocl-trans01.pdf)
+and [Clausal Congruence Closure](https://doi.org/10.4230/LIPIcs.SAT.2024.6).
+
 ## Sources And Artifacts
 
 The four dated repository sources for this chapter are:
