@@ -198,6 +198,40 @@ class GenerationTests(unittest.TestCase):
                 source = (outputs[0] / record["path"]).read_bytes()
                 self.assertEqual(hashlib.sha256(source).hexdigest(), record["source_sha256"])
 
+    def test_rejects_checkpoint_manifest_alias_and_nested_generated_paths(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser generated path conflicts ") as temp:
+            root = Path(temp)
+            cases = CAMPAIGN.generate_cases(seed=0, random_groups=0)[:2]
+            output = root / "output"
+            with self.assertRaisesRegex(ValueError, "must not alias or be nested"):
+                CAMPAIGN.execute_campaign(
+                    cases=cases,
+                    output_dir=output,
+                    seed=0,
+                    random_groups=0,
+                    generation_only=True,
+                    checkpoint_path=output / "manifest.jsonl",
+                )
+            self.assertFalse(output.exists())
+
+            with self.assertRaisesRegex(ValueError, "must not alias or be nested"):
+                CAMPAIGN.validate_generation_paths(
+                    output_dir=root / "parent" / "output",
+                    checkpoint_path=root / "parent",
+                    cases=cases,
+                    commands={},
+                )
+
+            bad_case = cases[0]._replace(case_id="../manifest")
+            with self.assertRaisesRegex(ValueError, "unsafe case id"):
+                CAMPAIGN.execute_campaign(
+                    cases=[bad_case, cases[1]],
+                    output_dir=root / "bad-case-output",
+                    seed=0,
+                    random_groups=0,
+                    generation_only=True,
+                )
+
 
 class ProcessClassificationTests(unittest.TestCase):
     def test_error_responses_are_rejected_on_both_streams(self) -> None:
@@ -441,6 +475,99 @@ class CampaignTests(unittest.TestCase):
                 any(key.startswith("yices:") for key in summary["anomaly_counts"])
             )
 
+    def test_solver_and_generated_source_replacement_use_bound_bytes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser bound byte race ") as temp:
+            root = Path(temp)
+            fake = write_fake_solver(root)
+            fake_digest = hashlib.sha256(fake.read_bytes()).hexdigest()
+            cases = complete_groups(
+                CAMPAIGN.generate_cases(seed=7, random_groups=0),
+                {"reserved-atom-true"},
+            )
+            output = root / "output"
+            replacement_solver = root / "replacement-solver.py"
+            replacement_solver.write_text("raise SystemExit(99)\n", encoding="utf-8")
+            replacement_source = root / "replacement-source.smt2"
+            replacement_source.write_text("; replacement path consumed\n", encoding="utf-8")
+            real_run = subprocess.run
+            replaced = False
+
+            def replace_then_run(*args: object, **kwargs: object) -> object:
+                nonlocal replaced
+                first_case = output / "cases" / f"{cases[0].case_id}.smt2"
+                if not replaced and first_case.exists():
+                    os.replace(replacement_solver, fake)
+                    os.replace(replacement_source, first_case)
+                    if CAMPAIGN._command_artifacts_use_fd_paths():
+                        for staged_path in (output / ".solver-stage").iterdir():
+                            replacement = root / f"replacement-{staged_path.name}"
+                            replacement.write_text(
+                                "raise SystemExit(98)\n", encoding="utf-8"
+                            )
+                            os.replace(replacement, staged_path)
+                    replaced = True
+                return real_run(*args, **kwargs)
+
+            with mock.patch.object(
+                CAMPAIGN.subprocess, "run", side_effect=replace_then_run
+            ):
+                summary = CAMPAIGN.execute_campaign(
+                    cases=cases,
+                    output_dir=output,
+                    seed=7,
+                    random_groups=0,
+                    generation_only=False,
+                    parser_mode="shadow",
+                    run_id="race-shadow",
+                    commands={
+                        "euf-viper": fake_command(fake, "viper"),
+                        "z3": fake_command(fake, "reference"),
+                        "cvc5": fake_command(fake, "reference"),
+                    },
+                    timeout_s=1.0,
+                )
+
+            self.assertTrue(replaced)
+            self.assertTrue(summary["success"])
+            result_records = [
+                json.loads(line)
+                for line in (output / "results.jsonl").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            ]
+            provenance = result_records[0]
+            expected_transport = (
+                "inherited-fd-for-verified-private-stage"
+                if CAMPAIGN._command_artifacts_use_fd_paths()
+                else "verified-private-stage-with-retained-fd"
+            )
+            for solver in provenance["execution"]["solvers"].values():
+                self.assertTrue(
+                    all(
+                        artifact["consumed_via"] == expected_transport
+                        for artifact in solver["artifacts"]
+                    )
+                )
+                self.assertIn(
+                    fake_digest,
+                    {artifact["sha256"] for artifact in solver["artifacts"]},
+                )
+            first_observation = next(
+                record
+                for record in result_records
+                if record.get("case_id") == cases[0].case_id
+            )
+            self.assertEqual(
+                first_observation["source_consumed"]["sha256"],
+                hashlib.sha256(cases[0].source.encode("utf-8")).hexdigest(),
+            )
+            self.assertNotEqual(
+                hashlib.sha256(
+                    (output / "cases" / f"{cases[0].case_id}.smt2").read_bytes()
+                ).hexdigest(),
+                first_observation["source_consumed"]["sha256"],
+            )
+
     def test_persistent_checkpoint_advances_during_case_execution(self) -> None:
         with tempfile.TemporaryDirectory(prefix="parser checkpoint generations ") as temp:
             root = Path(temp)
@@ -454,7 +581,7 @@ class CampaignTests(unittest.TestCase):
             durable_write = CAMPAIGN._durable_atomic_write
 
             def capture(path: Path, value: bytes) -> None:
-                if path == checkpoint:
+                if path == checkpoint.resolve():
                     snapshots.append(json.loads(value))
                 durable_write(path, value)
 
@@ -614,18 +741,134 @@ class CampaignTests(unittest.TestCase):
             self.assertEqual(summary["counts"]["candidate_failed_cases"], 0)
 
 
+class CrossModeTests(unittest.TestCase):
+    def test_rejects_mode_directory_collision(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser mode collision ") as temp:
+            root = Path(temp)
+            with self.assertRaisesRegex(ValueError, "directories collide"):
+                CAMPAIGN.compare_mode_campaigns(
+                    root / "same-mode-output",
+                    root / "same-mode-output",
+                    root / "pair.json",
+                )
+
+    def test_generation_only_pair_cannot_pass_cross_mode_gate(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser empty mode pair ") as temp:
+            root = Path(temp)
+            cases = complete_groups(
+                CAMPAIGN.generate_cases(seed=0, random_groups=0),
+                {"reserved-head-not"},
+            )
+            outputs = {mode: root / mode for mode in ("shadow", "stream")}
+            for mode in ("shadow", "stream"):
+                CAMPAIGN.execute_campaign(
+                    cases=cases,
+                    output_dir=outputs[mode],
+                    seed=0,
+                    random_groups=0,
+                    generation_only=True,
+                    parser_mode=mode,
+                    run_id=f"empty-{mode}",
+                )
+
+            paired = CAMPAIGN.compare_mode_campaigns(
+                outputs["shadow"],
+                outputs["stream"],
+                root / "pair-summary.json",
+            )
+            self.assertFalse(paired["gate_passed"])
+            self.assertIn(
+                "shadow:not-a-differential-campaign", paired["mismatches"]
+            )
+            self.assertIn(
+                "stream:case-observation-order-mismatch", paired["mismatches"]
+            )
+
+    def test_paired_shadow_stream_gate_passes_and_detects_byte_changes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="parser paired modes ") as temp:
+            root = Path(temp)
+            fake = write_fake_solver(root)
+            cases = complete_groups(
+                CAMPAIGN.generate_cases(seed=11, random_groups=0),
+                {"reserved-head-not"},
+            )
+            commands = {
+                "euf-viper": fake_command(fake, "viper"),
+                "z3": fake_command(fake, "reference"),
+                "cvc5": fake_command(fake, "reference"),
+            }
+            outputs = {
+                "shadow": root / "parser-diff-pair-shadow",
+                "stream": root / "parser-diff-pair-stream",
+            }
+            for mode in ("shadow", "stream"):
+                CAMPAIGN.execute_campaign(
+                    cases=cases,
+                    output_dir=outputs[mode],
+                    seed=11,
+                    random_groups=0,
+                    generation_only=False,
+                    parser_mode=mode,
+                    run_id=f"pair-{mode}",
+                    commands=commands,
+                    timeout_s=1.0,
+                )
+
+            paired = CAMPAIGN.compare_mode_campaigns(
+                outputs["shadow"],
+                outputs["stream"],
+                root / "pair-summary.json",
+            )
+            self.assertTrue(paired["gate_passed"])
+            self.assertEqual(paired["base_run_id"], "pair")
+            self.assertEqual(
+                paired["mode_run_ids"],
+                {"shadow": "pair-shadow", "stream": "pair-stream"},
+            )
+
+            stream_results = outputs["stream"] / "results.jsonl"
+            records = [
+                json.loads(line)
+                for line in stream_results.read_text(encoding="utf-8").splitlines()
+            ]
+            observation = next(
+                record for record in records if record.get("record_type") == "observation"
+            )
+            observation["observations"]["euf-viper"]["classification"] = "unsat"
+            stream_results.write_text(
+                "".join(CAMPAIGN._json_line(record) for record in records),
+                encoding="utf-8",
+            )
+            failed = CAMPAIGN.compare_mode_campaigns(
+                outputs["shadow"],
+                outputs["stream"],
+                root / "pair-summary-tampered.json",
+            )
+            self.assertFalse(failed["gate_passed"])
+            self.assertIn("stream:results-hash-mismatch", failed["mismatches"])
+            self.assertIn("candidate-observations-differ", failed["mismatches"])
+
+
 class WmiWrapperTests(unittest.TestCase):
-    def test_wrapper_requires_and_injects_recorded_acceptance_mode(self) -> None:
+    def test_wrapper_runs_mode_qualified_pair_and_final_consistency_gate(self) -> None:
         self.assertTrue(SCRIPT.is_file())
         self.assertTrue((ROOT / "tests" / "test_metamorphic_parser_diff.py").is_file())
         wrapper = WMI_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("scripts/bench/metamorphic_parser_diff.py", wrapper)
-        self.assertIn("EUF_VIPER_PARSER_DIFF_MODE:?", wrapper)
-        self.assertIn("shadow|stream", wrapper)
-        self.assertIn('--parser-mode "$PARSER_MODE"', wrapper)
-        self.assertIn("EUF_VIPER_PARSER_MODE=$PARSER_MODE", wrapper)
-        self.assertIn('--checkpoint "$CHECKPOINT"', wrapper)
+        self.assertIn('mode_run_id="${BASE_RUN_ID}-${parser_mode}"', wrapper)
+        self.assertIn("run_mode shadow &", wrapper)
+        self.assertIn("run_mode stream &", wrapper)
+        self.assertIn('--run-id "$mode_run_id"', wrapper)
+        self.assertIn('--parser-mode "$parser_mode"', wrapper)
+        self.assertIn("EUF_VIPER_PARSER_MODE=$parser_mode", wrapper)
+        self.assertIn('--checkpoint "$checkpoint"', wrapper)
+        self.assertIn("--cross-mode-shadow", wrapper)
+        self.assertIn("--cross-mode-stream", wrapper)
+        self.assertIn("--cross-mode-out", wrapper)
+        self.assertIn('parser-diff-${BASE_RUN_ID}-pair', wrapper)
         self.assertIn("wrapper-failure.txt", wrapper)
+        self.assertIn("pair-failure.txt", wrapper)
+        self.assertNotIn("EUF_VIPER_PARSER_DIFF_MODE", wrapper)
         self.assertNotIn("UNCONDITIONAL_QUOTIENT", wrapper)
         self.assertNotIn("unconditional-quotient", wrapper.lower())
         completed = subprocess.run(
@@ -641,39 +884,7 @@ class WmiWrapperTests(unittest.TestCase):
         assert match is not None
         hours, minutes, seconds = (int(value) for value in match.groups())
         self.assertGreaterEqual(hours * 3600 + minutes * 60 + seconds, 4.5 * 3600)
-
-    def test_wrapper_rejects_missing_and_tree_parser_modes(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "SLURM_SUBMIT_DIR": temp_dir,
-                    "SLURM_JOB_ID": "123",
-                }
-            )
-            environment.pop("EUF_VIPER_PARSER_DIFF_MODE", None)
-            missing = subprocess.run(
-                ["bash", str(WMI_SCRIPT)],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=environment,
-                check=False,
-            )
-            self.assertNotEqual(missing.returncode, 0)
-            self.assertIn("EUF_VIPER_PARSER_DIFF_MODE", missing.stderr)
-
-            environment["EUF_VIPER_PARSER_DIFF_MODE"] = "tree"
-            tree = subprocess.run(
-                ["bash", str(WMI_SCRIPT)],
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=environment,
-                check=False,
-            )
-            self.assertEqual(tree.returncode, 2)
-            self.assertIn("must be shadow or stream", tree.stderr)
+        self.assertIn("#SBATCH --cpus-per-task=2", wrapper)
 
 
 if __name__ == "__main__":

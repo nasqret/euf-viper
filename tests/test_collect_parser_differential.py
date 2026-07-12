@@ -620,6 +620,17 @@ class CollectionTests(unittest.TestCase):
                             benchmark_root=corpus,
                             protected_paths=protected,
                         )
+            with self.assertRaisesRegex(
+                COLLECTOR.HarnessError, "ancestor/descendant"
+            ):
+                COLLECTOR.validate_artifact_paths(
+                    {
+                        "out": root / "nested-output",
+                        "summary": root / "nested-output" / "summary.json",
+                    },
+                    benchmark_root=corpus,
+                    protected_paths=protected,
+                )
 
     def test_exact_completion_rejects_missing_duplicate_and_reordered_rows(self) -> None:
         entries = [
@@ -784,12 +795,22 @@ class CliContractTests(unittest.TestCase):
             digest_file(output / "summary.json"),
         )
         self.assertEqual(checkpoint["artifact_type"], "parser-differential-checkpoint")
+        self.assertEqual(checkpoint["campaign_status"], "complete")
+        self.assertTrue(checkpoint["final_progress_required"])
         self.assertFalse(
             checkpoint["completion"]["contiguous_prefix_guaranteed"]
         )
         self.assertEqual(
             checkpoint["records_sha256"],
             digest_bytes(COLLECTOR.jsonl_bytes(checkpoint["records"])),
+        )
+        self.assertEqual(
+            progress["artifacts"]["checkpoint"]["sha256"],
+            digest_file(output / "checkpoint.json"),
+        )
+        self.assertEqual(
+            progress["artifacts"]["checkpoint"]["campaign_status"],
+            "complete",
         )
         self.assertEqual(len(evidence), 1)
         self.assertTrue(evidence[0]["corpus_verified"])

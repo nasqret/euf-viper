@@ -364,6 +364,12 @@ def validate_artifact_paths(
             raise HarnessError(
                 f"{name} aliases {by_path[path]} after path resolution: {path}"
             )
+        for other_path, other_name in by_path.items():
+            if _is_within(path, other_path) or _is_within(other_path, path):
+                raise HarnessError(
+                    f"{name} and {other_name} have an ancestor/descendant "
+                    f"destination conflict: {path} vs {other_path}"
+                )
         by_path[path] = name
         if _is_within(path, root):
             raise HarnessError(f"{name} must not resolve inside benchmark root: {path}")
@@ -759,12 +765,14 @@ def build_checkpoint_bundle(
     generation: int,
     expected_instances: int,
     success_checkpoint_interval: int,
+    campaign_status: str = "running",
 ) -> dict:
     encoded_records = jsonl_bytes(records)
     return {
         "schema_version": SCHEMA_VERSION,
         "artifact_type": "parser-differential-checkpoint",
-        "campaign_status": "running",
+        "campaign_status": campaign_status,
+        "final_progress_required": campaign_status == "complete",
         "generation": generation,
         "generated_at_unix_ns": time.time_ns(),
         "completion": {
@@ -1225,6 +1233,30 @@ def main() -> int:
                 durable_atomic_write(artifacts["out"], encoded_records)
                 durable_atomic_write(artifacts["summary"], encoded_summary)
 
+                generation += 1
+                final_checkpoint_progress = {
+                    "schema_version": SCHEMA_VERSION,
+                    "campaign_status": "complete",
+                    "generation": generation,
+                    "completed_instances": len(records),
+                    "expected_instances": args.expected_instances,
+                    "remaining_instances": 0,
+                    "final_progress_published": False,
+                    "manifest_sha256": manifest.sha256,
+                    "binary_sha256": binary.consumed.sha256,
+                }
+                final_checkpoint = build_checkpoint_bundle(
+                    records,
+                    summary,
+                    final_checkpoint_progress,
+                    generation=generation,
+                    expected_instances=args.expected_instances,
+                    success_checkpoint_interval=args.checkpoint_every,
+                    campaign_status="complete",
+                )
+                encoded_checkpoint = json_bytes(final_checkpoint)
+                durable_atomic_write(artifacts["checkpoint"], encoded_checkpoint)
+
                 progress = {
                     "schema_version": SCHEMA_VERSION,
                     "campaign_status": "complete",
@@ -1246,6 +1278,13 @@ def main() -> int:
                             "path": str(artifacts["summary"]),
                             "size_bytes": len(encoded_summary),
                             "sha256": sha256_bytes(encoded_summary),
+                        },
+                        "checkpoint": {
+                            "path": str(artifacts["checkpoint"]),
+                            "size_bytes": len(encoded_checkpoint),
+                            "sha256": sha256_bytes(encoded_checkpoint),
+                            "generation": generation,
+                            "campaign_status": "complete",
                         },
                     },
                     "published_last": True,

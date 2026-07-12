@@ -17,6 +17,7 @@ gates only euf-viper's expected-result and metamorphic obligations.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -25,15 +26,16 @@ import random
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Mapping, NamedTuple, Sequence
+from typing import Iterator, Mapping, NamedTuple, Sequence
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 GENERATOR_VERSION = "metamorphic-parser-diff-v1"
 FILE_PLACEHOLDER = "{file}"
 OUTPUT_LIMIT = 8192
@@ -46,6 +48,7 @@ ACCEPTANCE_PARSER_MODES = ("shadow", "stream")
 SOLVER_ORDER = ("euf-viper", "z3", "cvc5", "yices")
 MANDATORY_SOLVERS = ("euf-viper", "z3", "cvc5")
 CASE_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
+RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 ERROR_OUTPUT_PATTERN = re.compile(r"\(\s*error(?:\s|[\"')])", re.IGNORECASE)
 
 
@@ -69,6 +72,34 @@ class SolverResult(NamedTuple):
     stderr: str
 
 
+class StagedArtifact(NamedTuple):
+    original_path: Path
+    consumed_path: Path
+    fd: int
+    fd_path: str
+    size_bytes: int
+    sha256: str
+    device: int
+    inode: int
+
+
+class BoundCommand(NamedTuple):
+    argv_template: tuple[str, ...]
+    pass_fds: tuple[int, ...]
+    artifacts: tuple[StagedArtifact, ...]
+    provenance: dict[str, object]
+
+
+class PinnedSource(NamedTuple):
+    original_path: Path
+    fd: int
+    fd_path: str
+    size_bytes: int
+    sha256: str
+    device: int
+    inode: int
+
+
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -79,6 +110,233 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _fd_identity(fd: int) -> tuple[int, str]:
+    if os.name != "posix" or not hasattr(os, "pread"):
+        raise ValueError("byte-bound solver campaigns require POSIX pread support")
+    size = 0
+    offset = 0
+    digest = hashlib.sha256()
+    while True:
+        chunk = os.pread(fd, 1024 * 1024, offset)
+        if not chunk:
+            break
+        size += len(chunk)
+        offset += len(chunk)
+        digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def _inherited_fd_path(fd: int) -> str:
+    for root in (Path("/proc/self/fd"), Path("/dev/fd")):
+        if root.is_dir():
+            return str(root / str(fd))
+    raise ValueError("cannot expose source descriptor through /proc/self/fd or /dev/fd")
+
+
+def _command_artifacts_use_fd_paths() -> bool:
+    return os.name == "posix" and Path("/proc/self/fd").is_dir()
+
+
+def _copy_fd_to_stage(source_fd: int, size_bytes: int, destination: Path) -> None:
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
+        0o700,
+    )
+    try:
+        offset = 0
+        while offset < size_bytes:
+            chunk = os.pread(source_fd, min(1024 * 1024, size_bytes - offset), offset)
+            if not chunk:
+                raise ValueError("opened command artifact changed size while staging")
+            view = memoryview(chunk)
+            while view:
+                written = os.write(descriptor, view)
+                if written == 0:
+                    raise OSError("short write while staging command artifact")
+                view = view[written:]
+            offset += len(chunk)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _stage_artifact(
+    original: Path,
+    stage_root: Path,
+    cache: dict[Path, StagedArtifact],
+) -> StagedArtifact:
+    resolved = original.expanduser().resolve()
+    if resolved in cache:
+        return cache[resolved]
+    descriptor = os.open(resolved, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"command artifact is not a regular file: {resolved}")
+        size_bytes, digest = _fd_identity(descriptor)
+        staged_path = stage_root / f"artifact-{len(cache):04d}"
+        _copy_fd_to_stage(descriptor, size_bytes, staged_path)
+    finally:
+        os.close(descriptor)
+    os.chmod(staged_path, 0o500 if metadata.st_mode & 0o111 else 0o400)
+    consumed_descriptor = os.open(
+        staged_path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        consumed_metadata = os.fstat(consumed_descriptor)
+        consumed_size, consumed_sha256 = _fd_identity(consumed_descriptor)
+        if consumed_size != size_bytes or consumed_sha256 != digest:
+            raise ValueError(
+                f"staged command artifact differs from opened bytes: {resolved}"
+            )
+        consumed_fd_path = _inherited_fd_path(consumed_descriptor)
+    except BaseException:
+        os.close(consumed_descriptor)
+        raise
+    artifact = StagedArtifact(
+        original_path=resolved,
+        consumed_path=staged_path,
+        fd=consumed_descriptor,
+        fd_path=consumed_fd_path,
+        size_bytes=consumed_size,
+        sha256=consumed_sha256,
+        device=consumed_metadata.st_dev,
+        inode=consumed_metadata.st_ino,
+    )
+    cache[resolved] = artifact
+    return artifact
+
+
+def _command_file_tokens(command: Sequence[str]) -> dict[int, Path]:
+    files = {0: _resolve_executable(command[0])}
+    for index, token in enumerate(command[1:], start=1):
+        if token == FILE_PLACEHOLDER:
+            continue
+        candidate = Path(token).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.is_file():
+            files[index] = resolved
+    return files
+
+
+def bind_command(
+    command: Sequence[str],
+    stage_root: Path,
+    cache: dict[Path, StagedArtifact],
+) -> BoundCommand:
+    rewritten = list(command)
+    artifact_records = []
+    bound_artifacts = []
+    use_fd_paths = _command_artifacts_use_fd_paths()
+    file_tokens = _command_file_tokens(command)
+    for token_index, path in sorted(file_tokens.items()):
+        artifact = _stage_artifact(path, stage_root, cache)
+        rewritten[token_index] = (
+            artifact.fd_path if use_fd_paths else str(artifact.consumed_path)
+        )
+        bound_artifacts.append(artifact)
+        artifact_records.append(
+            {
+                "token_index": token_index,
+                "original_path": str(artifact.original_path),
+                "consumed_path": str(artifact.consumed_path),
+                "consumed_fd_path": artifact.fd_path,
+                "size_bytes": artifact.size_bytes,
+                "sha256": artifact.sha256,
+                "device": artifact.device,
+                "inode": artifact.inode,
+                "consumed_via": (
+                    "inherited-fd-for-verified-private-stage"
+                    if use_fd_paths
+                    else "verified-private-stage-with-retained-fd"
+                ),
+            }
+        )
+    executable = next(
+        item for item in artifact_records if item["token_index"] == 0
+    )
+    return BoundCommand(
+        argv_template=tuple(rewritten),
+        pass_fds=tuple(
+            sorted(
+                {cache[path.expanduser().resolve()].fd for path in file_tokens.values()}
+                if use_fd_paths
+                else ()
+            )
+        ),
+        artifacts=tuple(bound_artifacts),
+        provenance={
+            "argv_template": list(command),
+            "bound_argv_template": rewritten,
+            "resolved_executable": executable["original_path"],
+            "executable_sha256": executable["sha256"],
+            "artifacts": artifact_records,
+        },
+    )
+
+
+def release_staged_artifacts(
+    cache: Mapping[Path, StagedArtifact],
+    stage_root: Path,
+    *,
+    verify: bool,
+) -> None:
+    mismatch: Path | None = None
+    try:
+        if verify:
+            for artifact in cache.values():
+                size_bytes, digest = _fd_identity(artifact.fd)
+                if size_bytes != artifact.size_bytes or digest != artifact.sha256:
+                    mismatch = artifact.original_path
+                    break
+    finally:
+        for artifact in cache.values():
+            os.close(artifact.fd)
+        shutil.rmtree(stage_root, ignore_errors=True)
+    if mismatch is not None:
+        raise ValueError(f"staged command artifact changed during campaign: {mismatch}")
+
+
+def verify_bound_command_paths(command: BoundCommand) -> None:
+    if command.pass_fds:
+        return
+    for artifact in command.artifacts:
+        metadata = artifact.consumed_path.stat()
+        if metadata.st_dev != artifact.device or metadata.st_ino != artifact.inode:
+            raise ValueError(
+                "staged command path no longer names the verified object: "
+                f"{artifact.consumed_path}"
+            )
+
+
+@contextlib.contextmanager
+def open_pinned_source(path: Path) -> Iterator[PinnedSource]:
+    resolved = path.expanduser().resolve()
+    descriptor = os.open(resolved, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"generated source is not a regular file: {resolved}")
+        size_bytes, digest = _fd_identity(descriptor)
+        yield PinnedSource(
+            original_path=resolved,
+            fd=descriptor,
+            fd_path=_inherited_fd_path(descriptor),
+            size_bytes=size_bytes,
+            sha256=digest,
+            device=metadata.st_dev,
+            inode=metadata.st_ino,
+        )
+    finally:
+        os.close(descriptor)
 
 
 def _json_line(value: object) -> str:
@@ -749,29 +1007,55 @@ def classify_completed_process(
     )
 
 
-def run_solver(command: Sequence[str], case_path: Path, timeout_s: float) -> SolverResult:
-    argv = materialize_command(command, case_path)
+def run_solver(
+    command: Sequence[str] | BoundCommand,
+    case_path: Path | PinnedSource,
+    timeout_s: float,
+) -> SolverResult:
+    if isinstance(command, BoundCommand):
+        bound_command = command
+        template = command.argv_template
+        inherited_fds = set(command.pass_fds)
+        verify_bound_command_paths(command)
+    else:
+        bound_command = None
+        template = command
+        inherited_fds = set()
+    if isinstance(case_path, PinnedSource):
+        os.lseek(case_path.fd, 0, os.SEEK_SET)
+        materialized_path = Path(case_path.fd_path)
+        inherited_fds.add(case_path.fd)
+    else:
+        materialized_path = case_path
+    argv = materialize_command(template, materialized_path)
     try:
-        completed = subprocess.run(
-            argv,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout_s,
-            check=False,
+        try:
+            completed = subprocess.run(
+                argv,
+                pass_fds=tuple(sorted(inherited_fds)),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            return SolverResult(
+                "unknown",
+                "timeout",
+                124,
+                (),
+                _limited(_text(error.stdout)),
+                _limited(_text(error.stderr)),
+            )
+        except OSError as error:
+            return SolverResult("error", "spawn_error", None, (), "", str(error))
+        return classify_completed_process(
+            completed.returncode, completed.stdout, completed.stderr
         )
-    except subprocess.TimeoutExpired as error:
-        return SolverResult(
-            "unknown",
-            "timeout",
-            124,
-            (),
-            _limited(_text(error.stdout)),
-            _limited(_text(error.stderr)),
-        )
-    except OSError as error:
-        return SolverResult("error", "spawn_error", None, (), "", str(error))
-    return classify_completed_process(completed.returncode, completed.stdout, completed.stderr)
+    finally:
+        if bound_command is not None:
+            verify_bound_command_paths(bound_command)
 
 
 def solver_result_record(result: SolverResult) -> dict[str, object]:
@@ -919,15 +1203,16 @@ def _provenance_record(
     *,
     mode: str,
     parser_mode: str | None,
+    run_id: str | None,
     seed: int,
     random_groups: int,
     timeout_s: float | None,
-    commands: Mapping[str, Sequence[str]],
+    commands: Mapping[str, BoundCommand],
     viper_reject_exit_code: int,
 ) -> dict[str, object]:
     script_path = Path(__file__).resolve()
     solver_provenance = {
-        name: command_provenance(commands[name])
+        name: commands[name].provenance
         for name in SOLVER_ORDER
         if name in commands
     }
@@ -935,6 +1220,7 @@ def _provenance_record(
         "schema_version": SCHEMA_VERSION,
         "record_type": "provenance",
         "mode": mode,
+        "run_id": run_id,
         "generator": {
             "name": GENERATOR_VERSION,
             "seed": seed,
@@ -965,6 +1251,76 @@ def _prepare_output_dir(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _paths_conflict(first: Path, second: Path) -> bool:
+    return (
+        first == second
+        or first in second.parents
+        or second in first.parents
+    )
+
+
+def validate_generation_paths(
+    *,
+    output_dir: Path,
+    checkpoint_path: Path | None,
+    cases: Sequence[FormulaCase],
+    commands: Mapping[str, Sequence[str]],
+) -> tuple[Path, Path | None]:
+    output = output_dir.expanduser().resolve()
+    checkpoint = (
+        checkpoint_path.expanduser().resolve()
+        if checkpoint_path is not None
+        else None
+    )
+    generated_files = [
+        output / "manifest.jsonl",
+        output / "results.jsonl",
+        output / "summary.json",
+        *(output / "cases" / f"{case.case_id}.smt2" for case in cases),
+    ]
+    if len(set(generated_files)) != len(generated_files):
+        raise ValueError("generated campaign destinations are not unique")
+    for index, path in enumerate(generated_files):
+        for other in generated_files[:index]:
+            if _paths_conflict(path, other):
+                raise ValueError(
+                    "generated campaign destinations have an "
+                    f"ancestor/descendant conflict: {path} vs {other}"
+                )
+    if checkpoint is not None:
+        if _paths_conflict(output, checkpoint):
+            raise ValueError(
+                "checkpoint and output directory must not alias or be nested: "
+                f"{checkpoint} vs {output}"
+            )
+        if checkpoint.exists():
+            raise ValueError(f"refusing stale checkpoint destination: {checkpoint}")
+
+    protected = {
+        path
+        for command in commands.values()
+        for path in _command_file_tokens(command).values()
+    }
+    for protected_path in protected:
+        if _paths_conflict(output, protected_path):
+            raise ValueError(
+                "output directory conflicts with a command artifact: "
+                f"{output} vs {protected_path}"
+            )
+        if checkpoint is not None and _paths_conflict(checkpoint, protected_path):
+            raise ValueError(
+                "checkpoint conflicts with a command artifact: "
+                f"{checkpoint} vs {protected_path}"
+            )
+        if (
+            checkpoint is not None
+            and checkpoint.exists()
+            and os.path.samefile(checkpoint, protected_path)
+        ):
+            raise ValueError("checkpoint aliases a command artifact inode")
+    return output, checkpoint
+
+
 def execute_campaign(
     *,
     cases: Sequence[FormulaCase],
@@ -973,6 +1329,7 @@ def execute_campaign(
     random_groups: int,
     generation_only: bool,
     parser_mode: str | None = None,
+    run_id: str | None = None,
     commands: Mapping[str, Sequence[str]] | None = None,
     timeout_s: float | None = None,
     viper_reject_exit_code: int = 2,
@@ -993,20 +1350,41 @@ def execute_campaign(
         raise ValueError("differential campaign requires parser mode shadow or stream")
     if parser_mode is not None and parser_mode not in ACCEPTANCE_PARSER_MODES:
         raise ValueError("parser mode must be shadow or stream")
+    if run_id is not None and RUN_ID_PATTERN.fullmatch(run_id) is None:
+        raise ValueError(f"unsafe run id: {run_id!r}")
     if not 1 <= viper_reject_exit_code <= 255:
         raise ValueError("viper reject exit code must be in [1, 255]")
     if checkpoint_every < 1:
         raise ValueError("checkpoint interval must be at least one")
 
+    output_dir, checkpoint_path = validate_generation_paths(
+        output_dir=output_dir,
+        checkpoint_path=checkpoint_path,
+        cases=cases,
+        commands=commands,
+    )
     _prepare_output_dir(output_dir)
+    stage_root = output_dir / ".solver-stage"
+    stage_root.mkdir(mode=0o700)
+    artifact_cache: dict[Path, StagedArtifact] = {}
+    try:
+        bound_commands = {
+            name: bind_command(commands[name], stage_root, artifact_cache)
+            for name in SOLVER_ORDER
+            if name in commands
+        }
+    except BaseException:
+        release_staged_artifacts(artifact_cache, stage_root, verify=False)
+        raise
     mode = "generation-only" if generation_only else "differential"
     provenance = _provenance_record(
         mode=mode,
         parser_mode=parser_mode,
+        run_id=run_id,
         seed=seed,
         random_groups=random_groups,
         timeout_s=None if generation_only else timeout_s,
-        commands={} if generation_only else commands,
+        commands={} if generation_only else bound_commands,
         viper_reject_exit_code=viper_reject_exit_code,
     )
 
@@ -1043,6 +1421,7 @@ def execute_campaign(
             "campaign_status": campaign_status,
             "generation": checkpoint_generation,
             "candidate_parser_mode": parser_mode,
+            "run_id": run_id,
             "generated_cases": len(cases),
             "completed_cases": len(result_records),
             "remaining_cases": len(cases) - len(result_records),
@@ -1060,12 +1439,39 @@ def execute_campaign(
     write_checkpoint("running")
     if not generation_only:
         assert timeout_s is not None
-        names = [name for name in SOLVER_ORDER if name in commands]
+        names = [name for name in SOLVER_ORDER if name in bound_commands]
         for case in cases:
-            observations = {
-                name: run_solver(commands[name], case_paths[case.case_id], timeout_s)
-                for name in names
-            }
+            expected_source = _case_record(case)
+            with open_pinned_source(case_paths[case.case_id]) as pinned_source:
+                if (
+                    pinned_source.size_bytes != expected_source["source_size_bytes"]
+                    or pinned_source.sha256 != expected_source["source_sha256"]
+                ):
+                    raise ValueError(
+                        f"generated source bytes do not match manifest: {case.case_id}"
+                    )
+                observations = {
+                    name: run_solver(
+                        bound_commands[name], pinned_source, timeout_s
+                    )
+                    for name in names
+                }
+                final_size, final_sha256 = _fd_identity(pinned_source.fd)
+                if (
+                    final_size != pinned_source.size_bytes
+                    or final_sha256 != pinned_source.sha256
+                ):
+                    raise ValueError(
+                        f"generated source changed during execution: {case.case_id}"
+                    )
+                source_binding = {
+                    "original_path": str(pinned_source.original_path),
+                    "size_bytes": pinned_source.size_bytes,
+                    "sha256": pinned_source.sha256,
+                    "device": pinned_source.device,
+                    "inode": pinned_source.inode,
+                    "consumed_via": "inherited-posix-fd",
+                }
             observations_by_case[case.case_id] = observations
             anomalies = evaluate_case(
                 case,
@@ -1076,6 +1482,7 @@ def execute_campaign(
                 {
                     **_case_record(case),
                     "record_type": "observation",
+                    "source_consumed": source_binding,
                     "observations": {
                         name: solver_result_record(observations[name]) for name in names
                     },
@@ -1092,6 +1499,7 @@ def execute_campaign(
             ):
                 write_checkpoint("running")
 
+    release_staged_artifacts(artifact_cache, stage_root, verify=True)
     metamorphic_records = (
         []
         if generation_only
@@ -1124,6 +1532,7 @@ def execute_campaign(
         "schema_version": SCHEMA_VERSION,
         "mode": mode,
         "candidate_parser_mode": parser_mode,
+        "run_id": run_id,
         "success": success,
         "candidate_success": candidate_success,
         "counts": {
@@ -1153,9 +1562,289 @@ def execute_campaign(
     return summary
 
 
+def _read_jsonl(path: Path, snapshot: bytes | None = None) -> list[dict[str, object]]:
+    try:
+        value = path.read_bytes() if snapshot is None else snapshot
+        lines = value.decode("utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ValueError(f"cannot read cross-mode artifact {path}: {error}") from error
+    records = []
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{path}:{line_number}: invalid JSON: {error}") from error
+        if not isinstance(record, dict):
+            raise ValueError(f"{path}:{line_number}: record must be an object")
+        records.append(record)
+    return records
+
+
+def _candidate_observation_projection(record: Mapping[str, object]) -> dict[str, object]:
+    observations = record.get("observations")
+    if not isinstance(observations, dict) or "euf-viper" not in observations:
+        raise ValueError(f"missing euf-viper observation for {record.get('case_id')}")
+    euf_result = observations["euf-viper"]
+    if not isinstance(euf_result, dict):
+        raise ValueError(f"malformed euf-viper observation for {record.get('case_id')}")
+    return {
+        "case_id": record.get("case_id"),
+        "expected": record.get("expected"),
+        "policy": record.get("policy"),
+        "source_sha256": record.get("source_sha256"),
+        "source_size_bytes": record.get("source_size_bytes"),
+        "candidate_passed": record.get("candidate_passed"),
+        "candidate_anomalies": record.get("candidate_anomalies"),
+        "euf-viper": {
+            key: euf_result.get(key)
+            for key in ("classification", "reason", "exit_code", "result_lines")
+        },
+    }
+
+
+def _candidate_group_projection(record: Mapping[str, object]) -> dict[str, object]:
+    solver_results = record.get("solver_results")
+    if not isinstance(solver_results, dict) or "euf-viper" not in solver_results:
+        raise ValueError(f"missing euf-viper group results for {record.get('group_id')}")
+    return {
+        "group_id": record.get("group_id"),
+        "expected": record.get("expected"),
+        "case_ids": record.get("case_ids"),
+        "candidate_passed": record.get("candidate_passed"),
+        "candidate_anomalies": record.get("candidate_anomalies"),
+        "euf-viper": solver_results["euf-viper"],
+    }
+
+
+def compare_mode_campaigns(
+    shadow_dir: Path,
+    stream_dir: Path,
+    output_path: Path,
+) -> dict[str, object]:
+    shadow = shadow_dir.expanduser().resolve()
+    stream = stream_dir.expanduser().resolve()
+    output = output_path.expanduser().resolve()
+    if _paths_conflict(shadow, stream):
+        raise ValueError(
+            f"shadow and stream campaign directories collide: {shadow} vs {stream}"
+        )
+    if _paths_conflict(output, shadow) or _paths_conflict(output, stream):
+        raise ValueError("cross-mode output must not alias or nest with mode outputs")
+    if output.exists():
+        raise ValueError(f"refusing stale cross-mode output: {output}")
+
+    artifacts: dict[str, dict[str, object]] = {}
+    loaded: dict[str, tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]]]] = {}
+    for mode, directory in (("shadow", shadow), ("stream", stream)):
+        summary_path = directory / "summary.json"
+        manifest_path = directory / "manifest.jsonl"
+        results_path = directory / "results.jsonl"
+        try:
+            summary_snapshot = summary_path.read_bytes()
+            manifest_snapshot = manifest_path.read_bytes()
+            results_snapshot = results_path.read_bytes()
+            summary = json.loads(summary_snapshot.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"cannot read {mode} summary: {error}") from error
+        if not isinstance(summary, dict):
+            raise ValueError(f"{mode} summary must be an object")
+        loaded[mode] = (
+            summary,
+            _read_jsonl(manifest_path, manifest_snapshot),
+            _read_jsonl(results_path, results_snapshot),
+        )
+        artifacts[mode] = {
+            "directory": str(directory),
+            "manifest_sha256": sha256_bytes(manifest_snapshot),
+            "results_sha256": sha256_bytes(results_snapshot),
+            "summary_sha256": sha256_bytes(summary_snapshot),
+        }
+
+    mismatches: list[str] = []
+    shadow_summary, shadow_manifest, shadow_results = loaded["shadow"]
+    stream_summary, stream_manifest, stream_results = loaded["stream"]
+    mode_views: dict[
+        str,
+        tuple[
+            list[dict[str, object]],
+            list[dict[str, object]],
+            list[dict[str, object]],
+        ],
+    ] = {}
+    for mode, (summary, manifest, results) in loaded.items():
+        if summary.get("mode") != "differential":
+            mismatches.append(f"{mode}:not-a-differential-campaign")
+        if summary.get("candidate_parser_mode") != mode:
+            mismatches.append(f"{mode}:parser-mode-mismatch")
+        if summary.get("candidate_success") is not True:
+            mismatches.append(f"{mode}:candidate-gate-failed")
+        declared_artifacts = summary.get("artifacts")
+        if not isinstance(declared_artifacts, dict):
+            mismatches.append(f"{mode}:missing-artifact-hashes")
+        else:
+            if (
+                declared_artifacts.get("manifest_sha256")
+                != artifacts[mode]["manifest_sha256"]
+            ):
+                mismatches.append(f"{mode}:manifest-hash-mismatch")
+            if (
+                declared_artifacts.get("results_sha256")
+                != artifacts[mode]["results_sha256"]
+            ):
+                mismatches.append(f"{mode}:results-hash-mismatch")
+
+        manifest_provenance = [
+            record for record in manifest if record.get("record_type") == "provenance"
+        ]
+        results_provenance = [
+            record for record in results if record.get("record_type") == "provenance"
+        ]
+        cases = [record for record in manifest if record.get("record_type") == "case"]
+        observation_records = [
+            record for record in results if record.get("record_type") == "observation"
+        ]
+        group_records = [
+            record
+            for record in results
+            if record.get("record_type") == "metamorphic-group"
+        ]
+        mode_views[mode] = (cases, observation_records, group_records)
+
+        if len(manifest_provenance) != 1 or len(results_provenance) != 1:
+            mismatches.append(f"{mode}:provenance-cardinality-mismatch")
+        elif manifest_provenance[0] != results_provenance[0]:
+            mismatches.append(f"{mode}:provenance-records-differ")
+        else:
+            provenance = manifest_provenance[0]
+            execution = provenance.get("execution")
+            if provenance.get("mode") != "differential":
+                mismatches.append(f"{mode}:provenance-mode-mismatch")
+            if provenance.get("run_id") != summary.get("run_id"):
+                mismatches.append(f"{mode}:provenance-run-id-mismatch")
+            if (
+                not isinstance(execution, dict)
+                or execution.get("candidate_parser_mode") != mode
+            ):
+                mismatches.append(f"{mode}:provenance-parser-mode-mismatch")
+
+        expected_record_types = {"provenance", "case"}
+        if any(record.get("record_type") not in expected_record_types for record in manifest):
+            mismatches.append(f"{mode}:unexpected-manifest-record")
+        expected_result_types = {"provenance", "observation", "metamorphic-group"}
+        if any(record.get("record_type") not in expected_result_types for record in results):
+            mismatches.append(f"{mode}:unexpected-results-record")
+
+        case_ids = [record.get("case_id") for record in cases]
+        observation_ids = [record.get("case_id") for record in observation_records]
+        if not case_ids or observation_ids != case_ids:
+            mismatches.append(f"{mode}:case-observation-order-mismatch")
+        case_group_ids = [record.get("group_id") for record in cases]
+        if any(not isinstance(group_id, str) for group_id in case_group_ids):
+            mismatches.append(f"{mode}:invalid-case-group-id")
+        expected_group_ids = sorted(
+            {group_id for group_id in case_group_ids if isinstance(group_id, str)}
+        )
+        group_ids = [record.get("group_id") for record in group_records]
+        if group_ids != expected_group_ids:
+            mismatches.append(f"{mode}:metamorphic-group-coverage-mismatch")
+        if any(record.get("candidate_passed") is not True for record in observation_records):
+            mismatches.append(f"{mode}:candidate-observation-failed")
+        if any(record.get("candidate_passed") is not True for record in group_records):
+            mismatches.append(f"{mode}:candidate-group-failed")
+        for record in observation_records:
+            source_consumed = record.get("source_consumed")
+            if (
+                not isinstance(source_consumed, dict)
+                or source_consumed.get("sha256") != record.get("source_sha256")
+                or source_consumed.get("size_bytes") != record.get("source_size_bytes")
+            ):
+                mismatches.append(f"{mode}:source-byte-binding-mismatch")
+                break
+
+        counts = summary.get("counts")
+        expected_counts = {
+            "generated_cases": len(cases),
+            "executed_cases": len(observation_records),
+            "metamorphic_groups": len(group_records),
+        }
+        if not isinstance(counts, dict):
+            mismatches.append(f"{mode}:missing-counts")
+        else:
+            for name, expected in expected_counts.items():
+                if counts.get(name) != expected:
+                    mismatches.append(f"{mode}:{name}-count-mismatch")
+
+    shadow_run_id = shadow_summary.get("run_id")
+    stream_run_id = stream_summary.get("run_id")
+    if not isinstance(shadow_run_id, str) or not shadow_run_id.endswith("-shadow"):
+        mismatches.append("shadow:run-id-not-mode-qualified")
+        shadow_base = None
+    else:
+        shadow_base = shadow_run_id.removesuffix("-shadow")
+    if not isinstance(stream_run_id, str) or not stream_run_id.endswith("-stream"):
+        mismatches.append("stream:run-id-not-mode-qualified")
+        stream_base = None
+    else:
+        stream_base = stream_run_id.removesuffix("-stream")
+    if shadow_base is not None and stream_base is not None and shadow_base != stream_base:
+        mismatches.append("mode-run-ids-have-different-base")
+
+    shadow_cases = [
+        record for record in shadow_manifest if record.get("record_type") == "case"
+    ]
+    stream_cases = [
+        record for record in stream_manifest if record.get("record_type") == "case"
+    ]
+    if shadow_cases != stream_cases:
+        mismatches.append("generated-case-manifests-differ")
+
+    def observations(records: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+        return [
+            _candidate_observation_projection(record)
+            for record in records
+            if record.get("record_type") == "observation"
+        ]
+
+    def groups(records: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+        return [
+            _candidate_group_projection(record)
+            for record in records
+            if record.get("record_type") == "metamorphic-group"
+        ]
+
+    if observations(shadow_results) != observations(stream_results):
+        mismatches.append("candidate-observations-differ")
+    if groups(shadow_results) != groups(stream_results):
+        mismatches.append("candidate-metamorphic-groups-differ")
+
+    payload: dict[str, object] = {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": "metamorphic-parser-cross-mode-gate",
+        "campaign_status": "complete",
+        "gate_passed": not mismatches,
+        "base_run_id": shadow_base if shadow_base == stream_base else None,
+        "mode_run_ids": {
+            "shadow": shadow_run_id,
+            "stream": stream_run_id,
+        },
+        "counts": {
+            "generated_cases": len(shadow_cases),
+            "candidate_observations": len(observations(shadow_results)),
+            "candidate_groups": len(groups(shadow_results)),
+        },
+        "mismatches": mismatches,
+        "artifacts": artifacts,
+    }
+    _durable_atomic_write(output, _json_bytes(payload))
+    return payload
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--run-id")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--random-groups", type=int, default=32)
     parser.add_argument("--timeout", type=float, default=2.0)
@@ -1184,12 +1873,40 @@ def build_parser() -> argparse.ArgumentParser:
         "--yices-command",
         help="optional Yices argv string, for example 'yices-smt2 {file}'",
     )
+    parser.add_argument("--cross-mode-shadow", type=Path)
+    parser.add_argument("--cross-mode-stream", type=Path)
+    parser.add_argument("--cross-mode-out", type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    cross_mode_values = (
+        args.cross_mode_shadow,
+        args.cross_mode_stream,
+        args.cross_mode_out,
+    )
+    if any(value is not None for value in cross_mode_values):
+        if not all(value is not None for value in cross_mode_values):
+            parser.error("all three --cross-mode-* paths are required")
+        try:
+            cross_mode = compare_mode_campaigns(
+                args.cross_mode_shadow,
+                args.cross_mode_stream,
+                args.cross_mode_out,
+            )
+        except (OSError, ValueError) as error:
+            print(f"metamorphic cross-mode gate error: {error}", file=sys.stderr)
+            return 2
+        print(
+            f"cross_mode_gate_passed={str(cross_mode['gate_passed']).lower()} "
+            f"mismatches={len(cross_mode['mismatches'])}"
+        )
+        return 0 if cross_mode["gate_passed"] else 1
+
+    if args.out is None:
+        parser.error("--out is required for generation or differential campaigns")
     if args.random_groups < 0:
         parser.error("--random-groups must be non-negative")
     if args.timeout <= 0:
@@ -1217,6 +1934,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             random_groups=args.random_groups,
             generation_only=args.generate_only,
             parser_mode=args.parser_mode,
+            run_id=args.run_id,
             commands=None if args.generate_only else commands,
             timeout_s=None if args.generate_only else args.timeout,
             viper_reject_exit_code=args.viper_reject_exit_code,
