@@ -26,8 +26,10 @@ mod quotient_state_search;
 #[cfg(test)]
 mod stabilizer_order;
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-4"))]
+use kissat4::{Solver as KissatSolver, Var as KissatVar};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use rustsat::solvers::{
     GetInternalStats, LimitConflicts, Solve as RustSatSolve, SolverResult as RustSatResult,
@@ -53,6 +55,20 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
+
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "kissat-sc2021",
+    feature = "kissat-4"
+))]
+compile_error!("features `kissat-sc2021` and `kissat-4` are mutually exclusive");
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    not(any(feature = "kissat-sc2021", feature = "kissat-4"))
+))]
+compile_error!("Linux x86-64 builds require either `kissat-sc2021` or `kissat-4`");
 
 type SymId = u32;
 type TermId = usize;
@@ -4455,6 +4471,29 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
     solver.set_configuration(configuration).ok()
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
+fn configure_kissat(_solver: &mut KissatSolver) -> Option<()> {
+    Some(())
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-4"))]
+fn configure_kissat(solver: &mut KissatSolver) -> Option<()> {
+    let configuration = env::var("EUF_VIPER_KISSAT_MODE").unwrap_or_else(|_| "default".to_owned());
+    match configuration.as_str() {
+        "basic" | "default" | "plain" | "sat" | "unsat" => {
+            solver.set_configuration(&configuration).ok()?;
+        }
+        _ => return None,
+    }
+    if let Ok(options) = env::var("EUF_VIPER_KISSAT_OPTIONS") {
+        for option in options.split(',').filter(|option| !option.is_empty()) {
+            let (name, value) = option.split_once('=')?;
+            solver.set_option(name, value.parse().ok()?).ok()?;
+        }
+    }
+    Some(())
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn solve_kissat_euf_once(
     cnf: &CnfProblem,
@@ -4465,6 +4504,9 @@ fn solve_kissat_euf_once(
 ) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
+    if configure_kissat(&mut solver).is_none() {
+        return EagerSolveOutcome::Unavailable;
+    }
     let variables = (0..cnf.var_count())
         .map(|_| solver.var())
         .collect::<Vec<_>>();
@@ -7159,6 +7201,21 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
         .map_err(|e| format!("invalid {label}: {e}"))
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
+fn embedded_sat_backend() -> &'static str {
+    "kissat-sc2021"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-4"))]
+fn embedded_sat_backend() -> &'static str {
+    "kissat-4.0.4"
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn embedded_sat_backend() -> &'static str {
+    "rustsat-kissat-4.0.4"
+}
+
 #[cfg(not(feature = "certificates"))]
 fn usage() -> &'static str {
     "usage:
@@ -7235,7 +7292,11 @@ fn run() -> Result<i32, String> {
         "bench" => bench_cmd(&args[1..]),
         "bench-or" => bench_or_cmd(&args[1..]),
         "--version" | "-V" => {
-            println!("euf-viper {}", env!("CARGO_PKG_VERSION"));
+            println!(
+                "euf-viper {} (sat={})",
+                env!("CARGO_PKG_VERSION"),
+                embedded_sat_backend()
+            );
             Ok(0)
         }
         "--help" | "-h" | "help" => {

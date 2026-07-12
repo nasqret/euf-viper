@@ -1,0 +1,11 @@
+[package]
+name = "kissat4"
+version = "4.0.4"
+edition = "2021"
+build = "build.rs"
+license = "MIT"
+description = "Minimal Rust wrapper for the pinned Kissat 4.0.4 backend"
+
+[build-dependencies]
+cc = "1.0"
+
