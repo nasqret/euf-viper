@@ -1,4 +1,7 @@
-use crate::{BoolAtomKey, BoolExpr, HashMap, HashSet, TermId, normalized_pair};
+use crate::{
+    BoolAtomKey, BoolExpr, BoolProblem, HashMap, HashSet, ROOT_EQUALITY_COUNT_CAP,
+    RootEqualityCount, TermId, normalized_pair,
+};
 use std::rc::Rc;
 
 pub(crate) const ENV: &str = "EUF_VIPER_UNCONDITIONAL_QUOTIENT";
@@ -6,7 +9,6 @@ pub(crate) const ENV: &str = "EUF_VIPER_UNCONDITIONAL_QUOTIENT";
 const DEFAULT_MAX_TERMS: usize = 1_000_000;
 const DEFAULT_MAX_SUPPORTING_FACTS: usize = 65_536;
 const DEFAULT_MAX_SYNTAX_OCCURRENCES: usize = 5_000_000;
-const DEFAULT_MAX_EQUALITY_FACTS: usize = 1_000_000;
 const DEFAULT_MAX_CANONICAL_NODES: usize = 2_000_000;
 const DEFAULT_MAX_CANONICAL_EDGES: usize = 10_000_000;
 
@@ -158,7 +160,6 @@ struct Limits {
 #[derive(Debug, Clone, Copy)]
 struct AutoLimits {
     max_syntax_occurrences: usize,
-    max_equality_facts: usize,
     max_canonical_nodes: usize,
     max_canonical_edges: usize,
 }
@@ -167,7 +168,6 @@ impl Default for AutoLimits {
     fn default() -> Self {
         Self {
             max_syntax_occurrences: DEFAULT_MAX_SYNTAX_OCCURRENCES,
-            max_equality_facts: DEFAULT_MAX_EQUALITY_FACTS,
             max_canonical_nodes: DEFAULT_MAX_CANONICAL_NODES,
             max_canonical_edges: DEFAULT_MAX_CANONICAL_EDGES,
         }
@@ -222,23 +222,18 @@ impl Plan {
         Self::build_with_limits(assertions, term_count, Limits::default())
     }
 
-    pub(crate) fn build_auto(
-        assertions: &[BoolExpr],
-        data_terms: &[TermId],
-        term_count: usize,
-    ) -> AutoOutcome {
-        Self::build_auto_with_config(assertions, data_terms, term_count, AutoConfig::default())
+    pub(crate) fn build_auto(bool_problem: &BoolProblem, term_count: usize) -> AutoOutcome {
+        Self::build_auto_with_config(bool_problem, term_count, AutoConfig::default())
     }
 
     fn build_auto_with_config(
-        assertions: &[BoolExpr],
-        data_terms: &[TermId],
+        bool_problem: &BoolProblem,
         term_count: usize,
         config: AutoConfig,
     ) -> AutoOutcome {
         let mut telemetry = AutoTelemetry::default();
         let plan_limits = Limits::default();
-        // Preserve the plan's cheap hard-limit failure before the prefilter allocates or scans.
+        // Preserve the plan's cheap hard-limit failure before any other validation or allocation.
         if term_count > plan_limits.max_terms {
             telemetry.rejection = Some(AutoRejection::Plan(BuildFailure::TermLimit));
             return AutoOutcome {
@@ -247,14 +242,10 @@ impl Plan {
             };
         }
 
-        // Every path that can admit still reaches Plan and data-term validation below.
-        telemetry.unconditional_equality_facts = match count_unconditional_equality_facts(
-            assertions,
-            config.limits.max_equality_facts,
-        ) {
-            Ok(facts) => facts,
-            Err(rejection) => {
-                telemetry.rejection = Some(rejection);
+        telemetry.unconditional_equality_facts = match bool_problem.root_equality_count {
+            RootEqualityCount::Exact(facts) if facts <= ROOT_EQUALITY_COUNT_CAP => facts,
+            RootEqualityCount::Exact(_) | RootEqualityCount::OverLimit => {
+                telemetry.rejection = Some(AutoRejection::EqualityFactLimit);
                 return AutoOutcome {
                     plan: None,
                     telemetry,
@@ -269,7 +260,20 @@ impl Plan {
             };
         }
 
-        let plan = match Self::build_with_limits(assertions, term_count, plan_limits) {
+        if bool_problem
+            .data_terms
+            .iter()
+            .any(|&term| term >= term_count)
+        {
+            telemetry.rejection = Some(AutoRejection::InvalidDataTerm);
+            return AutoOutcome {
+                plan: None,
+                telemetry,
+            };
+        }
+
+        let plan = match Self::build_with_limits(&bool_problem.assertions, term_count, plan_limits)
+        {
             Ok(plan) => plan,
             Err(failure) => {
                 telemetry.rejection = Some(AutoRejection::Plan(failure));
@@ -284,14 +288,6 @@ impl Plan {
         telemetry.effective_equality_unions = plan.projected_term_count();
         telemetry.projected_terms = plan.projected_term_count();
         telemetry.quotiented_terms = plan.quotiented_term_count();
-
-        if data_terms.iter().any(|&term| term >= term_count) {
-            telemetry.rejection = Some(AutoRejection::InvalidDataTerm);
-            return AutoOutcome {
-                plan: None,
-                telemetry,
-            };
-        }
 
         let prefilter_rejection =
             if telemetry.effective_equality_unions < config.min_effective_unions {
@@ -309,17 +305,21 @@ impl Plan {
             };
         }
 
-        let (raw_unique_nodes, projected_unique_nodes) =
-            match canonical_unique_nodes(assertions, data_terms, &plan, config.limits) {
-                Ok(counts) => counts,
-                Err(rejection) => {
-                    telemetry.rejection = Some(rejection);
-                    return AutoOutcome {
-                        plan: None,
-                        telemetry,
-                    };
-                }
-            };
+        let (raw_unique_nodes, projected_unique_nodes) = match canonical_unique_nodes(
+            &bool_problem.assertions,
+            &bool_problem.data_terms,
+            &plan,
+            config.limits,
+        ) {
+            Ok(counts) => counts,
+            Err(rejection) => {
+                telemetry.rejection = Some(rejection);
+                return AutoOutcome {
+                    plan: None,
+                    telemetry,
+                };
+            }
+        };
         telemetry.raw_unique_nodes = Some(raw_unique_nodes);
         telemetry.projected_unique_nodes = Some(projected_unique_nodes);
         let Some(reduction) = raw_unique_nodes.checked_sub(projected_unique_nodes) else {
@@ -382,17 +382,13 @@ impl Plan {
         record_plan_heap_vector_construction();
         let mut facts = supporting_facts.iter().copied().collect::<Vec<_>>();
         facts.sort_unstable();
+        let mut projected_terms = 0;
         for (left, right) in facts {
-            union_minimum(&mut representatives, left, right);
+            projected_terms += usize::from(union_minimum(&mut representatives, left, right));
         }
         for term in 0..term_count {
             representatives[term] = find(&mut representatives, term);
         }
-        let projected_terms = representatives
-            .iter()
-            .enumerate()
-            .filter(|&(term, representative)| term != *representative)
-            .count();
 
         Ok(Self {
             representatives,
@@ -520,21 +516,17 @@ fn collect_root_equalities(
     Ok(())
 }
 
-fn count_unconditional_equality_facts(
-    assertions: &[BoolExpr],
-    max_facts: usize,
-) -> Result<usize, AutoRejection> {
-    let mut facts = 0usize;
+#[cfg(test)]
+pub(crate) fn reference_root_equality_count(assertions: &[BoolExpr]) -> RootEqualityCount {
+    let mut count = RootEqualityCount::Exact(0);
     let mut stack = assertions.iter().rev().collect::<Vec<_>>();
     while let Some(expression) = stack.pop() {
         match expression {
             BoolExpr::And(children) => stack.extend(children.iter().rev()),
             BoolExpr::Atom(BoolAtomKey::Eq(_, _)) => {
-                facts = facts
-                    .checked_add(1)
-                    .ok_or(AutoRejection::ArithmeticOverflow)?;
-                if facts > max_facts {
-                    return Err(AutoRejection::EqualityFactLimit);
+                count = count.add(RootEqualityCount::Exact(1));
+                if count == RootEqualityCount::OverLimit {
+                    return count;
                 }
             }
             BoolExpr::Const(_)
@@ -545,7 +537,7 @@ fn count_unconditional_equality_facts(
             | BoolExpr::Ite(_, _, _) => {}
         }
     }
-    Ok(facts)
+    count
 }
 
 type NodeId = usize;
@@ -856,13 +848,16 @@ fn find(parent: &mut [TermId], mut term: TermId) -> TermId {
     term
 }
 
-fn union_minimum(parent: &mut [TermId], left: TermId, right: TermId) {
+fn union_minimum(parent: &mut [TermId], left: TermId, right: TermId) -> bool {
     let left = find(parent, left);
     let right = find(parent, right);
     if left != right {
         let minimum = left.min(right);
         let maximum = left.max(right);
         parent[maximum] = minimum;
+        true
+    } else {
+        false
     }
 }
 
@@ -884,6 +879,34 @@ mod tests {
             .collect();
         let data_terms = (0..2 * pair_count).collect();
         (assertions, data_terms)
+    }
+
+    fn bool_problem(assertions: &[BoolExpr], data_terms: &[TermId]) -> BoolProblem {
+        BoolProblem {
+            assertions: assertions.to_vec(),
+            root_equality_count: reference_root_equality_count(assertions),
+            unsupported: Vec::new(),
+            true_term: 0,
+            false_term: 0,
+            data_terms: data_terms.to_vec(),
+        }
+    }
+
+    fn build_auto(
+        assertions: &[BoolExpr],
+        data_terms: &[TermId],
+        term_count: usize,
+    ) -> AutoOutcome {
+        Plan::build_auto(&bool_problem(assertions, data_terms), term_count)
+    }
+
+    fn build_auto_with_config(
+        assertions: &[BoolExpr],
+        data_terms: &[TermId],
+        term_count: usize,
+        config: AutoConfig,
+    ) -> AutoOutcome {
+        Plan::build_auto_with_config(&bool_problem(assertions, data_terms), term_count, config)
     }
 
     #[test]
@@ -945,6 +968,20 @@ mod tests {
             plan.project(&BoolAtomKey::Eq(4, 7)),
             ProjectedLeaf::Const(true)
         );
+    }
+
+    #[test]
+    fn union_minimum_reports_only_effective_merges() {
+        let mut representatives = (0..5).collect::<Vec<_>>();
+        assert!(union_minimum(&mut representatives, 4, 2));
+        assert!(!union_minimum(&mut representatives, 2, 4));
+        assert!(union_minimum(&mut representatives, 3, 4));
+        assert!(!union_minimum(&mut representatives, 2, 3));
+
+        for term in 0..representatives.len() {
+            representatives[term] = find(&mut representatives, term);
+        }
+        assert_eq!(representatives, vec![0, 1, 2, 2, 2]);
     }
 
     #[test]
@@ -1017,7 +1054,7 @@ mod tests {
             BoolExpr::Const(true),
             BoolExpr::Const(false),
         ];
-        let outcome = Plan::build_auto_with_config(
+        let outcome = build_auto_with_config(
             &assertions,
             &[data_only, p, data_only],
             4,
@@ -1043,7 +1080,7 @@ mod tests {
     #[test]
     fn exact_auto_threshold_rejects_999_and_admits_1000() {
         let (assertions_999, data_terms_999) = generated_disjoint_pairs(999);
-        let rejected = Plan::build_auto(&assertions_999, &data_terms_999, 1_998);
+        let rejected = build_auto(&assertions_999, &data_terms_999, 1_998);
         assert_eq!(rejected.telemetry.unconditional_equality_facts, 999);
         assert_eq!(rejected.telemetry.effective_equality_unions, 999);
         assert_eq!(rejected.telemetry.quotiented_terms, 1_998);
@@ -1058,7 +1095,7 @@ mod tests {
         assert!(rejected.plan.is_none());
 
         let (assertions_1000, data_terms_1000) = generated_disjoint_pairs(1_000);
-        let admitted = Plan::build_auto(&assertions_1000, &data_terms_1000, 2_000);
+        let admitted = build_auto(&assertions_1000, &data_terms_1000, 2_000);
         assert_eq!(admitted.telemetry.unconditional_equality_facts, 1_000);
         assert_eq!(admitted.telemetry.effective_equality_unions, 1_000);
         assert_eq!(admitted.telemetry.quotiented_terms, 2_000);
@@ -1073,7 +1110,7 @@ mod tests {
     #[test]
     fn auto_prefilter_rejects_each_frozen_structural_gate_before_canonicalization() {
         let (facts_assertions, facts_data_terms) = generated_disjoint_pairs(695);
-        let facts = Plan::build_auto(&facts_assertions, &facts_data_terms, 1_390);
+        let facts = build_auto(&facts_assertions, &facts_data_terms, 1_390);
         assert_eq!(
             facts.telemetry.rejection,
             Some(AutoRejection::PrefilterFacts)
@@ -1081,7 +1118,7 @@ mod tests {
 
         let (mut union_assertions, union_data_terms) = generated_disjoint_pairs(521);
         union_assertions.extend(std::iter::repeat_n(eq(0, 1), 175));
-        let unions = Plan::build_auto(&union_assertions, &union_data_terms, 1_042);
+        let unions = build_auto(&union_assertions, &union_data_terms, 1_042);
         assert_eq!(unions.telemetry.unconditional_equality_facts, 696);
         assert_eq!(unions.telemetry.effective_equality_unions, 521);
         assert_eq!(
@@ -1091,8 +1128,7 @@ mod tests {
 
         let mut quotiented_assertions = (0..522).map(|term| eq(term, term + 1)).collect::<Vec<_>>();
         quotiented_assertions.extend(std::iter::repeat_n(eq(0, 1), 174));
-        let quotiented =
-            Plan::build_auto(&quotiented_assertions, &(0..523).collect::<Vec<_>>(), 523);
+        let quotiented = build_auto(&quotiented_assertions, &(0..523).collect::<Vec<_>>(), 523);
         assert_eq!(quotiented.telemetry.unconditional_equality_facts, 696);
         assert_eq!(quotiented.telemetry.effective_equality_unions, 522);
         assert_eq!(quotiented.telemetry.quotiented_terms, 523);
@@ -1111,9 +1147,9 @@ mod tests {
     }
 
     #[test]
-    fn auto_term_limit_precedes_fact_scan() {
+    fn auto_term_limit_precedes_cached_fact_count() {
         reset_plan_heap_vector_constructions();
-        let outcome = Plan::build_auto(&[eq(0, 1)], &[], DEFAULT_MAX_TERMS + 1);
+        let outcome = build_auto(&[eq(0, 1)], &[], DEFAULT_MAX_TERMS + 1);
 
         assert_eq!(plan_heap_vector_constructions(), 0);
         assert_eq!(outcome.telemetry.unconditional_equality_facts, 0);
@@ -1133,6 +1169,67 @@ mod tests {
     }
 
     #[test]
+    fn auto_rejection_precedence_is_term_count_data_plan_then_canonical() {
+        let mut problem = bool_problem(&[eq(0, 2)], &[3]);
+        problem.root_equality_count = RootEqualityCount::OverLimit;
+
+        let term_limit = Plan::build_auto(&problem, DEFAULT_MAX_TERMS + 1);
+        assert_eq!(
+            term_limit.telemetry.rejection,
+            Some(AutoRejection::Plan(BuildFailure::TermLimit))
+        );
+        assert_eq!(term_limit.telemetry.unconditional_equality_facts, 0);
+
+        let count_limit = Plan::build_auto(&problem, 2);
+        assert_eq!(
+            count_limit.telemetry.rejection,
+            Some(AutoRejection::EqualityFactLimit)
+        );
+
+        problem.root_equality_count = RootEqualityCount::Exact(695);
+        let count_prefilter = Plan::build_auto(&problem, 2);
+        assert_eq!(
+            count_prefilter.telemetry.rejection,
+            Some(AutoRejection::PrefilterFacts)
+        );
+
+        problem.root_equality_count = RootEqualityCount::Exact(696);
+        let data_term = Plan::build_auto(&problem, 2);
+        assert_eq!(
+            data_term.telemetry.rejection,
+            Some(AutoRejection::InvalidDataTerm)
+        );
+
+        problem.data_terms.clear();
+        let plan = Plan::build_auto(&problem, 2);
+        assert_eq!(
+            plan.telemetry.rejection,
+            Some(AutoRejection::Plan(BuildFailure::InvalidTerm))
+        );
+
+        let mut canonical_problem = bool_problem(&[eq(0, 1)], &[]);
+        canonical_problem.root_equality_count = RootEqualityCount::Exact(696);
+        let canonical = Plan::build_auto_with_config(
+            &canonical_problem,
+            2,
+            AutoConfig {
+                min_unconditional_facts: 0,
+                min_effective_unions: 0,
+                min_quotiented_terms: 0,
+                reduction_threshold: 0,
+                limits: AutoLimits {
+                    max_canonical_nodes: 0,
+                    ..AutoLimits::default()
+                },
+            },
+        );
+        assert_eq!(
+            canonical.telemetry.rejection,
+            Some(AutoRejection::RawNodeLimit)
+        );
+    }
+
+    #[test]
     fn fact_prefilter_skips_allocating_plan_construction_for_valid_695_pairs() {
         let pair_count = AUTO_MIN_UNCONDITIONAL_FACTS - 1;
         let term_count = 2 * pair_count;
@@ -1148,7 +1245,7 @@ mod tests {
         drop(direct_plan);
 
         reset_plan_heap_vector_constructions();
-        let outcome = Plan::build_auto(&assertions, &data_terms, term_count);
+        let outcome = build_auto(&assertions, &data_terms, term_count);
 
         assert_eq!(plan_heap_vector_constructions(), 0);
         assert_eq!(outcome.telemetry.unconditional_equality_facts, pair_count);
@@ -1169,7 +1266,7 @@ mod tests {
 
     #[test]
     fn canonical_caps_reject_auto_without_returning_a_partial_plan() {
-        let outcome = Plan::build_auto_with_config(
+        let outcome = build_auto_with_config(
             &[bool_atom(0)],
             &[],
             1,

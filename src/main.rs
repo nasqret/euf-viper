@@ -145,10 +145,102 @@ enum BoolExpr {
     Ite(Box<BoolExpr>, Box<BoolExpr>, Box<BoolExpr>),
 }
 
+pub(crate) const ROOT_EQUALITY_COUNT_CAP: usize = 1_000_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RootEqualityCount {
+    Exact(usize),
+    OverLimit,
+}
+
+impl Default for RootEqualityCount {
+    fn default() -> Self {
+        Self::Exact(0)
+    }
+}
+
+impl RootEqualityCount {
+    fn add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Exact(left), Self::Exact(right)) => left
+                .checked_add(right)
+                .filter(|&count| count <= ROOT_EQUALITY_COUNT_CAP)
+                .map_or(Self::OverLimit, Self::Exact),
+            (Self::OverLimit, _) | (_, Self::OverLimit) => Self::OverLimit,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CountedBoolExpr {
+    expression: BoolExpr,
+    root_equality_count: RootEqualityCount,
+}
+
+impl CountedBoolExpr {
+    fn constant(value: bool) -> Self {
+        Self::without_root_equalities(BoolExpr::Const(value))
+    }
+
+    fn atom(atom: BoolAtomKey) -> Self {
+        let root_equality_count = match &atom {
+            BoolAtomKey::Eq(_, _) => RootEqualityCount::Exact(1),
+            BoolAtomKey::BoolTerm(_) => RootEqualityCount::Exact(0),
+        };
+        Self {
+            expression: BoolExpr::Atom(atom),
+            root_equality_count,
+        }
+    }
+
+    fn not(child: Self) -> Self {
+        Self::without_root_equalities(BoolExpr::Not(Box::new(child.expression)))
+    }
+
+    fn and(children: Vec<Self>) -> Self {
+        let root_equality_count = children
+            .iter()
+            .fold(RootEqualityCount::Exact(0), |count, child| {
+                count.add(child.root_equality_count)
+            });
+        Self {
+            expression: BoolExpr::And(children.into_iter().map(|child| child.expression).collect()),
+            root_equality_count,
+        }
+    }
+
+    fn or(children: Vec<Self>) -> Self {
+        Self::without_root_equalities(BoolExpr::Or(
+            children.into_iter().map(|child| child.expression).collect(),
+        ))
+    }
+
+    fn iff(children: Vec<Self>) -> Self {
+        Self::without_root_equalities(BoolExpr::Iff(
+            children.into_iter().map(|child| child.expression).collect(),
+        ))
+    }
+
+    fn ite(condition: Self, then_expression: Self, else_expression: Self) -> Self {
+        Self::without_root_equalities(BoolExpr::Ite(
+            Box::new(condition.expression),
+            Box::new(then_expression.expression),
+            Box::new(else_expression.expression),
+        ))
+    }
+
+    fn without_root_equalities(expression: BoolExpr) -> Self {
+        Self {
+            expression,
+            root_equality_count: RootEqualityCount::Exact(0),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum BindingValue {
     Term(TermId),
-    Bool(BoolExpr),
+    Bool(CountedBoolExpr),
 }
 
 struct ScopedBindings<'a, V> {
@@ -189,6 +281,7 @@ impl<V> Drop for ScopedBindings<'_, V> {
 #[derive(Debug, Clone)]
 struct BoolProblem {
     assertions: Vec<BoolExpr>,
+    root_equality_count: RootEqualityCount,
     unsupported: Vec<String>,
     true_term: TermId,
     false_term: TermId,
@@ -211,9 +304,10 @@ struct ParseCtx {
     diseqs: Vec<(TermId, TermId)>,
     unsupported: Vec<String>,
     bool_assertions: Vec<BoolExpr>,
+    bool_root_equality_count: RootEqualityCount,
     bool_unsupported: Vec<String>,
     fun_decls: HashMap<SymId, FunDecl>,
-    bool_definitions: HashMap<SymId, BoolExpr>,
+    bool_definitions: HashMap<SymId, CountedBoolExpr>,
     bool_value_terms: Option<(TermId, TermId)>,
     bool_data_terms: HashSet<TermId>,
     fresh_internal_counter: usize,
@@ -244,6 +338,7 @@ impl ParseCtx {
                 .expect("Boolean parsing initializes value terms");
             BoolProblem {
                 assertions: self.bool_assertions,
+                root_equality_count: self.bool_root_equality_count,
                 unsupported: self.bool_unsupported,
                 true_term,
                 false_term,
@@ -262,6 +357,13 @@ impl ParseCtx {
 
     fn add_unsupported(&mut self, msg: impl Into<String>) {
         self.unsupported.push(msg.into());
+    }
+
+    fn push_bool_assertion(&mut self, assertion: CountedBoolExpr) {
+        self.bool_root_equality_count = self
+            .bool_root_equality_count
+            .add(assertion.root_equality_count);
+        self.bool_assertions.push(assertion.expression);
     }
 
     fn parse_command(&mut self, sexp: &Sexp) -> Result<(), String> {
@@ -291,11 +393,12 @@ impl ParseCtx {
                 self.ensure_bool_value_terms();
                 let mut mixed_env = HashMap::default();
                 let aux_start = self.bool_assertions.len();
+                let count_start = self.bool_root_equality_count;
                 match self.parse_bool_expr(&items[1], &mut mixed_env) {
                     Ok(expr) => {
                         let preprocess_branch_intersections =
-                            should_preprocess_branch_intersections(&expr);
-                        self.bool_assertions.push(expr);
+                            should_preprocess_branch_intersections(&expr.expression);
+                        self.push_bool_assertion(expr);
                         let term_limit = env::var("EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT")
                             .ok()
                             .and_then(|value| value.parse().ok())
@@ -311,6 +414,7 @@ impl ParseCtx {
                     }
                     Err(err) => {
                         self.bool_assertions.truncate(aux_start);
+                        self.bool_root_equality_count = count_start;
                         self.bool_unsupported.push(err);
                         let mut env = HashMap::default();
                         self.collect_formula(&items[1], true, &mut env)?;
@@ -728,10 +832,10 @@ impl ParseCtx {
         &mut self,
         sexp: &Sexp,
         env: &mut HashMap<String, BindingValue>,
-    ) -> Result<BoolExpr, String> {
+    ) -> Result<CountedBoolExpr, String> {
         match sexp {
-            Sexp::Atom(atom) if atom == "true" => Ok(BoolExpr::Const(true)),
-            Sexp::Atom(atom) if atom == "false" => Ok(BoolExpr::Const(false)),
+            Sexp::Atom(atom) if atom == "true" => Ok(CountedBoolExpr::constant(true)),
+            Sexp::Atom(atom) if atom == "false" => Ok(CountedBoolExpr::constant(false)),
             Sexp::Atom(name) | Sexp::QuotedAtom(name) => match env.get(name).cloned() {
                 Some(BindingValue::Bool(expr)) => Ok(expr),
                 Some(BindingValue::Term(_)) => {
@@ -768,22 +872,20 @@ impl ParseCtx {
                         for child in &items[1..] {
                             children.push(self.parse_bool_expr(child, env)?);
                         }
-                        Ok(BoolExpr::And(children))
+                        Ok(CountedBoolExpr::and(children))
                     }
                     Some("or") => {
                         let mut children = Vec::with_capacity(items.len().saturating_sub(1));
                         for child in &items[1..] {
                             children.push(self.parse_bool_expr(child, env)?);
                         }
-                        Ok(BoolExpr::Or(children))
+                        Ok(CountedBoolExpr::or(children))
                     }
                     Some("not") => {
                         if items.len() != 2 {
                             Err("not with arity other than 1".to_owned())
                         } else {
-                            Ok(BoolExpr::Not(Box::new(
-                                self.parse_bool_expr(&items[1], env)?,
-                            )))
+                            Ok(CountedBoolExpr::not(self.parse_bool_expr(&items[1], env)?))
                         }
                     }
                     Some("=>") => {
@@ -798,9 +900,12 @@ impl ParseCtx {
                         let premise = if children.len() == 1 {
                             children.pop().expect("single premise")
                         } else {
-                            BoolExpr::And(children)
+                            CountedBoolExpr::and(children)
                         };
-                        Ok(BoolExpr::Or(vec![BoolExpr::Not(Box::new(premise)), last]))
+                        Ok(CountedBoolExpr::or(vec![
+                            CountedBoolExpr::not(premise),
+                            last,
+                        ]))
                     }
                     Some("xor") => {
                         if items.len() < 3 {
@@ -809,7 +914,7 @@ impl ParseCtx {
                         let mut expr = self.parse_bool_expr(&items[1], env)?;
                         for child in &items[2..] {
                             let rhs = self.parse_bool_expr(child, env)?;
-                            expr = BoolExpr::Not(Box::new(BoolExpr::Iff(vec![expr, rhs])));
+                            expr = CountedBoolExpr::not(CountedBoolExpr::iff(vec![expr, rhs]));
                         }
                         Ok(expr)
                     }
@@ -817,10 +922,10 @@ impl ParseCtx {
                         if items.len() != 4 {
                             Err("Boolean ite with arity other than 3".to_owned())
                         } else {
-                            Ok(BoolExpr::Ite(
-                                Box::new(self.parse_bool_expr(&items[1], env)?),
-                                Box::new(self.parse_bool_expr(&items[2], env)?),
-                                Box::new(self.parse_bool_expr(&items[3], env)?),
+                            Ok(CountedBoolExpr::ite(
+                                self.parse_bool_expr(&items[1], env)?,
+                                self.parse_bool_expr(&items[2], env)?,
+                                self.parse_bool_expr(&items[3], env)?,
                             ))
                         }
                     }
@@ -864,7 +969,7 @@ impl ParseCtx {
         &mut self,
         args: &[Sexp],
         env: &mut HashMap<String, BindingValue>,
-    ) -> Result<BoolExpr, String> {
+    ) -> Result<CountedBoolExpr, String> {
         if args.len() < 2 {
             return Err("equality with fewer than two arguments".to_owned());
         }
@@ -879,12 +984,12 @@ impl ParseCtx {
                     let BindingValue::Term(term) = value else {
                         return Err("mixed Bool/data equality is not supported".to_owned());
                     };
-                    conjuncts.push(BoolExpr::Atom(BoolAtomKey::Eq(*first, *term)));
+                    conjuncts.push(CountedBoolExpr::atom(BoolAtomKey::Eq(*first, *term)));
                 }
                 Ok(if conjuncts.len() == 1 {
                     conjuncts.pop().expect("single equality")
                 } else {
-                    BoolExpr::And(conjuncts)
+                    CountedBoolExpr::and(conjuncts)
                 })
             }
             BindingValue::Bool(first) => {
@@ -896,7 +1001,7 @@ impl ParseCtx {
                     };
                     exprs.push(expr.clone());
                 }
-                Ok(BoolExpr::Iff(exprs))
+                Ok(CountedBoolExpr::iff(exprs))
             }
         }
     }
@@ -905,9 +1010,9 @@ impl ParseCtx {
         &mut self,
         args: &[Sexp],
         env: &mut HashMap<String, BindingValue>,
-    ) -> Result<BoolExpr, String> {
+    ) -> Result<CountedBoolExpr, String> {
         if args.len() < 2 {
-            return Ok(BoolExpr::Const(true));
+            return Ok(CountedBoolExpr::constant(true));
         }
         let mut values = Vec::with_capacity(args.len());
         for arg in args {
@@ -925,12 +1030,12 @@ impl ParseCtx {
                 let mut conjuncts = Vec::new();
                 for i in 0..terms.len() {
                     for j in (i + 1)..terms.len() {
-                        conjuncts.push(BoolExpr::Not(Box::new(BoolExpr::Atom(BoolAtomKey::Eq(
-                            terms[i], terms[j],
-                        )))));
+                        conjuncts.push(CountedBoolExpr::not(CountedBoolExpr::atom(
+                            BoolAtomKey::Eq(terms[i], terms[j]),
+                        )));
                     }
                 }
-                Ok(BoolExpr::And(conjuncts))
+                Ok(CountedBoolExpr::and(conjuncts))
             }
             BindingValue::Bool(_) => {
                 let mut exprs = Vec::with_capacity(values.len());
@@ -941,9 +1046,9 @@ impl ParseCtx {
                     exprs.push(expr);
                 }
                 if exprs.len() == 2 {
-                    Ok(BoolExpr::Not(Box::new(BoolExpr::Iff(exprs))))
+                    Ok(CountedBoolExpr::not(CountedBoolExpr::iff(exprs)))
                 } else {
-                    Ok(BoolExpr::Const(false))
+                    Ok(CountedBoolExpr::constant(false))
                 }
             }
         }
@@ -955,8 +1060,12 @@ impl ParseCtx {
         env: &mut HashMap<String, BindingValue>,
     ) -> Result<BindingValue, String> {
         match sexp {
-            Sexp::Atom(atom) if atom == "true" => Ok(BindingValue::Bool(BoolExpr::Const(true))),
-            Sexp::Atom(atom) if atom == "false" => Ok(BindingValue::Bool(BoolExpr::Const(false))),
+            Sexp::Atom(atom) if atom == "true" => {
+                Ok(BindingValue::Bool(CountedBoolExpr::constant(true)))
+            }
+            Sexp::Atom(atom) if atom == "false" => {
+                Ok(BindingValue::Bool(CountedBoolExpr::constant(false)))
+            }
             Sexp::Atom(atom) | Sexp::QuotedAtom(atom) => {
                 if let Some(value) = env.get(atom).cloned() {
                     return Ok(value);
@@ -1074,7 +1183,7 @@ impl ParseCtx {
                     if items.len() != 4 {
                         return Err("term-level ite with arity other than 3".to_owned());
                     }
-                    let cond = self.parse_bool_expr(&items[1], env)?;
+                    let condition = self.parse_bool_expr(&items[1], env)?;
                     let then_term = self.parse_typed_term(&items[2], env)?;
                     let else_term = self.parse_typed_term(&items[3], env)?;
                     if then_term == else_term {
@@ -1082,13 +1191,13 @@ impl ParseCtx {
                     }
 
                     let ite_term = self.fresh_internal_term("ite");
-                    let then_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, then_term));
-                    let else_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, else_term));
-                    self.bool_assertions.push(BoolExpr::Or(vec![
-                        BoolExpr::Not(Box::new(cond.clone())),
+                    let then_eq = CountedBoolExpr::atom(BoolAtomKey::Eq(ite_term, then_term));
+                    let else_eq = CountedBoolExpr::atom(BoolAtomKey::Eq(ite_term, else_term));
+                    self.push_bool_assertion(CountedBoolExpr::or(vec![
+                        CountedBoolExpr::not(condition.clone()),
                         then_eq,
                     ]));
-                    self.bool_assertions.push(BoolExpr::Or(vec![cond, else_eq]));
+                    self.push_bool_assertion(CountedBoolExpr::or(vec![condition, else_eq]));
                     return Ok(ite_term);
                 }
                 let fun = self.symbols.intern(head);
@@ -1156,23 +1265,29 @@ impl ParseCtx {
         }
     }
 
-    fn bool_app_expr(&mut self, fun: SymId, args: Vec<TermId>) -> BoolExpr {
+    fn bool_app_expr(&mut self, fun: SymId, args: Vec<TermId>) -> CountedBoolExpr {
         let term = self.arena.intern(fun, args);
-        BoolExpr::Atom(BoolAtomKey::BoolTerm(term))
+        CountedBoolExpr::atom(BoolAtomKey::BoolTerm(term))
     }
 
-    fn materialize_bool_expr(&mut self, expr: BoolExpr) -> TermId {
+    fn materialize_bool_expr(&mut self, expr: CountedBoolExpr) -> TermId {
         self.ensure_bool_value_terms();
         let term = match expr {
-            BoolExpr::Const(value) => {
+            CountedBoolExpr {
+                expression: BoolExpr::Const(value),
+                ..
+            } => {
                 let (true_term, false_term) = self.ensure_bool_value_terms();
                 if value { true_term } else { false_term }
             }
-            BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => term,
+            CountedBoolExpr {
+                expression: BoolExpr::Atom(BoolAtomKey::BoolTerm(term)),
+                ..
+            } => term,
             expr => {
                 let term = self.fresh_internal_term("bool_expr");
-                self.bool_assertions.push(BoolExpr::Iff(vec![
-                    BoolExpr::Atom(BoolAtomKey::BoolTerm(term)),
+                self.push_bool_assertion(CountedBoolExpr::iff(vec![
+                    CountedBoolExpr::atom(BoolAtomKey::BoolTerm(term)),
                     expr,
                 ]));
                 term
@@ -5485,8 +5600,7 @@ fn solve_problem_with_options_and_eq_abstraction(
 }
 
 fn build_unconditional_quotient_plan(
-    assertions: &[BoolExpr],
-    data_terms: &[TermId],
+    bool_problem: &BoolProblem,
     term_count: usize,
     mode: unconditional_leaf_quotient::Mode,
 ) -> (Option<unconditional_leaf_quotient::Plan>, bool) {
@@ -5499,8 +5613,7 @@ fn build_unconditional_quotient_plan(
 
     if mode == unconditional_leaf_quotient::Mode::Auto {
         let start = Instant::now();
-        let outcome =
-            unconditional_leaf_quotient::Plan::build_auto(assertions, data_terms, term_count);
+        let outcome = unconditional_leaf_quotient::Plan::build_auto(bool_problem, term_count);
         let elapsed_ns = start.elapsed().as_nanos();
         let (plan, telemetry) = outcome.into_parts();
         profile_measurement(
@@ -5547,7 +5660,7 @@ fn build_unconditional_quotient_plan(
     }
 
     let start = Instant::now();
-    let result = unconditional_leaf_quotient::Plan::build(assertions, term_count);
+    let result = unconditional_leaf_quotient::Plan::build(&bool_problem.assertions, term_count);
     let count = result
         .as_ref()
         .map_or(0, unconditional_leaf_quotient::Plan::supporting_fact_count);
@@ -5650,8 +5763,7 @@ fn solve_bool_problem(
     eq_abstraction_mode: EqAbstractionMode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let (quotient_plan, quotient_active) = build_unconditional_quotient_plan(
-        &bool_problem.assertions,
-        &bool_problem.data_terms,
+        bool_problem,
         arena.terms.len(),
         root_cnf_options.unconditional_quotient,
     );
@@ -6655,6 +6767,80 @@ fn main() {
 mod tests {
     use super::*;
 
+    fn assert_cached_root_equality_count_parity(bool_problem: &BoolProblem) {
+        assert_eq!(
+            bool_problem.root_equality_count,
+            unconditional_leaf_quotient::reference_root_equality_count(&bool_problem.assertions)
+        );
+    }
+
+    #[test]
+    fn counted_bool_expr_matches_reference_for_every_constructor() {
+        let eq = || CountedBoolExpr::atom(BoolAtomKey::Eq(0, 1));
+        let bool_atom = || CountedBoolExpr::atom(BoolAtomKey::BoolTerm(0));
+        let cases = vec![
+            (CountedBoolExpr::constant(true), 0),
+            (bool_atom(), 0),
+            (eq(), 1),
+            (CountedBoolExpr::not(eq()), 0),
+            (
+                CountedBoolExpr::and(vec![
+                    eq(),
+                    CountedBoolExpr::and(vec![eq(), bool_atom()]),
+                    CountedBoolExpr::or(vec![eq()]),
+                ]),
+                2,
+            ),
+            (
+                CountedBoolExpr::or(vec![eq(), CountedBoolExpr::and(vec![eq(), eq()])]),
+                0,
+            ),
+            (
+                CountedBoolExpr::iff(vec![eq(), CountedBoolExpr::and(vec![eq()])]),
+                0,
+            ),
+            (
+                CountedBoolExpr::ite(
+                    eq(),
+                    CountedBoolExpr::and(vec![eq()]),
+                    CountedBoolExpr::not(eq()),
+                ),
+                0,
+            ),
+        ];
+
+        for (counted, expected) in cases {
+            assert_eq!(
+                counted.root_equality_count,
+                RootEqualityCount::Exact(expected)
+            );
+            assert_eq!(
+                counted.root_equality_count,
+                unconditional_leaf_quotient::reference_root_equality_count(&[counted.expression])
+            );
+        }
+    }
+
+    #[test]
+    fn root_equality_count_caps_without_rejecting_parser_progress() {
+        assert_eq!(
+            RootEqualityCount::Exact(ROOT_EQUALITY_COUNT_CAP - 1).add(RootEqualityCount::Exact(1)),
+            RootEqualityCount::Exact(ROOT_EQUALITY_COUNT_CAP)
+        );
+        assert_eq!(
+            RootEqualityCount::Exact(ROOT_EQUALITY_COUNT_CAP).add(RootEqualityCount::Exact(1)),
+            RootEqualityCount::OverLimit
+        );
+
+        let mut ctx = ParseCtx::new(true);
+        ctx.bool_root_equality_count = RootEqualityCount::Exact(ROOT_EQUALITY_COUNT_CAP);
+        ctx.parse_command(&parse_one_sexp("(assert (= a b))"))
+            .unwrap();
+        assert_eq!(ctx.bool_root_equality_count, RootEqualityCount::OverLimit);
+        assert_eq!(ctx.bool_assertions.len(), 1);
+        assert!(ctx.bool_unsupported.is_empty());
+    }
+
     #[test]
     fn structural_router_uses_only_bounded_lexical_features() {
         assert!(structural_router_prefers_euf(
@@ -6993,6 +7179,25 @@ mod tests {
         term_count: usize,
         options: RootCnfOptions,
     ) -> CnfProblem {
+        let bool_problem = BoolProblem {
+            assertions: assertions.to_vec(),
+            root_equality_count: unconditional_leaf_quotient::reference_root_equality_count(
+                assertions,
+            ),
+            unsupported: Vec::new(),
+            true_term: 0,
+            false_term: 0,
+            data_terms: data_terms.to_vec(),
+        };
+        encode_bool_problem_with_quotient(&bool_problem, term_count, options)
+    }
+
+    fn encode_bool_problem_with_quotient(
+        bool_problem: &BoolProblem,
+        term_count: usize,
+        options: RootCnfOptions,
+    ) -> CnfProblem {
+        let assertions = &bool_problem.assertions;
         let (plan, active) = match options.unconditional_quotient {
             unconditional_leaf_quotient::Mode::Off => (None, false),
             unconditional_leaf_quotient::Mode::Shadow => (
@@ -7004,9 +7209,8 @@ mod tests {
                 true,
             ),
             unconditional_leaf_quotient::Mode::Auto => {
-                let outcome = unconditional_leaf_quotient::Plan::build_auto(
-                    assertions, data_terms, term_count,
-                );
+                let outcome =
+                    unconditional_leaf_quotient::Plan::build_auto(bool_problem, term_count);
                 let (plan, telemetry) = outcome.into_parts();
                 (plan, telemetry.admitted)
             }
@@ -7223,6 +7427,74 @@ mod tests {
     }
 
     #[test]
+    fn unconditional_quotient_cached_rejections_are_byte_identical_to_off() {
+        let problems = [
+            BoolProblem {
+                assertions: vec![
+                    BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+                    BoolExpr::Atom(BoolAtomKey::BoolTerm(0)),
+                ],
+                root_equality_count: RootEqualityCount::OverLimit,
+                unsupported: Vec::new(),
+                true_term: 0,
+                false_term: 1,
+                data_terms: Vec::new(),
+            },
+            BoolProblem {
+                assertions: vec![
+                    BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
+                    BoolExpr::Atom(BoolAtomKey::BoolTerm(0)),
+                ],
+                root_equality_count: RootEqualityCount::Exact(696),
+                unsupported: Vec::new(),
+                true_term: 0,
+                false_term: 1,
+                data_terms: vec![2],
+            },
+            BoolProblem {
+                assertions: vec![
+                    BoolExpr::Atom(BoolAtomKey::Eq(0, 2)),
+                    BoolExpr::Atom(BoolAtomKey::BoolTerm(0)),
+                ],
+                root_equality_count: RootEqualityCount::Exact(696),
+                unsupported: Vec::new(),
+                true_term: 0,
+                false_term: 1,
+                data_terms: Vec::new(),
+            },
+        ];
+
+        for bool_problem in &problems {
+            let outcome = unconditional_leaf_quotient::Plan::build_auto(bool_problem, 2);
+            assert!(!outcome.telemetry.admitted);
+            assert!(outcome.telemetry.rejection.is_some());
+            for (direct_root_cnf, direct_negated_root) in
+                [(false, false), (true, false), (true, true)]
+            {
+                let off = encode_bool_problem_with_quotient(
+                    bool_problem,
+                    2,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Off,
+                    ),
+                );
+                let auto = encode_bool_problem_with_quotient(
+                    bool_problem,
+                    2,
+                    quotient_root_options(
+                        direct_root_cnf,
+                        direct_negated_root,
+                        unconditional_leaf_quotient::Mode::Auto,
+                    ),
+                );
+                assert_cnf_byte_identical(&auto, &off);
+            }
+        }
+    }
+
+    #[test]
     fn unconditional_quotient_auto_boundary_changes_only_at_exact_1000() {
         for (pair_count, admitted) in [(999, false), (1_000, true)] {
             let (mut assertions, data_terms) = generated_auto_pairs(pair_count);
@@ -7320,6 +7592,7 @@ mod tests {
 
         let bool_problem = BoolProblem {
             assertions: assertions.clone(),
+            root_equality_count: RootEqualityCount::Exact(1),
             unsupported: Vec::new(),
             true_term: 0,
             false_term: 2,
@@ -7363,6 +7636,7 @@ mod tests {
                 BoolExpr::Atom(BoolAtomKey::Eq(0, 1)),
                 BoolExpr::Or(vec![BoolExpr::Atom(BoolAtomKey::BoolTerm(1))]),
             ],
+            root_equality_count: RootEqualityCount::Exact(1),
             unsupported: Vec::new(),
             true_term: 0,
             false_term: 2,
@@ -7393,6 +7667,7 @@ mod tests {
         assertions.push(BoolExpr::Atom(BoolAtomKey::BoolTerm(1)));
         let bool_problem = BoolProblem {
             assertions,
+            root_equality_count: RootEqualityCount::Exact(1_000),
             unsupported: Vec::new(),
             true_term: 0,
             false_term: 2,
@@ -7408,11 +7683,8 @@ mod tests {
             interned: HashMap::default(),
             apps: Vec::new(),
         };
-        let outcome = unconditional_leaf_quotient::Plan::build_auto(
-            &bool_problem.assertions,
-            &bool_problem.data_terms,
-            arena.terms.len(),
-        );
+        let outcome =
+            unconditional_leaf_quotient::Plan::build_auto(&bool_problem, arena.terms.len());
         assert!(outcome.telemetry.admitted);
         assert_eq!(outcome.telemetry.reduction, Some(1_000));
         let (plan, _) = outcome.into_parts();
@@ -8276,12 +8548,13 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                result,
+                result.expression,
                 BoolExpr::And(vec![
                     BoolExpr::Atom(BoolAtomKey::Eq(a, a)),
                     BoolExpr::Atom(BoolAtomKey::Eq(a, b)),
                 ])
             );
+            assert_eq!(result.root_equality_count, RootEqualityCount::Exact(2));
             assert!(env.is_empty());
         }
     }
@@ -8313,7 +8586,7 @@ mod tests {
             mixed_env.insert("x".to_owned(), BindingValue::Term(original));
             mixed_env.insert(
                 "keep".to_owned(),
-                BindingValue::Bool(BoolExpr::Const(false)),
+                BindingValue::Bool(CountedBoolExpr::constant(false)),
             );
             let mixed_expression = parse_one_sexp(
                 "(let ((x shadow) (keep true) (outer_new true))
@@ -8329,11 +8602,138 @@ mod tests {
             ));
             assert!(matches!(
                 mixed_env.get("keep"),
-                Some(BindingValue::Bool(BoolExpr::Const(false)))
+                Some(BindingValue::Bool(CountedBoolExpr {
+                    expression: BoolExpr::Const(false),
+                    ..
+                }))
             ));
             assert!(!mixed_env.contains_key("outer_new"));
             assert!(!mixed_env.contains_key("inner_new"));
             assert_eq!(mixed_env.len(), 2);
+        }
+    }
+
+    #[test]
+    fn cached_root_equality_count_expands_definitions_and_let_aliases() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (define-fun edge () Bool (= a b))
+            (define-fun pair () Bool (and edge (= b c)))
+            (assert
+              (and pair (pair)
+                (let ((x edge) (y pair)) (and x y))))
+            (check-sat)
+        ";
+
+        for mode in [ScopedLetMode::Off, ScopedLetMode::On] {
+            let problem = parse_problem_with_scoped_let_mode(input, mode).unwrap();
+            let bool_problem = problem.bool_problem.as_ref().unwrap();
+            assert_eq!(
+                bool_problem.root_equality_count,
+                RootEqualityCount::Exact(7)
+            );
+            assert_cached_root_equality_count_parity(bool_problem);
+        }
+    }
+
+    #[test]
+    fn cached_root_equality_count_includes_auxiliary_assertions_by_recurrence() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun f (Bool) U)
+            (assert (= (ite p a b) c))
+            (assert (= (f (and (= a b) (= b c))) c))
+            (check-sat)
+        ";
+
+        let problem = parse_problem_with_scoped_let_mode(input, ScopedLetMode::On).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert_eq!(bool_problem.assertions.len(), 5);
+        assert!(matches!(bool_problem.assertions[0], BoolExpr::Or(_)));
+        assert!(matches!(bool_problem.assertions[1], BoolExpr::Or(_)));
+        assert!(matches!(bool_problem.assertions[2], BoolExpr::Atom(_)));
+        assert!(matches!(bool_problem.assertions[3], BoolExpr::Iff(_)));
+        assert!(matches!(bool_problem.assertions[4], BoolExpr::Atom(_)));
+        assert_eq!(
+            bool_problem.root_equality_count,
+            RootEqualityCount::Exact(2)
+        );
+        assert_cached_root_equality_count_parity(bool_problem);
+    }
+
+    #[test]
+    fn failed_assertion_rolls_back_auxiliary_assertions_and_cached_count() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (assert (= a b))
+            (assert (and (= (ite p a b) c) (not)))
+            (check-sat)
+        ";
+
+        let problem = parse_problem_with_scoped_let_mode(input, ScopedLetMode::On).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert_eq!(bool_problem.assertions.len(), 1);
+        assert_eq!(
+            bool_problem.root_equality_count,
+            RootEqualityCount::Exact(1)
+        );
+        assert!(!bool_problem.unsupported.is_empty());
+        assert_cached_root_equality_count_parity(bool_problem);
+    }
+
+    #[test]
+    fn parser_cached_count_preserves_695_696_and_999_1000_auto_boundaries() {
+        for (pair_count, expected_rejection, admitted) in [
+            (
+                695,
+                Some(unconditional_leaf_quotient::AutoRejection::PrefilterFacts),
+                false,
+            ),
+            (
+                696,
+                Some(unconditional_leaf_quotient::AutoRejection::BelowThreshold),
+                false,
+            ),
+            (
+                999,
+                Some(unconditional_leaf_quotient::AutoRejection::BelowThreshold),
+                false,
+            ),
+            (1_000, None, true),
+        ] {
+            let mut input = String::from("(set-logic QF_UF)\n");
+            for pair in 0..pair_count {
+                input.push_str(&format!("(assert (= a{pair} b{pair}))\n"));
+            }
+            input.push_str("(check-sat)\n");
+
+            let problem = parse_problem_with_scoped_let_mode(&input, ScopedLetMode::On).unwrap();
+            let term_count = problem.arena.terms.len();
+            let mut bool_problem = problem.bool_problem.unwrap();
+            assert_eq!(
+                bool_problem.root_equality_count,
+                RootEqualityCount::Exact(pair_count)
+            );
+            assert_cached_root_equality_count_parity(&bool_problem);
+            bool_problem.data_terms = (0..term_count).collect();
+
+            let outcome = unconditional_leaf_quotient::Plan::build_auto(&bool_problem, term_count);
+            assert_eq!(outcome.telemetry.rejection, expected_rejection);
+            assert_eq!(outcome.telemetry.admitted, admitted);
         }
     }
 

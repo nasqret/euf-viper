@@ -7,6 +7,9 @@ use super::{
     normalized_pair,
 };
 
+#[cfg(test)]
+use super::RootEqualityCount;
+
 const DENSITY_SCALE: u128 = 1_000_000;
 const GUARDED_CLIQUE_SEED_LIMIT: usize = 32;
 const DEFAULT_PERMUTATION_CLIQUE_LIMIT: usize = 4_096;
@@ -729,6 +732,7 @@ mod tests {
             &arena,
             &BoolProblem {
                 assertions,
+                root_equality_count: RootEqualityCount::Exact(0),
                 unsupported: Vec::new(),
                 true_term,
                 false_term,
@@ -906,6 +910,7 @@ mod tests {
                 guarded(0, 2, 3, 5),
                 guarded(1, 2, 4, 5),
             ])],
+            root_equality_count: RootEqualityCount::Exact(0),
             unsupported: Vec::new(),
             true_term: 6,
             false_term: 7,
@@ -962,6 +967,7 @@ mod tests {
         let mandatory_disequalities = [(3, 4), (3, 5), (4, 5)].into_iter().collect::<HashSet<_>>();
         let bool_problem = BoolProblem {
             assertions: Vec::new(),
+            root_equality_count: RootEqualityCount::Exact(0),
             unsupported: Vec::new(),
             true_term: 6,
             false_term: 7,
