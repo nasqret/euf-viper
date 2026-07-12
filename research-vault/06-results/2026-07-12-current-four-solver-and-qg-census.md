@@ -58,11 +58,15 @@ orbits, 122 rejected pattern families, and 10 duplicate-pattern cases. All 19
 eligible abstentions retain a source predicate not handled by the reduction.
 `production_routing=false`; no record can answer SMT or change solver coverage.
 
-## Active Follow-Ups
+## Round Disposition
 
-- Bounded Ackermann passes Linux soundness `144317`; corrected causal timing is
-  `144631`. Job `144371` is invalid because its old wrapper omitted mode vars.
-- Fused quotient selection is blocked until off-mode parsing has no measured
-  regression and full rejection telemetry/result parity is restored.
-- The streaming parser remains blocked until its paired evidence harness closes
-  output-path and exact-byte provenance findings.
+- Bounded Ackermann passes Linux soundness `144317`, but corrected causal gate
+  `144631` loses one solve and has `0.9894x` all-case speed. It is rejected.
+  Job `144371` remains invalid because its old wrapper omitted mode variables.
+- Fused quotient selection is parked at research commit `eae27d0`. All 136 Rust
+  tests pass, but paired off-mode timing does not demonstrate a win.
+- The paired exact-byte parser evidence harness is parked at research commit
+  `58f015b`; 49 tests and 45 subtests pass. It is unmerged and no 7,503-file
+  campaign was launched.
+- All superseded pending `euf-viper` WMI jobs were cancelled. No solver campaign
+  remains active.

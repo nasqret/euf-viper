@@ -103,19 +103,18 @@ baseline-only instances, ten reverse timeout samples, and `0.9970x` common
 total plus `0.9940x` geometric speed violate the contract. Its first successor,
 an earlier exact prefilter, is neutral on hot-320 and has not earned a full gate.
 
-The parser track is moving beyond borrowed atoms. The active candidate parses
-events directly into the retained semantic IR, with the existing tree parser
-as both fallback and shadow oracle. WMI soundness and independent adversarial
-review pass; a parse-only 7,503-file shadow campaign remains mandatory before
-timing. This is a systems mechanism, not the claimed solver novelty, but
-Yices2 cannot be challenged while two temporary syntax representations
-dominate large easy inputs. The current harness is still fail-closed pending
-expected-manifest, opened-byte, and atomic-checkpoint audit repairs.
+The parser track moved beyond borrowed atoms. Research checkpoint `58f015b`
+parses events into the retained semantic IR, with the tree parser as fallback
+and shadow oracle, and hardens exact opened-byte and atomic paired evidence. Its
+49 tests and 45 subtests pass. The track is parked unmerged because it has no
+7,503-file shadow or performance campaign; both remain mandatory if resumed.
 
 Forced quotient plus full Ackermann completion exposes a second representation
 boundary. It accelerates six selected Goel formulas by `19.27x` geometrically,
 but an unguarded mixed run reaches 10,136,258 Ackermann clauses and OOMs. The
-successor is eligible for timing only after pre-clone caps cover base CNF,
-applications, arity, literal slots, pair examinations, and fill work. Projected
-component-local class labels reduce completion watches, but exact term sorts
-must be retained before that representation can be implemented soundly.
+bounded successor passes soundness, but corrected causal gate `144631` loses one
+of 32 solves and regresses all-case time to `0.9894x`; it is rejected. Fused
+quotient census checkpoint `eae27d0` passes 136 Rust tests but does not show an
+off-mode speed win. Projected component-local class labels reduce completion
+watches, but exact term sorts must be retained before that representation can
+be implemented soundly.

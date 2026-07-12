@@ -323,3 +323,14 @@ errors. Pairwise common-solve results are:
 
 A value above one favors euf-viper. The result establishes an overall cvc5 win
 and a Z3 fast-head win, but rejects overall superiority over Z3 or Yices2.
+
+## Bounded Ackermann Rejection
+
+Corrected causal job `144631` compares full Ackermann `auto` against
+`leaf-budget` while holding quotient mode at `auto`. Across 32 instances, three
+repeats, and a 60-second timeout, baseline/candidate coverage is 32/31. The
+candidate is `1.8056x` faster by common aggregate and `2.2359x` geometrically,
+but loses `frogs.4.prop1_ab_br_max`; timeout-charged all-case speed is only
+`0.9894x`. With zero wrong answers or execution errors, this is a performance
+and coverage rejection rather than a correctness failure. Job `144371` is
+excluded because its wrapper omitted the causal mode environments.

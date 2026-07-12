@@ -562,3 +562,11 @@
 - Bounded Ackermann `7bf410b` passes Linux soundness `144317`. Discard timing
   `144371`: its old wrapper omitted causal mode variables. Corrected rerun is
   `144631` with quotient `auto` in both arms and candidate `leaf-budget`.
+- Corrected job `144631` rejects bounded Ackermann: baseline/candidate coverage
+  is 32/31, the candidate loses `frogs.4.prop1_ab_br_max`, and timeout-charged
+  all-case speed is `0.9894x`. Its favorable `1.8056x` common aggregate and
+  `2.2359x` geometric ratios cannot override the coverage loss.
+- The closed research checkpoints are parser evidence harness `58f015b` (49
+  tests plus 45 subtests) and fused quotient census `eae27d0` (136 Rust tests).
+  Neither is merged or promoted. No `euf-viper` WMI jobs remain active after
+  cancelling eleven superseded pending jobs.

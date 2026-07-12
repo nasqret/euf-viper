@@ -90,6 +90,25 @@ A production candidate must reject before cloning unless all caps pass:
 The transaction must preserve existing CNF and finite-domain axioms. It may be
 timed only after soundness, backend-route tests, and independent review pass.
 
+Bounded candidate `7bf410b` passes 138 Linux tests in job `144317`. Corrected
+causal gate `144631` holds quotient mode at `auto` in both arms and changes only
+full Ackermann mode from `auto` to `leaf-budget`. It runs 32 instances, three
+repeats, and a 60-second timeout:
+
+| Metric | Baseline | Candidate or ratio |
+| --- | ---: | ---: |
+| Correct instances | 32 | 31 |
+| Common-total time | 129.071s | 71.484s (`1.8056x`) |
+| Geometric speed | - | `2.2359x` |
+| All-case total time | 130.160s | 131.550s (`0.9894x`) |
+| Baseline-only instances | 1 | - |
+| Wrong answers / errors | 0 | 0 |
+
+The lost instance is `frogs.4.prop1_ab_br_max`; `frogs.1` also regresses from
+about 0.484s to 47.636s. Coverage and all-case performance therefore reject
+the route despite the favorable common-only ratios. Invalid job `144371` is
+not evidence because its wrapper omitted the causal child environments.
+
 ## Class-Label Successor
 
 Polarity-aware component-local class labels project 2.57--6.79x fewer

@@ -139,11 +139,13 @@ front tier of a coverage-oriented portfolio.
 - [x] Measure early quotient prefilter `550853b` against its direct parent on
   hot-320 (`144222`). Equal coverage and `0.9998x` total time are neutral; do
   not launch a full successor gate without stronger causal evidence.
-- [ ] Finish and independently audit the bounded Ackermann successor. It must
-  bound base CNF and pair/fill work before clone allocation, preserve backend
-  routing, and pass soundness before a measured 32-case causal gate.
-- [ ] Finish the exact opened-byte streaming-parser harness and complete a
-  7,503-file shadow-equivalence campaign before any parser timing gate.
+- [x] Finish and independently audit the bounded Ackermann successor. Commit
+  `7bf410b` passes 138 Linux tests in `144317`; corrected 32-case causal gate
+  `144631` then rejects it for a lost solve and `0.9894x` all-case speed.
+- [x] Close the parser track for this round at research checkpoint `58f015b`.
+  Its exact-byte, paired, atomic evidence harness passes 49 tests and 45
+  subtests. It remains unmerged; a 7,503-file shadow campaign is mandatory if
+  the track is resumed.
 - [x] Finish the source-bound qg wrapper and exact qg7 census `144349`.
   All 418 bindings verify; 31 cases are eligible, with 12 shadow witnesses,
   19 abstentions, and zero refutations. Reject it as a production UNSAT engine.
@@ -154,8 +156,10 @@ front tier of a coverage-oriented portfolio.
   `144328`/`144329`/`144330`: euf-viper 7,408, Z3 7,450, cvc5 7,373, Yices2
   7,490. Euf-viper beats cvc5 overall and Z3 geometrically on common solves,
   but loses Z3 aggregate/coverage and trails Yices2 decisively.
-- [ ] Adjudicate bounded Ackermann on corrected 32-case causal job `144631`.
-  Discard `144371`, whose old wrapper omitted quotient/leaf-budget child vars.
+- [x] Adjudicate bounded Ackermann on corrected 32-case causal job `144631`.
+  Baseline/candidate coverage is `32/31`; common speed is `1.8056x` aggregate
+  and `2.2359x` geometric, but the candidate loses `frogs.4.prop1_ab_br_max`
+  and all-case speed is `0.9894x`. Reject. Discard invalid job `144371`.
 
 ## Acceptance Criteria For A Superiority Claim
 

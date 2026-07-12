@@ -734,6 +734,24 @@
   tests and binary SHA-256 `c6d6080d...5605a`. Timing job `144371` is invalid
   because its old harness omitted quotient and leaf-budget child environments;
   corrected causal rerun `144631` uses the newer recorded-environment harness.
+- Corrected causal gate `144631` ran 32 instances, three repeats, and a 60-second
+  timeout with quotient `auto` in both arms. Baseline full Ackermann `auto`
+  solves 32; candidate `leaf-budget` solves 31 and loses
+  `frogs.4.prop1_ab_br_max`. On 31 common solves the candidate is `1.8056x`
+  faster by aggregate and `2.2359x` geometrically, but timeout-charged all-case
+  speed is `0.9894x` (`130.1600s` versus `131.5499s`). There are zero wrong
+  answers or execution errors. The candidate is rejected and remains off.
+- Archived the corrected JSON/CSV and logs under ignored directory
+  `results/live-2026-07-12/ack-144631/`; JSON SHA-256 is
+  `207f54690201516a8650070c310c04e49db12e8d90748e638874fe179f8f6c83`.
+- Preserved the paired exact-byte parser harness at research commit `58f015b`
+  after 49 tests and 45 subtests passed. Preserved the mode-gated quotient
+  census at `eae27d0` after all 136 Rust tests passed. Neither candidate is
+  merged: the parser has no corpus performance gate, and the quotient follow-up
+  did not demonstrate an off-mode speed win.
+- Cancelled eleven superseded pending `euf-viper` WMI jobs from earlier failed
+  or replaced chains. The final queue contains no `euf-viper` job; unrelated
+  `sg-lean` and `echo-exp1` workloads were left untouched.
 
 ## Next Entry Template
 

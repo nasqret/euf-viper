@@ -222,16 +222,19 @@ Euf-viper is `1.5666x` faster geometrically than Z3 on 7,375 common solves,
 but only `0.7467x` by common aggregate time and has 42 fewer total solves. It
 beats cvc5 overall. Yices2 remains the clear leader.
 
-The active research queue is fail-closed:
+The 2026-07-12 research round is wrapped and fail-closed:
 
-- bounded quotient-plus-Ackermann completion awaits independent audit before
-  WMI soundness or timing;
-- the one-pass parser awaits exact opened-byte and atomic-checkpoint harness
-  clearance before a 7,503-file shadow campaign;
+- corrected bounded quotient-plus-Ackermann gate `144631` loses one of 32
+  solves and regresses timeout-charged all-case time to `0.9894x`; it is
+  rejected and remains default-off;
+- the paired parser evidence harness is preserved on research branch
+  `perf-exact-stream-parser` at `58f015b`, with 49 tests and 45 subtests passing,
+  but has not earned a corpus campaign or merge;
+- fused quotient census branch `perf-exact-leaf-prefilter` is preserved at
+  `eae27d0`, with 136 Rust tests passing, but its off-mode timing does not show
+  a performance win;
 - source-bound qg7 census `144349` found zero shadow refutations and remains
-  test-only;
-- component-local class labels require exact term-sort retention and exhaustive
-  reference equivalence before any production experiment.
+  test-only. No `euf-viper` WMI jobs remain queued or running.
 
 Orbit, MDD, quotient-CSP, class-label, and Hall mechanisms cannot alter
 production answers until their source-level preconditions and certificates are
