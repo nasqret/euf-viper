@@ -12,7 +12,9 @@ wrapper compiles the library sources with `COMPACT`, `EMBEDDED`, `NDEBUG`,
 `NPROOFS`, and `QUIET`; unlike the legacy SC2021 wrapper, it deliberately keeps
 runtime options enabled for controlled inprocessing ablations.
 
-Linux builds select exactly one backend:
+Linux builds link exactly one backend. The `kissat-4` feature takes precedence
+when both feature labels are present so `--all-features` remains a valid modern
+backend test:
 
 ```console
 cargo build --release

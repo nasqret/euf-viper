@@ -26,7 +26,12 @@ mod quotient_state_search;
 #[cfg(test)]
 mod stabilizer_order;
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "kissat-sc2021",
+    not(feature = "kissat-4")
+))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-4"))]
 use kissat4::{Solver as KissatSolver, Var as KissatVar};
@@ -56,13 +61,6 @@ use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
 
-#[cfg(all(
-    target_os = "linux",
-    target_arch = "x86_64",
-    feature = "kissat-sc2021",
-    feature = "kissat-4"
-))]
-compile_error!("features `kissat-sc2021` and `kissat-4` are mutually exclusive");
 #[cfg(all(
     target_os = "linux",
     target_arch = "x86_64",
@@ -4471,7 +4469,12 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
     solver.set_configuration(configuration).ok()
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "kissat-sc2021",
+    not(feature = "kissat-4")
+))]
 fn configure_kissat(_solver: &mut KissatSolver) -> Option<()> {
     Some(())
 }
@@ -7201,7 +7204,12 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
         .map_err(|e| format!("invalid {label}: {e}"))
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-sc2021"))]
+#[cfg(all(
+    target_os = "linux",
+    target_arch = "x86_64",
+    feature = "kissat-sc2021",
+    not(feature = "kissat-4")
+))]
 fn embedded_sat_backend() -> &'static str {
     "kissat-sc2021"
 }
