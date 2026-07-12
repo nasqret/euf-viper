@@ -4453,12 +4453,13 @@ fn dynamic_full_ackermann_before_refinement(
 enum EagerSolveOutcome {
     Solved(SolveResult),
     InvalidTheoryModel(usize),
+    ConfigurationError(String),
     #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
     Unavailable,
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
+fn configure_kissat(solver: &mut KissatSolver<'_>) -> Result<(), String> {
     let configuration = match env::var("EUF_VIPER_KISSAT_MODE").as_deref() {
         Ok("basic") => KissatConfig::Basic,
         Ok("plain") => KissatConfig::Plain,
@@ -4466,7 +4467,9 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
         Ok("unsat") => KissatConfig::Unsat,
         _ => KissatConfig::Default,
     };
-    solver.set_configuration(configuration).ok()
+    solver
+        .set_configuration(configuration)
+        .map_err(|error| format!("failed to configure Kissat: {error}"))
 }
 
 #[cfg(all(
@@ -4475,26 +4478,31 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
     feature = "kissat-sc2021",
     not(feature = "kissat-4")
 ))]
-fn configure_kissat(_solver: &mut KissatSolver) -> Option<()> {
-    Some(())
+fn configure_kissat(_solver: &mut KissatSolver) -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64", feature = "kissat-4"))]
-fn configure_kissat(solver: &mut KissatSolver) -> Option<()> {
+fn configure_kissat(solver: &mut KissatSolver) -> Result<(), String> {
     let configuration = env::var("EUF_VIPER_KISSAT_MODE").unwrap_or_else(|_| "default".to_owned());
     match configuration.as_str() {
         "basic" | "default" | "plain" | "sat" | "unsat" => {
-            solver.set_configuration(&configuration).ok()?;
+            solver.set_configuration(&configuration)?;
         }
-        _ => return None,
+        _ => return Err(format!("unknown Kissat configuration: {configuration}")),
     }
     if let Ok(options) = env::var("EUF_VIPER_KISSAT_OPTIONS") {
         for option in options.split(',').filter(|option| !option.is_empty()) {
-            let (name, value) = option.split_once('=')?;
-            solver.set_option(name, value.parse().ok()?).ok()?;
+            let (name, value) = option
+                .split_once('=')
+                .ok_or_else(|| format!("invalid Kissat option assignment: {option}"))?;
+            let value = value
+                .parse()
+                .map_err(|error| format!("invalid value in Kissat option {option}: {error}"))?;
+            solver.set_option(name, value)?;
         }
     }
-    Some(())
+    Ok(())
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -4507,8 +4515,8 @@ fn solve_kissat_euf_once(
 ) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
-    if configure_kissat(&mut solver).is_none() {
-        return EagerSolveOutcome::Unavailable;
+    if let Err(error) = configure_kissat(&mut solver) {
+        return EagerSolveOutcome::ConfigurationError(error);
     }
     let variables = (0..cnf.var_count())
         .map(|_| solver.var())
@@ -4590,8 +4598,8 @@ fn solve_kissat_euf_once(
 ) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
-    if configure_kissat(&mut solver).is_none() {
-        return EagerSolveOutcome::Unavailable;
+    if let Err(error) = configure_kissat(&mut solver) {
+        return EagerSolveOutcome::ConfigurationError(error);
     }
     for clause in &cnf.clauses {
         if solver.add_clause(rustsat_clause(clause)).is_err() {
@@ -6444,6 +6452,16 @@ fn solve_bool_problem(
                             EagerSolveOutcome::InvalidTheoryModel(_) => {
                                 completed_cnf = Some(completed);
                             }
+                            EagerSolveOutcome::ConfigurationError(error) => {
+                                return Some((
+                                    SolveResult::Unsupported(vec![error]),
+                                    completed.var_count(),
+                                    completed.clauses.len(),
+                                    0,
+                                    prior_sat_calls,
+                                    0,
+                                ));
+                            }
                             EagerSolveOutcome::Unavailable => {}
                         }
                     }
@@ -6467,6 +6485,16 @@ fn solve_bool_problem(
                             ));
                         }
                     }
+                }
+                EagerSolveOutcome::ConfigurationError(error) => {
+                    return Some((
+                        SolveResult::Unsupported(vec![error]),
+                        cnf.var_count(),
+                        cnf.clauses.len(),
+                        0,
+                        0,
+                        0,
+                    ));
                 }
                 EagerSolveOutcome::Unavailable => {}
             }
