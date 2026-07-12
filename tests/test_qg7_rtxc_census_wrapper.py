@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -128,6 +129,62 @@ class CensusWrapperTests(unittest.TestCase):
                 ),
                 1,
             )
+
+    def test_home_cargo_path_is_available_before_tool_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            root = base / "root"
+            corpus = root / "corpus"
+            corpus.mkdir(parents=True)
+            output = base / "output" / "census.jsonl"
+            write_valid_census_output(output)
+
+            inherited_bin = base / "inherited-bin"
+            inherited_bin.mkdir()
+            for tool in [
+                "basename",
+                "dirname",
+                "git",
+                "mkdir",
+                "rm",
+                "sha256sum",
+                "tar",
+            ]:
+                source = shutil.which(tool)
+                self.assertIsNotNone(source, f"test requires {tool}")
+                (inherited_bin / tool).symlink_to(source)
+            (inherited_bin / "python3").symlink_to(sys.executable)
+
+            home = base / "home"
+            fake_cargo = home / ".cargo" / "bin" / "cargo"
+            write_executable(fake_cargo, "#!/bin/sh\nexit 99\n")
+            environment = wrapper_environment(
+                root=root,
+                corpus=corpus,
+                output=output,
+                scratch=base / "scratch",
+                revision="0" * 40,
+            )
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "PATH": str(inherited_bin),
+                }
+            )
+
+            completed = subprocess.run(
+                ["/bin/bash", str(WRAPPER)],
+                cwd=ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 128, completed.stderr)
+            self.assertIn("not a git repository", completed.stderr)
+            self.assertNotIn("required tool is unavailable: cargo", completed.stderr)
+            self.assertFalse(output.exists())
 
     def test_invalid_root_removes_valid_explicit_stale_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

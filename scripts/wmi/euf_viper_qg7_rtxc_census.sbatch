@@ -131,6 +131,10 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+if [[ -n "${HOME:-}" ]]; then
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   printf 'required tool is unavailable: python3\n' >&2
   exit 2
@@ -321,7 +325,6 @@ if [[ "$EXECUTING_WRAPPER_SHA256" != "$ARCHIVED_WRAPPER_SHA256" ]]; then
   exit 2
 fi
 
-export PATH="$HOME/.cargo/bin:$PATH"
 export CARGO_TARGET_DIR="$TARGET_DIR"
 export CARGO_INCREMENTAL=0
 export RUST_MIN_STACK="${EUF_VIPER_QG7_CENSUS_STACK_BYTES:-67108864}"
