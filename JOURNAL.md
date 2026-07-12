@@ -857,6 +857,31 @@
   seconds into preparation, before any array ran, and changed preparation to
   lock one certificate-capable binary for both timing and proof emission.
 
+## 2026-07-13 Resume And T0 Control
+
+- Published corrected certificate-capable baseline revision `b46b137`; hosted
+  run `29212660080` passed. Submitted immutable P0 prepare/full/official/audit
+  jobs `144823`/`144824`/`144825`/`144826`, continuation dispatcher `144827`,
+  and base full/official certificate chains `144828`-`144833`. At this entry,
+  prepare is still computing the 957 MB taxonomy and no benchmark row exists.
+- Three source audits separated the next mechanisms. The broad Goel loss is
+  dominated by repeated complete-model validation (`frogs.3`: 25.66s
+  validation versus 2.41s SAT); the finite track needs source-certified
+  non-uniform ranges and Hall evidence; production Linux still embeds Kissat
+  SC2021 and ignores `EUF_VIPER_KISSAT_MODE`.
+- Cheap same-binary CaDiCaL congruence control on
+  `QG-classification/loops6/iso_icl053.smt2` reduced conflicts `62 -> 51` and
+  decisions `69 -> 59`, but a 20-pair local ABBA regressed median end-to-end
+  time from `8.055` to `9.737` ms (`1.209x` slower; mean `1.204x` slower).
+  Reject unconditional CaDiCaL congruence as a broad route; do not promote
+  from solver-internal counts.
+- Added a separate pinned Kissat 4.0.4 backend while retaining SC2021 as the
+  default control on public branch `research-modern-kissat`. Commit `78032df`
+  exposes mode and option ablations, records the linked backend in `--version`,
+  and keeps Linux `--all-features` valid by selecting Kissat 4.0.4. Local Rust
+  tests pass `228` with four environment probes ignored; standalone wrapper
+  SAT/UNSAT and option tests pass. WMI Linux validation is queued as `144844`.
+
 ## Next Entry Template
 
 - Benchmark corpus:

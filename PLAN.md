@@ -124,8 +124,10 @@ result cache can satisfy V1-V4.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
   chain at `1308be8` passed hosted CI but was cancelled during preparation when
-  the exact locked binary lacked certificate emission. Relaunch waits for the
-  corrected single-binary build revision.
+  the exact locked binary lacked certificate emission. Corrected revision
+  `b46b137` is live as prepare `144823`, full array `144824`, official array
+  `144825`, and global audit `144826`. Prepare is computing the full taxonomy;
+  no benchmark rows or new performance claim exist yet.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
   assembly, and exact carried-row provenance are implemented but not yet run.
@@ -139,9 +141,15 @@ independent evidence checks, and a frozen family holdout.
 ### T0: Modern SAT Backend
 
 - [ ] Embed Kissat 4.0.4 behind the current clause/model interface while
-  preserving the SC2021 backend as an exact control.
+  preserving the SC2021 backend as an exact control. Research branch
+  `research-modern-kissat` at `78032df` implements the feature-selected pinned
+  backend and option surface; WMI Linux validation is job `144844`.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
+  A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal
+  congruence on `loops6/iso_icl053`: conflicts improve `62 -> 51`, but median
+  end-to-end time regresses `8.055 -> 9.737` ms (`1.209x` slower). This is a
+  cheap falsification result, not WMI promotion evidence.
 - [ ] Require independent SAT-model/proof checks and broad end-to-end gain;
   formula-size reduction alone cannot pass.
 

@@ -625,3 +625,23 @@
   the locked binary lacked the opt-in certificate command. The next P0 build
   must use `cargo build --release --features certificates` and bind that exact
   binary for both timing and proof emission.
+
+## Resumed P0 And Modern SAT Control (2026-07-13)
+
+- Corrected revision `b46b137` has green hosted run `29212660080`. Its live WMI
+  P0 graph is prepare/full/official/audit `144823`-`144826`, continuation
+  dispatcher `144827`, and base certificate chains `144828`-`144833`. At the
+  last check, `144823` was running the full taxonomy pass and had emitted no
+  benchmark rows. All dependent jobs remain held.
+- A local 20-pair ABBA on `loops6/iso_icl053` rejects unconditional CaDiCaL
+  clausal congruence as a broad default: conflicts improve `62 -> 51`, but
+  median end-to-end time regresses `8.055 -> 9.737` ms (`1.209x` slower).
+- Public branch `research-modern-kissat` commit `78032df` adds pinned Kissat
+  4.0.4 as a feature-selected Linux backend while preserving SC2021 as the
+  default control. It exposes `EUF_VIPER_KISSAT_MODE` and
+  `EUF_VIPER_KISSAT_OPTIONS`, supports Linux `--all-features`, and records the
+  linked backend in `--version`. WMI build/test/certificate job is `144844`.
+- Do not compose Hall or rollback work into the modern-SAT experiment. Measure
+  the backend first; the next original mechanisms are proof-pressure-triggered
+  conflict-only rollback for validation-dominated Goel cases and a
+  source-certified guard-conditioned adequate-range Hall census.
