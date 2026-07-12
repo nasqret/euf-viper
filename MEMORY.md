@@ -611,3 +611,12 @@
 - The durable WMI chain is prepare -> full/official two-second arrays -> global
   audit. Do not claim any new performance result until this exact revision is
   committed, published, and the global artifacts return.
+- Public fixed revision `70f0a60` has green hosted CI run `29199707319` and is
+  the last hosted-green revision. WMI prepare/full/official/audit
+  `144767`/`144768`/`144769`/`144770` were cancelled during the requested pause.
+  Jobs `144763`–`144766` were cancelled before execution because their commit's
+  tests depended on ignored local certificate-smoke outputs. No benchmark rows
+  exist yet; retain campaign `144328` as the current performance evidence.
+- The resumed local checkpoint implements sparse timeout continuations and
+  independent per-stage plus staged-union certificate audits. Do not treat it
+  as evidence until committed, published, hosted-green, and executed on WMI.

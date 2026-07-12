@@ -258,7 +258,19 @@ The 2026-07-12 research round is wrapped and fail-closed:
   `eae27d0`, with 136 Rust tests passing, but its off-mode timing does not show
   a performance win;
 - source-bound qg7 census `144349` found zero shadow refutations and remains
-  test-only. No `euf-viper` WMI jobs remain queued or running.
+  test-only.
+
+Public revision `70f0a60` retains green hosted campaign-contract run
+`29199707319`. Its WMI chain `144767`-`144770` was cancelled during the
+requested project pause before any benchmark row was produced, so the
+performance table above remains authoritative.
+
+The next phase-zero revision adds schema-v2 timeout-only continuations, exact
+2/60/1,200-second staged assembly, per-observation physical raw provenance,
+hash-chained certificate-shadow journals, global artifact replay, and a final
+certificate union keyed by each solve's physical origin budget. These paths do
+not alter solver answers or constitute performance evidence until the fixed WMI
+campaign and independent audits return.
 
 Orbit, MDD, quotient-CSP, class-label, and Hall mechanisms cannot alter
 production answers until their source-level preconditions and certificates are

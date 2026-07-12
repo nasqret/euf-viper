@@ -2,7 +2,7 @@
 
 Date: 2026-07-12
 
-Status: implemented locally; WMI baseline pending
+Status: published foundation; replacement WMI baseline pending
 
 ## Frozen Inputs
 
@@ -56,3 +56,24 @@ No speed or superiority claim follows from this implementation. The first
 admissible new evidence is the immutable WMI two-second full/official campaign.
 Only its timeout rows may enter the 60- and 1,200-second continuations. Novelty
 tracks remain blocked from promotion until this evidence chain passes.
+
+## Published Execution
+
+- Fixed revision: `70f0a60671a90c78f4e6014bd23439f14c1f5adb`.
+- Hosted CI run `29199707319`: successful.
+- Prepare: `144767`.
+- Full-library array: `144768`.
+- Official-selection array: `144769`.
+- Global audit: `144770`.
+
+The first submission at `c2ed5d8` exposed a non-hermetic test that read ignored
+`results/cert-smoke` files. No benchmark job started. Jobs `144763`–`144766`
+were cancelled, the Rust-produced base prefixes were moved to tracked golden
+fixtures, and the exact hosted Python command plus Rust suite passed before the
+replacement chain was submitted.
+
+The replacement chain was subsequently cancelled on the requested project
+pause before producing a campaign lock or benchmark row. The resumed contract
+work adds timeout-only schema-v2 stages and independent certificate coverage;
+those artifacts remain implementation evidence only until a new fixed revision
+passes hosted CI and the full WMI dependency graph completes.

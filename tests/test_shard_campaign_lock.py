@@ -66,6 +66,37 @@ class ShardCampaignLockTests(unittest.TestCase):
         with self.assertRaisesRegex(SHARDER.ShardError, "exceed"):
             SHARDER.derive_shards(parent_lock(2), 3)
 
+    def test_sparse_run_selection_is_partitioned_with_its_instances(self) -> None:
+        parent = parent_lock(4)
+        parent["run_selection"] = [
+            {"instance_id": "0", "solver_id": "a"},
+            {"instance_id": "0", "solver_id": "b"},
+            {"instance_id": "1", "solver_id": "b"},
+            {"instance_id": "2", "solver_id": "a"},
+            {"instance_id": "3", "solver_id": "a"},
+        ]
+        parent["continuation"] = {}
+        parent["schema_version"] = 2
+        parent["lock_sha256"] = SHARDER.lock_hash(parent)
+
+        shards = SHARDER.derive_shards(parent, 2)
+
+        self.assertEqual(
+            shards[0]["run_selection"],
+            [
+                {"instance_id": "0", "solver_id": "a"},
+                {"instance_id": "0", "solver_id": "b"},
+                {"instance_id": "2", "solver_id": "a"},
+            ],
+        )
+        self.assertEqual(
+            shards[1]["run_selection"],
+            [
+                {"instance_id": "1", "solver_id": "b"},
+                {"instance_id": "3", "solver_id": "a"},
+            ],
+        )
+
     def test_load_rejects_tampered_parent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "lock.json"

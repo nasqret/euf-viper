@@ -130,6 +130,7 @@ class CampaignFixture:
         source: str = GENERIC_SOLVER,
         *,
         environment: dict[str, str] | None = None,
+        argv_template: list[str] | None = None,
     ) -> Path:
         path = self.artifacts / "solvers" / identifier
         write_executable(path, source)
@@ -147,7 +148,8 @@ class CampaignFixture:
                 "version": "test-1",
                 "binary": str(path.resolve()),
                 "sha256": sha256_file(path),
-                "argv_template": ["{binary}", "{instance}", "{budget_s}"],
+                "argv_template": argv_template
+                or ["{binary}", "{instance}", "{budget_s}"],
                 "version_output": None,
                 "version_output_sha256": None,
                 "environment": dict(sorted(settings.items())),
@@ -163,6 +165,8 @@ class CampaignFixture:
         timeout_grace_s: float = 0.05,
         repository_clean: bool = True,
         shard: dict[str, Any] | None = None,
+        continuation: dict[str, Any] | None = None,
+        run_selection: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         self.instances.sort(key=lambda item: (item["relative_path"], item["id"]))
         self.solvers.sort(key=lambda item: item["id"])
@@ -257,6 +261,11 @@ class CampaignFixture:
         }
         if shard is not None:
             payload["shard"] = shard
+        if continuation is not None:
+            payload["schema_version"] = 2
+            payload["continuation"] = continuation
+        if run_selection is not None:
+            payload["run_selection"] = run_selection
         payload["lock_sha256"] = sha256_bytes(canonical_bytes(payload))
         self.lock_path.write_bytes(canonical_bytes(payload))
         self.payload = payload
@@ -301,6 +310,150 @@ class LockedCampaignRunnerTests(unittest.TestCase):
                 (fixture.output / "summary.json").read_text(encoding="utf-8")
             )
             self.assertEqual(summary["shard"], shard)
+
+    def test_continuation_runs_only_hash_bound_selected_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CampaignFixture(root)
+            fixture.add_instance("a.smt2")
+            fixture.add_instance("b.smt2")
+            fixed_argv = ["{binary}", "{instance}", "60"]
+            fixture.add_solver("solver-a", argv_template=fixed_argv)
+            fixture.add_solver("solver-b", argv_template=fixed_argv)
+            selection = [
+                {"instance_id": "0", "solver_id": "solver-a"},
+                {"instance_id": "0", "solver_id": "solver-b"},
+                {"instance_id": "1", "solver_id": "solver-b"},
+            ]
+            parent_lock = root / "source-parent.json"
+            parent_payload = {"lock_sha256": ""}
+            parent_payload["lock_sha256"] = sha256_bytes(
+                canonical_bytes(parent_payload)
+            )
+            parent_lock.write_bytes(canonical_bytes(parent_payload))
+            continuation = {
+                "mode": "timeout_only",
+                "root_lock_sha256": parent_payload["lock_sha256"],
+                "parent_lock_path": str(parent_lock.resolve()),
+                "parent_lock_file_sha256": sha256_file(parent_lock),
+                "parent_lock_sha256": parent_payload["lock_sha256"],
+                "shard_bundle_sha256": "2" * 64,
+                "source_evidence_sha256": "2" * 64,
+                "shard_lock_directory": str((root / "source-locks").resolve()),
+                "shard_results_root": str((root / "source-results").resolve()),
+                "source_budget_s": 2,
+                "target_budget_s": 60,
+                "selection_sha256": sha256_bytes(canonical_bytes(selection)),
+                "selected_instances": 2,
+                "selected_runs": 3,
+                "runner_path": str(RUNNER.resolve()),
+                "runner_sha256": sha256_file(RUNNER),
+            }
+            fixture.finalize(
+                budgets=[60],
+                continuation=continuation,
+                run_selection=selection,
+            )
+
+            completed = fixture.run()
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            records = fixture.raw_records()
+            self.assertEqual(
+                [(record["instance_id"], record["solver_id"]) for record in records],
+                [("0", "solver-a"), ("0", "solver-b"), ("1", "solver-b")],
+            )
+            summary = json.loads(
+                (fixture.output / "summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["selected_runs"], 3)
+            self.assertEqual(summary["continuation"], continuation)
+
+    def test_continuation_rejects_selection_drift_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CampaignFixture(root)
+            fixture.add_instance("a.smt2")
+            fixture.add_solver(
+                "solver-a", argv_template=["{binary}", "{instance}", "60"]
+            )
+            selection = [{"instance_id": "0", "solver_id": "solver-a"}]
+            parent_lock = root / "source-parent.json"
+            parent_payload = {"lock_sha256": ""}
+            parent_payload["lock_sha256"] = sha256_bytes(
+                canonical_bytes(parent_payload)
+            )
+            parent_lock.write_bytes(canonical_bytes(parent_payload))
+            fixture.finalize(
+                budgets=[60],
+                continuation={
+                    "mode": "timeout_only",
+                    "root_lock_sha256": parent_payload["lock_sha256"],
+                    "parent_lock_path": str(parent_lock.resolve()),
+                    "parent_lock_file_sha256": sha256_file(parent_lock),
+                    "parent_lock_sha256": parent_payload["lock_sha256"],
+                    "shard_bundle_sha256": "2" * 64,
+                    "source_evidence_sha256": "2" * 64,
+                    "shard_lock_directory": str((root / "locks").resolve()),
+                    "shard_results_root": str((root / "results").resolve()),
+                    "source_budget_s": 2,
+                    "target_budget_s": 60,
+                    "selection_sha256": "3" * 64,
+                    "selected_instances": 1,
+                    "selected_runs": 1,
+                    "runner_path": str(RUNNER.resolve()),
+                    "runner_sha256": sha256_file(RUNNER),
+                },
+                run_selection=selection,
+            )
+
+            completed = fixture.run()
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn("selection SHA-256 mismatch", completed.stderr)
+            self.assertFalse((root / "calls.log").exists())
+
+    def test_continuation_rejects_budget_dependent_solver_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CampaignFixture(root)
+            fixture.add_instance("a.smt2")
+            fixture.add_solver("solver-a")
+            selection = [{"instance_id": "0", "solver_id": "solver-a"}]
+            parent_lock = root / "source-parent.json"
+            parent_payload = {"lock_sha256": ""}
+            parent_payload["lock_sha256"] = sha256_bytes(
+                canonical_bytes(parent_payload)
+            )
+            parent_lock.write_bytes(canonical_bytes(parent_payload))
+            fixture.finalize(
+                budgets=[60],
+                continuation={
+                    "mode": "timeout_only",
+                    "root_lock_sha256": parent_payload["lock_sha256"],
+                    "parent_lock_path": str(parent_lock.resolve()),
+                    "parent_lock_file_sha256": sha256_file(parent_lock),
+                    "parent_lock_sha256": parent_payload["lock_sha256"],
+                    "shard_bundle_sha256": "2" * 64,
+                    "source_evidence_sha256": "2" * 64,
+                    "shard_lock_directory": str((root / "locks").resolve()),
+                    "shard_results_root": str((root / "results").resolve()),
+                    "source_budget_s": 2,
+                    "target_budget_s": 60,
+                    "selection_sha256": sha256_bytes(canonical_bytes(selection)),
+                    "selected_instances": 1,
+                    "selected_runs": 1,
+                    "runner_path": str(RUNNER.resolve()),
+                    "runner_sha256": sha256_file(RUNNER),
+                },
+                run_selection=selection,
+            )
+
+            completed = fixture.run()
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn("budget-dependent", completed.stderr)
+            self.assertFalse((root / "calls.log").exists())
 
     def test_collects_hashes_resources_and_enforcement_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

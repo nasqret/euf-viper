@@ -828,6 +828,29 @@
   suite passes 228 tests with four environment-dependent tests ignored; the
   independent certificate smoke passes; campaign JSON and all new shell
   scripts validate.
+- Published implementation commit `c2ed5d8`. Hosted run `29199552439` then
+  exposed four certificate-prefix tests that depended on ignored local
+  `results/cert-smoke` output. Replaced that dependency with tracked,
+  source-hash-bound Rust prefix goldens in `70f0a60`; hosted run `29199707319`
+  passes all campaign, Python, shell, and Rust steps.
+- Cancelled still-pending superseded chain `144763`–`144766` without consuming
+  benchmark time. Submitted fixed revision `70f0a60` as prepare `144767`, full
+  array `144768`, official array `144769`, and global audit `144770`. The
+  dependency chain was durable and initially pending WMI capacity.
+- On the requested project pause, cancelled `144767`-`144770`; prepare had not
+  produced a campaign lock or benchmark row. Resumed from the preserved local
+  checkpoint the next day.
+- Added schema-v2 timeout-only continuation locks, exact sparse sharding,
+  runner/source hash lineage, adjacent 2/60/1,200-second assembly, and a
+  per-observation ledger back to physical lock/raw/run hashes.
+- Added fail-closed certificate-shadow execution with hash-chained resumable
+  journals, explicit zero-work shards, global journal/artifact replay, generic
+  physical-stage WMI campaigns, and a staged union audit matching certificates
+  to each final solve's origin budget. No superiority result follows yet.
+- Release gate: 261 Python tests and 228 Rust tests pass; four Rust probes remain
+  intentionally environment-gated. All campaign shell scripts parse, Python
+  entrypoints compile, Rust formatting is clean, and the independent SAT plus
+  five-UNSAT DRAT certificate smoke passes.
 
 ## Next Entry Template
 

@@ -32,7 +32,14 @@ jobs:
             tests.test_build_family_manifest \
             tests.test_run_locked_campaign \
             tests.test_analyze_campaign \
-            tests.test_independent_qfuf
+            tests.test_derive_timeout_continuations \
+            tests.test_analyze_staged_campaign \
+            tests.test_independent_qfuf \
+            tests.test_shadow_campaign \
+            tests.test_audit_shadow_campaign \
+            tests.test_audit_staged_shadow_campaign \
+            tests.test_wmi_continuation_scripts \
+            tests.test_wmi_certificate_scripts
       - name: Check campaign scripts
         run: |
           bash -n scripts/bench/install_solvers.sh
@@ -40,5 +47,16 @@ jobs:
           bash -n scripts/wmi/euf_viper_locked_shard.sbatch
           bash -n scripts/wmi/euf_viper_locked_audit.sbatch
           bash -n scripts/wmi/submit_locked_p0.sh
+          bash -n scripts/wmi/euf_viper_continuation_dispatch.sbatch
+          bash -n scripts/wmi/euf_viper_continuation_shard.sbatch
+          bash -n scripts/wmi/euf_viper_continuation_audit.sbatch
+          bash -n scripts/wmi/euf_viper_continuation_finalize.sbatch
+          bash -n scripts/wmi/submit_locked_continuations.sh
+          bash -n scripts/wmi/euf_viper_certificate_prepare.sbatch
+          bash -n scripts/wmi/euf_viper_certificate_shard.sbatch
+          bash -n scripts/wmi/euf_viper_certificate_audit.sbatch
+          bash -n scripts/wmi/submit_certificate_shadow.sh
+          bash -n scripts/wmi/euf_viper_certificate_staged_audit.sbatch
+          bash -n scripts/wmi/submit_staged_certificate_audit.sh
       - name: Test Rust solver
         run: cargo test --all-features

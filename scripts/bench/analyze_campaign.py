@@ -104,6 +104,25 @@ LOCK_RUNTIME_BINDING_KEYS = {
     "mechanism",
     "cpu_ids",
 }
+LOCK_CONTINUATION_KEYS = {
+    "mode",
+    "root_lock_sha256",
+    "parent_lock_path",
+    "parent_lock_file_sha256",
+    "parent_lock_sha256",
+    "shard_bundle_sha256",
+    "source_evidence_sha256",
+    "shard_lock_directory",
+    "shard_results_root",
+    "source_budget_s",
+    "target_budget_s",
+    "selection_sha256",
+    "selected_instances",
+    "selected_runs",
+    "runner_path",
+    "runner_sha256",
+}
+LOCK_RUN_SELECTION_KEYS = {"instance_id", "solver_id"}
 LOCK_CORPUS_KEYS = {
     "id",
     "manifest_path",
@@ -1358,12 +1377,22 @@ def _read_json_object(path: Path, context: str) -> dict[str, Any]:
 
 def _load_lock(lock_path: Path) -> dict[str, Any]:
     payload = _read_json_object(lock_path, "campaign lock")
+    has_continuation = "continuation" in payload
+    has_run_selection = "run_selection" in payload
     expected_keys = LOCK_TOP_LEVEL_KEYS | {
-        key for key in ("shard", "runtime_binding") if key in payload
+        key
+        for key in ("shard", "runtime_binding", "continuation", "run_selection")
+        if key in payload
     }
     _require_exact_keys(payload, expected_keys, "campaign lock")
-    if payload["schema_version"] != 1 or type(payload["schema_version"]) is not int:
-        raise CampaignInputError(["campaign lock: schema_version must be integer 1"])
+    expected_schema = 2 if has_continuation else 1
+    if (
+        payload["schema_version"] != expected_schema
+        or type(payload["schema_version"]) is not int
+    ):
+        raise CampaignInputError(
+            [f"campaign lock: schema_version must be integer {expected_schema}"]
+        )
     _require_string_value(payload["campaign_id"], "campaign lock campaign_id")
     lock_sha256 = _require_hash_value(
         payload["lock_sha256"], "campaign lock lock_sha256"
@@ -1406,6 +1435,11 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
             raise CampaignInputError(["runtime_binding.cpu_ids must be non-empty"])
         for index, cpu_id in enumerate(cpu_ids):
             _require_int_value(cpu_id, f"runtime_binding.cpu_ids[{index}]", 0)
+
+    if has_continuation != has_run_selection:
+        raise CampaignInputError(
+            ["continuation and run_selection must both be present or absent"]
+        )
 
     release_lock = _require_exact_keys(
         payload["solver_release_lock"],
@@ -1500,8 +1534,131 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
             type(value) is str for value in solver["argv_template"]
         ):
             raise CampaignInputError([f"{context}.argv_template must be strings"])
+        if has_continuation and any(
+            "{budget_s}" in argument for argument in solver["argv_template"]
+        ):
+            raise CampaignInputError(
+                [
+                    f"{context}.argv_template is budget-dependent; "
+                    "timeout-only carry-forward is invalid"
+                ]
+            )
     if [solver["id"] for solver in solvers] != sorted(seen_solver_ids):
         raise CampaignInputError(["campaign lock solvers must be sorted by id"])
+
+    target_budget: float | None = None
+    if has_continuation:
+        continuation = _require_exact_keys(
+            payload["continuation"],
+            LOCK_CONTINUATION_KEYS,
+            "continuation",
+        )
+        if continuation["mode"] != "timeout_only":
+            raise CampaignInputError(["continuation.mode must be timeout_only"])
+        for field in (
+            "root_lock_sha256",
+            "parent_lock_file_sha256",
+            "parent_lock_sha256",
+            "shard_bundle_sha256",
+            "source_evidence_sha256",
+            "selection_sha256",
+            "runner_sha256",
+        ):
+            _require_hash_value(continuation[field], f"continuation.{field}")
+        for field in (
+            "parent_lock_path",
+            "shard_lock_directory",
+            "shard_results_root",
+            "runner_path",
+        ):
+            value = _require_string_value(
+                continuation[field], f"continuation.{field}"
+            )
+            if not Path(value).is_absolute():
+                raise CampaignInputError(
+                    [f"continuation.{field} must be an absolute path"]
+                )
+        source_budget = _require_number_value(
+            continuation["source_budget_s"], "continuation.source_budget_s", 0.001
+        )
+        target_budget = _require_number_value(
+            continuation["target_budget_s"], "continuation.target_budget_s", 0.001
+        )
+        if target_budget <= source_budget:
+            raise CampaignInputError(
+                ["continuation target budget must exceed source budget"]
+            )
+        if continuation["source_evidence_sha256"] != continuation["shard_bundle_sha256"]:
+            raise CampaignInputError(
+                ["continuation source evidence and shard bundle hashes disagree"]
+            )
+        selected_instances = _require_int_value(
+            continuation["selected_instances"],
+            "continuation.selected_instances",
+            1,
+        )
+        selected_runs = _require_int_value(
+            continuation["selected_runs"], "continuation.selected_runs", 1
+        )
+        raw_selection = payload["run_selection"]
+        if type(raw_selection) is not list or not raw_selection:
+            raise CampaignInputError(["run_selection must be a non-empty array"])
+        instance_ordinals = {
+            instance["id"]: index for index, instance in enumerate(instances)
+        }
+        solver_ordinals = {
+            solver["id"]: index for index, solver in enumerate(solvers)
+        }
+        canonical_selection: list[dict[str, str]] = []
+        seen_run_pairs: set[tuple[str, str]] = set()
+        selected_instance_ids: set[str] = set()
+        previous_ordinal: tuple[int, int] | None = None
+        for index, raw_item in enumerate(raw_selection):
+            context = f"run_selection[{index}]"
+            item = _require_exact_keys(raw_item, LOCK_RUN_SELECTION_KEYS, context)
+            instance_id = _require_string_value(
+                item["instance_id"], f"{context}.instance_id"
+            )
+            solver_id = _require_string_value(
+                item["solver_id"], f"{context}.solver_id"
+            )
+            if instance_id not in instance_ordinals:
+                raise CampaignInputError(
+                    [f"{context}: unknown instance {instance_id!r}"]
+                )
+            if solver_id not in solver_ordinals:
+                raise CampaignInputError([f"{context}: unknown solver {solver_id!r}"])
+            pair = (instance_id, solver_id)
+            if pair in seen_run_pairs:
+                raise CampaignInputError([f"duplicate run_selection pair {pair!r}"])
+            ordinal = (instance_ordinals[instance_id], solver_ordinals[solver_id])
+            if previous_ordinal is not None and ordinal <= previous_ordinal:
+                raise CampaignInputError(
+                    ["run_selection must follow corpus instance and solver order"]
+                )
+            previous_ordinal = ordinal
+            seen_run_pairs.add(pair)
+            selected_instance_ids.add(instance_id)
+            canonical_selection.append(
+                {"instance_id": instance_id, "solver_id": solver_id}
+            )
+        if selected_runs != len(canonical_selection):
+            raise CampaignInputError(
+                ["continuation.selected_runs disagrees with run_selection"]
+            )
+        if selected_instances != len(selected_instance_ids):
+            raise CampaignInputError(
+                ["continuation.selected_instances disagrees with run_selection"]
+            )
+        if selected_instance_ids != set(instance_ordinals):
+            raise CampaignInputError(
+                ["every continuation corpus instance must have a selected run"]
+            )
+        selection_sha256 = hashlib.sha256(
+            _canonical_json_bytes(canonical_selection)
+        ).hexdigest()
+        if selection_sha256 != continuation["selection_sha256"]:
+            raise CampaignInputError(["continuation selection SHA-256 mismatch"])
 
     budgets = payload["budgets_s"]
     if type(budgets) is not list or not budgets:
@@ -1512,6 +1669,10 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
     ]
     if any(left >= right for left, right in zip(numeric_budgets, numeric_budgets[1:])):
         raise CampaignInputError(["campaign lock budgets_s must be strictly increasing"])
+    if has_continuation and numeric_budgets != [target_budget]:
+        raise CampaignInputError(
+            ["continuation lock budgets_s must contain only target_budget_s"]
+        )
 
     execution = _require_exact_keys(
         payload["execution"], LOCK_EXECUTION_KEYS, "campaign lock execution"
@@ -1520,6 +1681,10 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
         raise CampaignInputError(["campaign lock execution.order is invalid"])
     if execution["order"] == "abba" and len(solvers) != 2:
         raise CampaignInputError(["ABBA execution requires exactly two solvers"])
+    if has_continuation and execution["order"] != "balanced_latin_square":
+        raise CampaignInputError(
+            ["continuation execution order must be balanced_latin_square"]
+        )
     cpu_ids = execution["cpu_ids"]
     if type(cpu_ids) is not list or not cpu_ids:
         raise CampaignInputError(["campaign lock execution.cpu_ids must be non-empty"])
@@ -1568,6 +1733,14 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
     solvers = lock["solvers"]
     budgets = lock["budgets_s"]
     execution = lock["execution"]
+    selected_pairs = (
+        {
+            (item["instance_id"], item["solver_id"])
+            for item in lock["run_selection"]
+        }
+        if "run_selection" in lock
+        else None
+    )
     schedule: list[dict[str, Any]] = []
     sequence = 0
     for instance_index, instance in enumerate(instances):
@@ -1575,6 +1748,12 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
         order = _locked_solver_order(
             execution["order"], instance_index, len(solvers)
         )
+        if selected_pairs is not None:
+            order = [
+                solver_index
+                for solver_index in order
+                if (instance["id"], solvers[solver_index]["id"]) in selected_pairs
+            ]
         for budget in budgets:
             repetitions = {index: 0 for index in range(len(solvers))}
             for solver_index in order:
@@ -1872,6 +2051,10 @@ def _aggregate_locked_observation(records: Sequence[Mapping[str, Any]]) -> dict[
         "cpu_time_s": cpu_time_s,
         "wall_time_s": wall_time_s,
         "repetitions": len(records),
+        "origin_budget_s": float(records[0]["budget_s"]),
+        "carried_forward": False,
+        "source_lock_sha256": records[0]["lock_sha256"],
+        "source_record_sha256": [record["record_sha256"] for record in records],
     }
 
 
@@ -1901,6 +2084,8 @@ def load_locked_campaign(lock_path: Path, raw_path: Path) -> dict[str, Any]:
         )
         for key, records in grouped.items()
     }
+    for observation in observations.values():
+        observation["source_raw_sha256"] = raw_sha256
     return {
         "lock": lock,
         "lock_file_sha256": lock_file_sha256,
@@ -1927,6 +2112,16 @@ def _expected_prepared_shard(
     ]
     if not selected:
         raise CampaignInputError([f"shard {index} is empty"])
+    selected_ids = {instance["id"] for instance in selected}
+    selected_runs = None
+    if "run_selection" in parent:
+        selected_runs = [
+            item
+            for item in parent["run_selection"]
+            if item["instance_id"] in selected_ids
+        ]
+        if not selected_runs:
+            raise CampaignInputError([f"shard {index} has no selected runs"])
     shard = {
         **parent,
         "lock_sha256": "",
@@ -1944,6 +2139,16 @@ def _expected_prepared_shard(
             "parent_lock_sha256": parent["lock_sha256"],
         },
     }
+    if selected_runs is not None:
+        shard["run_selection"] = selected_runs
+        shard["continuation"] = {
+            **parent["continuation"],
+            "selection_sha256": hashlib.sha256(
+                _canonical_json_bytes(selected_runs)
+            ).hexdigest(),
+            "selected_instances": len(selected),
+            "selected_runs": len(selected_runs),
+        }
     shard["lock_sha256"] = _lock_sha256(shard)
     return shard
 
@@ -2045,7 +2250,9 @@ def load_sharded_locked_campaign(
         )
 
     expected_observations = (
-        len(parent["corpus"]["instances"])
+        len(parent["run_selection"]) * len(parent["budgets_s"])
+        if "run_selection" in parent
+        else len(parent["corpus"]["instances"])
         * len(parent["solvers"])
         * len(parent["budgets_s"])
     )
@@ -2057,7 +2264,25 @@ def load_sharded_locked_campaign(
             ]
         )
     provenance.sort(key=lambda item: item["index"])
-    bundle_sha256 = hashlib.sha256(_canonical_json_bytes(provenance)).hexdigest()
+    content_manifest = [
+        {
+            "index": item["index"],
+            "lock_file_sha256": item["lock_file_sha256"],
+            "lock_sha256": item["lock_sha256"],
+            "raw_sha256": item["raw_sha256"],
+            "raw_records": item["raw_records"],
+            "cpu_ids": item["cpu_ids"],
+        }
+        for item in provenance
+    ]
+    bundle_sha256 = hashlib.sha256(
+        _canonical_json_bytes(
+            {
+                "parent_lock_sha256": parent["lock_sha256"],
+                "shards": content_manifest,
+            }
+        )
+    ).hexdigest()
     return {
         "lock": parent,
         "lock_file_sha256": parent_file_sha256,
@@ -2119,6 +2344,14 @@ def _analyze_loaded_locked_campaign(
     holm_alpha: float | None = None,
 ) -> dict[str, Any]:
     """Analyze already validated locked observations."""
+
+    if "run_selection" in campaign["lock"]:
+        raise CampaignInputError(
+            [
+                "sparse continuation evidence must be assembled with its parent "
+                "before comparative analysis"
+            ]
+        )
 
     if isinstance(bootstrap_replicates, bool) or not isinstance(
         bootstrap_replicates, int

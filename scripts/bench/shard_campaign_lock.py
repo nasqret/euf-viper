@@ -30,8 +30,8 @@ def load_lock(path: Path) -> dict[str, Any]:
         lock = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ShardError(f"cannot read parent lock {path}: {error}") from error
-    if not isinstance(lock, dict) or lock.get("schema_version") != 1:
-        raise ShardError("parent lock must use schema_version 1")
+    if not isinstance(lock, dict) or lock.get("schema_version") not in {1, 2}:
+        raise ShardError("parent lock must use schema_version 1 or 2")
     expected = lock.get("lock_sha256")
     if not isinstance(expected, str) or expected != lock_hash(lock):
         raise ShardError("parent lock self-hash mismatch")
@@ -55,6 +55,29 @@ def derive_shards(parent: dict[str, Any], count: int) -> list[dict[str, Any]]:
         raise ShardError("shard count cannot exceed instance count")
     parent_hash = parent["lock_sha256"]
     base_output = Path(parent["output"]["directory"])
+    parent_instance_ids = {str(instance.get("id")) for instance in instances}
+    parent_run_selection = parent.get("run_selection")
+    if parent_run_selection is not None:
+        if not isinstance(parent.get("continuation"), dict):
+            raise ShardError("parent run_selection requires continuation metadata")
+        if not isinstance(parent_run_selection, list) or not parent_run_selection:
+            raise ShardError("parent run_selection must be a non-empty array")
+        seen_run_pairs: set[tuple[str, str]] = set()
+        for position, item in enumerate(parent_run_selection):
+            if not isinstance(item, dict) or set(item) != {"instance_id", "solver_id"}:
+                raise ShardError(f"invalid run_selection record {position}")
+            instance_id = item["instance_id"]
+            solver_id = item["solver_id"]
+            if not isinstance(instance_id, str) or instance_id not in parent_instance_ids:
+                raise ShardError(
+                    f"run_selection record {position} has unknown instance"
+                )
+            if not isinstance(solver_id, str) or not solver_id:
+                raise ShardError(f"run_selection record {position} has invalid solver")
+            pair = (instance_id, solver_id)
+            if pair in seen_run_pairs:
+                raise ShardError(f"duplicate run_selection pair {pair!r}")
+            seen_run_pairs.add(pair)
     shards: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for index in range(count):
@@ -65,6 +88,16 @@ def derive_shards(parent: dict[str, Any], count: int) -> list[dict[str, Any]]:
         ]
         if not selected:
             raise ShardError(f"shard {index} would be empty")
+        selected_ids = {str(instance.get("id")) for instance in selected}
+        selected_runs = None
+        if parent_run_selection is not None:
+            selected_runs = [
+                item
+                for item in parent_run_selection
+                if item["instance_id"] in selected_ids
+            ]
+            if not selected_runs:
+                raise ShardError(f"shard {index} has no selected runs")
         for instance in selected:
             key = (str(instance.get("id")), str(instance.get("relative_path")))
             if key in seen:
@@ -85,6 +118,16 @@ def derive_shards(parent: dict[str, Any], count: int) -> list[dict[str, Any]]:
                 "parent_lock_sha256": parent_hash,
             },
         }
+        if selected_runs is not None:
+            shard["run_selection"] = selected_runs
+            shard["continuation"] = {
+                **parent["continuation"],
+                "selection_sha256": hashlib.sha256(
+                    canonical_bytes(selected_runs)
+                ).hexdigest(),
+                "selected_instances": len(selected),
+                "selected_runs": len(selected_runs),
+            }
         shard["lock_sha256"] = lock_hash(shard)
         shards.append(shard)
     expected_keys = {

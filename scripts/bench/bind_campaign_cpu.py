@@ -31,8 +31,8 @@ def read_lock(path: Path) -> dict[str, Any]:
         lock = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise BindingError(f"cannot read prepared lock {path}: {error}") from error
-    if not isinstance(lock, dict) or lock.get("schema_version") != 1:
-        raise BindingError("prepared lock must use schema_version 1")
+    if not isinstance(lock, dict) or lock.get("schema_version") not in {1, 2}:
+        raise BindingError("prepared lock must use schema_version 1 or 2")
     declared = lock.get("lock_sha256")
     if not isinstance(declared, str) or declared != lock_hash(lock):
         raise BindingError("prepared lock self-hash mismatch")

@@ -117,10 +117,17 @@ result cache can satisfy V1-V4.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke
-  tests; corpus-wide shadow coverage remains before this item closes.
+  tests. The sharded journal runner, strict global auditor, physical-stage
+  wrapper, and staged physical-origin union auditor are implemented; returned
+  corpus evidence remains before this item closes.
 - [ ] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
+  Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
+  project pause before producing benchmark rows. The replacement immutable
+  chain waits for publication and hosted CI of the continuation/certificate
+  contract revision.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
-  at 1,200 seconds.
+  at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
+  assembly, and exact carried-row provenance are implemented but not yet run.
 - [ ] Publish a new current-main opportunity atlas before tuning a route.
 
 P0 exit: exact manifests, five hashed binaries, complete current baselines,
@@ -259,14 +266,14 @@ fallback can be an operational portfolio but never a standalone victory.
 
 ## Immediate Queue
 
-1. Publish the P0 implementation revision and run the immutable two-second WMI
-   full/official chain with OpenSMT and both Z3 controls.
-2. Batch-shadow SAT models and UNSAT certificates on the returned corpus rows.
-3. Resume only two-second timeouts at 60 and then 1,200 seconds.
-4. Ablate Kissat 4.0.4 against the current SC2021 backend.
-5. Run T1 shadow parity and T2 lazy-first reference in isolated branches.
-6. Run T4/T5/T6 opportunity censuses in parallel.
-7. Select the first architecture only from measured opportunity.
+1. Publish the complete P0 contract revision and require green hosted CI.
+2. Run the immutable two-second WMI full/official chain with all comparators.
+3. Batch-shadow and globally audit base-stage SAT/UNSAT certificates.
+4. Resume only two-second timeouts at 60 and remaining timeouts at 1,200.
+5. Certify each physical continuation stage and audit their union against the
+   final per-observation physical-origin ledger.
+6. Publish the opportunity atlas, then ablate Kissat and run T1/T2/T4/T5/T6.
+7. Select the first novel architecture only from measured opportunity.
 
 No WMI campaign beyond the P0 baseline enters the queue before the campaign
 lock and independent validation prerequisites pass.

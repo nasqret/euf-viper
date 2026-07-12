@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=euf-p0-prepare
 #SBATCH --partition=cpu_idle
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=16G
 #SBATCH --time=02:00:00
 #SBATCH --output=results/p0-prepare-%j.out
 #SBATCH --error=results/p0-prepare-%j.err

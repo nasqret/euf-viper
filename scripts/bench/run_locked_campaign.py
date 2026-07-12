@@ -69,6 +69,25 @@ RUNTIME_BINDING_KEYS = {
     "mechanism",
     "cpu_ids",
 }
+CONTINUATION_KEYS = {
+    "mode",
+    "root_lock_sha256",
+    "parent_lock_path",
+    "parent_lock_file_sha256",
+    "parent_lock_sha256",
+    "shard_bundle_sha256",
+    "source_evidence_sha256",
+    "shard_lock_directory",
+    "shard_results_root",
+    "source_budget_s",
+    "target_budget_s",
+    "selection_sha256",
+    "selected_instances",
+    "selected_runs",
+    "runner_path",
+    "runner_sha256",
+}
+RUN_SELECTION_KEYS = {"instance_id", "solver_id"}
 SPEC_KEYS = {"path", "sha256"}
 REPOSITORY_KEYS = {
     "root",
@@ -465,15 +484,30 @@ def build_jobs(
     solver_paths: tuple[Path, ...],
     budgets: list[int | float],
     execution: dict[str, Any],
+    run_selection: list[dict[str, str]] | None = None,
 ) -> tuple[Job, ...]:
     jobs: list[Job] = []
     base_environment = execution["environment"]
     cpu_ids = execution["cpu_ids"]
     order = execution["order"]
+    selected_pairs = (
+        {
+            (selection["instance_id"], selection["solver_id"])
+            for selection in run_selection
+        }
+        if run_selection is not None
+        else None
+    )
     sequence = 0
     for instance_index, instance in enumerate(instances):
         cpu_id = cpu_ids[instance_index % len(cpu_ids)]
         solver_order = _job_order(order, instance_index, len(solvers))
+        if selected_pairs is not None:
+            solver_order = [
+                solver_index
+                for solver_index in solver_order
+                if (instance["id"], solvers[solver_index]["id"]) in selected_pairs
+            ]
         for budget_s in budgets:
             repetitions = {solver_index: 0 for solver_index in range(len(solvers))}
             for solver_index in solver_order:
@@ -509,12 +543,22 @@ def build_jobs(
 def load_and_validate_lock(path: Path) -> LockedCampaign:
     lock_path = Path(os.path.abspath(path))
     payload = read_json_strict(lock_path, "campaign lock")
+    has_continuation = "continuation" in payload
+    has_run_selection = "run_selection" in payload
     expected_top_level = TOP_LEVEL_KEYS | {
-        key for key in ("shard", "runtime_binding") if key in payload
+        key
+        for key in ("shard", "runtime_binding", "continuation", "run_selection")
+        if key in payload
     }
     require_exact_keys(payload, expected_top_level, "campaign lock")
-    if payload["schema_version"] != 1 or type(payload["schema_version"]) is not int:
-        raise CampaignError("campaign lock schema_version must be integer 1")
+    expected_schema = 2 if has_continuation else 1
+    if (
+        payload["schema_version"] != expected_schema
+        or type(payload["schema_version"]) is not int
+    ):
+        raise CampaignError(
+            f"campaign lock schema_version must be integer {expected_schema}"
+        )
     require_string(payload["campaign_id"], "campaign_id")
     lock_digest = require_hash(payload["lock_sha256"], "lock_sha256")
     digest_payload = dict(payload)
@@ -555,6 +599,11 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
             )
         if binding["mechanism"] != "first_allowed_slurm_cpu":
             raise CampaignError("runtime_binding mechanism is not recognized")
+
+    if has_continuation != has_run_selection:
+        raise CampaignError(
+            "continuation and run_selection must either both be present or absent"
+        )
 
     spec = require_exact_keys(payload["spec"], SPEC_KEYS, "spec")
     spec_path = require_absolute_path(spec["path"], "spec.path")
@@ -697,6 +746,13 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         solver["argv_template"] = _validate_template(
             solver["argv_template"], f"{context}.argv_template"
         )
+        if has_continuation and any(
+            "{budget_s}" in argument for argument in solver["argv_template"]
+        ):
+            raise CampaignError(
+                f"{context}.argv_template is budget-dependent; "
+                "timeout-only carry-forward is invalid"
+            )
         version_output = solver["version_output"]
         version_hash = solver["version_output_sha256"]
         if version_output is None and version_hash is None:
@@ -719,6 +775,115 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
     if [solver["id"] for solver in solvers] != sorted(seen_solver_ids):
         raise CampaignError("solvers must be sorted by id")
 
+    run_selection: list[dict[str, str]] | None = None
+    target_budget: int | float | None = None
+    if has_continuation:
+        continuation = require_exact_keys(
+            payload["continuation"], CONTINUATION_KEYS, "continuation"
+        )
+        if continuation["mode"] != "timeout_only":
+            raise CampaignError("continuation.mode must be timeout_only")
+        for field in (
+            "root_lock_sha256",
+            "parent_lock_file_sha256",
+            "parent_lock_sha256",
+            "shard_bundle_sha256",
+            "source_evidence_sha256",
+            "selection_sha256",
+            "runner_sha256",
+        ):
+            require_hash(continuation[field], f"continuation.{field}")
+        for field in (
+            "parent_lock_path",
+            "shard_lock_directory",
+            "shard_results_root",
+            "runner_path",
+        ):
+            require_absolute_path(continuation[field], f"continuation.{field}")
+        source_budget = require_number(
+            continuation["source_budget_s"],
+            "continuation.source_budget_s",
+            minimum=0.001,
+        )
+        target_budget = require_number(
+            continuation["target_budget_s"],
+            "continuation.target_budget_s",
+            minimum=0.001,
+        )
+        if target_budget <= source_budget:
+            raise CampaignError("continuation target budget must exceed source budget")
+        if continuation["source_evidence_sha256"] != continuation["shard_bundle_sha256"]:
+            raise CampaignError(
+                "continuation source evidence and shard bundle hashes disagree"
+            )
+        selected_instances = require_int(
+            continuation["selected_instances"],
+            "continuation.selected_instances",
+            minimum=1,
+        )
+        selected_runs = require_int(
+            continuation["selected_runs"],
+            "continuation.selected_runs",
+            minimum=1,
+        )
+        raw_selection = payload["run_selection"]
+        if type(raw_selection) is not list or not raw_selection:
+            raise CampaignError("run_selection must be a non-empty array")
+        run_selection = []
+        seen_run_pairs: set[tuple[str, str]] = set()
+        instance_ordinals = {
+            instance["id"]: index for index, instance in enumerate(instances)
+        }
+        solver_ordinals = {
+            solver["id"]: index for index, solver in enumerate(solvers)
+        }
+        previous_ordinal: tuple[int, int] | None = None
+        selected_instance_ids: set[str] = set()
+        for index, raw_selection_item in enumerate(raw_selection):
+            context = f"run_selection[{index}]"
+            item = require_exact_keys(
+                raw_selection_item, RUN_SELECTION_KEYS, context
+            )
+            instance_id = require_string(
+                item["instance_id"], f"{context}.instance_id"
+            )
+            solver_id = require_string(item["solver_id"], f"{context}.solver_id")
+            if instance_id not in instance_ordinals:
+                raise CampaignError(
+                    f"{context} references unknown instance {instance_id!r}"
+                )
+            if solver_id not in solver_ordinals:
+                raise CampaignError(
+                    f"{context} references unknown solver {solver_id!r}"
+                )
+            pair = (instance_id, solver_id)
+            if pair in seen_run_pairs:
+                raise CampaignError(f"duplicate run_selection pair {pair!r}")
+            ordinal = (instance_ordinals[instance_id], solver_ordinals[solver_id])
+            if previous_ordinal is not None and ordinal <= previous_ordinal:
+                raise CampaignError(
+                    "run_selection must follow corpus instance and solver order"
+                )
+            previous_ordinal = ordinal
+            seen_run_pairs.add(pair)
+            selected_instance_ids.add(instance_id)
+            run_selection.append({"instance_id": instance_id, "solver_id": solver_id})
+        if selected_runs != len(run_selection):
+            raise CampaignError(
+                "continuation.selected_runs disagrees with run_selection"
+            )
+        if selected_instances != len(selected_instance_ids):
+            raise CampaignError(
+                "continuation.selected_instances disagrees with run_selection"
+            )
+        if selected_instance_ids != set(instance_ordinals):
+            raise CampaignError(
+                "every continuation corpus instance must have a selected run"
+            )
+        actual_selection_hash = sha256_bytes(canonical_bytes(run_selection))
+        if actual_selection_hash != continuation["selection_sha256"]:
+            raise CampaignError("continuation selection SHA-256 mismatch")
+
     raw_budgets = payload["budgets_s"]
     if type(raw_budgets) is not list or not raw_budgets:
         raise CampaignError("budgets_s must be a non-empty array")
@@ -727,6 +892,10 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         budgets.append(require_number(value, f"budgets_s[{index}]", minimum=0.001))
     if any(left >= right for left, right in zip(budgets, budgets[1:])):
         raise CampaignError("budgets_s must be strictly increasing")
+    if has_continuation and budgets != [target_budget]:
+        raise CampaignError(
+            "continuation lock budgets_s must contain only target_budget_s"
+        )
 
     execution = require_exact_keys(
         payload["execution"], EXECUTION_KEYS, "execution"
@@ -758,6 +927,10 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         )
     if execution["order"] == "abba" and len(solvers) != 2:
         raise CampaignError("execution.order abba requires exactly two solvers")
+    if has_continuation and execution["order"] != "balanced_latin_square":
+        raise CampaignError(
+            "continuation execution.order must be balanced_latin_square"
+        )
     execution["environment"] = _validate_environment(
         execution["environment"], "execution.environment"
     )
@@ -780,7 +953,11 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
     if len(output_paths) != 3:
         raise CampaignError("output journal, raw, and summary paths must be distinct")
 
-    expected_promotion = bool(repository_promotion and taxonomy_path is not None)
+    expected_promotion = (
+        False
+        if has_continuation
+        else bool(repository_promotion and taxonomy_path is not None)
+    )
     if promotion_eligible != expected_promotion:
         raise CampaignError(
             "promotion_eligible must equal repository eligibility plus taxonomy"
@@ -793,6 +970,7 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         tuple(solver_paths),
         budgets,
         execution,
+        run_selection,
     )
     return LockedCampaign(
         lock_path=lock_path,
@@ -941,6 +1119,46 @@ def verify_frozen_artifacts(campaign: LockedCampaign) -> dict[Path, ArtifactSnap
         "solver release lock",
         snapshots,
     )
+    if "continuation" in payload:
+        continuation = payload["continuation"]
+        parent_lock_path = Path(continuation["parent_lock_path"])
+        _verify_hash(
+            parent_lock_path,
+            continuation["parent_lock_file_sha256"],
+            "continuation parent lock",
+            snapshots,
+        )
+        parent_lock = read_json_strict(parent_lock_path, "continuation parent lock")
+        declared_parent_hash = require_hash(
+            parent_lock.get("lock_sha256"),
+            "continuation parent lock lock_sha256",
+        )
+        actual_parent_hash = sha256_bytes(
+            canonical_bytes({**parent_lock, "lock_sha256": ""})
+        )
+        if declared_parent_hash != actual_parent_hash:
+            raise CampaignError("continuation parent lock self-hash mismatch")
+        if declared_parent_hash != continuation["parent_lock_sha256"]:
+            raise CampaignError("continuation parent lock lineage mismatch")
+        expected_root_hash = (
+            parent_lock["continuation"]["root_lock_sha256"]
+            if isinstance(parent_lock.get("continuation"), dict)
+            else declared_parent_hash
+        )
+        if continuation["root_lock_sha256"] != expected_root_hash:
+            raise CampaignError("continuation root lock lineage mismatch")
+        runner_path = Path(continuation["runner_path"])
+        actual_runner_path = Path(__file__).resolve()
+        if runner_path.resolve() != actual_runner_path:
+            raise CampaignError(
+                f"continuation requires runner {runner_path}, got {actual_runner_path}"
+            )
+        _verify_hash(
+            actual_runner_path,
+            continuation["runner_sha256"],
+            "continuation runner",
+            snapshots,
+        )
     for index, instance_path in enumerate(campaign.instance_paths):
         instance = payload["corpus"]["instances"][index]
         _verify_hash(
@@ -1629,6 +1847,12 @@ def build_summary(
         "lock_sha256": campaign.payload["lock_sha256"],
         "promotion_eligible": campaign.payload["promotion_eligible"],
         "shard": campaign.payload.get("shard"),
+        "continuation": campaign.payload.get("continuation"),
+        "selected_runs": (
+            len(campaign.payload["run_selection"])
+            if "run_selection" in campaign.payload
+            else None
+        ),
         "repository_commit": campaign.payload["repository"]["commit"],
         "instances": len(campaign.payload["corpus"]["instances"]),
         "solvers": [solver["id"] for solver in campaign.payload["solvers"]],

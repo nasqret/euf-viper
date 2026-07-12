@@ -40,6 +40,18 @@ class BindCampaignCpuTests(unittest.TestCase):
         self.assertNotEqual(bound["lock_sha256"], prepared["lock_sha256"])
         self.assertNotIn("runtime_binding", prepared)
 
+    def test_schema_two_continuation_metadata_is_preserved(self) -> None:
+        prepared = prepared_lock()
+        prepared["schema_version"] = 2
+        prepared["continuation"] = {"mode": "timeout_only"}
+        prepared["lock_sha256"] = BINDER.lock_hash(prepared)
+
+        bound = BINDER.bind_lock(prepared, 3)
+
+        self.assertEqual(bound["schema_version"], 2)
+        self.assertEqual(bound["continuation"], prepared["continuation"])
+        self.assertEqual(bound["lock_sha256"], BINDER.lock_hash(bound))
+
     def test_invalid_cpu_ids_are_rejected(self) -> None:
         for value in (-1, True, "0"):
             with self.subTest(value=value):

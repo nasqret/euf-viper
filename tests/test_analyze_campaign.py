@@ -350,6 +350,72 @@ def write_sharded_fixture(
     return parent_path, pairs
 
 
+def write_sparse_sharded_fixture(
+    directory: Path,
+) -> tuple[Path, list[tuple[Path, Path]]]:
+    parent_path, _, _ = write_locked_fixture(directory)
+    parent = json.loads(parent_path.read_text(encoding="utf-8"))
+    selection = [
+        {"instance_id": "0", "solver_id": "euf-viper"},
+        {"instance_id": "1", "solver_id": "z3"},
+    ]
+    parent["budgets_s"] = [60]
+    parent["schema_version"] = 2
+    parent["execution"]["order"] = "balanced_latin_square"
+    for solver in parent["solvers"]:
+        solver["argv_template"] = ["{binary}", "{instance}"]
+    parent["continuation"] = {
+        "mode": "timeout_only",
+        "root_lock_sha256": "7" * 64,
+        "parent_lock_path": str((directory / "source-parent.json").resolve()),
+        "parent_lock_file_sha256": "6" * 64,
+        "parent_lock_sha256": "7" * 64,
+        "shard_bundle_sha256": "8" * 64,
+        "source_evidence_sha256": "8" * 64,
+        "shard_lock_directory": str((directory / "source-locks").resolve()),
+        "shard_results_root": str((directory / "source-results").resolve()),
+        "source_budget_s": 2,
+        "target_budget_s": 60,
+        "selection_sha256": hashlib.sha256(
+            ANALYZER._canonical_json_bytes(selection)
+        ).hexdigest(),
+        "selected_instances": 2,
+        "selected_runs": 2,
+        "runner_path": str(
+            (ROOT / "scripts" / "bench" / "run_locked_campaign.py").resolve()
+        ),
+        "runner_sha256": hashlib.sha256(
+            (ROOT / "scripts" / "bench" / "run_locked_campaign.py").read_bytes()
+        ).hexdigest(),
+    }
+    parent["run_selection"] = selection
+    parent["lock_sha256"] = ANALYZER._lock_sha256(parent)
+    parent_path.write_bytes(ANALYZER._canonical_json_bytes(parent))
+
+    pairs: list[tuple[Path, Path]] = []
+    for index in range(2):
+        prepared = ANALYZER._expected_prepared_shard(parent, index, 2)
+        cpu_id = index + 6
+        bound = {
+            **prepared,
+            "lock_sha256": "",
+            "execution": {**prepared["execution"], "cpu_ids": [cpu_id]},
+            "runtime_binding": {
+                "parent_lock_sha256": prepared["lock_sha256"],
+                "mechanism": "first_allowed_slurm_cpu",
+                "cpu_ids": [cpu_id],
+            },
+        }
+        bound["lock_sha256"] = ANALYZER._lock_sha256(bound)
+        lock_path = directory / "sparse-locks" / f"bound-{index:04d}.json"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_bytes(ANALYZER._canonical_json_bytes(bound))
+        raw_path = directory / "sparse-results" / f"shard-{index:04d}" / "raw.jsonl"
+        write_raw_for_lock(bound, raw_path)
+        pairs.append((lock_path, raw_path))
+    return parent_path, pairs
+
+
 def analyze(csv_path: Path, manifest_path: Path, **overrides: object) -> dict:
     parameters = {
         "seed": 17,
@@ -620,6 +686,45 @@ class LockedArtifactTests(unittest.TestCase):
             any("exact derivation" in error for error in caught.exception.errors),
             caught.exception.errors,
         )
+
+    def test_sparse_continuation_shards_validate_without_fabricating_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            parent_path, pairs = write_sparse_sharded_fixture(Path(temp_dir))
+            campaign = ANALYZER.load_sharded_locked_campaign(parent_path, pairs)
+
+            self.assertEqual(campaign["raw_records"], 2)
+            self.assertEqual(len(campaign["observations"]), 2)
+            self.assertEqual(
+                sorted(
+                    (path, solver_id)
+                    for path, _, solver_id in campaign["observations"]
+                ),
+                [
+                    ("QF_UF/alpha/case-0.smt2", "euf-viper"),
+                    ("QF_UF/beta/case-1.smt2", "z3"),
+                ],
+            )
+            with self.assertRaisesRegex(
+                ANALYZER.CampaignInputError, "must be assembled with its parent"
+            ):
+                ANALYZER.analyze_sharded_locked_campaign(
+                    parent_path,
+                    pairs,
+                    bootstrap_replicates=8,
+                )
+
+    def test_sparse_continuation_rejects_budget_dependent_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            parent_path, _ = write_sparse_sharded_fixture(Path(temp_dir))
+            parent = json.loads(parent_path.read_text(encoding="utf-8"))
+            parent["solvers"][0]["argv_template"].append("{budget_s}")
+            parent["lock_sha256"] = ANALYZER._lock_sha256(parent)
+            parent_path.write_bytes(ANALYZER._canonical_json_bytes(parent))
+
+            with self.assertRaisesRegex(
+                ANALYZER.CampaignInputError, "budget-dependent"
+            ):
+                ANALYZER._load_lock(parent_path)
 
 
 class ResamplingAndMultiplicityTests(unittest.TestCase):
