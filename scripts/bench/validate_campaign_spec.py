@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -98,6 +99,15 @@ def validate_spec(spec: Any) -> dict[str, Any]:
             errors.append("baseline.solver_revision must be a 40-digit Git hash")
         if not HEX64.fullmatch(str(baseline.get("binary_sha256", ""))):
             errors.append("baseline.binary_sha256 must be a SHA-256 digest")
+
+    release_lock = spec.get("release_lock")
+    if not isinstance(release_lock, dict):
+        errors.append("release_lock must be an object")
+    else:
+        if not isinstance(release_lock.get("path"), str) or not release_lock["path"]:
+            errors.append("release_lock.path must be a non-empty string")
+        if not HEX64.fullmatch(str(release_lock.get("sha256", ""))):
+            errors.append("release_lock.sha256 must be a SHA-256 digest")
 
     comparators = _objects(spec.get("comparators"), "comparators", errors)
     comparator_ids = _unique_ids(comparators, "comparators", errors)
@@ -271,7 +281,43 @@ def load_and_validate(path: Path) -> dict[str, Any]:
             spec = json.load(handle)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise CampaignSpecError([f"cannot load {path}: {error}"]) from error
-    return validate_spec(spec)
+    summary = validate_spec(spec)
+    root = path.resolve().parent.parent
+    bound_errors: list[str] = []
+
+    def verify_bound_file(record: dict[str, Any], label: str) -> None:
+        relative = record.get("path", record.get("manifest"))
+        expected = record.get("sha256", record.get("manifest_sha256"))
+        if not isinstance(relative, str) or not isinstance(expected, str):
+            bound_errors.append(f"{label} lacks a path and SHA-256 binding")
+            return
+        artifact = Path(relative)
+        if not artifact.is_absolute():
+            artifact = root / artifact
+        if not artifact.is_file():
+            bound_errors.append(f"{label} file does not exist: {artifact}")
+            return
+        digest = hashlib.sha256()
+        try:
+            with artifact.open("rb") as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(block)
+        except OSError as error:
+            bound_errors.append(f"cannot hash {label} file {artifact}: {error}")
+            return
+        actual = digest.hexdigest()
+        if actual != expected:
+            bound_errors.append(
+                f"{label} SHA-256 mismatch: expected {expected}, got {actual}"
+            )
+
+    verify_bound_file(spec["release_lock"], "release_lock")
+    for corpus in spec["corpora"]:
+        if corpus.get("status") == "present" and "manifest_sha256" in corpus:
+            verify_bound_file(corpus, f"corpus {corpus.get('id')!r}")
+    if bound_errors:
+        raise CampaignSpecError(bound_errors)
+    return summary
 
 
 def main() -> int:

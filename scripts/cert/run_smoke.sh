@@ -28,9 +28,6 @@ do
     --drat-trim "$DRAT_TRIM"
 done
 
-if target/release/euf-viper certify generated/synthetic/chain1000_sat.smt2 \
+target/release/euf-viper certify generated/synthetic/chain1000_sat.smt2 \
   --out-prefix "$OUT/chain1000_sat"
-then
-  echo "certificate generator accepted a SAT fixture" >&2
-  exit 1
-fi
+scripts/cert/check_certificate.py "$OUT/chain1000_sat.euf.json"

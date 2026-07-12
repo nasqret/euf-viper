@@ -1,0 +1,646 @@
+from __future__ import annotations
+
+import importlib.util
+import itertools
+import json
+import sys
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "cert" / "independent_qfuf.py"
+SPEC = importlib.util.spec_from_file_location("independent_qfuf", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+QFUF = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = QFUF
+SPEC.loader.exec_module(QFUF)
+
+
+def query(commands: str) -> str:
+    return f"(set-logic QF_UF)\n{commands.strip()}\n(check-sat)\n"
+
+
+def clauses_hold(problem: object, assignment: list[int]) -> bool:
+    values = [False, *(literal > 0 for literal in assignment)]
+    return all(
+        any((literal > 0) == values[abs(literal)] for literal in clause)
+        for clause in problem.clauses
+    )
+
+
+def atom_function_name(problem: object, atom: object) -> str | None:
+    if atom.kind != "bool_term":
+        return None
+    term = problem.terms[atom.term]
+    return problem.functions[term.function].name
+
+
+def find_base_assignment(
+    problem: object,
+    fixed: dict[int, bool] | None = None,
+    *,
+    require_model: bool = False,
+) -> list[int] | None:
+    fixed = fixed or {}
+    for bits in itertools.product((False, True), repeat=problem.variable_count):
+        if any(bits[variable - 1] != value for variable, value in fixed.items()):
+            continue
+        assignment = [
+            variable if bits[variable - 1] else -variable
+            for variable in range(1, problem.variable_count + 1)
+        ]
+        if not clauses_hold(problem, assignment):
+            continue
+        if require_model:
+            try:
+                QFUF.validate_total_assignment(problem, assignment)
+            except QFUF.IndependentQfufError:
+                continue
+        return assignment
+    return None
+
+
+def bool_variables(problem: object) -> dict[str, int]:
+    return {
+        name: atom.variable
+        for atom in problem.atoms
+        if (name := atom_function_name(problem, atom)) is not None
+        and not problem.functions[problem.terms[atom.term].function].internal
+    }
+
+
+class LexerAndParserTests(unittest.TestCase):
+    def test_comments_quoted_escapes_and_doubled_quote_strings(self) -> None:
+        problem = QFUF.parse_and_encode(
+            r'''
+            ; a comment with () and "ignored text"
+            (set-info :source "a string with ""quotes""")
+            (set-logic QF_UF)
+            (declare-const |true| Bool)
+            (declare-fun |not| (Bool) Bool)
+            (declare-const |x\|y| Bool)
+            (assert (and (|not| |true|) |x\|y|)) ; trailing comment
+            (check-sat)
+            (exit)
+            '''
+        )
+        declarations = {
+            function.name: function
+            for function in problem.functions
+            if not function.internal
+        }
+        self.assertEqual(set(declarations), {"true", "not", "x|y"})
+        self.assertTrue(all(function.quoted for function in declarations.values()))
+        self.assertIsNotNone(find_base_assignment(problem, require_model=True))
+
+    def test_declare_const_fun_sorts_and_structural_term_identity(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-fun b () U)
+                (declare-fun f (U U) U)
+                (assert (= (f a b) (f a b)))
+                """
+            )
+        )
+        equality = next(atom for atom in problem.atoms if atom.kind == "equality")
+        self.assertEqual(equality.left, equality.right)
+        self.assertEqual([sort.name for sort in problem.sorts], ["Bool", "U"])
+
+    def test_parameterized_and_zero_arity_define_fun_expansion(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const p Bool)
+                (define-fun same ((x U) (y U)) Bool (= x y))
+                (define-fun choose ((c Bool) (x U) (y U)) U (ite c x y))
+                (define-fun yes () Bool true)
+                (assert (same (choose p a b) a))
+                (assert p)
+                (assert yes)
+                """
+            )
+        )
+        macros = {function.name for function in problem.functions if function.macro}
+        self.assertEqual(macros, {"same", "choose", "yes"})
+        self.assertTrue(any(function.name.startswith("@independent_ite_") for function in problem.functions))
+        self.assertIsNotNone(find_base_assignment(problem, require_model=True))
+
+    def test_invalid_unused_macro_body_is_rejected(self) -> None:
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "body of `bad`"):
+            QFUF.parse_and_encode(
+                query(
+                    """
+                    (declare-sort U 0)
+                    (declare-const a U)
+                    (define-fun bad () Bool a)
+                    """
+                )
+            )
+
+    def test_malformed_lexing_parsing_commands_arities_and_types_fail_closed(self) -> None:
+        malformed = {
+            "unterminated quoted symbol": "(set-logic QF_UF) (declare-const |x Bool)",
+            "unterminated string": '(set-info :source "x) (check-sat)',
+            "unclosed list": "(set-logic QF_UF) (check-sat",
+            "wrong logic": "(set-logic QF_LIA) (check-sat)",
+            "unsupported command": "(set-logic QF_UF) (push 1) (check-sat)",
+            "missing query": "(set-logic QF_UF)",
+            "duplicate query": "(set-logic QF_UF) (check-sat) (check-sat)",
+            "post-query assertion": "(set-logic QF_UF) (check-sat) (assert true)",
+            "sort arity": "(set-logic QF_UF) (declare-sort U 1) (check-sat)",
+            "unknown sort": "(set-logic QF_UF) (declare-const a U) (check-sat)",
+            "reserved declaration": "(set-logic QF_UF) (declare-const true Bool) (check-sat)",
+            "non-Boolean assertion": query("(declare-sort U 0) (declare-const a U) (assert a)"),
+            "wrong function arity": query("(declare-fun p (Bool) Bool) (assert (p))"),
+            "wrong argument sort": query(
+                "(declare-sort U 0) (declare-const a U) "
+                "(declare-fun p (Bool) Bool) (assert (p a))"
+            ),
+            "equality sort mismatch": query(
+                "(declare-sort U 0) (declare-const a U) (assert (= a true))"
+            ),
+            "unary equality": query("(declare-const p Bool) (assert (= p))"),
+            "unary distinct": query("(declare-const p Bool) (assert (distinct p))"),
+            "bad not": query("(assert (not true false))"),
+            "bad ite branches": query(
+                "(declare-sort U 0) (declare-const a U) (assert (ite true a false))"
+            ),
+            "string expression": query('(assert "not a formula")'),
+            "recursive macro": query(
+                "(declare-sort U 0) (define-fun loop ((x U)) U (loop x))"
+            ),
+            "annotation": query("(assert (! true :named a))"),
+        }
+        for label, source in malformed.items():
+            with self.subTest(label=label):
+                with self.assertRaises(QFUF.IndependentQfufError):
+                    QFUF.parse_and_encode(source)
+
+
+class TseitinEncodingTests(unittest.TestCase):
+    def test_exact_and_or_not_encoding_order(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (declare-const r Bool)
+                (assert (and p (or (not q) r)))
+                """
+            )
+        )
+        self.assertEqual(
+            problem.clauses,
+            (
+                (4, 2),
+                (4, -3),
+                (-4, -2, 3),
+                (-5, 1),
+                (-5, 4),
+                (5, -1, -4),
+                (5,),
+            ),
+        )
+        self.assertEqual([atom.kind for atom in problem.atoms], [
+            "bool_term", "bool_term", "bool_term", "auxiliary", "auxiliary"
+        ])
+
+    def test_iff_and_ite_clause_shapes(self) -> None:
+        iff_problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (assert (= p q))
+                """
+            )
+        )
+        self.assertEqual(
+            iff_problem.clauses,
+            (
+                (-3, -1, 2),
+                (-3, 1, -2),
+                (3, -1, -2),
+                (3, 1, 2),
+                (3,),
+            ),
+        )
+        ite_problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (declare-const r Bool)
+                (assert (ite p q r))
+                """
+            )
+        )
+        self.assertEqual(
+            ite_problem.clauses,
+            (
+                (-1, -2, 4),
+                (-1, 2, -4),
+                (1, -3, 4),
+                (1, 3, -4),
+                (4,),
+            ),
+        )
+
+    def test_boolean_operator_truth_tables(self) -> None:
+        cases = {
+            "(and p (or (not q) r))": lambda p, q, r: p and (not q or r),
+            "(= p q)": lambda p, q, _r: p == q,
+            "(ite p q r)": lambda p, q, r: q if p else r,
+            "(=> p q r)": lambda p, q, r: (not (p and q)) or r,
+            "(xor p q r)": lambda p, q, r: p ^ q ^ r,
+        }
+        for expression, expected in cases.items():
+            with self.subTest(expression=expression):
+                problem = QFUF.parse_and_encode(
+                    query(
+                        f"""
+                        (declare-const p Bool)
+                        (declare-const q Bool)
+                        (declare-const r Bool)
+                        (assert {expression})
+                        """
+                    )
+                )
+                variables = bool_variables(problem)
+                for p, q, r in itertools.product((False, True), repeat=3):
+                    requested = {"p": p, "q": q, "r": r}
+                    fixed = {
+                        variable: requested[name]
+                        for name, variable in variables.items()
+                    }
+                    actual = find_base_assignment(problem, fixed) is not None
+                    self.assertEqual(actual, expected(p, q, r), (p, q, r))
+
+    def test_empty_connectives_use_shared_literal_constant(self) -> None:
+        true_problem = QFUF.parse_and_encode(query("(assert (and))"))
+        false_problem = QFUF.parse_and_encode(query("(assert (or))"))
+        self.assertEqual(true_problem.clauses, ((1,), (1,)))
+        self.assertEqual(false_problem.clauses, ((1,), (-1,)))
+
+    def test_simultaneous_let_rhs_and_nested_shadowing(self) -> None:
+        swapped = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (assert (let ((p q) (q p)) (and p (not q))))
+                """
+            )
+        )
+        variables = bool_variables(swapped)
+        self.assertIsNotNone(
+            find_base_assignment(
+                swapped, {variables["p"]: False, variables["q"]: True}
+            )
+        )
+        self.assertIsNone(
+            find_base_assignment(
+                swapped, {variables["p"]: True, variables["q"]: False}
+            )
+        )
+
+        nested = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (declare-const r Bool)
+                (assert (let ((p q)) (let ((p r) (q p)) (= p q))))
+                """
+            )
+        )
+        variables = bool_variables(nested)
+        self.assertIsNone(
+            find_base_assignment(
+                nested, {variables["q"]: False, variables["r"]: True}
+            )
+        )
+        self.assertIsNotNone(
+            find_base_assignment(
+                nested, {variables["q"]: True, variables["r"]: True}
+            )
+        )
+
+
+class ModelAndTheoryTests(unittest.TestCase):
+    def test_basic_equality_sat_and_congruence_unsat_assignment(self) -> None:
+        sat_problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun f (U) U)
+                (assert (= a b))
+                (assert (= (f a) (f b)))
+                """
+            )
+        )
+        self.assertEqual(QFUF.validate_total_assignment(sat_problem, [1, 2]), (False, True, True))
+
+        unsat_problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun f (U) U)
+                (assert (= a b))
+                (assert (distinct (f a) (f b)))
+                """
+            )
+        )
+        self.assertTrue(clauses_hold(unsat_problem, [1, -2]))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "disequality"):
+            QFUF.validate_total_assignment(unsat_problem, [1, -2])
+
+    def test_distinct_pairwise_and_boolean_cardinality(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const c U)
+                (assert (distinct a b c))
+                """
+            )
+        )
+        self.assertEqual(sum(atom.kind == "equality" for atom in problem.atoms), 3)
+        assignment = find_base_assignment(
+            problem,
+            {
+                atom.variable: False
+                for atom in problem.atoms
+                if atom.kind == "equality"
+            },
+            require_model=True,
+        )
+        self.assertIsNotNone(assignment)
+
+        impossible = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (declare-const r Bool)
+                (assert (distinct p q r))
+                """
+            )
+        )
+        self.assertIsNone(find_base_assignment(impossible))
+
+    def test_bool_valued_function_congruence(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun p (U) Bool)
+                (assert (= a b))
+                (assert (p a))
+                (assert (not (p b)))
+                """
+            )
+        )
+        self.assertEqual([atom.kind for atom in problem.atoms], [
+            "equality", "bool_term", "bool_term"
+        ])
+        self.assertTrue(clauses_hold(problem, [1, 2, -3]))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "true and false"):
+            QFUF.validate_total_assignment(problem, [1, 2, -3])
+
+    def test_bool_as_data_is_atomized_before_formula_encoding(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const p Bool)
+                (declare-const q Bool)
+                (declare-const r Bool)
+                (declare-fun f (Bool) U)
+                (assert (distinct (f p) (f q) (f r)))
+                """
+            )
+        )
+        self.assertEqual([atom.kind for atom in problem.atoms[:3]], [
+            "bool_term", "bool_term", "bool_term"
+        ])
+        names = bool_variables(problem)
+        fixed = {names["p"]: True, names["q"]: False, names["r"]: True}
+        fixed.update(
+            {
+                atom.variable: False
+                for atom in problem.atoms
+                if atom.kind == "equality"
+            }
+        )
+        assignment = find_base_assignment(problem, fixed)
+        self.assertIsNotNone(assignment)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "disequality"):
+            QFUF.validate_total_assignment(problem, assignment)
+
+    def test_true_false_terms_remain_distinct(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-fun f (Bool) U)
+                (assert (= (f true) (f false)))
+                """
+            )
+        )
+        self.assertEqual([atom.kind for atom in problem.atoms], [
+            "bool_term", "bool_term", "equality"
+        ])
+        QFUF.validate_total_assignment(problem, [1, -2, 3])
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "true and false"):
+            QFUF.validate_total_assignment(problem, [-1, -2, 3])
+
+    def test_term_ite_guard_constraints(self) -> None:
+        impossible = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const p Bool)
+                (assert (distinct (ite p a b) a))
+                (assert p)
+                """
+            )
+        )
+        self.assertIsNone(find_base_assignment(impossible))
+        self.assertTrue(
+            any(function.name.startswith("@independent_ite_") for function in impossible.functions)
+        )
+
+        possible = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const p Bool)
+                (assert (distinct (ite p a b) a))
+                (assert (not p))
+                """
+            )
+        )
+        self.assertIsNotNone(find_base_assignment(possible, require_model=True))
+
+    def test_valid_invalid_and_auxiliary_euf_lemmas(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun f (U) U)
+                (assert (or (= a b) (= (f a) (f b))))
+                """
+            )
+        )
+        equality_variables = [
+            atom.variable for atom in problem.atoms if atom.kind == "equality"
+        ]
+        auxiliary = next(
+            atom.variable for atom in problem.atoms if atom.kind == "auxiliary"
+        )
+        premise, consequence = equality_variables
+        QFUF.validate_euf_lemma(problem, [-premise, consequence])
+        self.assertTrue(QFUF.euf_lemma_is_valid(problem, [-premise, consequence]))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "not a valid EUF"):
+            QFUF.validate_euf_lemma(problem, [premise])
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "auxiliary"):
+            QFUF.validate_euf_lemma(problem, [auxiliary])
+
+
+class ManifestAndTamperTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun f (U) U)
+                (assert (or (= a b) (= (f a) (f b))))
+                """
+            )
+        )
+        self.equalities = [
+            atom.variable for atom in self.problem.atoms if atom.kind == "equality"
+        ]
+
+    def test_sat_manifest_requires_complete_ordered_untampered_assignment(self) -> None:
+        assignment = find_base_assignment(self.problem, require_model=True)
+        self.assertIsNotNone(assignment)
+        manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "sat",
+            "assignment": assignment,
+            "variables": 999,
+            "terms": "ignored solver metadata",
+        }
+        QFUF.validate_v2_sat_manifest(manifest, self.problem)
+
+        with self.assertRaises(QFUF.IndependentQfufError):
+            QFUF.validate_total_assignment(self.problem, assignment[:-1])
+        reordered = assignment.copy()
+        reordered[0], reordered[1] = reordered[1], reordered[0]
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "must assign variable"):
+            QFUF.validate_total_assignment(self.problem, reordered)
+        tampered = assignment.copy()
+        root_variable = self.problem.variable_count
+        tampered[root_variable - 1] *= -1
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "base clause"):
+            QFUF.validate_total_assignment(self.problem, tampered)
+
+    def test_unsat_helper_uses_local_exact_prefix_and_checks_suffix(self) -> None:
+        premise, consequence = self.equalities
+        valid_lemma = (-premise, consequence)
+        clauses = (*self.problem.clauses, valid_lemma)
+        manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": -10,
+            "terms": [{"tampered": True}],
+            "atoms": "untrusted",
+            "clauses": {"base": 0, "total": 0},
+        }
+        self.assertEqual(
+            QFUF.validate_v2_unsat_manifest(
+                manifest, self.problem, self.problem.variable_count, clauses
+            ),
+            1,
+        )
+
+        tampered = list(clauses)
+        first = list(tampered[0])
+        first[0] *= -1
+        tampered[0] = tuple(first)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "base clause 1"):
+            QFUF.validate_v2_unsat_manifest(
+                manifest, self.problem, self.problem.variable_count, tampered
+            )
+
+        invalid_suffix = (*self.problem.clauses, (premise,))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "theory clause"):
+            QFUF.validate_unsat_dimacs(
+                self.problem, self.problem.variable_count, invalid_suffix
+            )
+
+    def test_dimacs_parser_is_strict_and_supports_split_clauses(self) -> None:
+        variables, clauses = QFUF.parse_dimacs(
+            "c comment\np cnf 3 2\n1 -2\n3 0\n0\n"
+        )
+        self.assertEqual(variables, 3)
+        self.assertEqual(clauses, ((1, -2, 3), ()))
+        for malformed in (
+            "1 0\np cnf 1 1\n",
+            "p cnf 1 2\n1 0\n",
+            "p cnf 1 1\n2 0\n",
+            "p cnf 1 1\n1\n",
+        ):
+            with self.subTest(source=malformed):
+                with self.assertRaises(QFUF.IndependentQfufError):
+                    QFUF.parse_dimacs(malformed)
+
+    def test_reconstruction_matches_checked_in_rust_base_prefixes(self) -> None:
+        for name in (
+            "basic_unsat",
+            "transitivity_unsat",
+            "predicate_congruence_unsat",
+            "eq_diamond_unsat",
+        ):
+            with self.subTest(name=name):
+                manifest_path = ROOT / "results" / "cert-smoke" / f"{name}.euf.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                source = (ROOT / manifest["source"]).read_text(encoding="utf-8")
+                reconstructed = QFUF.parse_and_encode(source)
+                dimacs_source = manifest_path.with_suffix("").with_suffix(".cnf")
+                variables, clauses = QFUF.parse_dimacs(
+                    dimacs_source.read_text(encoding="ascii")
+                )
+                base_count = manifest["clauses"]["base"]
+                self.assertEqual(reconstructed.variable_count, variables)
+                self.assertEqual(reconstructed.base_count, base_count)
+                self.assertEqual(reconstructed.clauses, clauses[:base_count])
+
+
+if __name__ == "__main__":
+    unittest.main()

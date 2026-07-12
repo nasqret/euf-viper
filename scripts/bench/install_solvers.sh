@@ -71,12 +71,35 @@ install_tar_binary() {
   chmod +x "$DEST/bin/$name"
 }
 
+install_tar_bzip2_binary() {
+  local archive="$1"
+  local name="$2"
+  local pattern="$3"
+  local tmp="$DEST/.extract-$name"
+  rm -rf "$tmp"
+  mkdir -p "$tmp"
+  tar -xjf "$archive" -C "$tmp"
+  local bin
+  bin="$(find "$tmp" -type f -path "$pattern" -perm -111 | head -1)"
+  if [ -z "$bin" ]; then
+    bin="$(find "$tmp" -type f -name "$name" | head -1)"
+  fi
+  if [ -z "$bin" ]; then
+    echo "could not find $name in $archive" >&2
+    exit 1
+  fi
+  cp "$bin" "$DEST/bin/$name"
+  chmod +x "$DEST/bin/$name"
+}
+
 case "$UNAME_S:$UNAME_M" in
   Linux:x86_64)
     CVC5_URL="https://github.com/cvc5/cvc5/releases/download/cvc5-1.3.4/cvc5-Linux-x86_64-static.zip"
     CVC5_SHA="dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6"
     YICES_URL="https://github.com/SRI-CSL/yices2/releases/download/yices-2.7.0/yices-2.7.0-x86_64-pc-linux-gnu-static-gmp.tar.gz"
     YICES_SHA="49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a"
+    OPENSMT_URL="https://github.com/usi-verification-and-security/opensmt/releases/download/v2.9.2/opensmt-x64-linux-static.tar.bz2"
+    OPENSMT_SHA="be4767bf5d6c08bc7f4f49ae1480f2ae2ac8f38a277d0ec39d56badd974b84bd"
     YICES_REQUIRED=1
     GLIBC_VERSION="$(ldd --version 2>/dev/null | head -1 | sed -E 's/.* ([0-9]+)\.([0-9]+).*/\1 \2/' || true)"
     GLIBC_MAJOR="$(printf '%s\n' "$GLIBC_VERSION" | awk '{print $1}')"
@@ -87,6 +110,8 @@ case "$UNAME_S:$UNAME_M" in
     else
       Z3_URL=""
       Z3_SHA=""
+      Z3_WHEEL_URL="https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3_solver-4.16.0.0-py3-none-manylinux_2_27_x86_64.whl"
+      Z3_WHEEL_SHA="afae2551f795670f0522cfce82132d129c408a2694adff71eb01ba0f2ece44f9"
       BUILD_Z3_API_RUNNER=1
     fi
     ;;
@@ -95,6 +120,8 @@ case "$UNAME_S:$UNAME_M" in
     CVC5_SHA="3840aa53f6ee6fc357415dcfe291d7f5ffec6cfb1ccca6fef64120a0d2be4cb6"
     YICES_URL="https://github.com/SRI-CSL/yices2/releases/download/yices-2.7.0/yices-2.7.0-arm-apple-darwin24.5.0-static-gmp.tar.gz"
     YICES_SHA="5682fedf13add7818e8d05796b9133e67844fce2bb72fd1ecc75dcb73167c7ac"
+    OPENSMT_URL="https://github.com/usi-verification-and-security/opensmt/releases/download/v2.9.2/opensmt-arm-osx.tar.bz2"
+    OPENSMT_SHA="6c8605db38e0f62ea040cffc670e65bd5f47e4fb65ecd65c6aaf4170cd19c51c"
     Z3_URL=""
     Z3_SHA=""
     ;;
@@ -103,6 +130,8 @@ case "$UNAME_S:$UNAME_M" in
     CVC5_SHA="5a7976affaf37dcf03ee44c3d0297c8e0ba08afd44ac832dab97400da726b852"
     YICES_URL="https://github.com/SRI-CSL/yices2/releases/download/yices-2.7.0/yices-2.7.0-x86_64-apple-darwin21.6.0-static-gmp.tar.gz"
     YICES_SHA="dff40838ae5674abed2c08c383d702c1358ad64627c15799d2a15e67d1b4495a"
+    OPENSMT_URL="https://github.com/usi-verification-and-security/opensmt/releases/download/v2.9.2/opensmt-x64-osx.tar.bz2"
+    OPENSMT_SHA="b376e0339793f1ed5c546155f865de10fb39d1346d1788b57c80dfb538375ada"
     Z3_URL="https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-osx-15.7.3.zip"
     Z3_SHA="d95519c4f3ed9393bb5f996e514c8f177bb148989bdfc32e95587f0307c4e7b0"
     ;;
@@ -120,16 +149,24 @@ YICES_TAR="$DEST/downloads/$(basename "$YICES_URL")"
 download_checked "$YICES_URL" "$YICES_SHA" "$YICES_TAR"
 install_tar_binary "$YICES_TAR" yices-smt2 '*/bin/yices-smt2'
 
+OPENSMT_TAR="$DEST/downloads/$(basename "$OPENSMT_URL")"
+download_checked "$OPENSMT_URL" "$OPENSMT_SHA" "$OPENSMT_TAR"
+install_tar_bzip2_binary "$OPENSMT_TAR" opensmt '*/bin/opensmt'
+
 if [ -n "$Z3_URL" ]; then
   Z3_ZIP="$DEST/downloads/$(basename "$Z3_URL")"
   download_checked "$Z3_URL" "$Z3_SHA" "$Z3_ZIP"
   install_zip_binary "$Z3_ZIP" z3 '*/bin/z3'
 elif [ "$BUILD_Z3_API_RUNNER" = 1 ]; then
-  python3 - <<'PY' >/dev/null 2>&1 || python3 -m pip install --user z3-solver==4.16.0.0
-import z3
-assert z3.get_version_string() == "4.16.0"
-PY
-  Z3_PACKAGE_DIR="$(python3 -c 'import pathlib, z3; print(pathlib.Path(z3.__file__).parent)')"
+  Z3_WHEEL="$DEST/downloads/$(basename "$Z3_WHEEL_URL")"
+  download_checked "$Z3_WHEEL_URL" "$Z3_WHEEL_SHA" "$Z3_WHEEL"
+  Z3_WHEEL_ROOT="$DEST/z3-wheel"
+  rm -rf "$Z3_WHEEL_ROOT"
+  mkdir -p "$Z3_WHEEL_ROOT"
+  unzip -q "$Z3_WHEEL" -d "$Z3_WHEEL_ROOT"
+  Z3_PACKAGE_DIR="$Z3_WHEEL_ROOT/z3"
+  test -f "$Z3_PACKAGE_DIR/include/z3.h"
+  test -f "$Z3_PACKAGE_DIR/lib/libz3.so"
   "${CC:-cc}" -O2 -DNDEBUG \
     -I "$Z3_PACKAGE_DIR/include" \
     "$ROOT/scripts/bench/z3_native_runner.c" \
@@ -157,3 +194,4 @@ fi
 if [ -x "$DEST/bin/z3" ]; then
   "$DEST/bin/z3" -version
 fi
+"$DEST/bin/opensmt" --version | head -1

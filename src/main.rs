@@ -2215,6 +2215,7 @@ struct CertificateClauseCounts {
 struct CertificateManifest {
     format: &'static str,
     result: &'static str,
+    encoding: &'static str,
     source: String,
     source_sha256: String,
     dimacs: String,
@@ -2229,6 +2230,33 @@ struct CertificateManifest {
     clauses: CertificateClauseCounts,
     theory_rounds: usize,
     finite_domain_axioms: usize,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct SatCertificateManifest {
+    format: &'static str,
+    result: &'static str,
+    encoding: &'static str,
+    source: String,
+    source_sha256: String,
+    variables: usize,
+    assignment: Vec<i32>,
+    theory_rounds: usize,
+    theory_conflicts: usize,
+}
+
+#[cfg(feature = "certificates")]
+enum CertificateSaturation {
+    Sat {
+        theory_rounds: usize,
+        conflict_count: usize,
+        assignment: Vec<i32>,
+    },
+    Unsat {
+        theory_rounds: usize,
+        conflict_count: usize,
+    },
 }
 
 impl CnfProblem {
@@ -5103,7 +5131,7 @@ fn discover_certificate_theory_conflicts(
     true_term: TermId,
     false_term: TermId,
     max_rounds: usize,
-) -> Result<(usize, usize), String> {
+) -> Result<CertificateSaturation, String> {
     let mut solver = VarisatSolver::new();
     for clause in &cnf.clauses {
         let literals = clause
@@ -5116,7 +5144,12 @@ fn discover_certificate_theory_conflicts(
     let mut learned = HashSet::<Vec<i32>>::default();
     for round in 1..=max_rounds {
         match solver.solve() {
-            Ok(false) => return Ok((round, learned.len())),
+            Ok(false) => {
+                return Ok(CertificateSaturation::Unsat {
+                    theory_rounds: round,
+                    conflict_count: learned.len(),
+                });
+            }
             Err(error) => return Err(format!("Varisat failed during certification: {error}")),
             Ok(true) => {}
         }
@@ -5136,7 +5169,23 @@ fn discover_certificate_theory_conflicts(
         let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
             .ok_or_else(|| "certificate SAT model is incomplete".to_owned())?;
         if conflicts.is_empty() {
-            return Err("input is satisfiable; no UNSAT certificate exists".to_owned());
+            let assignment = assignment
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(variable, &value)| {
+                    if value > 0 {
+                        variable as i32
+                    } else {
+                        -(variable as i32)
+                    }
+                })
+                .collect();
+            return Ok(CertificateSaturation::Sat {
+                theory_rounds: round,
+                conflict_count: learned.len(),
+                assignment,
+            });
         }
 
         let mut added = 0usize;
@@ -5407,74 +5456,102 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
         cnf.add_assertion(assertion);
     }
     let base_count = cnf.clauses.len();
-    let transitivity = equality_transitivity_clauses(&cnf, problem.arena.terms.len());
-    let transitivity_count = transitivity.len();
-    cnf.clauses.extend(transitivity);
-    let congruence = congruence_axiom_clauses(&cnf, &problem.arena);
-    let congruence_count = congruence.len();
-    cnf.clauses.extend(congruence);
-
-    let (theory_rounds, conflict_count) = discover_certificate_theory_conflicts(
+    let saturation = discover_certificate_theory_conflicts(
         &mut cnf,
         &problem.arena,
         bool_problem.true_term,
         bool_problem.false_term,
         max_rounds,
     )?;
-    write_dimacs(&dimacs_path, &cnf)?;
-    write_cadical_drat(&proof_path, &cnf)?;
-
-    let terms = problem
-        .arena
-        .terms
-        .iter()
-        .enumerate()
-        .map(|(id, term)| CertificateTerm {
-            id,
-            function: term.fun,
-            args: term.args.clone(),
-        })
-        .collect();
-    let manifest = CertificateManifest {
-        format: "euf-viper-euf-cnf-v1",
-        result: "unsat",
-        source: source_path.display().to_string(),
-        source_sha256: sha256_hex(&source_bytes),
-        dimacs: dimacs_path.display().to_string(),
-        dimacs_sha256: sha256_file(&dimacs_path)?,
-        proof: proof_path.display().to_string(),
-        proof_sha256: sha256_file(&proof_path)?,
-        variables: cnf.var_count(),
-        true_term: bool_problem.true_term,
-        false_term: bool_problem.false_term,
-        terms,
-        atoms: certificate_atoms(&cnf),
-        clauses: CertificateClauseCounts {
-            base: base_count,
-            transitivity: transitivity_count,
-            congruence: congruence_count,
-            theory_conflicts: conflict_count,
-            total: cnf.clauses.len(),
-        },
-        theory_rounds,
-        finite_domain_axioms: 0,
-    };
     let manifest_file = fs::File::create(&manifest_path)
         .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
     let mut manifest_writer = BufWriter::new(manifest_file);
-    serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
-        .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
-    writeln!(manifest_writer)
-        .map_err(|error| format!("failed to finish {}: {error}", manifest_path.display()))?;
-
-    println!("unsat");
-    eprintln!("dimacs={}", dimacs_path.display());
-    eprintln!("proof={}", proof_path.display());
-    eprintln!("manifest={}", manifest_path.display());
-    eprintln!("cnf_vars={}", cnf.var_count());
-    eprintln!("cnf_clauses={}", cnf.clauses.len());
-    eprintln!("theory_rounds={theory_rounds}");
-    eprintln!("theory_conflicts={conflict_count}");
+    match saturation {
+        CertificateSaturation::Sat {
+            theory_rounds,
+            conflict_count,
+            assignment,
+        } => {
+            let manifest = SatCertificateManifest {
+                format: "euf-viper-euf-cnf-v2",
+                result: "sat",
+                encoding: "canonical-tseitin-v1",
+                source: source_path.display().to_string(),
+                source_sha256: sha256_hex(&source_bytes),
+                variables: cnf.var_count(),
+                assignment,
+                theory_rounds,
+                theory_conflicts: conflict_count,
+            };
+            serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
+                .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+            writeln!(manifest_writer).map_err(|error| {
+                format!("failed to finish {}: {error}", manifest_path.display())
+            })?;
+            println!("sat");
+            eprintln!("manifest={}", manifest_path.display());
+            eprintln!("cnf_vars={}", cnf.var_count());
+            eprintln!("cnf_clauses={}", cnf.clauses.len());
+            eprintln!("theory_rounds={theory_rounds}");
+            eprintln!("theory_conflicts={conflict_count}");
+        }
+        CertificateSaturation::Unsat {
+            theory_rounds,
+            conflict_count,
+        } => {
+            write_dimacs(&dimacs_path, &cnf)?;
+            write_cadical_drat(&proof_path, &cnf)?;
+            let terms = problem
+                .arena
+                .terms
+                .iter()
+                .enumerate()
+                .map(|(id, term)| CertificateTerm {
+                    id,
+                    function: term.fun,
+                    args: term.args.clone(),
+                })
+                .collect();
+            let manifest = CertificateManifest {
+                format: "euf-viper-euf-cnf-v2",
+                result: "unsat",
+                encoding: "canonical-tseitin-v1",
+                source: source_path.display().to_string(),
+                source_sha256: sha256_hex(&source_bytes),
+                dimacs: dimacs_path.display().to_string(),
+                dimacs_sha256: sha256_file(&dimacs_path)?,
+                proof: proof_path.display().to_string(),
+                proof_sha256: sha256_file(&proof_path)?,
+                variables: cnf.var_count(),
+                true_term: bool_problem.true_term,
+                false_term: bool_problem.false_term,
+                terms,
+                atoms: certificate_atoms(&cnf),
+                clauses: CertificateClauseCounts {
+                    base: base_count,
+                    transitivity: 0,
+                    congruence: 0,
+                    theory_conflicts: conflict_count,
+                    total: cnf.clauses.len(),
+                },
+                theory_rounds,
+                finite_domain_axioms: 0,
+            };
+            serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
+                .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+            writeln!(manifest_writer).map_err(|error| {
+                format!("failed to finish {}: {error}", manifest_path.display())
+            })?;
+            println!("unsat");
+            eprintln!("dimacs={}", dimacs_path.display());
+            eprintln!("proof={}", proof_path.display());
+            eprintln!("manifest={}", manifest_path.display());
+            eprintln!("cnf_vars={}", cnf.var_count());
+            eprintln!("cnf_clauses={}", cnf.clauses.len());
+            eprintln!("theory_rounds={theory_rounds}");
+            eprintln!("theory_conflicts={conflict_count}");
+        }
+    }
     Ok(0)
 }
 
@@ -7157,6 +7234,10 @@ fn run() -> Result<i32, String> {
         "gen" => gen_cmd(&args[1..]),
         "bench" => bench_cmd(&args[1..]),
         "bench-or" => bench_or_cmd(&args[1..]),
+        "--version" | "-V" => {
+            println!("euf-viper {}", env!("CARGO_PKG_VERSION"));
+            Ok(0)
+        }
         "--help" | "-h" | "help" => {
             println!("{}", usage());
             Ok(0)

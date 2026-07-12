@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "campaign_id": "best-overall-qf-uf-2026-07",
-  "status": "ready_for_phase_0",
+  "status": "active",
   "scope": {
     "logic": "QF_UF",
     "standalone_solver": true,
@@ -18,6 +18,10 @@
     "reference_corpus": "smtlib-2025-full",
     "reference_timeout_s": 2
   },
+  "release_lock": {
+    "path": "campaigns/solver-releases-2026-07.json",
+    "sha256": "afbc1aa43127a467540167ef5e4e6d201f1b0a3840d99cec78dd761607d66cfd"
+  },
   "comparators": [
     {
       "id": "z3",
@@ -28,9 +32,9 @@
     },
     {
       "id": "cvc5",
-      "version": "1.3.4-local-snapshot",
-      "pin_status": "must_record_commit_and_binary_hash",
-      "source": "https://github.com/cvc5/cvc5"
+      "version": "1.3.4",
+      "pin_status": "pinned_release_and_binary_hash",
+      "source": "https://github.com/cvc5/cvc5/releases/tag/cvc5-1.3.4"
     },
     {
       "id": "yices2",
@@ -57,7 +61,11 @@
       "id": "smtcomp-2025-qf-uf",
       "role": "official_primary",
       "instances": 3521,
-      "status": "to_ingest_exact_selection",
+      "status": "present",
+      "manifest": "benchmarks/smtcomp-2025/qf_uf_manifest.jsonl",
+      "manifest_sha256": "ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6",
+      "source_commit": "82b2c91eb186a846dff0109bf96bf8fe71d2ded5",
+      "source_sha256": "d79dd5d693e9cc645817ecbcad8ccc3cb92fba97418dbe011be3f181a6dd4a1e",
       "source": "https://smt-comp.github.io/2025/results/qf_equality-single-query/"
     },
     {
@@ -132,7 +140,7 @@
       "id": "F0",
       "rank": 0,
       "title": "measurement, proof, and corpus foundation",
-      "status": "ready",
+      "status": "in_progress",
       "prerequisites": [],
       "first_gate": "ingest exact SMT-COMP selection, add OpenSMT, reconstruct base CNF independently, and rerun current sound main at all declared budgets",
       "kill_condition": "none; this is mandatory infrastructure"

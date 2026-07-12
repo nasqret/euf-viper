@@ -10,6 +10,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from independent_qfuf import (
+    IndependentQfufError,
+    V2_FORMAT,
+    parse_and_encode,
+    parse_dimacs as parse_dimacs_independent,
+    validate_v2_sat_manifest,
+    validate_v2_unsat_manifest,
+)
+
 
 class UnionFind:
     def __init__(self, size: int) -> None:
@@ -225,21 +234,74 @@ def main() -> int:
     parser.add_argument("--drat-trim", default=shutil.which("drat-trim"))
     args = parser.parse_args()
 
-    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    try:
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"cannot read certificate manifest: {error}") from error
+    if not isinstance(manifest, dict) or manifest.get("format") != V2_FORMAT:
+        raise SystemExit(
+            "independent checking requires euf-viper-euf-cnf-v2; "
+            "legacy v1 trusts the solver-emitted base CNF"
+        )
+    if manifest.get("encoding") != "canonical-tseitin-v1":
+        raise SystemExit("unsupported or missing independent encoding identifier")
     source = artifact_path(manifest["source"], args.manifest, args.source)
+    actual_source_hash = sha256(source)
+    if actual_source_hash != manifest.get("source_sha256"):
+        raise SystemExit(
+            "source SHA-256 mismatch: "
+            f"expected {manifest.get('source_sha256')}, got {actual_source_hash}"
+        )
+    try:
+        source_text = source.read_text(encoding="utf-8")
+        problem = parse_and_encode(source_text)
+    except (OSError, UnicodeError, IndependentQfufError) as error:
+        raise SystemExit(f"independent SMT-LIB reconstruction failed: {error}") from error
+
+    result = manifest.get("result")
+    if result == "sat":
+        try:
+            validate_v2_sat_manifest(manifest, problem)
+        except IndependentQfufError as error:
+            raise SystemExit(f"independent SAT model check failed: {error}") from error
+        if manifest.get("variables") != problem.variable_count:
+            raise SystemExit(
+                "SAT manifest variable count differs from independent reconstruction"
+            )
+        print(
+            json.dumps(
+                {
+                    "status": "verified",
+                    "result": "sat",
+                    "variables": problem.variable_count,
+                    "base_clauses": problem.base_count,
+                    "source_sha256": actual_source_hash,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if result != "unsat":
+        raise SystemExit(f"certificate manifest has unsupported result {result!r}")
+
     dimacs = artifact_path(manifest["dimacs"], args.manifest, args.dimacs)
     proof = artifact_path(manifest["proof"], args.manifest, args.proof)
     for path, expected, label in [
-        (source, manifest["source_sha256"], "source"),
         (dimacs, manifest["dimacs_sha256"], "DIMACS"),
         (proof, manifest["proof_sha256"], "proof"),
     ]:
         actual = sha256(path)
         if actual != expected:
             raise SystemExit(f"{label} SHA-256 mismatch: expected {expected}, got {actual}")
-
-    variables, clauses = parse_dimacs(dimacs)
-    replayed = validate_manifest(manifest, variables, clauses)
+    try:
+        variables, clauses = parse_dimacs_independent(
+            dimacs.read_text(encoding="ascii")
+        )
+        replayed = validate_v2_unsat_manifest(
+            manifest, problem, variables, clauses
+        )
+    except (OSError, UnicodeError, IndependentQfufError) as error:
+        raise SystemExit(f"independent UNSAT reconstruction failed: {error}") from error
     if not args.drat_trim:
         raise SystemExit("drat-trim is required; pass --drat-trim PATH")
     checked = subprocess.run(
@@ -256,8 +318,10 @@ def main() -> int:
         json.dumps(
             {
                 "status": "verified",
+                "result": "unsat",
                 "variables": variables,
                 "clauses": len(clauses),
+                "base_clauses": problem.base_count,
                 "replayed_theory_clauses": replayed,
                 "source_sha256": manifest["source_sha256"],
                 "dimacs_sha256": manifest["dimacs_sha256"],

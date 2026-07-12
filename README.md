@@ -12,8 +12,11 @@ SMT-LIB and SMT-COMP runs.
 > **Soundness and claim status, 2026-07-12:** the historically measured
 > `58efe9d` binary is not generally sound for Boolean values used only as UF
 > data. Current main repairs Boolean-as-data, quoted-symbol, and query-order
-> defects and passes 228 all-feature Rust tests plus 127 Python tests and 203
-> subtests. Flat persistent clause storage is the latest promoted optimization;
+> defects and passes 228 all-feature Rust tests plus 217 Python tests. The new
+> certificate path independently parses the original SMT-LIB, reconstructs the
+> base Tseitin CNF, checks SAT assignments, replays every EUF lemma, and then
+> invokes DRAT-trim for UNSAT. Flat persistent clause storage is still the
+> latest promoted performance optimization;
 > its full paired gate improves coverage `7,418 -> 7,419` and common-total,
 > geometric, and median speed by `1.0071x`, `1.0309x`, and `1.0314x`. This is a
 > broad implementation win, not superiority over Z3 or Yices2. Fresh exact
@@ -35,6 +38,8 @@ scripts/bench/install_solvers.sh
 scripts/bench/fetch_smtlib_qf_uf.sh
 python3 scripts/bench/compare_solvers.py \
   benchmarks/smtlib-2025/qf_uf_manifest.jsonl --timeout 2 --jobs 8
+python3 scripts/bench/validate_campaign_spec.py \
+  campaigns/best-overall-qf-uf-2026-07.json
 cargo build --release --features certificates
 target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
   --out-prefix results/cert-basic
@@ -168,7 +173,11 @@ negative results and immutable WMI job identifiers are retained under
   none can alter production answers.
 - `benches/`: local comparator harnesses.
 - `scripts/wmi/`: WMI SLURM preflight, sync, and benchmark campaign scripts.
-- `scripts/cert/`: pinned DRAT checker setup and independent certificate replay.
+- `scripts/cert/`: independent typed SMT-LIB/CNF/model/EUF checking and pinned
+  DRAT verification.
+- `scripts/bench/freeze_campaign.py`, `run_locked_campaign.py`, and
+  `analyze_campaign.py`: immutable resource-controlled execution and rigorous
+  globally reconstructed shard and family-cluster promotion gates.
 - `scripts/lts/`: LTS/CAS preflights and artifact checks.
 - `artifacts/`: SageMath, Magma, Singular, Oscar, and Rust-adjacent
   mathematical sanity artifacts.
@@ -224,6 +233,19 @@ Euf-viper is `1.5666x` faster geometrically than Z3 on 7,375 common solves,
 but only `0.7467x` by common aggregate time and has 42 fewer total solves. It
 beats cvc5 overall. Yices2 remains the clear leader.
 
+Phase P0 is now active. The exact official 3,521-instance SMT-COMP 2025 QF_UF
+selection is committed and bound to official source commit `82b2c91e`.
+OpenSMT 2.9.2 is installed from hash-pinned release artifacts, all comparator
+release commits and platform assets have a machine-readable lock, and the new
+runner binds source, corpus, taxonomy, solver bytes, CPU allocation, memory,
+budgets, schedule, journals, and results. Family-safe splitting, exact McNemar,
+PAR-2, clustered bootstrap intervals, Holm correction, immutable resume, and
+WMI shard derivation all have focused tests. The analyzer proves every
+runtime-bound shard is an exact child of the parent campaign and requires the
+complete partition before computing one corpus-wide result. These are
+measurement and soundness advances; they do not change the performance table
+above.
+
 The 2026-07-12 research round is wrapped and fail-closed:
 
 - corrected bounded quotient-plus-Ackermann gate `144631` loses one of 32
@@ -245,8 +267,8 @@ independently replayed.
 The next research program is preregistered in
 [`PLAN.md`](PLAN.md) and
 [`campaigns/best-overall-qf-uf-2026-07.json`](campaigns/best-overall-qf-uf-2026-07.json).
-It first adds the exact SMT-COMP QF_UF selection, OpenSMT, modern Kissat and Z3
-EUF controls, independent base-CNF/model checking, grouped holdouts, and a
-normalized runner. Its primary architecture is proof-carrying per-component
+Its remaining P0 work is the WMI taxonomy/lock run, corpus-wide checker shadow,
+and new 2/60/1,200-second evidence. T0 then isolates modern Kissat and Z3 EUF
+controls. Its primary architecture remains proof-carrying per-component
 migration among eager, rollback-EUF, quotient/class, and Hall/PB
-representations. No heavy successor campaign launches before phase P0 passes.
+representations. No novelty candidate can be promoted before phase P0 passes.

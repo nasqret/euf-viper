@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run euf-viper, Z3, cvc5, and Yices2 on an SMT-LIB manifest."""
+"""Run euf-viper, Z3, cvc5, Yices2, and OpenSMT on an SMT-LIB manifest."""
 
 from __future__ import annotations
 
@@ -244,9 +244,11 @@ def main() -> int:
     parser.add_argument("--z3")
     parser.add_argument("--cvc5")
     parser.add_argument("--yices")
+    parser.add_argument("--opensmt")
     parser.add_argument("--no-z3", action="store_true")
     parser.add_argument("--no-cvc5", action="store_true")
     parser.add_argument("--no-yices", action="store_true")
+    parser.add_argument("--no-opensmt", action="store_true")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--limit", type=int)
@@ -265,6 +267,8 @@ def main() -> int:
         parser.error("--no-cvc5 cannot be combined with --cvc5")
     if args.no_yices and args.yices:
         parser.error("--no-yices cannot be combined with --yices")
+    if args.no_opensmt and args.opensmt:
+        parser.error("--no-opensmt cannot be combined with --opensmt")
     if args.resume and args.resume_from:
         parser.error("--resume and --resume-from are mutually exclusive")
     if (args.retry_result or args.retry_solver) and not (
@@ -288,6 +292,10 @@ def main() -> int:
         yices = solver_path(args.yices, "yices-smt2")
         if yices:
             solvers.append(("yices2", [yices]))
+    if not args.no_opensmt:
+        opensmt = solver_path(args.opensmt, "opensmt")
+        if opensmt:
+            solvers.append(("opensmt", [opensmt]))
     if not solvers:
         raise SystemExit("no solver binaries found")
 

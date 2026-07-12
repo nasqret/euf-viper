@@ -589,3 +589,25 @@
 - Phase P0 must complete exact hashes, family/duplicate groups, sealed holdout,
   normalized runner, hierarchical statistics, independent SAT model checking,
   and base-CNF reconstruction before heavy successor timing.
+
+## Phase-Zero Evidence Foundation (2026-07-12)
+
+- The exact 3,521-row SMT-COMP 2025 QF_UF manifest is committed with SHA-256
+  `ed00b0e2...2aaa6` and official result archive hash `d79dd5d6...4a1e`.
+- `campaigns/solver-releases-2026-07.json` pins official artifacts and source
+  revisions for Z3, cvc5, Yices2, OpenSMT 2.9.2, and Kissat 4.0.4. WMI records
+  the exact installed executable hashes before campaign freezing.
+- Parent, shard, and runtime CPU-binding locks now bind all source, corpus,
+  taxonomy, binary, environment, resource, schedule, and output bytes. The
+  runner uses cold process groups, affinity/RLIMIT controls, CPU/RSS accounting,
+  chained journals, and exact-prefix immutable resume.
+- Global analysis rejects missing, duplicate, drifted, or incorrectly derived
+  shards before combining observations. Promotion statistics run over the
+  complete parent corpus, not shard-local samples.
+- Certificate schema v2 emits total SAT assignments or base-CNF plus replayable
+  EUF lemmas and DRAT. The independent Python parser reconstructs typed source,
+  atoms, and canonical Tseitin without importing Rust code. Focused SAT/UNSAT
+  smoke passes; corpus-wide shadow validation remains open.
+- The durable WMI chain is prepare -> full/official two-second arrays -> global
+  audit. Do not claim any new performance result until this exact revision is
+  committed, published, and the global artifacts return.

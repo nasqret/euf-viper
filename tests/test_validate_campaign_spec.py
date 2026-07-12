@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -65,6 +66,15 @@ class CampaignSpecTests(unittest.TestCase):
         self.assertTrue(any("wrong_answers_allowed" in error for error in errors))
         self.assertTrue(any("held_out_gate" in error for error in errors))
 
+    def test_missing_release_lock_is_rejected(self) -> None:
+        spec = load_spec()
+        del spec["release_lock"]
+
+        with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+            VALIDATOR.validate_spec(spec)
+
+        self.assertTrue(any("release_lock" in error for error in caught.exception.errors))
+
     def test_cli_writes_machine_readable_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "validated.json"
@@ -79,6 +89,34 @@ class CampaignSpecTests(unittest.TestCase):
             result = json.loads(output.read_text(encoding="utf-8"))
             self.assertTrue(result["valid"])
             self.assertEqual(result["campaign_id"], "best-overall-qf-uf-2026-07")
+
+    def test_bound_artifact_hash_drift_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repository = Path(temp_dir)
+            campaign_dir = repository / "campaigns"
+            corpus_dir = repository / "benchmarks" / "smtcomp-2025"
+            campaign_dir.mkdir(parents=True)
+            corpus_dir.mkdir(parents=True)
+            shutil.copy2(
+                ROOT / "campaigns" / "solver-releases-2026-07.json",
+                campaign_dir / "solver-releases-2026-07.json",
+            )
+            shutil.copy2(
+                ROOT / "benchmarks" / "smtcomp-2025" / "qf_uf_manifest.jsonl",
+                corpus_dir / "qf_uf_manifest.jsonl",
+            )
+            spec = load_spec()
+            official = next(
+                item for item in spec["corpora"] if item["id"] == "smtcomp-2025-qf-uf"
+            )
+            official["manifest_sha256"] = "0" * 64
+            path = campaign_dir / "best-overall-qf-uf-2026-07.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+
+            with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+                VALIDATOR.load_and_validate(path)
+
+            self.assertTrue(any("mismatch" in error for error in caught.exception.errors))
 
 
 if __name__ == "__main__":

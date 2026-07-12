@@ -143,8 +143,11 @@ timeout or on one familiar family is not best overall.
 
 ## Proof Boundary
 
-The current certificate checker replays EUF-derived clauses and the SAT proof,
-but still trusts the base Tseitin prefix. F0 must independently reconstruct:
+The phase-zero checker no longer trusts the Rust base Tseitin prefix. A
+standalone typed Python parser reconstructs the source terms, theory atoms, and
+canonical base CNF. The Rust solver emits only that base plus source-replayable
+EUF cuts, a complete SAT assignment for SAT, or DRAT for UNSAT. The checker
+then validates:
 
 1. source symbols, sorts, and theory atoms;
 2. base Boolean/Tseitin clauses;
@@ -152,8 +155,29 @@ but still trusts the base Tseitin prefix. F0 must independently reconstruct:
 4. EUF and migration bridge lemmas;
 5. the final SAT refutation.
 
-SAT answers require a complete emitted model and a separate source evaluator.
-Any failure rejects the candidate before timing interpretation.
+The local smoke covers five UNSAT fixtures and a 1,002-variable SAT fixture.
+Every UNSAT proof passes DRAT-trim. Corpus-wide certificate shadowing remains a
+P0 exit condition; local smoke is implementation evidence, not a complete
+campaign validation.
+
+## Phase-Zero Implementation
+
+The campaign foundation now includes:
+
+1. the exact 3,521-row SMT-COMP 2025 QF_UF selection and source hashes;
+2. a release lock for euf-viper, Z3, Z3 `sat.euf=true`, cvc5, Yices2,
+   OpenSMT, and the Kissat controls;
+3. deterministic family/lineage taxonomy, normalized token fingerprints,
+   duplicate closure, and sealed family folds;
+4. self-hashed parent, shard, and runtime CPU-binding locks;
+5. cold-process CPU, wall-time, RSS, timeout, output, and immutable resume
+   records;
+6. exact global shard reconstruction before family-cluster bootstrap, McNemar,
+   Holm, PAR-2, and promotion adjudication.
+
+The WMI P0 lane freezes the two-second corpus first. It does not authorize a
+performance claim or novelty promotion. Sixty- and 1,200-second timeout-only
+continuations start only from checked two-second rows.
 
 ## Closed Work
 

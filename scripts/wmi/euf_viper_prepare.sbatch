@@ -51,6 +51,7 @@ test -x "$PWD/target/release/euf-viper"
 test -x "$PWD/third_party/solvers/bin/z3"
 test -x "$PWD/third_party/solvers/bin/cvc5"
 test -x "$PWD/third_party/solvers/bin/yices-smt2"
+test -x "$PWD/third_party/solvers/bin/opensmt"
 test -s "$CAMPAIGN_MANIFEST"
 
 printf 'revision=%s\n' "${EUF_VIPER_GIT_REVISION:-unknown}"

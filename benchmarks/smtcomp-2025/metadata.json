@@ -1,0 +1,13 @@
+{
+  "full_manifest_path": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+  "full_manifest_sha256": "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db",
+  "instances": 3521,
+  "logic": "QF_UF",
+  "schema_version": 1,
+  "selected_manifest_sha256": "ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6",
+  "source_commit": "82b2c91eb186a846dff0109bf96bf8fe71d2ded5",
+  "source_sha256": "d79dd5d693e9cc645817ecbcad8ccc3cb92fba97418dbe011be3f181a6dd4a1e",
+  "source_url": "https://raw.githubusercontent.com/SMT-COMP/smt-comp.github.io/82b2c91eb186a846dff0109bf96bf8fe71d2ded5/data/results-sq-2025.json.gz",
+  "track": "SingleQuery",
+  "year": 2025
+}

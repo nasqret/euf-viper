@@ -784,6 +784,51 @@
   validate the exact comparator/corpus/budget/track/promotion contract and its
   negative tests before campaign changes can land.
 
+## 2026-07-12 Phase P0 Implementation
+
+- Reconstructed the exact 3,521-instance SMT-COMP 2025 QF_UF selection from
+  official single-query results at source commit `82b2c91e`. The portable
+  selected manifest SHA-256 is `ed00b0e2...2aaa6`; its source result archive is
+  pinned as `d79dd5d6...4a1e`.
+- Added OpenSMT 2.9.2 to the installer and legacy comparator path. Official
+  platform archives for Z3, cvc5, Yices2, and OpenSMT plus source commits for
+  all controls and Kissat 4.0.4 are bound by
+  `campaigns/solver-releases-2026-07.json`. The WMI Z3 fallback now uses the
+  official hash-pinned manylinux 2.27 wheel rather than an index-resolved pip
+  installation.
+- Implemented deterministic source-family and generator-lineage taxonomy,
+  token-level SMT-LIB normalization, near-duplicate closure, and sealed family
+  holdouts. A path-only audit recognizes all 7,503 files across nine source
+  families and 5,796 lineages; the full 957 MB fingerprint pass is delegated
+  to WMI.
+- Implemented immutable campaign freezing, exact child shard locks, runtime
+  binding to the first SLURM-allowed CPU, cold sequential process execution,
+  process-group timeout cleanup, affinity/RLIMIT enforcement reporting,
+  CPU/RSS accounting, balanced solver order, chained journals, atomic resume,
+  and strict artifact drift checks.
+- Implemented exact paired analysis with wrong-answer fail-closed behavior,
+  PAR-2, common totals/geometric ratios, SAT/UNSAT and family macro summaries,
+  exact McNemar, deterministic family-cluster bootstrap, Holm correction, and
+  promotion adjudication.
+- Replaced the certificate trust boundary. `certify` now uses only base
+  canonical Tseitin clauses plus lazy EUF lemmas, emits total SAT assignments,
+  and emits DRAT for UNSAT. A separate Python parser reconstructs typed QF_UF,
+  base CNF, terms, and atoms from the original source. Five UNSAT fixtures and
+  a 1,002-variable SAT fixture pass independent reconstruction/model/lemma
+  checks; every UNSAT proof also passes DRAT-trim.
+- Added a durable WMI P0 prepare/full/official/audit dependency chain. It
+  verifies the committed selection, computes family taxonomies, records six
+  exact solver configurations including Z3 `sat.euf=true`, freezes only the
+  two-second budget, derives 64 shards, binds each allocated CPU, and audits
+  every shard. The audit reconstructs each bound shard from the parent lock,
+  requires a complete disjoint partition, and computes one global analysis per
+  corpus rather than treating shard-local samples as promotion evidence. No new
+  performance claim is made before those rows return.
+- Verification at this checkpoint: 217 Python tests pass; Rust all-feature
+  suite passes 228 tests with four environment-dependent tests ignored; the
+  independent certificate smoke passes; campaign JSON and all new shell
+  scripts validate.
+
 ## Next Entry Template
 
 - Benchmark corpus:
