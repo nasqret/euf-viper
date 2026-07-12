@@ -123,8 +123,9 @@ result cache can satisfy V1-V4.
 - [ ] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
-  chain waits for publication and hosted CI of the continuation/certificate
-  contract revision.
+  chain at `1308be8` passed hosted CI but was cancelled during preparation when
+  the exact locked binary lacked certificate emission. Relaunch waits for the
+  corrected single-binary build revision.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
   assembly, and exact carried-row provenance are implemented but not yet run.

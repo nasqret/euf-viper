@@ -851,6 +851,11 @@
   intentionally environment-gated. All campaign shell scripts parse, Python
   entrypoints compile, Rust formatting is clean, and the independent SAT plus
   five-UNSAT DRAT certificate smoke passes.
+- Published `1308be8` and obtained green hosted run `29212534371`. Initial WMI
+  chain `144817`/`144818`/`144819`/`144821` exposed that P0 still built the
+  benchmark binary without the opt-in `certificates` feature. Cancelled it 38
+  seconds into preparation, before any array ran, and changed preparation to
+  lock one certificate-capable binary for both timing and proof emission.
 
 ## Next Entry Template
 

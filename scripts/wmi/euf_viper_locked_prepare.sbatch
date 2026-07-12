@@ -35,7 +35,7 @@ python3 scripts/bench/validate_campaign_spec.py \
   campaigns/best-overall-qf-uf-2026-07.json \
   --out "$RUN_ROOT/validated-campaign.json"
 
-cargo build --release
+cargo build --release --features certificates
 scripts/bench/install_solvers.sh "$PWD/third_party/solvers" \
   > "$RUN_ROOT/install-solvers.log" 2>&1
 SHARED_CORPUS="${EUF_VIPER_SHARED_CORPUS:-$HOME/euf-viper/benchmarks/smtlib-2025}"
@@ -69,7 +69,7 @@ python3 scripts/bench/build_family_manifest.py "$OFFICIAL_MANIFEST" \
   --taxonomy-out "$RUN_ROOT/taxonomy/official.jsonl" \
   --split-out "$RUN_ROOT/taxonomy/official-split.json"
 
-VIPER_VERSION="0.1.0+$ACTUAL_REVISION"
+VIPER_VERSION="0.1.0+$ACTUAL_REVISION.certificates"
 python3 scripts/bench/record_solver_config.py \
   --campaign campaigns/best-overall-qf-uf-2026-07.json \
   --viper target/release/euf-viper \

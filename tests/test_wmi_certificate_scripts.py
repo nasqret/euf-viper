@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WMI = ROOT / "scripts" / "wmi"
+P0_PREPARE = WMI / "euf_viper_locked_prepare.sbatch"
 SBATCH_FILES = [
     WMI / "euf_viper_certificate_prepare.sbatch",
     WMI / "euf_viper_certificate_shard.sbatch",
@@ -32,6 +33,14 @@ class WmiCertificateScriptTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_p0_times_the_same_binary_that_emits_certificates(self) -> None:
+        text = self.text(P0_PREPARE)
+        build = "cargo build --release --features certificates"
+        self.assertIn(build, text)
+        self.assertIn("target/release/euf-viper", text)
+        self.assertLess(text.index(build), text.index("record_solver_config.py"))
+        self.assertIn(".certificates", text)
 
     def test_embedded_python_blocks_compile(self) -> None:
         pattern = re.compile(

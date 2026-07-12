@@ -620,3 +620,8 @@
 - The resumed local checkpoint implements sparse timeout continuations and
   independent per-stage plus staged-union certificate audits. Do not treat it
   as evidence until committed, published, hosted-green, and executed on WMI.
+- Commit `1308be8` passed hosted run `29212534371`, but WMI chain
+  `144817`/`144818`/`144819`/`144821` was cancelled during preparation because
+  the locked binary lacked the opt-in certificate command. The next P0 build
+  must use `cargo build --release --features certificates` and bind that exact
+  binary for both timing and proof emission.

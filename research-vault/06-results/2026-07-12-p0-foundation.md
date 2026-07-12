@@ -77,3 +77,8 @@ pause before producing a campaign lock or benchmark row. The resumed contract
 work adds timeout-only schema-v2 stages and independent certificate coverage;
 those artifacts remain implementation evidence only until a new fixed revision
 passes hosted CI and the full WMI dependency graph completes.
+
+Commit `1308be8` passed hosted run `29212534371`. Its initial WMI chain was
+cancelled during preparation because the locked benchmark binary was built
+without the opt-in certificate command. No array ran. The corrected preparation
+uses one `certificates`-enabled binary for timing and independent proof replay.

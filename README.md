@@ -272,6 +272,11 @@ certificate union keyed by each solve's physical origin budget. These paths do
 not alter solver answers or constitute performance evidence until the fixed WMI
 campaign and independent audits return.
 
+Hosted run `29212534371` is green for commit `1308be8`. Its first WMI submission
+was cancelled during preparation, before benchmark arrays, because the locked
+binary had not enabled certificate emission. The corrected campaign builds one
+exact `certificates`-enabled binary for both timing and proof generation.
+
 Orbit, MDD, quotient-CSP, class-label, and Hall mechanisms cannot alter
 production answers until their source-level preconditions and certificates are
 independently replayed.
