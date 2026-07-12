@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "bench" / "validate_campaign_spec.py"
+CAMPAIGN = ROOT / "campaigns" / "best-overall-qf-uf-2026-07.json"
+MODULE_SPEC = importlib.util.spec_from_file_location("validate_campaign_spec", SCRIPT)
+assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
+VALIDATOR = importlib.util.module_from_spec(MODULE_SPEC)
+MODULE_SPEC.loader.exec_module(VALIDATOR)
+
+
+def load_spec() -> dict:
+    return json.loads(CAMPAIGN.read_text(encoding="utf-8"))
+
+
+class CampaignSpecTests(unittest.TestCase):
+    def test_repository_campaign_is_valid(self) -> None:
+        result = VALIDATOR.validate_spec(load_spec())
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["budgets_s"], [2, 60, 1200])
+        self.assertEqual(result["tracks"][0], "F0")
+        self.assertIn("opensmt", result["comparators"])
+
+    def test_missing_opensmt_is_rejected(self) -> None:
+        spec = load_spec()
+        spec["comparators"] = [
+            item for item in spec["comparators"] if item["id"] != "opensmt"
+        ]
+
+        with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+            VALIDATOR.validate_spec(spec)
+
+        self.assertTrue(any("opensmt" in error for error in caught.exception.errors))
+
+    def test_unknown_track_dependency_is_rejected(self) -> None:
+        spec = load_spec()
+        spec["tracks"][1]["prerequisites"].append("MISSING")
+
+        with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+            VALIDATOR.validate_spec(spec)
+
+        self.assertTrue(
+            any("unknown prerequisites" in error for error in caught.exception.errors)
+        )
+
+    def test_weakened_soundness_policy_is_rejected(self) -> None:
+        spec = load_spec()
+        spec["promotion_policy"]["wrong_answers_allowed"] = 1
+        spec["promotion_policy"]["held_out_gate_before_superiority_claim"] = False
+
+        with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+            VALIDATOR.validate_spec(spec)
+
+        errors = caught.exception.errors
+        self.assertTrue(any("wrong_answers_allowed" in error for error in errors))
+        self.assertTrue(any("held_out_gate" in error for error in errors))
+
+    def test_cli_writes_machine_readable_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "validated.json"
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPT), str(CAMPAIGN), "--out", str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            result = json.loads(output.read_text(encoding="utf-8"))
+            self.assertTrue(result["valid"])
+            self.assertEqual(result["campaign_id"], "best-overall-qf-uf-2026-07")
+
+
+if __name__ == "__main__":
+    unittest.main()

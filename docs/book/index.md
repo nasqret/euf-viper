@@ -16,3 +16,8 @@ overall; Yices2 is both faster and more complete. Current exact campaign
 `144328`/`144329`/`144330` has zero wrong answers or execution errors. These
 results do not establish overall superiority over Z3 or Yices2.
 ```
+
+The next program is the [Best-Overall Campaign](best-overall-campaign.md). It
+adds the official QF_UF selection and OpenSMT, modernizes the SAT control,
+closes independent proof/model gaps, and tests proof-carrying component-local
+representation migration under held-out and full-corpus gates.

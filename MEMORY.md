@@ -570,3 +570,22 @@
   tests plus 45 subtests) and fused quotient census `eae27d0` (136 Rust tests).
   Neither is merged or promoted. No `euf-viper` WMI jobs remain active after
   cancelling eleven superseded pending jobs.
+
+## Best-Overall Campaign Reset (2026-07-12)
+
+- `PLAN.md` is now an actionable campaign rather than a historical job ledger;
+  the full design is
+  `research-vault/02-design/2026-07-12-best-overall-qf-uf-campaign.md` and the
+  validated contract is `campaigns/best-overall-qf-uf-2026-07.json`.
+- Add the exact 3,521-case SMT-COMP 2025 QF_UF selection and OpenSMT 2.9.2.
+  Keep the 7,503-file corpus as development regression, not a fresh holdout.
+- Production Linux uses a Kissat SC2021 wrapper. Causally test Kissat 4.0.4 and
+  modern inprocessing before attributing broad gains to new SMT mechanisms.
+- Primary architecture hypothesis: stable-ID, proof-carrying per-component
+  migration among eager CNF, rollback EUF, quotient/class coding, and native
+  adequate-range Hall/PB. Parser/formula staging, semantic DAG factoring,
+  explanation economics, and canonical frontier/bit-sliced search are gated
+  supporting tracks.
+- Phase P0 must complete exact hashes, family/duplicate groups, sealed holdout,
+  normalized runner, hierarchical statistics, independent SAT model checking,
+  and base-CNF reconstruction before heavy successor timing.

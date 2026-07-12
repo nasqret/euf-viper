@@ -753,6 +753,37 @@
   or replaced chains. The final queue contains no `euf-viper` job; unrelated
   `sg-lean` and `echo-exp1` workloads were left untouched.
 
+## 2026-07-12 Best-Overall Campaign Design
+
+- Reconciled every unchecked historical `PLAN.md` item against current source
+  and WMI evidence. Base-CNF reconstruction, independent result validation, and
+  a class-code prototype remain genuinely open. Typed-sort optimization,
+  deep-let permutation, old exact-lineage jobs, qg ledger, flat clauses, orbit
+  recognizer, one-pass parser promotion, and automatic leaf quotient were
+  completed, superseded, rejected, or explicitly parked.
+- Corrected the primary benchmark scope. SMT-COMP 2025 QF_Equality includes
+  3,521 selected QF_UF cases; Yices2 solved the complete division and OpenSMT
+  ranked second. The next campaign adds exact selection ingestion and OpenSMT
+  rather than relying only on the 7,503-file library sweep.
+- Audited current solver dependencies and found that production Linux still
+  embeds a SAT Competition 2021 Kissat wrapper. Modern Kissat 4.0.4 plus
+  congruence, sweeping, factor/BVA, vivification, and phase ablations is now the
+  first performance control. Z3 default and `sat.euf=true` are separate controls.
+- Defined the primary architecture as proof-complexity-triggered per-component
+  migration among eager clauses, rollback EUF, quotient/class coding, and
+  adequate-range Hall/PB. Supporting tracks cover a staged typed formula
+  machine, theory-conditioned Boolean DAG factoring, SAT-aware explanations,
+  and conditional canonical frontier/bit-sliced quotient search.
+- Added machine-readable preregistration
+  `campaigns/best-overall-qf-uf-2026-07.json`, its validator and tests, the full
+  vault design, a primary-source refresh, and a Jupyter Book chapter. Phase P0
+  blocks heavy submission until comparator/corpus hashes, grouped holdouts,
+  normalized resource controls, campaign locks, and independent proof/model
+  paths are complete.
+- Added `.github/workflows/campaign-contract.yml` so pull requests and pushes
+  validate the exact comparator/corpus/budget/track/promotion contract and its
+  negative tests before campaign changes can land.
+
 ## Next Entry Template
 
 - Benchmark corpus:

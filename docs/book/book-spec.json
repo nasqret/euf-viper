@@ -8,6 +8,9 @@
     "theory",
     "implementation",
     "benchmarking",
+    "frontier",
+    "novelty-campaign",
+    "best-overall-campaign",
     "operations"
   ],
   "acceptance": [

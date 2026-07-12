@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "campaign_id": "best-overall-qf-uf-2026-07",
+  "status": "ready_for_phase_0",
+  "scope": {
+    "logic": "QF_UF",
+    "standalone_solver": true,
+    "primary_resource_model": "single_core_cold_process",
+    "heavy_compute_site": "WMI",
+    "cas_site": "LTS"
+  },
+  "baseline": {
+    "repository_head": "b0bfdae37cd3f7dfa3a37f9cd5b32008132d489d",
+    "solver_revision": "3c178dced8eb44e13a6381bdc43290c71658ac40",
+    "binary_sha256": "808c59ceef559062bb61befea2030b16b890bd18b8936a98d1ea3bc3172903ff",
+    "sat_backend": "vendored Kissat SAT Competition 2021 wrapper",
+    "reference_campaign": "144328/144329/144330",
+    "reference_corpus": "smtlib-2025-full",
+    "reference_timeout_s": 2
+  },
+  "comparators": [
+    {
+      "id": "z3",
+      "version": "4.16.0",
+      "pin_status": "pinned_release",
+      "configurations": ["default", "sat.euf=true"],
+      "source": "https://github.com/Z3Prover/z3/releases/tag/z3-4.16.0"
+    },
+    {
+      "id": "cvc5",
+      "version": "1.3.4-local-snapshot",
+      "pin_status": "must_record_commit_and_binary_hash",
+      "source": "https://github.com/cvc5/cvc5"
+    },
+    {
+      "id": "yices2",
+      "version": "2.7.0",
+      "pin_status": "pinned_tag_and_binary_hash",
+      "source": "https://github.com/SRI-CSL/yices2/tree/yices-2.7.0"
+    },
+    {
+      "id": "opensmt",
+      "version": "2.9.2",
+      "pin_status": "to_install_and_hash",
+      "source": "https://github.com/usi-verification-and-security/opensmt/releases/tag/v2.9.2"
+    }
+  ],
+  "corpora": [
+    {
+      "id": "smtlib-2025-full",
+      "role": "development_regression",
+      "instances": 7503,
+      "status": "present",
+      "manifest": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
+    },
+    {
+      "id": "smtcomp-2025-qf-uf",
+      "role": "official_primary",
+      "instances": 3521,
+      "status": "to_ingest_exact_selection",
+      "source": "https://smt-comp.github.io/2025/results/qf_equality-single-query/"
+    },
+    {
+      "id": "source-family-holdout",
+      "role": "anti_overfit",
+      "instances": null,
+      "status": "derive_before_route_training",
+      "split_rule": "group by source family and generator lineage, never random files"
+    },
+    {
+      "id": "generated-scaling",
+      "role": "proof_complexity_and_soundness",
+      "instances": null,
+      "status": "extend",
+      "split_rule": "freeze unseen sizes and symbol renamings before tuning"
+    }
+  ],
+  "budgets_s": [2, 60, 1200],
+  "objectives": [
+    {
+      "id": "V0",
+      "title": "valid certifying solver",
+      "gate": "zero wrong answers, complete strict merges, independent SAT-model validation, and replayable UNSAT evidence"
+    },
+    {
+      "id": "V1",
+      "title": "best official QF_UF sequential result",
+      "gate": "match the best comparator coverage and beat its resource-normalized score on the exact SMT-COMP 2025 QF_UF selection"
+    },
+    {
+      "id": "V2",
+      "title": "best full-library result",
+      "gate": "coverage at least equal to every comparator at 2, 60, and 1200 seconds, with lower timeout-charged aggregate and common geometric time"
+    },
+    {
+      "id": "V3",
+      "title": "held-out generalization",
+      "gate": "repeat the V1/V2 direction on source-family-held-out or newly released benchmarks on two CPU classes"
+    },
+    {
+      "id": "V4",
+      "title": "publishable differentiated mechanism",
+      "gate": "closest-prior-art delta, component ablations, checked evidence, and no claim explained by one known ingredient"
+    }
+  ],
+  "promotion_policy": {
+    "wrong_answers_allowed": 0,
+    "execution_errors_allowed": 0,
+    "coverage_loss_allowed": 0,
+    "required_primary_speedups": [
+      "timeout_charged_total",
+      "common_total",
+      "common_geometric"
+    ],
+    "minimum_speedup": 1.0,
+    "confidence_level": 0.95,
+    "superiority_confidence_level": 0.99,
+    "family_cluster_bootstrap": true,
+    "coverage_test": "exact_McNemar",
+    "multiplicity_correction": "Holm",
+    "primary_ranking": "zero_invalid_then_solved_then_PAR2_then_CPU",
+    "paired_order": "deterministic_ABBA_or_balanced_latin_square",
+    "required_cpu_classes": 2,
+    "required_independent_full_runs": 2,
+    "family_identity_as_runtime_feature": false,
+    "path_or_content_hash_as_runtime_feature": false,
+    "full_corpus_gate_before_default": true,
+    "held_out_gate_before_superiority_claim": true
+  },
+  "tracks": [
+    {
+      "id": "F0",
+      "rank": 0,
+      "title": "measurement, proof, and corpus foundation",
+      "status": "ready",
+      "prerequisites": [],
+      "first_gate": "ingest exact SMT-COMP selection, add OpenSMT, reconstruct base CNF independently, and rerun current sound main at all declared budgets",
+      "kill_condition": "none; this is mandatory infrastructure"
+    },
+    {
+      "id": "T0",
+      "rank": 1,
+      "title": "modern SAT backend and inprocessing baseline",
+      "status": "high_priority_engineering_control",
+      "prerequisites": ["F0"],
+      "first_gate": "embed Kissat 4.0.4 and ablate congruence, equivalence sweeping, factor/BVA, vivification, and phase options against the SC2021 backend on identical CNF",
+      "kill_condition": "no broad end-to-end gain, proof/model incompatibility, or one isolated inprocessing option explains no repeatable wall-time change"
+    },
+    {
+      "id": "T1",
+      "rank": 2,
+      "title": "one-pass typed structural IR and staged formula machine",
+      "status": "resume_from_58f015b_without_merge",
+      "prerequisites": ["F0"],
+      "first_gate": "7503-file tree/shadow parity plus parse-phase and end-to-end ABBA gate; only then profile a fused formula schedule and require at least 70 percent reusable static work",
+      "kill_condition": "semantic mismatch, more than 1 percent p95 miss overhead, no end-to-end gain, or schedule construction above 5 percent of routed solve time"
+    },
+    {
+      "id": "T2",
+      "rank": 3,
+      "title": "lazy-first reference and rollback EUF",
+      "status": "unimplemented_control_architecture",
+      "prerequisites": ["F0", "T0"],
+      "first_gate": "base-CNF-only CaDiCaL refinement on frozen Goel and graph controls, then conflict-only IPASIR-UP rollback closure",
+      "kill_condition": "more invalid models without lower wall time, head regression, or unreplayable explanations"
+    },
+    {
+      "id": "T3",
+      "rank": 4,
+      "title": "proof-complexity-triggered component migration",
+      "status": "primary_architecture_hypothesis",
+      "prerequisites": ["T1", "T2"],
+      "first_gate": "telemetry classifier separates eager wins from tails at balanced accuracy at least 0.80 with overhead below 1 percent",
+      "kill_condition": "held-out routing failure, migration without lower end-to-end cost, or bridge-proof failure"
+    },
+    {
+      "id": "T4",
+      "rank": 5,
+      "title": "adequate-range Hall and native cardinality/PB sidecar",
+      "status": "high_value_finite_tail",
+      "prerequisites": ["T1", "F0"],
+      "first_gate": "typed finite-range certificates and matching/PB comparison on generated EUF pigeonhole scaling and frozen finite tail",
+      "kill_condition": "range rarely provable, less than 30 percent value-cell reduction, or proof/check cost erases recovered time"
+    },
+    {
+      "id": "T5",
+      "rank": 6,
+      "title": "component-local quotient RAM and class coding",
+      "status": "projection_census_first",
+      "prerequisites": ["T1"],
+      "first_gate": "project class-code and sorting-network size against eager triangles and Ackermann pairs; require at least 25 percent fewer clauses or watches on a frozen broad stratum",
+      "kill_condition": "variable growth dominates, source model decoding is incomplete, or no broad construction-cost advantage exists"
+    },
+    {
+      "id": "T6",
+      "rank": 7,
+      "title": "theory-conditioned Boolean DAG and semantic factoring",
+      "status": "census_first",
+      "prerequisites": ["T1"],
+      "first_gate": "dual source-EUF and Boolean-gate congruence census; require at least 25 percent projected CNF reduction on 8 of 10 frozen hard table cases",
+      "kill_condition": "generic SAT congruence/factoring matches the gain, proof provenance is incomplete, or CNF reduction does not reduce wall time"
+    },
+    {
+      "id": "T7",
+      "rank": 8,
+      "title": "SAT-impact-aware explanations and theory vivification",
+      "status": "after_online_engine",
+      "prerequisites": ["T2"],
+      "first_gate": "factorial comparison of Boolean-only, EUF-only, and combined vivification plus explanation objectives",
+      "kill_condition": "explanation cost exceeds propagation savings or generic vivification explains the full gain"
+    },
+    {
+      "id": "T8",
+      "rank": 9,
+      "title": "canonical frontier and bit-sliced finite-table quotient search",
+      "status": "conditional_research_track",
+      "prerequisites": ["T1", "T4"],
+      "first_gate": "source-complete assertion ledger, tiny-domain exhaustiveness, and canonical scalar frontier census; require useful state reuse or SIMD occupancy before a direct target comparison with Yices2",
+      "kill_condition": "eligible population remains narrow, frontier occupancy stays below 70 percent, exhaustive cover is impractical, or target cannot beat Yices2"
+    }
+  ],
+  "stages": [
+    {
+      "id": "P0",
+      "title": "freeze evidence",
+      "tracks": ["F0"],
+      "exit": "validated spec, exact manifests, five hashed solvers, current 2/60/1200 baseline, and current opportunity atlas"
+    },
+    {
+      "id": "P1",
+      "title": "cheap falsification",
+      "tracks": ["T0", "T1", "T2", "T4", "T5", "T6"],
+      "exit": "each survivor passes semantic differential and its preregistered census threshold"
+    },
+    {
+      "id": "P2",
+      "title": "isolated target mechanisms",
+      "tracks": ["T0", "T1", "T2", "T4", "T5", "T6", "T7"],
+      "exit": "same-binary causal gates with no loss and positive end-to-end timing"
+    },
+    {
+      "id": "P3",
+      "title": "heterogeneous solver",
+      "tracks": ["T3"],
+      "exit": "migration beats every fixed internal representation on held-out target families"
+    },
+    {
+      "id": "P4",
+      "title": "full promotion",
+      "tracks": ["T3", "T4", "T5", "T6", "T7", "T8"],
+      "exit": "two independent full runs pass coverage, speed, proof/model, resource, and family non-regression gates"
+    },
+    {
+      "id": "P5",
+      "title": "superiority evaluation",
+      "tracks": ["F0", "T3"],
+      "exit": "official selection and held-out campaign satisfy V0 through V3"
+    }
+  ],
+  "unresolved_plan_disposition": [
+    {"item": "independent base CNF reconstruction", "disposition": "live", "owner": "F0"},
+    {"item": "compact typed sort tracking", "disposition": "standalone_rejected_metadata_retained", "owner": "T1"},
+    {"item": "deep-let focused permutation", "disposition": "parked_after_failed_refinement", "owner": null},
+    {"item": "remaining finite-model tail", "disposition": "decomposed", "owner": "T4"},
+    {"item": "independently checked benchmark tables", "disposition": "live", "owner": "F0"},
+    {"item": "component-local class labels", "disposition": "live_projection_and_prototype", "owner": "T5"},
+    {"item": "jobs 143752/143753 and 143798/143799", "disposition": "superseded_and_cancelled", "owner": null},
+    {"item": "exact-lineage soundness and parser jobs", "disposition": "superseded_by_current_sound_campaign", "owner": null},
+    {"item": "orbit-cover production recognizer", "disposition": "rejected_current_abstraction", "owner": "T8"},
+    {"item": "qg assertion ledger", "disposition": "completed_in_144349", "owner": "T8"},
+    {"item": "one-pass parser", "disposition": "parked_checkpoint_with_resume_gate", "owner": "T1"},
+    {"item": "flat literal slab", "disposition": "completed_and_promoted_as_3c178dc", "owner": null},
+    {"item": "automatic leaf route", "disposition": "rejected_by_144056_144061", "owner": null}
+  ],
+  "required_artifacts": [
+    "source and binary hashes",
+    "immutable corpus manifests",
+    "complete raw per-instance rows",
+    "paired promotion report",
+    "family and status stratification",
+    "CPU, memory, compiler, and environment metadata",
+    "SAT model validation log",
+    "SAT proof and EUF lemma replay log",
+    "family taxonomy, near-duplicate clusters, and held-out split hashes",
+    "rejection record for every failed arm"
+  ]
+}

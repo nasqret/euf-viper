@@ -12,7 +12,7 @@ SMT-LIB and SMT-COMP runs.
 > **Soundness and claim status, 2026-07-12:** the historically measured
 > `58efe9d` binary is not generally sound for Boolean values used only as UF
 > data. Current main repairs Boolean-as-data, quoted-symbol, and query-order
-> defects and passes 228 all-feature Rust tests plus 122 Python tests and 203
+> defects and passes 228 all-feature Rust tests plus 127 Python tests and 203
 > subtests. Flat persistent clause storage is the latest promoted optimization;
 > its full paired gate improves coverage `7,418 -> 7,419` and common-total,
 > geometric, and median speed by `1.0071x`, `1.0309x`, and `1.0314x`. This is a
@@ -174,6 +174,8 @@ negative results and immutable WMI job identifiers are retained under
   mathematical sanity artifacts.
 - `research-vault/`: Obsidian-compatible notes.
 - `docs/book/`: Jupyter Book source.
+- `campaigns/best-overall-qf-uf-2026-07.json`: validated machine-readable
+  contract for the next campaign.
 - `MEMORY.md`, `JOURNAL.md`, `PLAN.md`: durable project state.
 
 ## Research Sources
@@ -239,3 +241,12 @@ The 2026-07-12 research round is wrapped and fail-closed:
 Orbit, MDD, quotient-CSP, class-label, and Hall mechanisms cannot alter
 production answers until their source-level preconditions and certificates are
 independently replayed.
+
+The next research program is preregistered in
+[`PLAN.md`](PLAN.md) and
+[`campaigns/best-overall-qf-uf-2026-07.json`](campaigns/best-overall-qf-uf-2026-07.json).
+It first adds the exact SMT-COMP QF_UF selection, OpenSMT, modern Kissat and Z3
+EUF controls, independent base-CNF/model checking, grouped holdouts, and a
+normalized runner. Its primary architecture is proof-carrying per-component
+migration among eager, rollback-EUF, quotient/class, and Hall/PB
+representations. No heavy successor campaign launches before phase P0 passes.
