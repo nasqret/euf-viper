@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "format": "euf-viper-euf-cnf-v2",
+  "producer_revision": "c2ed5d8eac597f239407118bbc624599badb8ff7",
+  "cases": {
+    "basic_unsat": {
+      "source": "tests/fixtures/basic_unsat.smt2",
+      "source_sha256": "e34934cddbdd901821f415350f2e4fcd0156a8f0ba01518fc6c423e9212edb36",
+      "full_dimacs_sha256": "799495ab7b8aedc0625ec9cdb3e5581026b65aa71ef12034d14b31bd96e9b463",
+      "variables": 2,
+      "base_clauses": [[1], [-2]]
+    },
+    "eq_diamond_unsat": {
+      "source": "tests/fixtures/eq_diamond_unsat.smt2",
+      "source_sha256": "b2e587ccd1f71ca946477582b6a1c74ba8b31a34b9e55eb1bcd890906681cee2",
+      "full_dimacs_sha256": "942d60d6e8a9875fc64c4171a13a49b024d9ef258ab6cd9f1eb95d519b037e00",
+      "variables": 9,
+      "base_clauses": [
+        [-3, 1],
+        [-3, 2],
+        [3, -1, -2],
+        [-6, 4],
+        [-6, 5],
+        [6, -4, -5],
+        [7, -3],
+        [7, -6],
+        [-7, 3, 6],
+        [-9, 7],
+        [-9, -8],
+        [9, -7, 8],
+        [9]
+      ]
+    },
+    "predicate_congruence_unsat": {
+      "source": "tests/fixtures/predicate_congruence_unsat.smt2",
+      "source_sha256": "59a2a6d6d874d0d6b72c32091a95451b40f6ad432babdaa5d2a2257727d6db00",
+      "full_dimacs_sha256": "352b4222f2701b5c95a249a8c4713078684645dfd5a513b49fa3a54aa77617b1",
+      "variables": 3,
+      "base_clauses": [[1], [2], [-3]]
+    },
+    "transitivity_unsat": {
+      "source": "tests/fixtures/transitivity_unsat.smt2",
+      "source_sha256": "00f616ecb83a596462e71647547653a35eba048831662b57539bc752f9ddc23b",
+      "full_dimacs_sha256": "352b4222f2701b5c95a249a8c4713078684645dfd5a513b49fa3a54aa77617b1",
+      "variables": 3,
+      "base_clauses": [[1], [2], [-3]]
+    }
+  }
+}

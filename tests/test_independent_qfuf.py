@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import itertools
 import json
@@ -621,25 +622,26 @@ class ManifestAndTamperTests(unittest.TestCase):
                     QFUF.parse_dimacs(malformed)
 
     def test_reconstruction_matches_checked_in_rust_base_prefixes(self) -> None:
-        for name in (
-            "basic_unsat",
-            "transitivity_unsat",
-            "predicate_congruence_unsat",
-            "eq_diamond_unsat",
-        ):
+        golden_path = ROOT / "tests" / "fixtures" / "cert-v2" / "base_prefixes.json"
+        golden = json.loads(golden_path.read_text(encoding="utf-8"))
+        self.assertEqual(golden["schema_version"], 1)
+        self.assertEqual(golden["format"], QFUF.V2_FORMAT)
+        self.assertRegex(golden["producer_revision"], r"^[0-9a-f]{40}$")
+        for name, case in sorted(golden["cases"].items()):
             with self.subTest(name=name):
-                manifest_path = ROOT / "results" / "cert-smoke" / f"{name}.euf.json"
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                source = (ROOT / manifest["source"]).read_text(encoding="utf-8")
-                reconstructed = QFUF.parse_and_encode(source)
-                dimacs_source = manifest_path.with_suffix("").with_suffix(".cnf")
-                variables, clauses = QFUF.parse_dimacs(
-                    dimacs_source.read_text(encoding="ascii")
+                source_path = ROOT / case["source"]
+                source_bytes = source_path.read_bytes()
+                self.assertEqual(
+                    hashlib.sha256(source_bytes).hexdigest(), case["source_sha256"]
                 )
-                base_count = manifest["clauses"]["base"]
-                self.assertEqual(reconstructed.variable_count, variables)
-                self.assertEqual(reconstructed.base_count, base_count)
-                self.assertEqual(reconstructed.clauses, clauses[:base_count])
+                source = source_bytes.decode("utf-8")
+                reconstructed = QFUF.parse_and_encode(source)
+                expected_clauses = tuple(
+                    tuple(clause) for clause in case["base_clauses"]
+                )
+                self.assertEqual(reconstructed.variable_count, case["variables"])
+                self.assertEqual(reconstructed.base_count, len(expected_clauses))
+                self.assertEqual(reconstructed.clauses, expected_clauses)
 
 
 if __name__ == "__main__":
