@@ -260,18 +260,6 @@ impl Plan {
             };
         }
 
-        if bool_problem
-            .data_terms
-            .iter()
-            .any(|&term| term >= term_count)
-        {
-            telemetry.rejection = Some(AutoRejection::InvalidDataTerm);
-            return AutoOutcome {
-                plan: None,
-                telemetry,
-            };
-        }
-
         let plan = match Self::build_with_limits(&bool_problem.assertions, term_count, plan_limits)
         {
             Ok(plan) => plan,
@@ -288,6 +276,18 @@ impl Plan {
         telemetry.effective_equality_unions = plan.projected_term_count();
         telemetry.projected_terms = plan.projected_term_count();
         telemetry.quotiented_terms = plan.quotiented_term_count();
+
+        if bool_problem
+            .data_terms
+            .iter()
+            .any(|&term| term >= term_count)
+        {
+            telemetry.rejection = Some(AutoRejection::InvalidDataTerm);
+            return AutoOutcome {
+                plan: None,
+                telemetry,
+            };
+        }
 
         let prefilter_rejection =
             if telemetry.effective_equality_unions < config.min_effective_unions {
@@ -1169,7 +1169,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_rejection_precedence_is_term_count_data_plan_then_canonical() {
+    fn auto_rejection_precedence_is_term_count_plan_data_then_canonical() {
         let mut problem = bool_problem(&[eq(0, 2)], &[3]);
         problem.root_equality_count = RootEqualityCount::OverLimit;
 
@@ -1194,18 +1194,23 @@ mod tests {
         );
 
         problem.root_equality_count = RootEqualityCount::Exact(696);
-        let data_term = Plan::build_auto(&problem, 2);
-        assert_eq!(
-            data_term.telemetry.rejection,
-            Some(AutoRejection::InvalidDataTerm)
-        );
-
-        problem.data_terms.clear();
         let plan = Plan::build_auto(&problem, 2);
         assert_eq!(
             plan.telemetry.rejection,
             Some(AutoRejection::Plan(BuildFailure::InvalidTerm))
         );
+
+        let mut data_problem = bool_problem(&[eq(0, 1)], &[2]);
+        data_problem.root_equality_count = RootEqualityCount::Exact(696);
+        let data_term = Plan::build_auto(&data_problem, 2);
+        assert_eq!(
+            data_term.telemetry.rejection,
+            Some(AutoRejection::InvalidDataTerm)
+        );
+        assert_eq!(data_term.telemetry.unique_supporting_facts, 1);
+        assert_eq!(data_term.telemetry.effective_equality_unions, 1);
+        assert_eq!(data_term.telemetry.projected_terms, 1);
+        assert_eq!(data_term.telemetry.quotiented_terms, 2);
 
         let mut canonical_problem = bool_problem(&[eq(0, 1)], &[]);
         canonical_problem.root_equality_count = RootEqualityCount::Exact(696);
