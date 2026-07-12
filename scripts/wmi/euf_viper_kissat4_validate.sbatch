@@ -10,7 +10,7 @@
 set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
-export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+export PATH="$HOME/euf-viper-tools/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 ACTUAL_REVISION="$(git rev-parse HEAD)"
 if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
@@ -19,6 +19,11 @@ if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
 fi
 if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
   echo "tracked repository state is dirty" >&2
+  exit 2
+fi
+DRAT_TRIM="$(command -v drat-trim || true)"
+if [ -z "$DRAT_TRIM" ] || [ ! -x "$DRAT_TRIM" ]; then
+  echo "drat-trim is required" >&2
   exit 2
 fi
 
@@ -58,12 +63,14 @@ scripts/cert/run_smoke.sh
 sha256sum \
   "$OUT/euf-viper-kissat-sc2021" \
   "$OUT/euf-viper-kissat-4.0.4" \
+  "$DRAT_TRIM" \
   scripts/wmi/euf_viper_kissat4_validate.sbatch \
   > "$OUT/sha256.txt"
 
 {
   printf 'revision=%s\n' "$ACTUAL_REVISION"
   printf 'job_id=%s\n' "$SLURM_JOB_ID"
+  printf 'drat_trim=%s\n' "$DRAT_TRIM"
   "$OUT/euf-viper-kissat-sc2021" --version
   "$OUT/euf-viper-kissat-4.0.4" --version
 } > "$OUT/validation.txt"
