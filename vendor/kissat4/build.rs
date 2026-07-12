@@ -31,6 +31,7 @@ fn main() {
     // CaDiCaL carries Kitten too. Prefix the public Kitten symbols so both
     // engines can be linked into euf-viper without global C symbol clashes.
     for symbol in [
+        "completely_backtrack_to_root_level",
         "kitten_calloc",
         "kitten_init",
         "kitten_embedded",
@@ -46,6 +47,21 @@ fn main() {
         "kitten_traverse_core_lemmas",
         "kitten_shrink_to_clausal_core",
         "kitten_value",
+        "kitten_randomize_phases",
+        "kitten_flip_phases",
+        "kitten_no_ticks_limit",
+        "kitten_set_ticks_limit",
+        "kitten_shuffle_clauses",
+        "kitten_assume",
+        "kitten_clause_with_id_and_exception",
+        "kitten_unit",
+        "kitten_binary",
+        "kitten_status",
+        "kitten_traverse_core_ids",
+        "kitten_traverse_core_clauses",
+        "kitten_fixed",
+        "kitten_flip_literal",
+        "kitten_failed",
     ] {
         let prefixed = format!("euf_viper_kissat4_{symbol}");
         build.define(symbol, Some(prefixed.as_str()));
