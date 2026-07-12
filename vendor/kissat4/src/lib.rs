@@ -1,7 +1,7 @@
 use std::ffi::CString;
 use std::mem;
 use std::ops::Not;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_void};
 
 #[repr(C)]
 struct Kissat {
@@ -14,8 +14,10 @@ unsafe extern "C" {
     fn kissat_solve(solver: *mut Kissat) -> c_int;
     fn kissat_value(solver: *mut Kissat, literal: c_int) -> c_int;
     fn kissat_release(solver: *mut Kissat);
+    fn kissat_get_option(solver: *mut Kissat, name: *const c_char) -> c_int;
     fn kissat_set_configuration(solver: *mut Kissat, name: *const c_char) -> c_int;
     fn kissat_set_option(solver: *mut Kissat, name: *const c_char, value: c_int) -> c_int;
+    fn kissat_options_has(name: *const c_char) -> *const c_void;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,8 +74,17 @@ impl Solver {
 
     pub fn set_option(&mut self, name: &str, value: i32) -> Result<i32, String> {
         let name = CString::new(name).map_err(|_| "option contains NUL".to_owned())?;
+        if unsafe { kissat_options_has(name.as_ptr()) }.is_null() {
+            return Err(format!("unknown Kissat option: {}", name.to_string_lossy()));
+        }
         let previous = unsafe { kissat_set_option(self.solver, name.as_ptr(), value) };
-        Ok(previous)
+        let actual = unsafe { kissat_get_option(self.solver, name.as_ptr()) };
+        (actual == value).then_some(previous).ok_or_else(|| {
+            format!(
+                "Kissat option {} rejected value {value} and selected {actual}",
+                name.to_string_lossy()
+            )
+        })
     }
 
     #[must_use]
@@ -133,6 +144,8 @@ mod tests {
         let mut solver = Solver::new();
         solver.set_configuration("default").unwrap();
         solver.set_option("congruence", 1).unwrap();
+        assert!(solver.set_option("not-a-kissat-option", 1).is_err());
+        assert!(solver.set_option("congruence", 2).is_err());
         let a = solver.var();
         let b = solver.var();
         solver.add(&[a, b]);
