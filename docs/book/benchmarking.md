@@ -294,3 +294,32 @@ repeat on `PEQ014_size9`. Pinned same-node 31-repeat adjudication `144309`
 solves the case 31/31 in both arms and measures `1.0225x` in favor of flat
 clauses. Promotion is retained under repeated-boundary adjudication; the raw
 full-gate rejection is not relabeled.
+
+## Fresh Sound Four-Solver Checkpoint
+
+Prepare `144328`, array `144329`, and strict merge `144330` ran current flat
+main against Z3 4.16.0, cvc5 1.3.4, and Yices2 2.7.0 on all 7,503 inputs at two
+seconds. Euf-viper revision and binary SHA-256 are
+`3c178dced8eb44e13a6381bdc43290c71658ac40` and
+`808c59ceef559062bb61befea2030b16b890bd18b8936a98d1ea3bc3172903ff`.
+The immutable campaign manifest SHA-256 is
+`32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4`.
+
+| Solver | Correct | Coverage | Median | Timeout-charged total |
+| --- | ---: | ---: | ---: | ---: |
+| euf-viper | 7,408 | 98.73% | 0.00939s | 885.69s |
+| Z3 4.16.0 | 7,450 | 99.29% | 0.02199s | 639.66s |
+| cvc5 1.3.4 | 7,373 | 98.27% | 0.03061s | 976.53s |
+| Yices2 2.7.0 | 7,490 | 99.83% | 0.00504s | 228.56s |
+
+All 30,012 observations are present with zero wrong answers or execution
+errors. Pairwise common-solve results are:
+
+| Comparator | Common | Viper only | Other only | Aggregate speed | Geometric speed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Z3 | 7,375 | 33 | 75 | 0.7467x | 1.5666x |
+| cvc5 | 7,328 | 80 | 45 | 1.0823x | 2.1886x |
+| Yices2 | 7,404 | 4 | 86 | 0.2374x | 0.3543x |
+
+A value above one favors euf-viper. The result establishes an overall cvc5 win
+and a Z3 fast-head win, but rejects overall superiority over Z3 or Yices2.

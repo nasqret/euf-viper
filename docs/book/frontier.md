@@ -25,6 +25,14 @@ coverage deficit against Z3 and a large speed and coverage deficit against
 Yices2. None of these results establishes standalone or certifying superiority.
 ```
 
+The fresh sound two-second comparator is campaign `144328`/`144329`/`144330`.
+Euf-viper solves 7,408/7,503, versus Z3 7,450, cvc5 7,373, and Yices2 7,490.
+Its median is 0.00939s versus Z3's 0.02199s, but timeout-charged total is
+885.69s versus Z3's 639.66s and Yices2's 228.56s. On common Z3 solves,
+geometric speed favors euf-viper by `1.5666x` while aggregate speed is only
+`0.7467x`. The current blocker is tail proof cost and coverage, not median
+startup overhead.
+
 ## Latest Promoted Mechanism
 
 **[M]** Flat persistent clause storage passed WMI soundness, a disjoint

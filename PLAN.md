@@ -144,11 +144,18 @@ front tier of a coverage-oriented portfolio.
   routing, and pass soundness before a measured 32-case causal gate.
 - [ ] Finish the exact opened-byte streaming-parser harness and complete a
   7,503-file shadow-equivalence campaign before any parser timing gate.
-- [ ] Finish the source-bound qg wrapper re-audit, then run the exact qg7
-  census. Its Algorithm-X labels remain test-only and cannot answer SMT.
+- [x] Finish the source-bound qg wrapper and exact qg7 census `144349`.
+  All 418 bindings verify; 31 cases are eligible, with 12 shadow witnesses,
+  19 abstentions, and zero refutations. Reject it as a production UNSAT engine.
 - [ ] Retain exact sort metadata before implementing a component-local class
   label prototype; require exhaustive small-model equivalence and a frozen
   construction-cost gate before SAT timing.
+- [x] Run fresh exact current-main two-second four-solver campaign
+  `144328`/`144329`/`144330`: euf-viper 7,408, Z3 7,450, cvc5 7,373, Yices2
+  7,490. Euf-viper beats cvc5 overall and Z3 geometrically on common solves,
+  but loses Z3 aggregate/coverage and trails Yices2 decisively.
+- [ ] Adjudicate bounded Ackermann on corrected 32-case causal job `144631`.
+  Discard `144371`, whose old wrapper omitted quotient/leaf-budget child vars.
 
 ## Acceptance Criteria For A Superiority Claim
 

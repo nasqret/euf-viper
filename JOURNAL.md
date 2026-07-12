@@ -701,6 +701,40 @@
   wrapper audit still blocks WMI because early preflight failure can preserve a
   stale final JSONL and the containing directory is not fsynced after rename.
 
+## 2026-07-12 Fresh Comparator And Source-Bound QG Census
+
+- Exact current-main four-solver campaign `144328`/`144329`/`144330` ran all
+  7,503 SMT-LIB 2025 QF_UF inputs at two seconds. The euf-viper binary is
+  `3c178dced8eb44e13a6381bdc43290c71658ac40`, SHA-256
+  `808c59ceef559062bb61befea2030b16b890bd18b8936a98d1ea3bc3172903ff`;
+  the campaign manifest SHA-256 is
+  `32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4`.
+- Coverage/median/timeout-charged total are euf-viper
+  `7,408`/`0.00939s`/`885.69s`, Z3 4.16.0
+  `7,450`/`0.02199s`/`639.66s`, cvc5 1.3.4
+  `7,373`/`0.03061s`/`976.53s`, and Yices2 2.7.0
+  `7,490`/`0.00504s`/`228.56s`. All 30,012 observations are present with zero
+  wrong answers or execution errors.
+- On common solves, euf-viper versus Z3 has `1.5666x` geometric but `0.7467x`
+  aggregate speed, with 33 euf-viper-only and 75 Z3-only instances. Against
+  cvc5 the ratios are `2.1886x` geometric and `1.0823x` aggregate. Against
+  Yices2 they are `0.3543x` geometric and `0.2374x` aggregate, with four
+  euf-viper-only versus 86 Yices-only instances. No overall Z3/Yices win.
+- A first submission chain `144321`/`144322`/`144323` was cancelled after an
+  incorrect expanded revision label was detected. Its rows are invalid and
+  unused; the replacement chain above records the exact revision and binary.
+- Source-bound qg7 census `144349` ran from clean Git-backed commit `9fc09e8`,
+  with source archive SHA-256 `9fc95dc7...a13d2` and output SHA-256
+  `854360a5...63950`. It publishes exactly one provenance plus 418 unique case
+  records; all source/problem bindings verify. Only 31 cases remain eligible:
+  12 produce a shadow witness and 19 abstain on a remaining source predicate.
+  The other 387 fail closed. There are zero shadow refutations, so this route
+  remains test-only and adds no production coverage.
+- Bounded Ackermann commit `7bf410b` passes Linux soundness `144317` with 138
+  tests and binary SHA-256 `c6d6080d...5605a`. Timing job `144371` is invalid
+  because its old harness omitted quotient and leaf-budget child environments;
+  corrected causal rerun `144631` uses the newer recorded-environment harness.
+
 ## Next Entry Template
 
 - Benchmark corpus:

@@ -546,3 +546,19 @@
   close the Yices2 gap and require exact term-sort retention. The streaming
   parser and source-bound qg census remain fail-closed until their provenance,
   opened-byte, atomic-checkpoint, and wrapper audits pass.
+
+## Fresh Sound Comparator And QG Result (2026-07-12)
+
+- Current flat-main four-solver jobs `144328`/`144329`/`144330` use exact
+  binary SHA `808c59ce...2903ff` and all 7,503 SMT-LIB 2025 QF_UF files at two
+  seconds. Coverage is euf-viper 7,408, Z3 7,450, cvc5 7,373, Yices2 7,490;
+  timeout totals are 885.69s, 639.66s, 976.53s, and 228.56s. Euf-viper beats
+  cvc5 overall and is `1.5666x` faster geometrically than Z3 on common solves,
+  but loses Z3 common aggregate at `0.7467x` and trails Yices2 at `0.3543x`
+  geometric. No overall Z3 or Yices2 victory exists.
+- Exact source-bound qg7 census `144349` contains 419 records for 418 files and
+  verifies every source/problem binding. Of 31 eligible cases, 12 yield shadow
+  witnesses and 19 abstain; zero yield a refutation. Keep the engine test-only.
+- Bounded Ackermann `7bf410b` passes Linux soundness `144317`. Discard timing
+  `144371`: its old wrapper omitted causal mode variables. Corrected rerun is
+  `144631` with quotient `auto` in both arms and candidate `leaf-budget`.

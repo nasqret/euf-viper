@@ -16,7 +16,9 @@ SMT-LIB and SMT-COMP runs.
 > subtests. Flat persistent clause storage is the latest promoted optimization;
 > its full paired gate improves coverage `7,418 -> 7,419` and common-total,
 > geometric, and median speed by `1.0071x`, `1.0309x`, and `1.0314x`. This is a
-> broad implementation win, not superiority over Z3 or Yices2.
+> broad implementation win, not superiority over Z3 or Yices2. Fresh exact
+> two-second campaign `144328` solves 7,408 instances versus Z3 7,450 and
+> Yices2 7,490; current main therefore still trails both overall.
 
 ## Quick Start
 
@@ -206,14 +208,28 @@ arms and favors flat clauses by `1.0225x`. Automatic leaf quotienting is
 separately rejected by full gate `144056`/`144061`: net coverage is +1, but two
 baseline-only instances and speed ratios below parity violate the contract.
 
+Fresh exact four-solver campaign `144328`/`144329`/`144330` uses binary
+SHA-256 `808c59ce...2903ff` and all 7,503 inputs at two seconds:
+
+| Solver | Correct | Median | Timeout-charged total |
+| --- | ---: | ---: | ---: |
+| euf-viper | 7,408 | 0.00939s | 885.69s |
+| Z3 4.16.0 | 7,450 | 0.02199s | 639.66s |
+| cvc5 1.3.4 | 7,373 | 0.03061s | 976.53s |
+| Yices2 2.7.0 | 7,490 | 0.00504s | 228.56s |
+
+Euf-viper is `1.5666x` faster geometrically than Z3 on 7,375 common solves,
+but only `0.7467x` by common aggregate time and has 42 fewer total solves. It
+beats cvc5 overall. Yices2 remains the clear leader.
+
 The active research queue is fail-closed:
 
 - bounded quotient-plus-Ackermann completion awaits independent audit before
   WMI soundness or timing;
 - the one-pass parser awaits exact opened-byte and atomic-checkpoint harness
   clearance before a 7,503-file shadow campaign;
-- the source-bound qg7 Algorithm-X census awaits final wrapper clearance and
-  remains test-only even after execution;
+- source-bound qg7 census `144349` found zero shadow refutations and remains
+  test-only;
 - component-local class labels require exact term-sort retention and exhaustive
   reference equivalence before any production experiment.
 

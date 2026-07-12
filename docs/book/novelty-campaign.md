@@ -85,11 +85,12 @@ median `1.0314x`, with no reverse timeout conversion. This low-level mechanism
 is promoted as `3c178dc`; it is an optimization result, not a novelty claim.
 
 The finite-structure track now has a hardened qg7 population count. Of 418
-files, 164 satisfy the final exact-cover eligibility checks. The degree-7
-Algorithm-X implementation returns abstract SAT on all 164 and no abstract
-UNSAT result. It is rejected as an UNSAT engine. The source audit now requires
-an assertion ledger that consumes every predicate or abstains; checked local
-cycle constraints reduce anti-idempotent column candidates from 5,040 to 240.
+files, the earlier syntactic gate selected 164, but exact source-bound census
+`144349` leaves only 31 eligible. Twelve produce a shadow witness, 19 abstain
+on a remaining source predicate, and none produces a refutation. All 418
+source/problem bindings verify and the other 387 fail closed. The engine is
+rejected as a production UNSAT route; checked local cycle constraints remain
+useful only as search telemetry.
 
 The unconditional leaf quotient is also split by evidence. Uniform activation
 gains eight Goel solves but regresses the median. A frozen semantic selector,
