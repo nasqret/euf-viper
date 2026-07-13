@@ -74,6 +74,22 @@ class T3M0ContractTests(unittest.TestCase):
 
         self.assertTrue(any("does not match" in item for item in caught.exception.errors))
 
+    def test_boolean_integer_type_confusion_is_rejected(self) -> None:
+        contract = load_contract()
+        contract["checkpoints"]["S1"]["stop_at_first"][
+            "invalid_complete_model"
+        ] = True
+        contract["measurement"]["unique_label_rule"]["blocks"] = True
+        contract["gates"]["wrong_or_missing_or_hash_failures_allowed"] = False
+
+        with self.assertRaises(VALIDATOR.T3M0ContractError) as caught:
+            VALIDATOR.validate_contract(contract)
+
+        message = "\n".join(caught.exception.errors)
+        self.assertIn("invalid_complete_model", message)
+        self.assertIn("blocks", message)
+        self.assertIn("wrong_or_missing", message)
+
     def test_cli_writes_machine_readable_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "summary.json"

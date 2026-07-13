@@ -74,6 +74,10 @@ class T3M0ContractError(ValueError):
         super().__init__(errors[0] if errors else "invalid T3 M0 contract")
 
 
+def _matches(actual: Any, expected: Any) -> bool:
+    return type(actual) is type(expected) and actual == expected
+
+
 def _object(root: dict[str, Any], field: str, errors: list[str]) -> dict[str, Any]:
     value = root.get(field)
     if not isinstance(value, dict):
@@ -110,7 +114,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
     if not isinstance(contract, dict):
         raise T3M0ContractError(["contract root must be an object"])
 
-    if contract.get("schema_version") != 1:
+    if not _matches(contract.get("schema_version"), 1):
         errors.append("schema_version must be 1")
     if contract.get("campaign_id") != "t3-m0-component-pressure-v1":
         errors.append("campaign_id must be t3-m0-component-pressure-v1")
@@ -126,21 +130,21 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "par2_miss_s": 120,
     }
     for field, expected in expected_scope.items():
-        if scope.get(field) != expected:
+        if not _matches(scope.get(field), expected):
             errors.append(f"scope.{field} must be {expected!r}")
 
     prerequisites = _object(contract, "prerequisites", errors)
-    if prerequisites.get("minimum_migration_eligible_fixed_arms") != 2:
+    if not _matches(prerequisites.get("minimum_migration_eligible_fixed_arms"), 2):
         errors.append("M0 requires exactly two or more migration-eligible fixed arms")
     if prerequisites.get("fixed_arm_correctness_and_timing_gate_required") is not True:
         errors.append("fixed-arm correctness and timing gates must be required")
-    if prerequisites.get("minimum_oracle_headroom_lcb") != 0.1:
+    if not _matches(prerequisites.get("minimum_oracle_headroom_lcb"), 0.1):
         errors.append("minimum oracle-headroom LCB must be 0.1")
-    if prerequisites.get("confidence") != 0.95:
+    if not _matches(prerequisites.get("confidence"), 0.95):
         errors.append("prerequisite confidence must be 0.95")
 
     evidence = _object(contract, "preliminary_evidence", errors)
-    if evidence.get("source_count") != 24:
+    if not _matches(evidence.get("source_count"), 24):
         errors.append("preliminary evidence must remain the frozen 24-source panel")
     if evidence.get("family_confounded") is not True:
         errors.append("preliminary evidence must remain marked family-confounded")
@@ -157,7 +161,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         computed = best_fixed / oracle - 1.0
         if not math.isclose(headroom, computed, rel_tol=0.0, abs_tol=5e-5):
             errors.append("preliminary oracle_headroom does not match PAR-2 totals")
-        if headroom >= prerequisites.get("minimum_oracle_headroom_lcb", 0.0):
+        if headroom >= 0.1:
             errors.append("preliminary evidence must remain below the M0 headroom gate")
 
     _exact_set(contract.get("arms"), REQUIRED_ARMS, "arms", errors)
@@ -195,7 +199,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "budget_fraction": 0.005,
     }
     for field, expected in expected_caps.items():
-        if stop.get(field) != expected:
+        if not _matches(stop.get(field), expected):
             errors.append(f"checkpoints.S1.stop_at_first.{field} must be {expected!r}")
     _exact_set(
         s1.get("feature_groups"),
@@ -218,7 +222,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
     )
 
     measurement = _object(contract, "measurement", errors)
-    if measurement.get("repeats") != 4:
+    if not _matches(measurement.get("repeats"), 4):
         errors.append("measurement.repeats must be 4")
     if measurement.get("order") != "balanced_williams":
         errors.append("measurement.order must be balanced_williams")
@@ -231,7 +235,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "otherwise": "unresolved",
     }
     for field, expected in expected_labels.items():
-        if labels.get(field) != expected:
+        if not _matches(labels.get(field), expected):
             errors.append(f"measurement.unique_label_rule.{field} must be {expected!r}")
     if measurement.get("oracle_headroom_formula") != (
         "min_arm(sum_i_PAR2_i_arm)/sum_i(min_arm_PAR2_i_arm)-1"
@@ -239,7 +243,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         errors.append("coverage-aware oracle-headroom formula changed")
 
     population = _object(contract, "population", errors)
-    if population.get("s0_all_sources") != 7503:
+    if not _matches(population.get("s0_all_sources"), 7503):
         errors.append("S0 must cover all 7503 sources")
     _exact_set(
         population.get("label_strata"),
@@ -247,9 +251,9 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "population.label_strata",
         errors,
     )
-    if population.get("semantic_quantile_lineage_controls") != 512:
+    if not _matches(population.get("semantic_quantile_lineage_controls"), 512):
         errors.append("population must include 512 semantic lineage controls")
-    if population.get("maximum_label_panel_before_overlap") != 1762:
+    if not _matches(population.get("maximum_label_panel_before_overlap"), 1762):
         errors.append("maximum pre-overlap label panel must be 1762")
     _exact_set(
         population.get("split_group_closure"),
@@ -257,17 +261,17 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "population.split_group_closure",
         errors,
     )
-    if population.get("minimum_lineages_per_class_per_split") != 64:
+    if not _matches(population.get("minimum_lineages_per_class_per_split"), 64):
         errors.append("every retained class needs 64 lineages per split")
     if population.get("sealed_evaluation_minimum") != "max(256,64*K)":
         errors.append("sealed evaluation minimum changed")
-    if population.get("sealed_unseen_families_minimum") != 3:
+    if not _matches(population.get("sealed_unseen_families_minimum"), 3):
         errors.append("sealed evaluation needs at least three unseen families")
 
     classifier = _object(contract, "classifier", errors)
     if classifier.get("kind") != "deterministic_decision_tree":
         errors.append("M0 classifier must be a deterministic decision tree")
-    if classifier.get("maximum_depth") != 4:
+    if not _matches(classifier.get("maximum_depth"), 4):
         errors.append("M0 classifier maximum depth must be 4")
     if classifier.get("sealed_feature_selection") is not False:
         errors.append("sealed-set feature selection must be disabled")
@@ -282,7 +286,7 @@ def validate_contract(contract: Any) -> dict[str, Any]:
         "leaked_split_groups_allowed": 0,
     }
     for field, expected in expected_gates.items():
-        if gates.get(field) != expected:
+        if not _matches(gates.get(field), expected):
             errors.append(f"gates.{field} must be {expected!r}")
     if contract.get("stop_rule") != "any_failed_prerequisite_or_gate_stops_before_migration":
         errors.append("stop_rule must stop before migration on any failed gate")
