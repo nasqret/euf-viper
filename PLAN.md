@@ -450,7 +450,8 @@ Do not compose two candidates in P2. Attribution must remain exact.
     with `validate_t8_scalar_contract.py`. Strict JSON, the raw summary and T4
     receipt hashes, all 12 paths, and every zero-range field are bound; both
     evidence paths are mandatory and a valid contract still authorizes neither
-    implementation nor SIMD.
+    implementation nor SIMD. Independent review is GO for retaining this
+    denial-only preregistration control.
   - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
     source assertion and parser-generated auxiliary. T1 parser parity alone
     does not provide this ledger.

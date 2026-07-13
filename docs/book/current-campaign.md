@@ -252,7 +252,9 @@ certificate. Hosted CI strictly validates the machine contract, raw P12
 negative-evidence artifact, and exact T4 rejection receipt; both evidence paths
 are mandatory. Successful validation explicitly authorizes neither
 implementation nor SIMD. T1 review, the missing assertion-lineage ledger, and a
-separate checked domain-seven proof still block T8.
+separate checked domain-seven proof still block T8. Independent review is GO
+only for retaining this denial-only control, with hosted run `29290493620`
+green.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

@@ -356,9 +356,17 @@ class T8ScalarContractTests(unittest.TestCase):
         self.assertIn("t4_receipt.status", message)
         self.assertIn("t4_receipt.artifacts.p12_range_summary.sha256", message)
 
-    def test_python_api_requires_both_evidence_paths(self) -> None:
+    def test_python_api_requires_receipt_path(self) -> None:
         with self.assertRaises(TypeError):
             VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY)
+
+    def test_python_api_requires_p12_summary_path(self) -> None:
+        with self.assertRaises(TypeError):
+            VALIDATOR.load_and_validate(CONTRACT, receipt_path=RECEIPT)
+
+    def test_python_api_requires_all_evidence_paths(self) -> None:
+        with self.assertRaises(TypeError):
+            VALIDATOR.load_and_validate(CONTRACT)
 
     def test_cli_is_executable_and_emits_a_compact_machine_readable_summary(
         self,

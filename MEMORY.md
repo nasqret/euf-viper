@@ -858,3 +858,7 @@
   zero-range fields; both evidence paths are mandatory. A successful validation
   means the design is correctly frozen and blocked, not that scalar or SIMD
   implementation is authorized.
+- Independent review of the repaired T8 control at `14754f8` is GO for
+  preregistration retention only. Hosted run `29290493620` passed, and explicit
+  regressions reject receipt drift plus omitted summary, receipt, or both API
+  evidence paths. T8 implementation remains blocked on its three prerequisites.

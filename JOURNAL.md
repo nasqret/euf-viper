@@ -1198,12 +1198,17 @@
   prerequisite. Added a source-bound P12 summary; T8 now requires a separate
   checked finite-domain certificate in addition to T1 review and assertion
   lineage.
-- Added `validate_t8_scalar_contract.py`, hosted-CI enforcement, and 24 combined
+- Added `validate_t8_scalar_contract.py`, hosted-CI enforcement, and 26 combined
   T3/T8 contract tests. T8 validation now binds strict JSON types and keys, the
   exact preregistration, the raw P12 summary and T4 receipt SHA-256 values, all
   12 source paths, the T4 records hash, and every zero-range field. The CLI and
   Python API require both evidence paths. Successful output explicitly keeps
   both implementation and SIMD unauthorized.
+- Independent T8 control review is GO at `14754f8` after the raw receipt and
+  mandatory-API repairs. Receipt status/hash mutations fail, omitted summary,
+  omitted receipt, and omitted-both API calls all raise `TypeError`, and hosted
+  run `29290493620` passed. This is permission to retain the freeze only, not to
+  implement scalar search or SIMD.
 
 ## Next Entry Template
 
