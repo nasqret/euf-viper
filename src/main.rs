@@ -4825,6 +4825,78 @@ fn add_novel_theory_cuts(
     Some(added)
 }
 
+#[allow(dead_code)]
+fn solve_cadical_rollback_euf(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+) -> Result<(SolveResult, rollback_propagator::RollbackPropagatorStats), String> {
+    let mut solver = CadicalSolver::default();
+    configure_cadical(&mut solver, false)
+        .ok_or_else(|| "failed to configure CaDiCaL rollback control".to_owned())?;
+    for clause in &cnf.clauses {
+        solver
+            .add_clause(rustsat_clause(clause))
+            .map_err(|error| format!("failed to load rollback base clause: {error}"))?;
+    }
+
+    let mut propagator = rollback_propagator::RollbackEufPropagator::from_cnf(
+        arena,
+        cnf,
+        true_term,
+        false_term,
+        rollback_euf::RollbackEufLimits::default(),
+    )
+    .map_err(|error| format!("failed to build rollback propagator: {error:?}"))?;
+    let observed = propagator.observed_variables().to_vec();
+    let (result, mut assignment) = solver
+        .with_external_propagator(&mut propagator, observed, |session| {
+            let result = session
+                .solve()
+                .map_err(|error| format!("CaDiCaL solve failed: {error}"))?;
+            let mut assignment = Vec::new();
+            if result == RustSatResult::Sat {
+                assignment.resize(cnf.var_count() + 1, 0i8);
+                for (variable, value) in assignment.iter_mut().enumerate().skip(1) {
+                    let literal = RustSatLit::from_ipasir(variable as i32)
+                        .map_err(|error| format!("invalid model variable: {error}"))?;
+                    *value = match session
+                        .lit_val(literal)
+                        .map_err(|error| format!("failed to read SAT model: {error}"))?
+                    {
+                        TernaryVal::True => 1,
+                        TernaryVal::False => -1,
+                        TernaryVal::DontCare => 0,
+                    };
+                }
+            }
+            Ok::<_, String>((result, assignment))
+        })
+        .map_err(|error| format!("rollback propagator scope failed: {error}"))?
+        .map_err(|error| format!("CaDiCaL rollback solve failed: {error}"))?;
+    let stats = propagator.stats();
+    match result {
+        RustSatResult::Unsat => Ok((SolveResult::Unsat, stats)),
+        RustSatResult::Interrupted => Err("CaDiCaL rollback solve was interrupted".to_owned()),
+        RustSatResult::Sat => {
+            if !complete_cnf_assignment(cnf, &mut assignment) {
+                return Err("rollback SAT model failed base-CNF completion".to_owned());
+            }
+            let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
+                .ok_or_else(|| "rollback SAT model validator rejected its shape".to_owned())?;
+            if conflicts.is_empty() {
+                Ok((SolveResult::Sat, stats))
+            } else {
+                Err(format!(
+                    "rollback SAT model failed complete EUF validation with {} conflicts",
+                    conflicts.len()
+                ))
+            }
+        }
+    }
+}
+
 fn solve_cadical_euf_refining(
     cnf: &CnfProblem,
     arena: &TermArena,
@@ -9450,6 +9522,132 @@ mod tests {
         let report = solve_problem(problem, false);
         assert_eq!(report.result, SolveResult::Unsat);
         assert!(report.stats.sat_calls >= 2);
+    }
+
+    fn rollback_control(
+        input: &str,
+    ) -> (SolveResult, rollback_propagator::RollbackPropagatorStats) {
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert!(bool_problem.unsupported.is_empty());
+        let mut cnf = CnfProblem::new();
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        solve_cadical_rollback_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+        )
+        .unwrap_or_else(|error| panic!("rollback control failed: {error}"))
+    }
+
+    #[test]
+    fn fixed_rollback_control_matches_representative_qf_uf_semantics() {
+        let direct_unsat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (assert (= a b))
+            (assert (distinct a b))
+            (check-sat)
+        ";
+        let congruence_unsat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        ";
+        let predicate_unsat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun p (U) Bool)
+            (assert (= a b))
+            (assert (p a))
+            (assert (not (p b)))
+            (check-sat)
+        ";
+        let nested_sat = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (declare-fun g (U) U)
+            (assert (distinct a b))
+            (assert (or (= (g (f a)) a) (= (g (f a)) b)))
+            (check-sat)
+        ";
+
+        assert_eq!(rollback_control(direct_unsat).0, SolveResult::Unsat);
+        let (result, stats) = rollback_control(congruence_unsat);
+        assert_eq!(result, SolveResult::Unsat);
+        assert!(stats.conflicts >= 1);
+        let (result, stats) = rollback_control(predicate_unsat);
+        assert_eq!(result, SolveResult::Unsat);
+        assert!(stats.conflicts >= 1);
+        let (result, stats) = rollback_control(nested_sat);
+        assert_eq!(result, SolveResult::Sat);
+        assert!(stats.model_checks >= 1);
+    }
+
+    #[test]
+    fn fixed_rollback_control_matches_varisat_on_random_small_cnf() {
+        let mut arena = TermArena::default();
+        let sort = SortId(1);
+        let a = arena.intern_typed(1, vec![], sort);
+        let b = arena.intern_typed(2, vec![], sort);
+        let c = arena.intern_typed(3, vec![], sort);
+        let fa = arena.intern_typed(10, vec![a], sort);
+        let fb = arena.intern_typed(10, vec![b], sort);
+        let true_term = arena.intern_typed(20, vec![], BOOL_SORT);
+        let false_term = arena.intern_typed(21, vec![], BOOL_SORT);
+        let predicate = arena.intern_typed(22, vec![], BOOL_SORT);
+
+        for case in 0..256u64 {
+            let mut cnf = CnfProblem::new();
+            let atoms = [
+                cnf.atom_lit(BoolAtomKey::Eq(a, b)),
+                cnf.atom_lit(BoolAtomKey::Eq(b, c)),
+                cnf.atom_lit(BoolAtomKey::Eq(fa, fb)),
+                cnf.atom_lit(BoolAtomKey::BoolTerm(predicate)),
+                cnf.atom_lit(BoolAtomKey::Eq(predicate, false_term)),
+            ];
+            let mut random = case.wrapping_add(1).wrapping_mul(0x9e37_79b9);
+            let clause_count = 1 + (random as usize % 7);
+            for _ in 0..clause_count {
+                random = random
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let width = 1 + (random as usize % 3);
+                let mut clause = Vec::with_capacity(width);
+                for _ in 0..width {
+                    random = random
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    let mut literal = atoms[random as usize % atoms.len()];
+                    if random >> 63 != 0 {
+                        literal = -literal;
+                    }
+                    clause.push(literal);
+                }
+                cnf.add_clause(clause);
+            }
+
+            let rollback = solve_cadical_rollback_euf(&cnf, &arena, true_term, false_term)
+                .unwrap_or_else(|error| panic!("case {case} rollback failed: {error}"))
+                .0;
+            let reference = solve_varisat_euf(&cnf, &arena, true_term, false_term).0;
+            assert_eq!(rollback, reference, "case={case}");
+        }
     }
 
     #[test]
