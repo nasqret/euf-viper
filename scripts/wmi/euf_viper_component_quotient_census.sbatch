@@ -80,6 +80,14 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def canonical_sha256(value: object) -> str:
+    encoded = (
+        json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+        + "\n"
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 out = Path(sys.argv[1])
 root = out.parent
 manifest = Path(sys.argv[2]).resolve()
@@ -88,10 +96,27 @@ aggregate = json.loads((root / "aggregate.json").read_text(encoding="ascii"))
 sources = aggregate.get("sources")
 gates = aggregate.get("gates")
 hashes = aggregate.get("hashes")
+decoder_oracle = aggregate.get("decoder_oracle")
 if not isinstance(sources, dict) or sources.get("observed") != expected_sources:
     raise SystemExit("component quotient census source cardinality mismatch")
 if not isinstance(gates, dict) or gates.get("validity", {}).get("pass") is not True:
     raise SystemExit("component quotient census validity gate did not pass")
+if (
+    not isinstance(decoder_oracle, dict)
+    or decoder_oracle.get("executed") is not True
+    or decoder_oracle.get("passed") is not True
+    or not isinstance(decoder_oracle.get("sha256"), str)
+    or len(decoder_oracle["sha256"]) != 64
+    or any(
+        character not in "0123456789abcdef"
+        for character in decoder_oracle["sha256"]
+    )
+):
+    raise SystemExit("component quotient bounded decoder oracle did not pass")
+oracle_evidence = dict(decoder_oracle)
+oracle_sha256 = oracle_evidence.pop("sha256")
+if canonical_sha256(oracle_evidence) != oracle_sha256:
+    raise SystemExit("component quotient bounded decoder oracle SHA-256 mismatch")
 if not isinstance(hashes, dict):
     raise SystemExit("component quotient census aggregate lacks hashes")
 if hashes.get("records_jsonl_sha256") != sha256(root / "records.jsonl"):
@@ -120,6 +145,7 @@ payload = {
         "expected_sources": expected_sources,
         "observed_sources": sources["observed"],
         "validity_pass": True,
+        "decoder_oracle_sha256": oracle_sha256,
         "implementation_allowed": gates["implementation_allowed"],
     },
     "artifacts": {

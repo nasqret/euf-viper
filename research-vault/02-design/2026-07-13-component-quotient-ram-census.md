@@ -2,8 +2,10 @@
 
 Date: 2026-07-13
 
-Status: implemented source-only opportunity census. This is not a production
-solver route, a timing experiment, or evidence that T5 should be implemented.
+Status: implemented source-only opportunity census, repaired after independent
+review, and awaiting a second independent review. No WMI decision run has been
+submitted. This is not a production solver route, a timing experiment, or
+evidence that T5 should be implemented.
 
 ## Purpose
 
@@ -66,7 +68,29 @@ atoms and all observed function records, installs one result for each observed
 typed key, and gives every unobserved tuple an arbitrary typed default. Every
 sort receives a default, including a declared sort with no observed term.
 
-The census records operation counts for this reconstruction. They are
+The decoder is executable. Given component class codes and Boolean carrier
+bits, it sorts padded function records, rejects conflicting repeated keys,
+constructs typed function tables, fills unobserved tuples with typed arbitrary
+defaults, reevaluates every observed term, and checks every semantic equality
+or Boolean-term atom against the projected assignment.
+
+Before any source can be projected, a bounded exhaustive oracle runs two fixed
+typed fixtures. It exhausts 316 restricted-growth/Boolean assignments: 179
+reconstruct satisfying EUF interpretations and 137 are rejected for conflicting
+repeated keys. The passing receipt covers Boolean carriers, multiple typed
+components and sorts, four disconnected components of one sort, three-to-four
+record padding, repeated keys, empty-sort defaults, 1,608 exhaustive
+non-nullary arbitrary-default probes, and 2,998 reconstructed term/atom
+satisfaction checks. The receipt is canonicalized and SHA-256 bound into every
+source record and the
+aggregate. A missing, failed, drifted, or feature-incomplete receipt aborts the
+census before outputs are written.
+
+The exhaustive bound is four terms per component and two free Boolean terms.
+This is an executable regression oracle for the general decoder algorithm, not
+a claim that finite testing proves the unbounded construction. Per-source typed
+partition, namespace, Boolean-channel, cap, and reconstruction preconditions
+remain fail-closed structural checks. Decoder operation counts remain
 structural telemetry only, not a performance estimate.
 
 ## Fail-Closed Evidence
@@ -81,7 +105,11 @@ The campaign lock fixes:
 - parser, analyzer, taxonomy builder, lock, manifest, portable source-set,
   record-stream, terminal-record, and target-manifest hashes;
 - a canonical JSONL hash chain in strict relative-path order;
-- explicit caps, with every cap event causing the validity gate to fail.
+- explicit caps, with every cap event causing the validity gate to fail;
+- `max_symbols` counts every parser function entry, including internal,
+  nullary, unused, and macro declarations, rather than only symbols with
+  observed non-nullary applications;
+- a passing bounded exhaustive decoder-oracle receipt for every source.
 
 The portable source-set digest hashes only relative path, byte count, and
 source SHA-256. Host-specific absolute manifest paths therefore do not make
@@ -103,6 +131,13 @@ must show all three of:
 - at least 25 percent weighted reduction;
 - at least 25 percent median reduction;
 - at least half of files individually reducing by at least 25 percent.
+
+That primary reduction is necessary but no longer sufficient. Both clauses and
+literal slots must also show no regression in the weighted aggregate and at the
+nearest-rank 95th percentile. Therefore a watch-only reduction cannot promote a
+candidate whose unit-clause mix hides larger clause storage or long clauses. An
+adversarial regression fixture with a passing 50 percent watch reduction, a
+1.5x clause increase, and a 333x literal-slot increase is required to fail.
 
 Candidate variables must be at most 1.25 times eager variables both in the
 weighted aggregate and at the nearest-rank 95th percentile. T5 remains

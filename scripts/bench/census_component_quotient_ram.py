@@ -12,12 +12,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import heapq
+import itertools
 import json
 import os
 import sys
 import tempfile
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Mapping, Sequence
@@ -42,6 +44,22 @@ DEFAULT_LOCK_PATH = ROOT / "campaigns" / "component-quotient-ram-census-v1.json"
 INTERPRETATION = "structural_projection_only_no_solver_invocation_no_timing_claim"
 GENESIS_HASH: str | None = None
 PPM = 1_000_000
+DECODER_ORACLE_SCHEMA = "euf-viper.component-quotient-decoder-oracle.v1"
+DECODER_ORACLE_FIXTURES = (
+    "boolean_multisort_padding_defaults",
+    "same_sort_disconnected_components",
+)
+DECODER_ORACLE_REQUIRED_FEATURES = (
+    "arbitrary_defaults",
+    "boolean_carriers",
+    "multiple_sorts_and_components",
+    "padding",
+    "reconstructed_euf_satisfaction",
+    "repeated_keys",
+    "same_sort_disconnected_components",
+)
+DECODER_ORACLE_MAX_COMPONENT_TERMS = 4
+DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS = 2
 
 
 class CensusError(ValueError):
@@ -60,6 +78,10 @@ class ProjectionCap(CensusError):
 
 class ProjectionInvariant(CensusError):
     """The proposed encoding cannot satisfy its typed decoder contract."""
+
+
+class DecoderAssignmentRejected(CensusError):
+    """A bounded oracle assignment violates projected functionality."""
 
 
 @dataclass(frozen=True)
@@ -178,6 +200,9 @@ class CampaignLock:
     opportunity_reduction: Ratio
     minimum_individual_fraction: Ratio
     opportunity_metrics: tuple[str, ...]
+    ram_control_metrics: tuple[str, ...]
+    ram_control_maximum: Ratio
+    ram_control_percentile: int
     variable_maximum: Ratio
     variable_percentile: int
 
@@ -201,6 +226,111 @@ class Component:
     sort: int
     terms: tuple[int, ...]
     width: int
+
+
+DecoderValue = bool | tuple[int, int, int]
+
+
+@dataclass
+class DecodedFunction:
+    id: int
+    argument_sorts: tuple[int, ...]
+    result_sort: int
+    table: dict[tuple[DecoderValue, ...], DecoderValue]
+    default: DecoderValue
+
+    def apply(self, arguments: Sequence[DecoderValue]) -> DecoderValue:
+        key = tuple(arguments)
+        if len(key) != len(self.argument_sorts):
+            raise ProjectionInvariant(f"decoded function {self.id} arity mismatch")
+        for value, sort_id in zip(key, self.argument_sorts):
+            if _decoder_value_sort(value) != sort_id:
+                raise ProjectionInvariant(
+                    f"decoded function {self.id} received a value of the wrong sort"
+                )
+        result = self.table.get(key, self.default)
+        if _decoder_value_sort(result) != self.result_sort:
+            raise ProjectionInvariant(
+                f"decoded function {self.id} returned a value of the wrong sort"
+            )
+        return result
+
+
+@dataclass
+class DecodedModel:
+    term_values: dict[int, DecoderValue]
+    sort_defaults: dict[int, DecoderValue]
+    functions: dict[int, DecodedFunction]
+    atom_values: dict[int, bool]
+
+
+@dataclass(frozen=True)
+class DecoderValidation:
+    model: DecodedModel
+    repeated_key_pairs: int
+    padding_records: int
+    arbitrary_default_probes: int
+    non_nullary_default_probes: int
+    satisfaction_checks: int
+
+
+@dataclass(frozen=True)
+class DecoderOracleReceipt:
+    executed: bool
+    passed: bool
+    fixture_names: tuple[str, ...]
+    exercised_features: tuple[str, ...]
+    assignments_examined: int
+    assignments_accepted: int
+    assignments_rejected: int
+    euf_satisfaction_checks: int
+    repeated_key_assignments: int
+    padded_assignments: int
+    arbitrary_default_probes: int
+    non_nullary_default_probes: int
+    maximum_component_terms: int
+    maximum_free_boolean_terms: int
+
+    def _evidence(self) -> dict[str, object]:
+        return {
+            "schema": DECODER_ORACLE_SCHEMA,
+            "executed": self.executed,
+            "passed": self.passed,
+            "fixtures": list(self.fixture_names),
+            "required_features": list(DECODER_ORACLE_REQUIRED_FEATURES),
+            "exercised_features": list(self.exercised_features),
+            "bounds": {
+                "maximum_component_terms": self.maximum_component_terms,
+                "maximum_free_boolean_terms": self.maximum_free_boolean_terms,
+            },
+            "counts": {
+                "assignments_examined": self.assignments_examined,
+                "assignments_accepted": self.assignments_accepted,
+                "assignments_rejected": self.assignments_rejected,
+                "euf_satisfaction_checks": self.euf_satisfaction_checks,
+                "repeated_key_assignments": self.repeated_key_assignments,
+                "padded_assignments": self.padded_assignments,
+                "arbitrary_default_probes": self.arbitrary_default_probes,
+                "non_nullary_default_probes": self.non_nullary_default_probes,
+            },
+        }
+
+    @property
+    def sha256(self) -> str:
+        return sha256_bytes(canonical_json_bytes(self._evidence()))
+
+    def to_json(self) -> dict[str, object]:
+        payload = self._evidence()
+        payload["sha256"] = self.sha256
+        return payload
+
+    def reference_json(self) -> dict[str, object]:
+        return {
+            "schema": DECODER_ORACLE_SCHEMA,
+            "executed": self.executed,
+            "passed": self.passed,
+            "sha256": self.sha256,
+        }
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -356,7 +486,13 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
 
     gates = _exact_keys(
         raw["gates"],
-        {"validity", "broadness", "opportunity", "variable_control"},
+        {
+            "validity",
+            "broadness",
+            "opportunity",
+            "ram_control",
+            "variable_control",
+        },
         "gates",
     )
     validity = _exact_keys(
@@ -367,6 +503,7 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
             "allowed_unknown_projections",
             "allowed_cap_events",
             "require_complete_decoder",
+            "require_bounded_exhaustive_decoder_oracle",
         },
         "validity gate",
     )
@@ -376,6 +513,7 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
         "allowed_unknown_projections": 0,
         "allowed_cap_events": 0,
         "require_complete_decoder": True,
+        "require_bounded_exhaustive_decoder_oracle": True,
     }:
         raise CensusError("validity gate must require exact complete coverage")
     broadness = _exact_keys(
@@ -398,6 +536,30 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
     metrics = opportunity["metrics"]
     if metrics != ["clauses", "watch_entries"]:
         raise CensusError("opportunity metrics must be clauses and watch_entries")
+    ram_control = _exact_keys(
+        gates["ram_control"],
+        {
+            "metrics",
+            "maximum_ratio",
+            "percentile",
+            "require_weighted_and_percentile",
+        },
+        "RAM control gate",
+    )
+    if ram_control["metrics"] != ["clauses", "literal_slots"]:
+        raise CensusError("RAM controls must cover clauses and literal_slots")
+    if ram_control["require_weighted_and_percentile"] is not True:
+        raise CensusError("RAM control conjunction may not be weakened")
+    ram_control_maximum = _ratio(
+        ram_control["maximum_ratio"], "RAM control maximum_ratio"
+    )
+    if ram_control_maximum != Ratio(1, 1):
+        raise CensusError("RAM controls must forbid weighted and percentile regression")
+    ram_control_percentile = _positive_int(
+        ram_control["percentile"], "RAM control percentile"
+    )
+    if ram_control_percentile != 95:
+        raise CensusError("RAM controls must remain at the 95th percentile")
     variable = _exact_keys(
         gates["variable_control"],
         {"maximum_ratio", "percentile", "require_weighted_and_percentile"},
@@ -414,6 +576,38 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
         {"eager", "component_quotient_ram", "cnf_templates"},
         "projection",
     )
+    component_projection = _exact_keys(
+        projection["component_quotient_ram"],
+        {
+            "component_union",
+            "component_width",
+            "canonicalization",
+            "functionality",
+            "boolean_carrier",
+            "decoder_domain_value",
+            "decoder_oracle",
+        },
+        "component quotient projection",
+    )
+    decoder_oracle = _exact_keys(
+        component_projection["decoder_oracle"],
+        {
+            "kind",
+            "fixtures",
+            "required_features",
+            "maximum_component_terms",
+            "maximum_free_boolean_terms",
+        },
+        "decoder oracle",
+    )
+    if decoder_oracle != {
+        "kind": "bounded_exhaustive_model_reconstruction",
+        "fixtures": list(DECODER_ORACLE_FIXTURES),
+        "required_features": list(DECODER_ORACLE_REQUIRED_FEATURES),
+        "maximum_component_terms": DECODER_ORACLE_MAX_COMPONENT_TERMS,
+        "maximum_free_boolean_terms": DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS,
+    }:
+        raise CensusError("bounded decoder oracle contract drift")
     templates = _exact_keys(
         projection["cnf_templates"],
         {
@@ -469,6 +663,9 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
             "minimum_individual_fraction",
         ),
         opportunity_metrics=tuple(metrics),
+        ram_control_metrics=tuple(ram_control["metrics"]),
+        ram_control_maximum=ram_control_maximum,
+        ram_control_percentile=ram_control_percentile,
         variable_maximum=_ratio(variable["maximum_ratio"], "maximum_ratio"),
         variable_percentile=percentile,
     )
@@ -1089,6 +1286,476 @@ def _term_channel(
     return "component", component.width, component.id
 
 
+def _decoder_value_sort(value: DecoderValue) -> int:
+    if type(value) is bool:
+        return qfuf.BOOL_SORT
+    if (
+        type(value) is not tuple
+        or len(value) != 3
+        or any(type(part) is not int for part in value)
+        or value[0] <= qfuf.BOOL_SORT
+        or value[1] < -1
+        or value[2] < 0
+    ):
+        raise ProjectionInvariant(f"malformed decoded value {value!r}")
+    return value[0]
+
+
+def _decoder_value_order(value: DecoderValue) -> tuple[int, int, int, int]:
+    sort_id = _decoder_value_sort(value)
+    if type(value) is bool:
+        return sort_id, 0, int(value), 0
+    return sort_id, 1, value[1], value[2]
+
+
+def _restricted_growth_assignments(term_count: int) -> tuple[tuple[int, ...], ...]:
+    if type(term_count) is not int or term_count < 1:
+        raise ProjectionInvariant("decoder oracle component must be nonempty")
+    assignments: list[tuple[int, ...]] = []
+
+    def extend(prefix: tuple[int, ...], prefix_max: int) -> None:
+        if len(prefix) == term_count:
+            assignments.append(prefix)
+            return
+        for value in range(prefix_max + 2):
+            extend((*prefix, value), max(prefix_max, value))
+
+    extend((0,), 0)
+    return tuple(assignments)
+
+
+def _decoder_term_values(
+    problem: qfuf.EncodedProblem,
+    components: Sequence[Component],
+    component_codes: Mapping[int, int],
+    boolean_values: Mapping[int, bool],
+) -> dict[int, DecoderValue]:
+    expected_non_boolean = {
+        term.id for term in problem.terms if term.sort != qfuf.BOOL_SORT
+    }
+    expected_boolean = {
+        term.id for term in problem.terms if term.sort == qfuf.BOOL_SORT
+    }
+    if set(component_codes) != expected_non_boolean:
+        raise ProjectionInvariant("decoder class assignment is incomplete")
+    if set(boolean_values) != expected_boolean or any(
+        type(value) is not bool for value in boolean_values.values()
+    ):
+        raise ProjectionInvariant("decoder Boolean assignment is incomplete")
+    if (
+        boolean_values.get(problem.true_term) is not True
+        or boolean_values.get(problem.false_term) is not False
+    ):
+        raise DecoderAssignmentRejected("Boolean carrier does not distinguish true and false")
+
+    values: dict[int, DecoderValue] = dict(boolean_values)
+    covered: set[int] = set()
+    for component in components:
+        codes = tuple(component_codes[term_id] for term_id in component.terms)
+        if codes[0] != 0:
+            raise DecoderAssignmentRejected("restricted-growth component does not start at zero")
+        prefix_max = 0
+        for code in codes:
+            if type(code) is not int or code < 0 or code >= 1 << component.width:
+                raise DecoderAssignmentRejected("component class code is out of range")
+            if code > prefix_max + 1:
+                raise DecoderAssignmentRejected("component class code breaks restricted growth")
+            prefix_max = max(prefix_max, code)
+        for term_id, code in zip(component.terms, codes):
+            term = problem.terms[term_id]
+            if term.sort != component.sort or term_id in covered:
+                raise ProjectionInvariant("decoder component map is not a typed partition")
+            values[term_id] = (component.sort, component.id, code)
+            covered.add(term_id)
+    if covered != expected_non_boolean:
+        raise ProjectionInvariant("decoder components do not cover every non-Boolean term")
+    for term in problem.terms:
+        if _decoder_value_sort(values[term.id]) != term.sort:
+            raise ProjectionInvariant(f"decoded term {term.id} has the wrong sort")
+    return values
+
+
+def _semantic_atom_values(
+    problem: qfuf.EncodedProblem, term_values: Mapping[int, DecoderValue]
+) -> dict[int, bool]:
+    values: dict[int, bool] = {}
+    for atom in problem.atoms:
+        if atom.kind == "equality":
+            if atom.left is None or atom.right is None:
+                raise ProjectionInvariant("decoder saw an incomplete equality atom")
+            values[atom.variable] = term_values[atom.left] == term_values[atom.right]
+        elif atom.kind == "bool_term":
+            if atom.term is None or type(term_values[atom.term]) is not bool:
+                raise ProjectionInvariant("decoder saw an incomplete Boolean atom")
+            values[atom.variable] = bool(term_values[atom.term])
+        elif atom.kind != "auxiliary":
+            raise ProjectionInvariant(f"decoder saw unknown atom kind {atom.kind!r}")
+    return values
+
+
+def _validate_sorted_function_records(
+    problem: qfuf.EncodedProblem,
+    groups: Mapping[int, Sequence[int]],
+    term_values: Mapping[int, DecoderValue],
+) -> tuple[int, int]:
+    repeated_key_pairs = 0
+    padding_records = 0
+    for function_id, term_ids in groups.items():
+        function = problem.functions[function_id]
+        real_records: list[tuple[object, object]] = []
+        for term_id in term_ids:
+            term = problem.terms[term_id]
+            key = tuple(term_values[argument] for argument in term.args)
+            key_order = tuple(_decoder_value_order(value) for value in key)
+            real_records.append(((0, key_order), (key, term_values[term_id])))
+        padded_count = next_power_of_two(len(real_records))
+        padding_records += padded_count - len(real_records)
+        records = list(real_records)
+        records.extend(
+            ((1, ()), None) for _ in range(padded_count - len(real_records))
+        )
+        sorted_records = simulate_bitonic_sort(records)
+        if [record[0] for record in sorted_records] != sorted(
+            record[0] for record in sorted_records
+        ):
+            raise ProjectionInvariant(
+                f"decoder oracle sorter failed for function {function_id}"
+            )
+        decoded_records = [
+            record[1] for record in sorted_records if record[0][0] == 0  # type: ignore[index]
+        ]
+        if len(decoded_records) != len(real_records) or any(
+            record is None for record in decoded_records
+        ):
+            raise ProjectionInvariant("decoder lost a real record during padded sorting")
+        for left, right in zip(decoded_records, decoded_records[1:]):
+            assert left is not None and right is not None
+            left_key, left_value = left
+            right_key, right_value = right
+            if left_key == right_key:
+                repeated_key_pairs += 1
+                if left_value != right_value:
+                    raise DecoderAssignmentRejected(
+                        f"function {function.name!r} maps one decoded key to two values"
+                    )
+    return repeated_key_pairs, padding_records
+
+
+def reconstruct_decoder_model(
+    problem: qfuf.EncodedProblem,
+    components: Sequence[Component],
+    groups: Mapping[int, Sequence[int]],
+    component_codes: Mapping[int, int],
+    boolean_values: Mapping[int, bool],
+    expected_atom_values: Mapping[int, bool],
+) -> DecoderValidation:
+    """Execute the CQRAM decoder and independently check its EUF model."""
+
+    term_values = _decoder_term_values(
+        problem, components, component_codes, boolean_values
+    )
+    repeated_key_pairs, padding_records = _validate_sorted_function_records(
+        problem, groups, term_values
+    )
+
+    values_by_sort: dict[int, set[DecoderValue]] = defaultdict(set)
+    for term in problem.terms:
+        values_by_sort[term.sort].add(term_values[term.id])
+    sort_defaults: dict[int, DecoderValue] = {}
+    for sort in problem.sorts:
+        if sort.id == qfuf.BOOL_SORT:
+            sort_defaults[sort.id] = False
+        elif values_by_sort[sort.id]:
+            sort_defaults[sort.id] = min(
+                values_by_sort[sort.id], key=_decoder_value_order
+            )
+        else:
+            sort_defaults[sort.id] = (sort.id, -1, 0)
+
+    function_models = {
+        function.id: DecodedFunction(
+            function.id,
+            function.arg_sorts,
+            function.result_sort,
+            {},
+            sort_defaults[function.result_sort],
+        )
+        for function in problem.functions
+        if not function.macro
+    }
+    for term in problem.terms:
+        function = problem.functions[term.function]
+        if function.macro or function.id not in function_models:
+            raise ProjectionInvariant("expanded macro unexpectedly survived as a term")
+        key = tuple(term_values[argument] for argument in term.args)
+        result = term_values[term.id]
+        table = function_models[function.id].table
+        previous = table.get(key)
+        if previous is not None and previous != result:
+            raise DecoderAssignmentRejected(
+                f"function {function.name!r} has inconsistent reconstructed records"
+            )
+        table[key] = result
+
+    satisfaction_checks = 0
+    evaluated_terms: dict[int, DecoderValue] = {}
+    for term in problem.terms:
+        arguments = tuple(evaluated_terms[argument] for argument in term.args)
+        result = function_models[term.function].apply(arguments)
+        if result != term_values[term.id]:
+            raise ProjectionInvariant(
+                f"reconstructed interpretation does not satisfy term {term.id}"
+            )
+        evaluated_terms[term.id] = result
+        satisfaction_checks += 1
+
+    atom_values = _semantic_atom_values(problem, evaluated_terms)
+    if dict(expected_atom_values) != atom_values:
+        raise ProjectionInvariant(
+            "reconstructed interpretation does not satisfy the projected atom assignment"
+        )
+    satisfaction_checks += len(atom_values)
+
+    domains: dict[int, tuple[DecoderValue, ...]] = {}
+    for sort in problem.sorts:
+        values = set(values_by_sort[sort.id])
+        values.add(sort_defaults[sort.id])
+        if sort.id == qfuf.BOOL_SORT:
+            values.update((False, True))
+        domains[sort.id] = tuple(sorted(values, key=_decoder_value_order))
+
+    arbitrary_default_probes = 0
+    non_nullary_default_probes = 0
+    for function in problem.functions:
+        if function.macro:
+            continue
+        interpretation = function_models[function.id]
+        for key in itertools.product(
+            *(domains[sort_id] for sort_id in function.arg_sorts)
+        ):
+            if key in interpretation.table:
+                continue
+            if interpretation.apply(key) != interpretation.default:
+                raise ProjectionInvariant(
+                    f"function {function.name!r} does not use its typed arbitrary default"
+                )
+            arbitrary_default_probes += 1
+            if function.arg_sorts:
+                non_nullary_default_probes += 1
+
+    model = DecodedModel(
+        term_values=dict(term_values),
+        sort_defaults=sort_defaults,
+        functions=function_models,
+        atom_values=atom_values,
+    )
+    return DecoderValidation(
+        model=model,
+        repeated_key_pairs=repeated_key_pairs,
+        padding_records=padding_records,
+        arbitrary_default_probes=arbitrary_default_probes,
+        non_nullary_default_probes=non_nullary_default_probes,
+        satisfaction_checks=satisfaction_checks,
+    )
+
+
+def _decoder_oracle_sources() -> tuple[tuple[str, str], ...]:
+    return (
+        (
+            "boolean_multisort_padding_defaults",
+            """(set-logic QF_UF)
+(declare-sort U 0)
+(declare-sort V 0)
+(declare-sort W 0)
+(declare-fun f (U Bool) V)
+(declare-fun p (V) Bool)
+(declare-fun h (U V) V)
+(declare-fun k (W) U)
+(declare-const a U)
+(declare-const b U)
+(declare-const c U)
+(declare-const v0 V)
+(assert (or (= (f a true) v0)
+            (= (f b true) (f c false))
+            (p (f a true))
+            (not (p (f b true)))))
+(check-sat)
+""",
+        ),
+        (
+            "same_sort_disconnected_components",
+            """(set-logic QF_UF)
+(declare-sort U 0)
+(declare-fun f (U) U)
+(declare-fun g (U) U)
+(declare-const a U)
+(declare-const b U)
+(declare-const c U)
+(declare-const d U)
+(assert (or (= (f a) (f b)) (= (g c) (g d))))
+(check-sat)
+""",
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def run_bounded_decoder_oracle() -> DecoderOracleReceipt:
+    """Exhaust every registered small decoder assignment before census use."""
+
+    features: set[str] = set()
+    fixture_names: list[str] = []
+    assignments_examined = 0
+    assignments_accepted = 0
+    assignments_rejected = 0
+    validated_assignments = 0
+    euf_satisfaction_checks = 0
+    repeated_key_assignments = 0
+    padded_assignments = 0
+    arbitrary_default_probes = 0
+    non_nullary_default_probes = 0
+    maximum_component_terms = 0
+    maximum_free_boolean_terms = 0
+
+    for fixture_name, source in _decoder_oracle_sources():
+        fixture_names.append(fixture_name)
+        problem = qfuf.parse_and_encode(source)
+        groups = _application_groups(problem)
+        components, _ = build_components(problem, groups, load_campaign_lock().caps)
+        maximum_component_terms = max(
+            maximum_component_terms,
+            max((len(component.terms) for component in components), default=0),
+        )
+        boolean_terms = tuple(
+            term.id for term in problem.terms if term.sort == qfuf.BOOL_SORT
+        )
+        free_boolean_terms = tuple(
+            term_id
+            for term_id in boolean_terms
+            if term_id not in {problem.true_term, problem.false_term}
+        )
+        maximum_free_boolean_terms = max(
+            maximum_free_boolean_terms, len(free_boolean_terms)
+        )
+        if maximum_component_terms > DECODER_ORACLE_MAX_COMPONENT_TERMS:
+            raise ProjectionInvariant("decoder oracle component bound drift")
+        if maximum_free_boolean_terms > DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS:
+            raise ProjectionInvariant("decoder oracle Boolean bound drift")
+
+        if len(problem.sorts) >= 3 and len(components) >= 2:
+            features.add("multiple_sorts_and_components")
+        component_sorts = Counter(component.sort for component in components)
+        if any(count >= 2 for count in component_sorts.values()):
+            features.add("same_sort_disconnected_components")
+        if free_boolean_terms:
+            features.add("boolean_carriers")
+
+        component_options = [
+            _restricted_growth_assignments(len(component.terms))
+            for component in components
+        ]
+        for component_assignment in itertools.product(*component_options):
+            component_codes = {
+                term_id: code
+                for component, codes in zip(components, component_assignment)
+                for term_id, code in zip(component.terms, codes)
+            }
+            for boolean_bits in itertools.product(
+                (False, True), repeat=len(free_boolean_terms)
+            ):
+                boolean_values = {
+                    problem.true_term: True,
+                    problem.false_term: False,
+                    **dict(zip(free_boolean_terms, boolean_bits)),
+                }
+                term_values = _decoder_term_values(
+                    problem, components, component_codes, boolean_values
+                )
+                expected_atoms = _semantic_atom_values(problem, term_values)
+                assignments_examined += 1
+                try:
+                    validation = reconstruct_decoder_model(
+                        problem,
+                        components,
+                        groups,
+                        component_codes,
+                        boolean_values,
+                        expected_atoms,
+                    )
+                except DecoderAssignmentRejected:
+                    assignments_rejected += 1
+                    continue
+                assignments_accepted += 1
+                validated_assignments += 1
+                euf_satisfaction_checks += validation.satisfaction_checks
+                arbitrary_default_probes += validation.arbitrary_default_probes
+                non_nullary_default_probes += validation.non_nullary_default_probes
+                if validation.repeated_key_pairs:
+                    repeated_key_assignments += 1
+                    features.add("repeated_keys")
+                if validation.padding_records:
+                    padded_assignments += 1
+                    features.add("padding")
+                if validation.non_nullary_default_probes:
+                    features.add("arbitrary_defaults")
+
+    if validated_assignments == assignments_accepted and validated_assignments:
+        features.add("reconstructed_euf_satisfaction")
+    exercised_features = tuple(sorted(features))
+    passed = (
+        tuple(fixture_names) == DECODER_ORACLE_FIXTURES
+        and assignments_examined == assignments_accepted + assignments_rejected
+        and assignments_accepted > 0
+        and assignments_rejected > 0
+        and non_nullary_default_probes > 0
+        and set(DECODER_ORACLE_REQUIRED_FEATURES).issubset(features)
+    )
+    return DecoderOracleReceipt(
+        executed=True,
+        passed=passed,
+        fixture_names=tuple(fixture_names),
+        exercised_features=exercised_features,
+        assignments_examined=assignments_examined,
+        assignments_accepted=assignments_accepted,
+        assignments_rejected=assignments_rejected,
+        euf_satisfaction_checks=euf_satisfaction_checks,
+        repeated_key_assignments=repeated_key_assignments,
+        padded_assignments=padded_assignments,
+        arbitrary_default_probes=arbitrary_default_probes,
+        non_nullary_default_probes=non_nullary_default_probes,
+        maximum_component_terms=DECODER_ORACLE_MAX_COMPONENT_TERMS,
+        maximum_free_boolean_terms=DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS,
+    )
+
+
+def _require_decoder_oracle(receipt: DecoderOracleReceipt | None) -> DecoderOracleReceipt:
+    if receipt is None or receipt.executed is not True:
+        raise ProjectionInvariant("bounded decoder oracle was not run")
+    if receipt.passed is not True:
+        raise ProjectionInvariant("bounded decoder oracle did not pass")
+    if receipt.fixture_names != DECODER_ORACLE_FIXTURES:
+        raise ProjectionInvariant("bounded decoder oracle fixture drift")
+    if receipt.maximum_component_terms != DECODER_ORACLE_MAX_COMPONENT_TERMS or (
+        receipt.maximum_free_boolean_terms
+        != DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS
+    ):
+        raise ProjectionInvariant("bounded decoder oracle bound drift")
+    if not set(DECODER_ORACLE_REQUIRED_FEATURES).issubset(
+        receipt.exercised_features
+    ):
+        raise ProjectionInvariant("bounded decoder oracle lacks required feature coverage")
+    if (
+        receipt.assignments_examined
+        != receipt.assignments_accepted + receipt.assignments_rejected
+        or receipt.assignments_accepted < 1
+        or receipt.assignments_rejected < 1
+        or receipt.euf_satisfaction_checks < 1
+        or receipt.non_nullary_default_probes < 1
+    ):
+        raise ProjectionInvariant("bounded decoder oracle evidence is incomplete")
+    return receipt
+
+
 def _counts_within_cap(counts: Counts, caps: Caps, context: str) -> Counts:
     for field, value in asdict(counts).items():
         _checked(value, caps.max_projected_count, f"{context}_{field}")
@@ -1174,17 +1841,23 @@ def _mark_unknown(
 
 
 def project_problem(
-    problem: qfuf.EncodedProblem, caps: Caps
+    problem: qfuf.EncodedProblem,
+    caps: Caps,
+    decoder_oracle: DecoderOracleReceipt | None = None,
 ) -> dict[str, object]:
+    oracle = _require_decoder_oracle(
+        run_bounded_decoder_oracle() if decoder_oracle is None else decoder_oracle
+    )
     term_count = len(problem.terms)
     if term_count > caps.max_terms:
         raise ProjectionCap("terms", caps.max_terms, term_count)
+    function_count = len(problem.functions)
+    if function_count > caps.max_symbols:
+        raise ProjectionCap("symbols", caps.max_symbols, function_count)
     groups = _application_groups(problem)
     applications = sum(map(len, groups.values()))
     if applications > caps.max_applications:
         raise ProjectionCap("applications", caps.max_applications, applications)
-    if len(groups) > caps.max_symbols:
-        raise ProjectionCap("symbols", caps.max_symbols, len(groups))
     argument_slots = sum(
         len(problem.terms[term_id].args)
         for term_ids in groups.values()
@@ -1512,6 +2185,7 @@ def project_problem(
 
     shape = {
         "sorts": len(problem.sorts),
+        "function_declarations": function_count,
         "terms": term_count,
         "non_boolean_terms": sum(
             term.sort != qfuf.BOOL_SORT for term in problem.terms
@@ -1556,7 +2230,8 @@ def project_problem(
             },
         },
         "decoder": {
-            "complete": True,
+            "complete": oracle.executed and oracle.passed,
+            "oracle": oracle.reference_json(),
             "domain_value": "typed_tuple_sort_id_component_id_class_code",
             "boolean_carrier": "false_true",
             "unobserved_function_completion": "typed_arbitrary_default",
@@ -1576,6 +2251,7 @@ def analyze_source(
     lock: CampaignLock,
     manifest_sha256: str,
     parser_sha256: str,
+    decoder_oracle: DecoderOracleReceipt,
 ) -> dict[str, object]:
     record = _base_record(source, lock, manifest_sha256, parser_sha256)
     if len(source.source_bytes) > lock.caps.max_source_bytes:
@@ -1596,7 +2272,7 @@ def analyze_source(
         record["reason"] = str(error)
         return record
     try:
-        projection = project_problem(problem, lock.caps)
+        projection = project_problem(problem, lock.caps, decoder_oracle)
     except ProjectionCap as error:
         return _mark_unknown(record, error.code, error)
     except ProjectionInvariant as error:
@@ -1814,32 +2490,78 @@ def _opportunity_metric_gate(
     }
 
 
-def _variable_gate(
-    records: Sequence[Mapping[str, object]], lock: CampaignLock
+def _ratio_control_gate(
+    records: Sequence[Mapping[str, object]],
+    metric: str,
+    maximum: Ratio,
+    percentile: int,
 ) -> dict[str, object]:
     pairs = [
         (
-            _total_counts(record, "component_quotient_ram")["variables"],
-            _total_counts(record, "eager")["variables"],
+            _total_counts(record, "component_quotient_ram")[metric],
+            _total_counts(record, "eager")[metric],
         )
         for record in records
     ]
     candidate_total = sum(candidate for candidate, _ in pairs)
     eager_total = sum(eager for _, eager in pairs)
     weighted = _ratio_fraction(candidate_total, eager_total)
-    percentile = _percentile_ratio(pairs, lock.variable_percentile)
-    weighted_pass = _at_most(weighted, lock.variable_maximum)
-    percentile_pass = _at_most(percentile, lock.variable_maximum)
+    percentile_ratio = _percentile_ratio(pairs, percentile)
+    weighted_pass = _at_most(weighted, maximum)
+    percentile_pass = _at_most(percentile_ratio, maximum)
     return {
+        "metric": metric,
         "candidate_total": candidate_total,
         "eager_total": eager_total,
         "weighted_ratio_ppm": _fraction_ppm(weighted),
-        "percentile": lock.variable_percentile,
-        "percentile_ratio_ppm": _fraction_ppm(percentile),
+        "percentile": percentile,
+        "percentile_ratio_ppm": _fraction_ppm(percentile_ratio),
         "weighted_pass": weighted_pass,
         "percentile_pass": percentile_pass,
         "pass": weighted_pass and percentile_pass,
     }
+
+
+def _family_opportunity_gate(
+    records: Sequence[Mapping[str, object]], lock: CampaignLock
+) -> dict[str, object]:
+    reductions = {
+        metric: _opportunity_metric_gate(records, metric, lock)
+        for metric in lock.opportunity_metrics
+    }
+    primary_reduction_pass = any(
+        bool(metric_gate["pass"]) for metric_gate in reductions.values()
+    )
+    ram_controls = {
+        metric: _ratio_control_gate(
+            records,
+            metric,
+            lock.ram_control_maximum,
+            lock.ram_control_percentile,
+        )
+        for metric in lock.ram_control_metrics
+    }
+    ram_control_pass = all(
+        bool(metric_gate["pass"]) for metric_gate in ram_controls.values()
+    )
+    return {
+        "reductions": reductions,
+        "primary_reduction_pass": primary_reduction_pass,
+        "ram_no_regression": ram_controls,
+        "ram_no_regression_pass": ram_control_pass,
+        "pass": primary_reduction_pass and ram_control_pass,
+    }
+
+
+def _variable_gate(
+    records: Sequence[Mapping[str, object]], lock: CampaignLock
+) -> dict[str, object]:
+    return _ratio_control_gate(
+        records,
+        "variables",
+        lock.variable_maximum,
+        lock.variable_percentile,
+    )
 
 
 def _target_rows(records: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
@@ -1888,7 +2610,10 @@ def aggregate_records(
     parser_sha256: str,
     taxonomy_builder_sha256: str,
     analyzer_sha256: str,
+    decoder_oracle: DecoderOracleReceipt,
 ) -> dict[str, object]:
+    oracle = _require_decoder_oracle(decoder_oracle)
+    oracle_reference = oracle.reference_json()
     statuses = Counter(str(record.get("status")) for record in records)
     cap_events = Counter(
         str(event["code"])
@@ -1898,6 +2623,7 @@ def aggregate_records(
     decoder_incomplete = sum(
         type(record.get("decoder")) is not dict
         or record["decoder"].get("complete") is not True  # type: ignore[union-attr]
+        or record["decoder"].get("oracle") != oracle_reference  # type: ignore[union-attr]
         for record in records
     )
     family_population_match = True
@@ -1927,13 +2653,8 @@ def aggregate_records(
             and len(targets) >= required_targets
             and len(lineages) >= lock.minimum_generator_lineages
         )
-        metric_gates = {
-            metric: _opportunity_metric_gate(targets, metric, lock)
-            for metric in lock.opportunity_metrics
-        }
-        opportunity_pass = any(
-            bool(metric_gate["pass"]) for metric_gate in metric_gates.values()
-        )
+        opportunity_gate = _family_opportunity_gate(targets, lock)
+        opportunity_pass = bool(opportunity_gate["pass"])
         variable_gate = _variable_gate(targets, lock)
         family_gates[family.key] = {
             "source_family": family.source_family,
@@ -1945,7 +2666,7 @@ def aggregate_records(
             "target_generator_lineages": len(lineages),
             "required_generator_lineages": lock.minimum_generator_lineages,
             "broadness_pass": broadness_pass,
-            "opportunity": metric_gates,
+            "opportunity": opportunity_gate,
             "opportunity_pass": opportunity_pass,
             "variable_control": variable_gate,
             "pass": broadness_pass and opportunity_pass and bool(variable_gate["pass"]),
@@ -1958,6 +2679,7 @@ def aggregate_records(
         "zero_unknown_projections": statuses.get("unknown_projection", 0) == 0,
         "zero_cap_events": not cap_events,
         "complete_decoder_for_every_source": decoder_incomplete == 0,
+        "bounded_exhaustive_decoder_oracle": oracle.executed and oracle.passed,
         "family_populations_match": family_population_match,
     }
     validity_pass = all(validity_checks.values())
@@ -1979,6 +2701,7 @@ def aggregate_records(
         "campaign_id": lock.campaign_id,
         "interpretation": INTERPRETATION,
         "parser_api": PARSER_API,
+        "decoder_oracle": oracle.to_json(),
         "hashes": {
             "lock_sha256": lock.sha256,
             "input_manifest_sha256": manifest_sha256,
@@ -2044,6 +2767,7 @@ def run_census(
     lock_path: Path = DEFAULT_LOCK_PATH,
 ) -> tuple[list[dict[str, object]], dict[str, object], list[dict[str, object]]]:
     lock = load_campaign_lock(lock_path)
+    decoder_oracle = _require_decoder_oracle(run_bounded_decoder_oracle())
     protected = {
         Path(manifest_path).resolve(strict=False),
         Path(lock_path).resolve(strict=False),
@@ -2070,7 +2794,9 @@ def run_census(
         )
     parser_sha256 = sha256_path(PARSER_PATH)
     analyzed = [
-        analyze_source(source, lock, manifest_sha256, parser_sha256)
+        analyze_source(
+            source, lock, manifest_sha256, parser_sha256, decoder_oracle
+        )
         for source in sources
     ]
     records = chain_records(analyzed)
@@ -2093,6 +2819,7 @@ def run_census(
         parser_sha256=parser_sha256,
         taxonomy_builder_sha256=sha256_path(TAXONOMY_PATH),
         analyzer_sha256=sha256_path(Path(__file__)),
+        decoder_oracle=decoder_oracle,
     )
     _atomic_write(
         (

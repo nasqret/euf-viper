@@ -7,6 +7,7 @@ import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -295,23 +296,155 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(raised.exception.limit, 1)
         self.assertEqual(raised.exception.observed, len(problem.terms))
 
+    def test_symbol_cap_covers_internal_nullary_unused_and_macro_functions(self) -> None:
+        problem = CENSUS.qfuf.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-fun unused (U) U)
+                (declare-const unused_constant U)
+                (define-fun identity ((x U)) U x)
+                (assert true)
+                """
+            )
+        )
+        values = CENSUS.asdict(self.caps)
+        values["max_symbols"] = len(problem.functions) - 1
+        with self.assertRaises(CENSUS.ProjectionCap) as raised:
+            CENSUS.project_problem(problem, CENSUS.Caps(**values))
+        self.assertEqual(raised.exception.code, "symbols")
+        self.assertEqual(raised.exception.observed, len(problem.functions))
+
+        values["max_symbols"] = len(problem.functions)
+        projection = CENSUS.project_problem(problem, CENSUS.Caps(**values))
+        self.assertEqual(
+            projection["shape"]["function_declarations"], len(problem.functions)
+        )
+
+
+class DecoderOracleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.caps = CENSUS.load_campaign_lock().caps
+        cls.receipt = CENSUS.run_bounded_decoder_oracle()
+
+    def test_registered_oracle_is_exhaustive_and_feature_complete(self) -> None:
+        receipt = self.receipt
+        self.assertTrue(receipt.executed)
+        self.assertTrue(receipt.passed)
+        self.assertEqual(receipt.fixture_names, CENSUS.DECODER_ORACLE_FIXTURES)
+        self.assertEqual(receipt.assignments_examined, 316)
+        self.assertEqual(receipt.assignments_accepted, 179)
+        self.assertEqual(receipt.assignments_rejected, 137)
+        self.assertEqual(receipt.padded_assignments, 170)
+        self.assertEqual(receipt.repeated_key_assignments, 55)
+        self.assertEqual(receipt.non_nullary_default_probes, 1608)
+        self.assertEqual(
+            set(receipt.exercised_features),
+            set(CENSUS.DECODER_ORACLE_REQUIRED_FEATURES),
+        )
+        self.assertRegex(receipt.sha256, r"^[0-9a-f]{64}$")
+
+    def test_projection_fails_closed_when_oracle_did_not_run_or_failed(self) -> None:
+        problem = CENSUS.qfuf.parse_and_encode(query("(assert true)"))
+        not_run = replace(self.receipt, executed=False, passed=False)
+        failed = replace(self.receipt, passed=False)
+        with self.assertRaisesRegex(CENSUS.ProjectionInvariant, "was not run"):
+            CENSUS.project_problem(problem, self.caps, not_run)
+        with self.assertRaisesRegex(CENSUS.ProjectionInvariant, "did not pass"):
+            CENSUS.project_problem(problem, self.caps, failed)
+
+    def test_decoder_reconstructs_typed_model_and_rejects_false_atom_claim(self) -> None:
+        source = dict(CENSUS._decoder_oracle_sources())[
+            "boolean_multisort_padding_defaults"
+        ]
+        problem = CENSUS.qfuf.parse_and_encode(source)
+        groups = CENSUS._application_groups(problem)
+        components, _ = CENSUS.build_components(problem, groups, self.caps)
+        component_codes = {
+            term_id: 0 for component in components for term_id in component.terms
+        }
+        boolean_values = {
+            term.id: False
+            for term in problem.terms
+            if term.sort == CENSUS.qfuf.BOOL_SORT
+        }
+        boolean_values[problem.true_term] = True
+        term_values = CENSUS._decoder_term_values(
+            problem, components, component_codes, boolean_values
+        )
+        atom_values = CENSUS._semantic_atom_values(problem, term_values)
+        validation = CENSUS.reconstruct_decoder_model(
+            problem,
+            components,
+            groups,
+            component_codes,
+            boolean_values,
+            atom_values,
+        )
+        self.assertGreater(validation.repeated_key_pairs, 0)
+        self.assertEqual(validation.padding_records, 1)
+        self.assertGreater(validation.non_nullary_default_probes, 0)
+        empty_sort = next(sort.id for sort in problem.sorts if sort.name == "W")
+        self.assertEqual(validation.model.sort_defaults[empty_sort], (empty_sort, -1, 0))
+
+        corrupted_atoms = dict(atom_values)
+        first_atom = min(corrupted_atoms)
+        corrupted_atoms[first_atom] = not corrupted_atoms[first_atom]
+        with self.assertRaisesRegex(
+            CENSUS.ProjectionInvariant, "does not satisfy the projected atom"
+        ):
+            CENSUS.reconstruct_decoder_model(
+                problem,
+                components,
+                groups,
+                component_codes,
+                boolean_values,
+                corrupted_atoms,
+            )
+
+    def test_decoder_rejects_collapsed_boolean_carrier(self) -> None:
+        problem = CENSUS.qfuf.parse_and_encode(query("(assert true)"))
+        groups = CENSUS._application_groups(problem)
+        components, _ = CENSUS.build_components(problem, groups, self.caps)
+        boolean_values = {
+            term.id: False
+            for term in problem.terms
+            if term.sort == CENSUS.qfuf.BOOL_SORT
+        }
+        with self.assertRaisesRegex(
+            CENSUS.DecoderAssignmentRejected, "does not distinguish"
+        ):
+            CENSUS._decoder_term_values(problem, components, {}, boolean_values)
+
 
 def synthetic_record(
-    *, eager: int, candidate: int, variables: tuple[int, int] = (100, 100)
+    *,
+    eager: int,
+    candidate: int,
+    variables: tuple[int, int] = (100, 100),
+    eager_overrides: dict[str, int] | None = None,
+    candidate_overrides: dict[str, int] | None = None,
 ) -> dict[str, object]:
-    def total(value: int, variable_value: int) -> dict[str, int]:
-        return {
+    def total(
+        value: int, variable_value: int, overrides: dict[str, int] | None
+    ) -> dict[str, int]:
+        counts = {
             "variables": variable_value,
             "clauses": value,
             "literal_slots": value,
             "unit_clauses": 0,
             "watch_entries": value,
         }
+        counts.update(overrides or {})
+        return counts
 
     return {
         "counts": {
-            "eager": {"total": total(eager, variables[0])},
-            "component_quotient_ram": {"total": total(candidate, variables[1])},
+            "eager": {"total": total(eager, variables[0], eager_overrides)},
+            "component_quotient_ram": {
+                "total": total(candidate, variables[1], candidate_overrides)
+            },
         }
     }
 
@@ -337,6 +470,59 @@ class GateBoundaryTests(unittest.TestCase):
         failing = synthetic_record(eager=100, candidate=75, variables=(100, 126))
         self.assertTrue(CENSUS._variable_gate([passing], self.lock)["pass"])
         self.assertFalse(CENSUS._variable_gate([failing], self.lock)["pass"])
+
+    def test_watch_only_win_cannot_hide_333x_literal_and_clause_regression(self) -> None:
+        adversarial = synthetic_record(
+            eager=1000,
+            candidate=1500,
+            eager_overrides={
+                "clauses": 1000,
+                "literal_slots": 3000,
+                "unit_clauses": 0,
+                "watch_entries": 2000,
+            },
+            candidate_overrides={
+                "clauses": 1500,
+                "literal_slots": 999000,
+                "unit_clauses": 1000,
+                "watch_entries": 1000,
+            },
+        )
+        gate = CENSUS._family_opportunity_gate([adversarial], self.lock)
+        self.assertTrue(gate["reductions"]["watch_entries"]["pass"])
+        self.assertTrue(gate["primary_reduction_pass"])
+        self.assertEqual(
+            gate["ram_no_regression"]["literal_slots"]["weighted_ratio_ppm"],
+            333_000_000,
+        )
+        self.assertFalse(gate["ram_no_regression"]["literal_slots"]["pass"])
+        self.assertFalse(gate["ram_no_regression"]["clauses"]["pass"])
+        self.assertFalse(gate["ram_no_regression_pass"])
+        self.assertFalse(gate["pass"])
+
+    def test_watch_only_win_remains_allowed_without_ram_regression(self) -> None:
+        controlled = synthetic_record(
+            eager=100,
+            candidate=100,
+            eager_overrides={
+                "clauses": 100,
+                "literal_slots": 300,
+                "unit_clauses": 0,
+                "watch_entries": 200,
+            },
+            candidate_overrides={
+                "clauses": 100,
+                "literal_slots": 225,
+                "unit_clauses": 25,
+                "watch_entries": 150,
+            },
+        )
+        gate = CENSUS._family_opportunity_gate([controlled], self.lock)
+        self.assertFalse(gate["reductions"]["clauses"]["pass"])
+        self.assertTrue(gate["reductions"]["watch_entries"]["pass"])
+        self.assertTrue(gate["ram_no_regression"]["clauses"]["pass"])
+        self.assertTrue(gate["ram_no_regression"]["literal_slots"]["pass"])
+        self.assertTrue(gate["pass"])
 
 
 class HashChainTests(unittest.TestCase):
@@ -535,6 +721,28 @@ class ProvenanceAndDeterminismTests(unittest.TestCase):
             value["gates"]["validity"]["allowed_parse_errors"] = 1
             path.write_text(json.dumps(value), encoding="ascii")
             with self.assertRaisesRegex(CENSUS.CensusError, "exact complete coverage"):
+                CENSUS.load_campaign_lock(path)
+
+    def test_weakened_ram_control_and_decoder_oracle_lock_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            value = json.loads(CENSUS.DEFAULT_LOCK_PATH.read_text(encoding="ascii"))
+            value["gates"]["ram_control"]["maximum_ratio"] = {
+                "numerator": 2,
+                "denominator": 1,
+            }
+            path = root / "weak-ram.json"
+            path.write_text(json.dumps(value), encoding="ascii")
+            with self.assertRaisesRegex(CENSUS.CensusError, "forbid weighted"):
+                CENSUS.load_campaign_lock(path)
+
+            value = json.loads(CENSUS.DEFAULT_LOCK_PATH.read_text(encoding="ascii"))
+            value["projection"]["component_quotient_ram"]["decoder_oracle"][
+                "maximum_component_terms"
+            ] = 3
+            path = root / "weak-oracle.json"
+            path.write_text(json.dumps(value), encoding="ascii")
+            with self.assertRaisesRegex(CENSUS.CensusError, "oracle contract drift"):
                 CENSUS.load_campaign_lock(path)
 
 

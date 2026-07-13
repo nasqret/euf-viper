@@ -36,6 +36,9 @@ class ComponentQuotientWmiTests(unittest.TestCase):
         self.assertIn('"targets": root / "targets.jsonl"', text)
         self.assertIn('"aggregate": root / "aggregate.json"', text)
         self.assertIn('"implementation_allowed": gates["implementation_allowed"]', text)
+        self.assertIn("component quotient bounded decoder oracle did not pass", text)
+        self.assertIn("bounded decoder oracle SHA-256 mismatch", text)
+        self.assertIn('"decoder_oracle_sha256": oracle_sha256', text)
         for forbidden in ("cargo run", "target/release/euf-viper", " z3 ", "cvc5", "yices"):
             self.assertNotIn(forbidden, text)
 
