@@ -23,6 +23,15 @@ UNSAT and EUF-valid SAT paths are unchanged. Set
 The default was promoted only after a targeted repeated profile, a repeated
 40-instance control, and a 7,503-instance paired WMI gate.
 
+`EUF_VIPER_BACKEND=cadical-rollback` is a separate default-off research
+control. It connects CaDiCaL to a rollback congruence-closure propagator and
+loads only the base Boolean CNF, before equality abstraction, finite-domain
+encoding, Ackermann completion, chordal fill, or eager congruence can run.
+Theory conflicts are replay-checked before they are exported, SAT models are
+validated again with complete EUF closure, and any adapter failure returns
+`unsupported` without entering another backend. The production default is
+unchanged until this route passes its targeted and full-corpus gates.
+
 The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail

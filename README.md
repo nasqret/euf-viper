@@ -142,6 +142,14 @@ validation. Full-corpus paired job `139497` improved two-second coverage from
 answers or execution errors. Linux x86_64 now uses this route by default;
 `EUF_VIPER_INVALID_MODEL_FALLBACK=varisat` restores the prior behavior.
 
+The research branch also exposes `EUF_VIPER_BACKEND=cadical-rollback` as a
+strictly opt-in control. It sends only the base Boolean CNF to CaDiCaL and
+maintains EUF state incrementally through a rollback external propagator; it
+does not inherit finite-domain, equality-abstraction, Ackermann, chordal, or
+eager-congruence clauses. Internal adapter errors return `unsupported` instead
+of falling through to a different solver. This backend is not a default and
+requires corpus A/B evidence before any promotion decision.
+
 The 2026-07-09 accepted iteration adds a colder, structurally gated route for
 large non-finite formulas whose first Kissat model fails EUF validation. It
 rebuilds root assertions directly, adds full Ackermann function and predicate

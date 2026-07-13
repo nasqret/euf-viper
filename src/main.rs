@@ -4825,7 +4825,6 @@ fn add_novel_theory_cuts(
     Some(added)
 }
 
-#[allow(dead_code)]
 fn solve_cadical_rollback_euf(
     cnf: &CnfProblem,
     arena: &TermArena,
@@ -4895,6 +4894,41 @@ fn solve_cadical_rollback_euf(
             }
         }
     }
+}
+
+fn solve_explicit_rollback_backend(
+    backend: &str,
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    if backend != "cadical-rollback" {
+        return None;
+    }
+
+    Some(
+        match solve_cadical_rollback_euf(cnf, arena, true_term, false_term) {
+            Ok((result, stats)) => (
+                result,
+                cnf.var_count(),
+                cnf.clauses.len(),
+                0,
+                1,
+                stats.conflicts,
+            ),
+            Err(error) => (
+                SolveResult::Unsupported(vec![format!(
+                    "CaDiCaL rollback backend failed closed: {error}"
+                )]),
+                cnf.var_count(),
+                cnf.clauses.len(),
+                0,
+                1,
+                0,
+            ),
+        },
+    )
 }
 
 fn solve_cadical_euf_refining(
@@ -6321,6 +6355,25 @@ fn solve_bool_problem(
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
+    solve_bool_problem_with_backend(
+        arena,
+        bool_problem,
+        root_cnf_options,
+        requested_eq_abstraction_mode,
+        finite_context,
+        &backend,
+    )
+}
+
+fn solve_bool_problem_with_backend(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    root_cnf_options: RootCnfOptions,
+    requested_eq_abstraction_mode: EqAbstractionMode,
+    finite_context: &mut finite_analysis::FiniteAnalysisContext,
+    backend: &str,
+) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
@@ -6337,6 +6390,15 @@ fn solve_bool_problem(
         }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
+    if let Some(result) = solve_explicit_rollback_backend(
+        backend,
+        &cnf,
+        arena,
+        bool_problem.true_term,
+        bool_problem.false_term,
+    ) {
+        return Some(result);
+    }
     let eq_abstraction_mode = route_eq_abstraction_mode(
         requested_eq_abstraction_mode,
         arena,
@@ -6362,12 +6424,11 @@ fn solve_bool_problem(
     } else {
         Vec::new()
     };
-    let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
     if matches!(
-        backend.as_str(),
+        backend,
         "auto" | "varisat" | "kissat" | "cadical" | "cadical-refine"
     ) {
-        let finite_added = if matches!(backend.as_str(), "auto" | "cadical" | "cadical-refine")
+        let finite_added = if matches!(backend, "auto" | "cadical" | "cadical-refine")
             || env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1")
         {
             let finite_start = Instant::now();
@@ -6540,7 +6601,7 @@ fn solve_bool_problem(
             0,
             sat_calls
                 + usize::from(matches!(
-                    backend.as_str(),
+                    backend,
                     "auto" | "kissat" | "cadical" | "cadical-refine"
                 )),
             theory_lemmas,
@@ -9541,6 +9602,137 @@ mod tests {
             bool_problem.false_term,
         )
         .unwrap_or_else(|error| panic!("rollback control failed: {error}"))
+    }
+
+    #[test]
+    fn explicit_rollback_backend_is_exact_and_bypasses_eager_transformations() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun p () U)
+            (declare-fun q () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (assert (distinct a b c))
+            (assert (or (= a b) (not (= x y))))
+            (assert (= (= p q) true))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut base_cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut base_cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            base_cnf.add_assertion(assertion);
+        }
+        let base_vars = base_cnf.var_count();
+        let base_clauses = base_cnf.clauses.len();
+
+        let candidates = equality_abstraction_fact_candidates(
+            &bool_problem.assertions,
+            EqAbstractionMode::Facts,
+        );
+        assert_eq!(candidates.len(), 1);
+        let mut transformed = base_cnf;
+        let integration = integrate_equality_abstraction_facts(
+            &mut transformed,
+            &candidates,
+            EqAbstractionFactConfig::default(),
+        );
+        assert_eq!(integration.accepted_existing_facts, 1);
+        assert!(transformed.clauses.len() > base_clauses);
+
+        let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+        let result = solve_bool_problem_with_backend(
+            &problem.arena,
+            bool_problem,
+            RootCnfOptions::existing_behavior(false),
+            EqAbstractionMode::Facts,
+            &mut finite_context,
+            "cadical-rollback",
+        )
+        .expect("explicit rollback backend must produce a result");
+        assert_eq!(result.0, SolveResult::Sat);
+        assert_eq!(result.1, base_vars);
+        assert_eq!(result.2, base_clauses);
+        assert_eq!(result.3, 0);
+        assert_eq!(result.4, 1);
+        assert!(
+            solve_explicit_rollback_backend(
+                "cadical-refine",
+                &transformed,
+                &problem.arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn explicit_rollback_backend_bypasses_finite_domain_encoding() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (declare-fun x () U)
+            (declare-fun y () U)
+            (declare-fun f (U) U)
+            (declare-fun g (U) U)
+            (assert (distinct a b c))
+            (assert (or (= (f a) a) (= (f a) b) (= (f a) c)))
+            (assert (or (= (f b) a) (= (f b) b) (= (f b) c)))
+            (assert (or (= (f c) a) (= (f c) b) (= (f c) c)))
+            (assert (= x y))
+            (assert (distinct (g x) (g y)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut base_cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut base_cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            base_cnf.add_assertion(assertion);
+        }
+        let base_vars = base_cnf.var_count();
+        let base_clauses = base_cnf.clauses.len();
+        assert!(add_finite_domain_axioms(&mut base_cnf, &problem.arena, bool_problem) > 0);
+        assert!(base_cnf.clauses.len() > base_clauses);
+
+        let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+        let result = solve_bool_problem_with_backend(
+            &problem.arena,
+            bool_problem,
+            RootCnfOptions::existing_behavior(false),
+            EqAbstractionMode::Off,
+            &mut finite_context,
+            "cadical-rollback",
+        )
+        .expect("explicit rollback backend must produce a result");
+        assert_eq!(result.0, SolveResult::Unsat);
+        assert_eq!(result.1, base_vars);
+        assert_eq!(result.2, base_clauses);
+        assert_eq!(result.4, 1);
+        assert!(result.5 >= 1);
+    }
+
+    #[test]
+    fn explicit_rollback_backend_fails_closed_on_internal_errors() {
+        let arena = TermArena::default();
+        let cnf = CnfProblem::new();
+        let result = solve_explicit_rollback_backend("cadical-rollback", &cnf, &arena, 0, 1)
+            .expect("explicit rollback backend must not fall through");
+        let SolveResult::Unsupported(errors) = result.0 else {
+            panic!("rollback backend error must be unsupported");
+        };
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("failed closed"));
+        assert_eq!(result.4, 1);
     }
 
     #[test]
