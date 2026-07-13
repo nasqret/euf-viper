@@ -636,11 +636,18 @@
 - A local 20-pair ABBA on `loops6/iso_icl053` rejects unconditional CaDiCaL
   clausal congruence as a broad default: conflicts improve `62 -> 51`, but
   median end-to-end time regresses `8.055 -> 9.737` ms (`1.209x` slower).
-- Public branch `research-modern-kissat` commit `78032df` adds pinned Kissat
-  4.0.4 as a feature-selected Linux backend while preserving SC2021 as the
-  default control. It exposes `EUF_VIPER_KISSAT_MODE` and
-  `EUF_VIPER_KISSAT_OPTIONS`, supports Linux `--all-features`, and records the
-  linked backend in `--version`. WMI build/test/certificate job is `144844`.
+- Public branch `research-modern-kissat` validation commit `d7c14da` adds
+  pinned Kissat 4.0.4 as a feature-selected Linux backend while preserving
+  SC2021 as the default control. It exposes fail-closed
+  `EUF_VIPER_KISSAT_MODE`/`EUF_VIPER_KISSAT_OPTIONS`, fully namespaces Kitten,
+  supports Linux `--all-features`, and records the linked backend in
+  `--version`.
+- WMI paired artifact validation `144945` passed. SC2021 binary SHA-256 is
+  `d7321602b8cc86683ccb41e90bea7b843a5059caad62d1eba347bb3e69c70362`;
+  Kissat 4.0.4 binary SHA-256 is
+  `ecbcfebb1f39c725c1d0266442c7dcc80083b8347e3b77d90bfb5646bd4ea6b6`.
+  Both pass shared SAT/UNSAT fixtures; modern certificate smoke passes with
+  pinned `drat-trim` SHA `58a121de...943e5`. No timing evidence exists yet.
 - Do not compose Hall or rollback work into the modern-SAT experiment. Measure
   the backend first; the next original mechanisms are proof-pressure-triggered
   conflict-only rollback for validation-dominated Goel cases and a

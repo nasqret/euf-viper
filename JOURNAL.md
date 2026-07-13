@@ -876,11 +876,19 @@
   Reject unconditional CaDiCaL congruence as a broad route; do not promote
   from solver-internal counts.
 - Added a separate pinned Kissat 4.0.4 backend while retaining SC2021 as the
-  default control on public branch `research-modern-kissat`. Commit `78032df`
-  exposes mode and option ablations, records the linked backend in `--version`,
-  and keeps Linux `--all-features` valid by selecting Kissat 4.0.4. Local Rust
-  tests pass `228` with four environment probes ignored; standalone wrapper
-  SAT/UNSAT and option tests pass. WMI Linux validation is queued as `144844`.
+  default control on public branch `research-modern-kissat`. Final validation
+  commit `d7c14da` exposes fail-closed mode/option ablations, records the linked
+  backend in `--version`, fully namespaces Kitten against CaDiCaL, and keeps
+  Linux `--all-features` valid by selecting Kissat 4.0.4. Hosted run
+  `29213778114` passed on the solver commit and final hosted run `29214335958`
+  passed on `d7c14da`.
+- WMI paired artifact job `144945` completed in 74 seconds from cache. Default
+  SC2021 tests passed `222` with three environment probes ignored; modern
+  all-feature tests passed `228` with four ignored. Both binaries pass shared
+  SAT/UNSAT fixtures, and modern certificate smoke passes against pinned
+  `drat-trim` SHA `58a121de...943e5`. Exact release hashes are SC2021
+  `d7321602...c70362` and Kissat 4.0.4 `ecbcfebb...ea6b6`. No timing result or
+  performance promotion follows yet.
 
 ## Next Entry Template
 

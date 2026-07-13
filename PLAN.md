@@ -142,8 +142,10 @@ independent evidence checks, and a frozen family holdout.
 
 - [ ] Embed Kissat 4.0.4 behind the current clause/model interface while
   preserving the SC2021 backend as an exact control. Research branch
-  `research-modern-kissat` at `78032df` implements the feature-selected pinned
-  backend and option surface; WMI Linux validation is job `144844`.
+  `research-modern-kissat` at `d7c14da` implements the feature-selected pinned
+  backend and fail-closed option surface. WMI validation `144945` passed with
+  preserved SC2021/4.0.4 binary hashes `d7321602...c70362` and
+  `ecbcfebb...ea6b6`; timing remains blocked on P0 audit.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
   A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal
