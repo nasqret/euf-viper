@@ -16,6 +16,35 @@ export LC_ALL=C
 export TZ=UTC
 export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-1}"
 
+CARGO="${EUF_VIPER_CARGO:-$HOME/.cargo/bin/cargo}"
+EXPECTED_CARGO_SHA256="${EUF_VIPER_CARGO_SHA256:?set EUF_VIPER_CARGO_SHA256}"
+EXPECTED_CARGO_VERSION="${EUF_VIPER_CARGO_VERSION:?set EUF_VIPER_CARGO_VERSION}"
+case "$CARGO" in
+  /*) ;;
+  *) echo "EUF_VIPER_CARGO must be an absolute path: $CARGO" >&2; exit 127 ;;
+esac
+if [ ! -f "$CARGO" ] || [ ! -x "$CARGO" ]; then
+  echo "pinned cargo is not an executable file: $CARGO" >&2
+  exit 127
+fi
+if [ "${#EXPECTED_CARGO_SHA256}" -ne 64 ]; then
+  echo "EUF_VIPER_CARGO_SHA256 must be a lowercase SHA-256" >&2
+  exit 2
+fi
+case "$EXPECTED_CARGO_SHA256" in
+  *[!0-9a-f]*) echo "EUF_VIPER_CARGO_SHA256 must be a lowercase SHA-256" >&2; exit 2 ;;
+esac
+ACTUAL_CARGO_SHA256="$(sha256sum "$CARGO" | awk '{print $1}')"
+if [ "$ACTUAL_CARGO_SHA256" != "$EXPECTED_CARGO_SHA256" ]; then
+  echo "cargo hash mismatch: expected $EXPECTED_CARGO_SHA256, got $ACTUAL_CARGO_SHA256" >&2
+  exit 2
+fi
+ACTUAL_CARGO_VERSION="$("$CARGO" --version)"
+if [ "$ACTUAL_CARGO_VERSION" != "$EXPECTED_CARGO_VERSION" ]; then
+  echo "cargo version mismatch: expected $EXPECTED_CARGO_VERSION, got $ACTUAL_CARGO_VERSION" >&2
+  exit 2
+fi
+
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 CAMPAIGN_ROOT="${EUF_VIPER_TYPED_PARSER_ROOT:?set EUF_VIPER_TYPED_PARSER_ROOT}"
 EXPECTED_SOURCES="${EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES:-7503}"
@@ -52,7 +81,10 @@ if [ -e "$CAMPAIGN_ROOT/prepare.json" ]; then
 fi
 mkdir -p "$CAMPAIGN_ROOT"
 
-cargo build --release --locked
+printf '%s\n' "$ACTUAL_CARGO_VERSION" > "$CAMPAIGN_ROOT/cargo-version.txt"
+printf '%s  %s\n' "$ACTUAL_CARGO_SHA256" "$CARGO" \
+  > "$CAMPAIGN_ROOT/cargo-sha256.txt"
+"$CARGO" build --release --locked
 BINARY="$PWD/target/release/euf-viper"
 test -x "$BINARY"
 "$BINARY" parse-check tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2 \

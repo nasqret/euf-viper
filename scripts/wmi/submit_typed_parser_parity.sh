@@ -10,6 +10,7 @@ EXPECTED_SOURCES="${EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES:-7503}"
 SHARDS="${EUF_VIPER_TYPED_PARSER_SHARDS:-128}"
 MAX_PARALLEL="${EUF_VIPER_TYPED_PARSER_MAX_PARALLEL:-32}"
 TIMEOUT_SECONDS="${EUF_VIPER_TYPED_PARSER_TIMEOUT_SECONDS:-60}"
+PARTITION="${EUF_VIPER_TYPED_PARSER_PARTITION:-cpu_idle}"
 
 if [ -n "$DEPENDENCY" ]; then
   case "$DEPENDENCY" in *[!0-9]*) echo "dependency must be numeric" >&2; exit 2 ;; esac
@@ -23,6 +24,9 @@ if [ "$MAX_PARALLEL" -gt "$SHARDS" ]; then
   echo "max parallelism cannot exceed shard count" >&2
   exit 2
 fi
+case "$PARTITION" in
+  *[!A-Za-z0-9_-]*|'') echo "partition contains unsafe characters" >&2; exit 2 ;;
+esac
 
 cd "$ROOT"
 if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
@@ -36,10 +40,37 @@ if [ "$REVISION" != "$PUBLISHED_REVISION" ]; then
   exit 2
 fi
 SHORT_REVISION="$(git rev-parse --short=12 HEAD)"
+REMOTE_HOME="$(ssh "$REMOTE_HOST" 'printf %s "$HOME"')"
 if [ -z "$REMOTE_PARENT" ]; then
-  REMOTE_HOME="$(ssh "$REMOTE_HOST" 'printf %s "$HOME"')"
   REMOTE_PARENT="$REMOTE_HOME/euf-viper-parser-parity-campaigns"
 fi
+REMOTE_CARGO="${EUF_VIPER_CARGO_REMOTE_PATH:-$REMOTE_HOME/.cargo/bin/cargo}"
+case "$REMOTE_CARGO" in
+  /*) ;;
+  *) echo "remote cargo path must be absolute" >&2; exit 2 ;;
+esac
+case "$REMOTE_CARGO" in
+  *[!A-Za-z0-9_./-]*) echo "remote cargo path contains unsafe characters" >&2; exit 2 ;;
+esac
+if ! REMOTE_CARGO_SHA256="$(ssh "$REMOTE_HOST" "test -f '$REMOTE_CARGO' && test -x '$REMOTE_CARGO' && sha256sum '$REMOTE_CARGO' | awk '{print \$1}'")"; then
+  echo "remote cargo is missing or not executable: $REMOTE_CARGO" >&2
+  exit 2
+fi
+if [ "${#REMOTE_CARGO_SHA256}" -ne 64 ]; then
+  echo "failed to pin remote cargo SHA-256 at $REMOTE_CARGO" >&2
+  exit 2
+fi
+case "$REMOTE_CARGO_SHA256" in
+  *[!0-9a-f]*) echo "remote cargo SHA-256 is malformed" >&2; exit 2 ;;
+esac
+if ! REMOTE_CARGO_VERSION="$(ssh "$REMOTE_HOST" "'$REMOTE_CARGO' --version")"; then
+  echo "failed to read remote cargo version at $REMOTE_CARGO" >&2
+  exit 2
+fi
+case "$REMOTE_CARGO_VERSION" in
+  cargo\ [0-9]*\ \(*\)) ;;
+  *) echo "remote cargo version is malformed: $REMOTE_CARGO_VERSION" >&2; exit 2 ;;
+esac
 REMOTE_WORK="$REMOTE_PARENT/$SHORT_REVISION"
 CAMPAIGN_TAG="${EUF_VIPER_TYPED_PARSER_CAMPAIGN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 case "$CAMPAIGN_TAG" in
@@ -54,16 +85,16 @@ PREPARE_ARGS=(--parsable)
 if [ -n "$DEPENDENCY" ]; then
   PREPARE_ARGS+=(--dependency="afterok:$DEPENDENCY")
 fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${PREPARE_ARGS[*]} --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES',EUF_VIPER_TYPED_PARSER_SHARDS='$SHARDS',EUF_VIPER_TYPED_PARSER_TIMEOUT_SECONDS='$TIMEOUT_SECONDS' scripts/wmi/euf_viper_typed_parser_parity_prepare.sbatch")"
+PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${PREPARE_ARGS[*]} --partition='$PARTITION' --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_CARGO='$REMOTE_CARGO',EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256',EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES',EUF_VIPER_TYPED_PARSER_SHARDS='$SHARDS',EUF_VIPER_TYPED_PARSER_TIMEOUT_SECONDS='$TIMEOUT_SECONDS' scripts/wmi/euf_viper_typed_parser_parity_prepare.sbatch")"
 PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
 case "$PREPARE_JOB" in *[!0-9]*|'') echo "invalid prepare job id: $PREPARE_SUBMISSION" >&2; exit 2 ;; esac
 
 LAST_SHARD="$((SHARDS - 1))"
-ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --dependency=afterok:$PREPARE_JOB --array=0-$LAST_SHARD%$MAX_PARALLEL --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT' scripts/wmi/euf_viper_typed_parser_parity_array.sbatch")"
+ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$PREPARE_JOB --array=0-$LAST_SHARD%$MAX_PARALLEL --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT' scripts/wmi/euf_viper_typed_parser_parity_array.sbatch")"
 ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
 case "$ARRAY_JOB" in *[!0-9]*|'') echo "invalid array job id: $ARRAY_SUBMISSION" >&2; exit 2 ;; esac
 
-AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --dependency=afterok:$ARRAY_JOB --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch")"
+AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$ARRAY_JOB --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch")"
 AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
 case "$AUDIT_JOB" in *[!0-9]*|'') echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
 
@@ -82,6 +113,12 @@ payload = {
     "remote_host": "$REMOTE_HOST",
     "remote_worktree": "$REMOTE_WORK",
     "campaign_root": "$CAMPAIGN_ROOT",
+    "partition": "$PARTITION",
+    "cargo": {
+        "path": "$REMOTE_CARGO",
+        "sha256": "$REMOTE_CARGO_SHA256",
+        "version": "$REMOTE_CARGO_VERSION",
+    },
     "dependency": "$DEPENDENCY" or None,
     "expected_sources": int("$EXPECTED_SOURCES"),
     "shards": int("$SHARDS"),
