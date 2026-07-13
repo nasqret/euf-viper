@@ -794,3 +794,9 @@
   and twelve UNSAT qg7. After T1/T2/T4/T5/T6, run T3 M0 only if two fixed arms
   survive with at least 10% oracle headroom; otherwise test scalar source-exact
   qg7 frontier search before SIMD.
+- Rollback final audit `145929` is a valid scientific rejection, not an
+  infrastructure failure. All 12 shards completed; 576 observations have zero
+  wrong/errors and coverage `15 -> 23`, with target speedups
+  `7.6029x`/`9.0741x`/`7.3178x`. Anti-target p95 overhead
+  `11.1689x`/`32.7545x`/`23.3462x` fails the `1.10x` cap. Never promote
+  whole-instance rollback; use its frozen split only for M0 telemetry.

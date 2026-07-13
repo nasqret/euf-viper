@@ -39,7 +39,10 @@ Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
 `145785` has started on WMI: two shards are complete, one is active, and the
 remaining shards are scheduler-bound. Official array `145787` remains
 priority-bound, with audits/finalizer `145786`/`145788`/`145789`
-dependency-held. The graph is unchanged.
+dependency-held. The graph is unchanged. Rollback control audit `145929`
+scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
+and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
+overheads were `11.17x`-`32.75x` against a `1.10x` cap.
 
 ## Victory Contract
 
@@ -262,7 +265,7 @@ independent evidence checks, and a frozen family holdout.
   for causal tests. Unknown settings fail closed. After the callback-handoff
   repair, root matrices pass `242` default and `248` all-feature tests; hosted
   run `29275599640` passes.
-- [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
+- [x] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
   dynamic full Ackermannization. Require fewer complete validations on every
   multi-round target, `1.10x` target speedup, no baseline-only solve, and
   independently replayed conflicts before selector work. Public harness
@@ -284,12 +287,20 @@ independent evidence checks, and a frozen family holdout.
   `correct:2`, candidate `correct:2`, and four bounded repeated-assignment
   conflicts. The exact binary SHA-256 is `0cff30a189d46423...`, preflight
   journal SHA-256 is `e223befc265ee95e...`, and summary SHA-256 is
-  `2809e913e30b5bb7...`. Array `145928` released automatically; audit `145929`
-  remains dependency-held. Only that final audit can promote.
+  `2809e913e30b5bb7...`. Array `145928` completed all 12 shards. Final audit
+  `145929` returned a valid scientific `reject` over 576 observations. Every
+  arm had zero wrong/errors,
+  no baseline-only solve, coverage `15 -> 23`, and target geometric speedups
+  `7.6029x`/`9.0741x`/`7.3178x` for current/dynamic/model-cuts. Their anti-target
+  p95 overheads were `11.1689x`/`32.7545x`/`23.3462x`, far above the `1.10x`
+  cap. Whole-instance rollback is rejected as a default.
 - [ ] Add component-local migration and then delayed propagation only after the
-  whole-instance engineering control passes. Rollback DPLL(T) itself is known;
-  the differentiated claim requires stable atoms and checked bridge facts
-  across per-component eager/rollback/Hall representations.
+  whole-instance engineering control passes. It did not pass its broad gate;
+  therefore no migration implementation is authorized. T3 M0 may consume the
+  frozen rejected arm only to test whether its sharp target/anti-target split is
+  predictably isolatable. Rollback DPLL(T) itself is known; the differentiated
+  claim requires stable atoms and checked bridge facts across per-component
+  eager/rollback/Hall representations.
 
 ### T4: Adequate-Range Hall/PB
 
@@ -442,8 +453,9 @@ fallback can be an operational portfolio but never a standalone victory.
 2. Let dependency-bound full/official certificate chains
    `146076`-`146078` and `146079`-`146081` batch-shadow and globally audit the
    exact two-second rows only after `146071` succeeds.
-3. Let rollback array `145928` and final audit `145929` finish; promote only
-   from the immutable final audit, never from completed or active shards.
+3. Preserve rollback audit `145929` as a rejection: do not promote
+   whole-instance rollback. Reuse its frozen target/anti-target telemetry only
+   in T3 M0 after the remaining fixed-arm gates finish.
 4. Keep modern Kissat 4 rejected: valid sample `145905` lost both geometric and
    aggregate paired gates, so broad `145906` and merge `145907` stay cancelled.
 5. Preserve the existing 1,200-second continuation graph `145785`-`145789`;

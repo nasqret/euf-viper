@@ -1,0 +1,38 @@
+{
+  "array_job": "145928",
+  "audit_file_sha256": "fffb152c97aef625caf25b7c3b5373720856a2fba39b6c42a5f9b9c46e3831ff",
+  "audit_job": "145929",
+  "binary_sha256": "0cff30a189d464231dabf6a893a31dc23f9a44a7d115c65ee784508597cdb4ad",
+  "comparisons": {
+    "current": {
+      "anti_target_p95_overhead": 11.168941893715719,
+      "target_geometric_speedup": 7.602894694640701
+    },
+    "dynamic": {
+      "anti_target_p95_overhead": 32.7545349999143,
+      "target_geometric_speedup": 9.074121823587157
+    },
+    "model-cuts": {
+      "anti_target_p95_overhead": 23.346224637593895,
+      "target_geometric_speedup": 7.317786799889852
+    }
+  },
+  "coverage": {
+    "baseline": 15,
+    "candidate": 23,
+    "candidate_only": 8
+  },
+  "errors": 0,
+  "interpretation": "scientific_reject_anti_target_overhead_target_headroom_for_component_selector_only",
+  "manifest_sha256": "85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390",
+  "observations": 576,
+  "prepare_file_sha256": "7a1e5400d97aa02342dc654940bd47aeb4214c8802a8e2079e904eee7411dd2b",
+  "prepare_job": "145927",
+  "repeats": 4,
+  "revision": "6e402f0a9595bd3f9c1ba99ea193bf237474d9f7",
+  "schema": "euf-viper.rollback-control-decision-receipt.v1",
+  "slurm_audit_exit_code": "1:0",
+  "slurm_audit_state": "FAILED",
+  "status": "reject",
+  "wrong_answers": 0
+}

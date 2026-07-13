@@ -134,11 +134,17 @@ Exact branch head `6e402f0` passed hosted run `29277510106`. Fresh prepare
 `correct:2`, candidate `correct:2`, and four bounded repeated-assignment
 conflicts. Its locked binary SHA-256 is `0cff30a189d46423...`, the preflight
 journal SHA-256 is `e223befc265ee95e...`, and the preflight-summary file SHA-256
-is `2809e913e30b5bb7...`. Array `145928` released automatically and final audit
-`145929` remains dependency-held. Six array shards are complete and two are
-active at this checkpoint. Only that immutable final audit may decide
-whether validation-count, target-speed, anti-target-overhead, and conflict-
-evidence gates pass. Partial state is not timing evidence.
+is `2809e913e30b5bb7...`. Array `145928` completed all 12 shards. Final audit
+`145929` returned a valid scientific rejection with zero wrong answers or
+execution errors, no baseline-only solve, and coverage improving from 15 to 23
+in every comparison. Target geometric speedups were `7.6029x` against current,
+`9.0741x` against dynamic Ackermann, and `7.3178x` against model cuts.
+
+The corresponding anti-target p95 overheads were `11.1689x`, `32.7545x`, and
+`23.3462x`, all far above the preregistered `1.10x` cap. Whole-instance rollback
+is therefore rejected as a default. Its sharp target/anti-target separation may
+feed T3 M0 telemetry, but it does not authorize migration or integration. The
+final audit file SHA-256 is `fffb152c...e3831ff`.
 
 ## Long-Timeout Graph
 

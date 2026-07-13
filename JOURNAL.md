@@ -1115,6 +1115,19 @@
   survive with at least 10% oracle headroom. Otherwise stop migration and run a
   scalar source-exact qg7 frontier census. Explanation economics and
   EUF-conditioned vivification remain Goel-specific controlled backups.
+- Rollback array `145928` completed all 12 shards and final audit `145929`
+  returned `status: reject` with no internal audit errors. Across 576
+  observations, every current/dynamic/model-cuts comparison had zero wrong or
+  execution-error rows, no baseline-only solve, coverage `15 -> 23`, and eight
+  candidate-only solves. Target geometric speedups were
+  `7.6029x`/`9.0741x`/`7.3178x`, but anti-target p95 overhead was
+  `11.1689x`/`32.7545x`/`23.3462x` against a `1.10x` maximum. Reject
+  whole-instance rollback as a default. Preserve the frozen arm only as input
+  to M0 selector telemetry; it does not authorize migration.
+- Preserved final audit SHA-256 `fffb152c...e3831ff`, prepare, stdout, stderr,
+  and a compact decision receipt under
+  `results/wmi/rollback-control-145929/`. Slurm reports the audit job as failed
+  because the auditor intentionally exits one on a scientific rejection.
 
 ## Next Entry Template
 
