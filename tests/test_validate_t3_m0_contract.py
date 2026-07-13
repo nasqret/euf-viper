@@ -90,6 +90,30 @@ class T3M0ContractTests(unittest.TestCase):
         self.assertIn("blocks", message)
         self.assertIn("wrong_or_missing", message)
 
+    def test_duplicate_keys_and_non_finite_constants_are_rejected(self) -> None:
+        original = CONTRACT.read_text(encoding="ascii")
+        duplicate = original.replace(
+            '  "schema_version": 1,',
+            '  "schema_version": 1,\n  "schema_version": 1,',
+            1,
+        )
+        non_finite = original.replace(
+            '"oracle_headroom": 0.0374', '"oracle_headroom": NaN'
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            duplicate_path = Path(temp_dir) / "duplicate.json"
+            duplicate_path.write_text(duplicate, encoding="ascii")
+            with self.assertRaises(VALIDATOR.T3M0ContractError) as duplicate_error:
+                VALIDATOR.load_and_validate(duplicate_path)
+            self.assertIn("duplicate JSON key", str(duplicate_error.exception))
+
+            non_finite_path = Path(temp_dir) / "non-finite.json"
+            non_finite_path.write_text(non_finite, encoding="ascii")
+            with self.assertRaises(VALIDATOR.T3M0ContractError) as non_finite_error:
+                VALIDATOR.load_and_validate(non_finite_path)
+            self.assertIn("non-finite JSON constant", str(non_finite_error.exception))
+
     def test_cli_writes_machine_readable_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "summary.json"

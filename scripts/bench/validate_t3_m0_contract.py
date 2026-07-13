@@ -74,6 +74,19 @@ class T3M0ContractError(ValueError):
         super().__init__(errors[0] if errors else "invalid T3 M0 contract")
 
 
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"non-finite JSON constant {value!r} is forbidden")
+
+
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
 def _matches(actual: Any, expected: Any) -> bool:
     return type(actual) is type(expected) and actual == expected
 
@@ -305,9 +318,13 @@ def validate_contract(contract: Any) -> dict[str, Any]:
 
 def load_and_validate(path: Path) -> dict[str, Any]:
     try:
-        with path.open(encoding="ascii") as handle:
-            contract = json.load(handle)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raw = path.read_bytes()
+        contract = json.loads(
+            raw.decode("ascii"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError) as error:
         raise T3M0ContractError([f"cannot load {path}: {error}"]) from error
     return validate_contract(contract)
 
