@@ -12,20 +12,22 @@ The machine-readable preregistration is
 
 ## Starting Point
 
-Current sound campaign `144328`/`144329`/`144330` contains all 30,012 expected
-rows and no wrong answers or execution errors.
+The authoritative post-fix baseline is exact-revision campaign
+`144990`/`144991`/`144992`/`144993`, followed by timeout-only 60-second
+continuations. See [Current Campaign](current-campaign.md) for locks, active
+certificate work, and the 1,200-second dependency graph.
 
-| Solver | Correct / 7,503 | Median | Timeout total |
-| --- | ---: | ---: | ---: |
-| euf-viper | 7,408 | 0.00939s | 885.69s |
-| Z3 4.16.0 | 7,450 | 0.02199s | 639.66s |
-| cvc5 1.3.4 snapshot | 7,373 | 0.03061s | 976.53s |
-| Yices2 2.7.0 | 7,490 | 0.00504s | 228.56s |
+| Solver | Correct at 2s / 7,503 | Correct at 60s / 7,503 |
+| --- | ---: | ---: |
+| euf-viper | 7,269 | 7,480 |
+| Z3 4.16.0 | 7,412 | 7,489 |
+| cvc5 1.3.4 | 7,222 | 7,479 |
+| Yices2 2.7.0 | 7,445 | 7,500 |
+| OpenSMT 2.9.2 | 6,916 | 7,448 |
 
-The solver has a useful fast head and beats cvc5 overall. It is not better than
-Z3 overall and is far behind Yices2. QG and Goel account for 77 of the 82
-Yices2 coverage gaps and most of the timeout-total deficit, so narrow tail
-patches cannot satisfy the objective.
+The solver has a useful fast head, but it is not better overall than Z3 or
+Yices2. QG and Goel dominate the coverage and timeout-total deficit, so narrow
+startup or median-only patches cannot satisfy the objective.
 
 ## Official Scoreboard
 

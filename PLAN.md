@@ -115,6 +115,9 @@ result cache can satisfy V1-V4.
   evidence is reconstructed against the exact parent lock and analyzed only as
   one complete corpus, never as independent shard promotions.
 - [ ] Add independent SAT-model emission/checking for every candidate SAT result.
+  The required interface is an atomic `solve --evidence-out PATH` sidecar that
+  binds the literal production model to source/config/revision/status hashes;
+  an independent later rerun is not equivalent evidence.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke
@@ -167,9 +170,11 @@ independent evidence checks, and a frozen family holdout.
   one CPU, and verifies all 7,503 source hashes. The first post-P0 sample
   `145884` failed before timing because inherited absolute paths named another
   checkout. Corrected source rebinding passed hosted run `29274065472`;
-  replacement sample `145905`, broad array `145906`, and merge `145907` are
-  dependency-guarded, and broad timing releases only if the deterministic
-  64-case sample passes.
+  replacement sample `145905` completed validly and rejected replacement: both
+  arms solved `53/64`, Kissat 4 won 16 and lost 37 paired instances, geometric
+  speed was `0.928694`, common-total speed was `0.963416`, and sign-flip
+  `p=0.999500` with SC2021/Kissat-4 orientation. Broad `145906` and merge
+  `145907` were dependency-cancelled.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
   A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal
@@ -181,8 +186,11 @@ independent evidence checks, and a frozen family holdout.
 
 ### T1: Typed IR And Staged Formula Machine
 
-- [ ] Resume parser checkpoint `58f015b` and run exact opened-byte tree/shadow
-  parity over all 7,503 files.
+- [ ] Port only the useful streaming lexer/collector from old untyped checkpoint
+  `58f015b` onto current typed main. Keep the tree parser authoritative and run
+  exact opened-byte semantic-snapshot parity over all 7,503 files, including
+  every sort, function signature, term sort, application, assertion,
+  Boolean-data term, and unsupported diagnostic. Zero silent fallback.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
   1%; otherwise stop T1.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
@@ -235,8 +243,12 @@ independent evidence checks, and a frozen family holdout.
   `145916`/`145917`/`145918` rejected before that canary because nested `srun`
   could not resolve bare `python3`; dependents cancelled automatically. Commit
   `835d134` pins one validated absolute interpreter. Exact branch head
-  `dcc7263` passed hosted run `29276687808`; fresh chain
-  `145923`/`145924`/`145925` is submitted. Only its final audit can promote.
+  `dcc7263` passed hosted run `29276687808`; prepare `145923` then reached the
+  canary but returned baseline `correct:2`, candidate `coverage_miss:2` because
+  an already persistent lemma recurred during `notify_assignment`. Dependents
+  `145924`/`145925` cancelled. Commit `8e26569` suppresses and counts only
+  assignment-time repeats; complete-model or handoff duplicates still abort.
+  A fresh run is pending exact-head CI, and only its final audit can promote.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -366,8 +378,8 @@ fallback can be an operational portfolio but never a standalone victory.
 2. Let dependency-bound full/official certificate chains
    `145892`-`145894` and `145897`-`145899` batch-shadow and globally audit the
    exact two-second rows.
-3. Require rollback prepare `145923` to pass its anti-target ABBA canary before
-   array `145924`; promote only from immutable audit `145925`.
+3. CI-gate rollback repeat repair `8e26569`, then require a fresh prepare to pass
+   its anti-target ABBA canary before any array; promote only from final audit.
 4. Keep modern Kissat 4 rejected: valid sample `145905` lost both geometric and
    aggregate paired gates, so broad `145906` and merge `145907` stay cancelled.
 5. Preserve the existing 1,200-second continuation graph `145785`-`145789`;

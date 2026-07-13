@@ -324,6 +324,28 @@ errors. Pairwise common-solve results are:
 A value above one favors euf-viper. The result establishes an overall cvc5 win
 and a Z3 fast-head win, but rejects overall superiority over Z3 or Yices2.
 
+## Exact Post-Fix P0 Matrix
+
+The current authoritative chain is `144990`/`144991`/`144992`/`144993` at
+revision `30828a4`. It adds the exact 3,521-source official selection, OpenSMT,
+Z3 `sat.euf=true`, hash-bound family taxonomy, immutable continuation records,
+and strict global audits.
+
+| Solver configuration | Full 2s | Official 2s | Full 60s | Official 60s |
+| --- | ---: | ---: | ---: | ---: |
+| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 |
+| cvc5 | 7,222 | 3,384 | 7,479 | 3,510 |
+| OpenSMT | 6,916 | 3,215 | 7,448 | 3,497 |
+| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 |
+| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 |
+| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,484 | 3,511 |
+
+Every full/official two/60-second audit rejects. On the 60-second full corpus,
+euf-viper is `1.5685x` faster geometrically than Z3 default on common solves but
+only `0.5873x` by summed common wall time. Its geometric factor against Yices2
+is `0.4910x`. The official factors have the same direction. This is the
+fast-head/weak-tail profile in one paired result, not a solver victory.
+
 ## Bounded Ackermann Rejection
 
 Corrected causal job `144631` compares full Ackermann `auto` against

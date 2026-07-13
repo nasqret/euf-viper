@@ -1,6 +1,7 @@
 format: jb-book
 root: index
 chapters:
+  - file: current-campaign
   - file: theory
   - file: soundness
   - file: implementation

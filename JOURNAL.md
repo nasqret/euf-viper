@@ -1003,6 +1003,14 @@
   tests pass. Exact head `dcc7263` passed hosted run `29276687808`; fresh
   prepare/array/audit chain `145923`/`145924`/`145925` was submitted with run
   root `/home/bnaskrecki/euf-viper-campaigns/dcc7263eb4d3/results/rollback-control-20260713T190109Z-dcc7263eb4d3`.
+  Prepare reached the exact canary and rejected with baseline `correct:2` and
+  candidate `coverage_miss:2`; both candidate rows aborted during
+  `notify_assignment` after an already persistent lemma recurred. Dependents
+  cancelled automatically. Commit `8e26569` suppresses only bounded
+  assignment-time recurrences already covered by a delivered persistent clause
+  and records them as telemetry. Complete-model and duplicate-handoff cases
+  remain fail-closed. Seven focused, `242` default, and `248` all-feature tests
+  pass; a fresh run awaits exact-head CI.
 - Full/official 1,200-second arrays `145785` and `145787` remain scheduler
   pending with 10 GiB, one-core requests; their dependent audits/finalizer
   `145786`/`145788`/`145789` remain held. The full array has a scheduler estimate

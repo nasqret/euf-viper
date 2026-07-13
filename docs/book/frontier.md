@@ -25,13 +25,14 @@ coverage deficit against Z3 and a large speed and coverage deficit against
 Yices2. None of these results establishes standalone or certifying superiority.
 ```
 
-The fresh sound two-second comparator is campaign `144328`/`144329`/`144330`.
-Euf-viper solves 7,408/7,503, versus Z3 7,450, cvc5 7,373, and Yices2 7,490.
-Its median is 0.00939s versus Z3's 0.02199s, but timeout-charged total is
-885.69s versus Z3's 639.66s and Yices2's 228.56s. On common Z3 solves,
-geometric speed favors euf-viper by `1.5666x` while aggregate speed is only
-`0.7467x`. The current blocker is tail proof cost and coverage, not median
-startup overhead.
+The authoritative post-fix comparator is campaign
+`144990`/`144991`/`144992`/`144993`. At two seconds euf-viper solves
+7,269/7,503, versus Z3 7,412, cvc5 7,222, OpenSMT 6,916, and Yices2 7,445. At
+60 seconds it solves 7,480, versus Z3 7,489 and Yices2 7,500. On common
+60-second Z3 solves, geometric speed favors euf-viper by `1.5685x`, while
+aggregate common-wall speed is only `0.5873x`. The blocker remains tail proof
+cost and coverage, not median startup overhead. Exact official and full tables
+are in [Current Campaign](current-campaign.md).
 
 ## Latest Promoted Mechanism
 
@@ -618,12 +619,17 @@ artifact also passes the independent certificate smoke. Invalid option names,
 values, and configurations fail closed rather than silently routing to another
 backend.
 
-This closes an engineering prerequisite, not a timing claim. A local CaDiCaL
+The valid paired sample `145905` rejects wholesale Kissat 4 replacement. Both
+backends solve 53/64; Kissat 4 wins 16 paired instances and loses 37, with
+SC2021/Kissat-4 geometric and common-total factors `0.928694` and `0.963416`.
+Broad `145906` and merge `145907` were therefore cancelled.
+
+A local CaDiCaL
 clausal-congruence canary reduced conflicts but regressed median end-to-end
 time by 1.209x, reinforcing the rule that internal SAT metrics cannot promote
-an SMT configuration. Exact SC2021-versus-4.0.4 timing starts only after the
-current P0 global audit, followed by one-factor ablations of congruence,
-sweeping, factor/BVA, vivification, and phase search. The full evidence is in
+an SMT configuration. Individual congruence, sweeping, factor/BVA,
+vivification, or phase-search passes require separate one-factor ablations. The
+full design is in
 the [modern Kissat control note](https://github.com/nasqret/euf-viper/blob/main/research-vault/06-results/2026-07-13-modern-kissat-control.md).
 
 ## Sources And Artifacts

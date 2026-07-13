@@ -732,7 +732,11 @@
   the canary because nested `srun` could not resolve bare `python3`; dependents
   cancelled. Commit `835d134` pins a validated absolute interpreter and passes
   11 focused plus 302 full Python tests. Exact head `dcc7263` passed hosted run
-  `29276687808`; fresh chain `145923`/`145924`/`145925` is submitted.
+  `29276687808`; prepare `145923` reached the canary but candidate returned two
+  deterministic coverage misses from a persistent-lemma recurrence during
+  `notify_assignment`; `145924`/`145925` cancelled. Commit `8e26569` suppresses
+  and counts only assignment-time repeats. Complete-model or handoff recurrence
+  still aborts. A fresh run awaits exact-head CI.
 - Full/official 1,200-second continuation graph `145785`-`145789` is intact and
   scheduler-pending. Do not cancel or resubmit from queue state alone.
 - T5 must first pass a 7,503-source typed, hash-chained structural projection.
