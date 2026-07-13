@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -263,7 +264,7 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(
             rebound["path"],
-            "benchmarks/smtlib-2025/QF_UF/family/case.smt2",
+            "benchmarks/smtlib-2025/QF_UF/QF_UF/family/case.smt2",
         )
 
     def test_manifest_rebinding_rejects_parent_traversal(self) -> None:
@@ -294,6 +295,51 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
             )
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("unsafe relative_path", completed.stderr)
+
+    def test_rebound_manifest_verifies_against_nested_release_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            source = (
+                work
+                / "benchmarks"
+                / "smtlib-2025"
+                / "QF_UF"
+                / "QF_UF"
+                / "family"
+                / "case.smt2"
+            )
+            source.parent.mkdir(parents=True)
+            source.write_text("(set-logic QF_UF)\n", encoding="ascii")
+            manifest = work / "manifest.jsonl"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "path": "/stale/case.smt2",
+                        "relative_path": "QF_UF/family/case.smt2",
+                        "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                        "status": "sat",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            summary = work / "verification.json"
+            command = (
+                f"source {COMMON!s}; "
+                f"kissat4_rebind_manifest_sources {manifest!s}; "
+                f"digest=$(kissat4_sha256 {manifest!s}); "
+                f"kissat4_verify_manifest {manifest!s} \"$digest\" {summary!s}"
+            )
+            completed = subprocess.run(
+                ["bash", "-c", command],
+                cwd=work,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            verification = json.loads(summary.read_text(encoding="utf-8"))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(verification["sources_verified"], 1)
 
 
 if __name__ == "__main__":

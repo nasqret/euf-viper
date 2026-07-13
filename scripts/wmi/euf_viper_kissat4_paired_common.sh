@@ -326,7 +326,8 @@ for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlin
         or any(part in {"", ".", ".."} for part in relative.parts)
     ):
         raise SystemExit(f"{manifest}:{line_number}: unsafe relative_path")
-    rebound = Path("benchmarks/smtlib-2025").joinpath(*relative.parts)
+    # The release archive keeps its own QF_UF directory below QF_UF.tar.zst.
+    rebound = Path("benchmarks/smtlib-2025/QF_UF").joinpath(*relative.parts)
     row["path"] = rebound.as_posix()
     rows.append(row)
 if not rows:
