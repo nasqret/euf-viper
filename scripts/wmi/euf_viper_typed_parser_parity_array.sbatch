@@ -20,13 +20,21 @@ export EUF_VIPER_SCOPED_LET=auto
 export EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024
 unset EUF_VIPER_PROFILE
 
-PYTHON="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
+CONFIGURED_PYTHON="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
 EXPECTED_PYTHON_SHA256="${EUF_VIPER_PYTHON_SHA256:?set EUF_VIPER_PYTHON_SHA256}"
 EXPECTED_PYTHON_VERSION="${EUF_VIPER_PYTHON_VERSION:?set EUF_VIPER_PYTHON_VERSION}"
-case "$PYTHON" in
+case "$CONFIGURED_PYTHON" in
   /*) ;;
-  *) echo "EUF_VIPER_PYTHON must be an absolute path: $PYTHON" >&2; exit 127 ;;
+  *) echo "EUF_VIPER_PYTHON must be an absolute path: $CONFIGURED_PYTHON" >&2; exit 127 ;;
 esac
+if ! PYTHON="$(readlink -f -- "$CONFIGURED_PYTHON")" || [ -z "$PYTHON" ]; then
+  echo "cannot canonicalize pinned python: $CONFIGURED_PYTHON" >&2
+  exit 2
+fi
+if [ "$PYTHON" != "$CONFIGURED_PYTHON" ]; then
+  echo "EUF_VIPER_PYTHON must be its canonical realpath: $PYTHON" >&2
+  exit 2
+fi
 if [ ! -f "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
   echo "pinned python is not an executable file: $PYTHON" >&2
   exit 127

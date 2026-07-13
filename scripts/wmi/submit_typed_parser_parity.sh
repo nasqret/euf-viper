@@ -71,13 +71,24 @@ case "$REMOTE_CARGO_VERSION" in
   cargo\ [0-9]*\ \(*\)) ;;
   *) echo "remote cargo version is malformed: $REMOTE_CARGO_VERSION" >&2; exit 2 ;;
 esac
-REMOTE_PYTHON="${EUF_VIPER_PYTHON_REMOTE_PATH:-/usr/bin/python3}"
-case "$REMOTE_PYTHON" in
+REQUESTED_REMOTE_PYTHON="${EUF_VIPER_PYTHON_REMOTE_PATH:-/usr/bin/python3}"
+case "$REQUESTED_REMOTE_PYTHON" in
   /*) ;;
   *) echo "remote python path must be absolute" >&2; exit 2 ;;
 esac
-case "$REMOTE_PYTHON" in
+case "$REQUESTED_REMOTE_PYTHON" in
   *[!A-Za-z0-9_./-]*) echo "remote python path contains unsafe characters" >&2; exit 2 ;;
+esac
+if ! REMOTE_PYTHON="$(ssh "$REMOTE_HOST" "readlink -f -- '$REQUESTED_REMOTE_PYTHON'")"; then
+  echo "failed to canonicalize remote python: $REQUESTED_REMOTE_PYTHON" >&2
+  exit 2
+fi
+case "$REMOTE_PYTHON" in
+  /*) ;;
+  *) echo "remote python realpath is not absolute" >&2; exit 2 ;;
+esac
+case "$REMOTE_PYTHON" in
+  *[!A-Za-z0-9_./-]*) echo "remote python realpath contains unsafe characters" >&2; exit 2 ;;
 esac
 if ! REMOTE_PYTHON_SHA256="$(ssh "$REMOTE_HOST" "test -f '$REMOTE_PYTHON' && test -x '$REMOTE_PYTHON' && sha256sum '$REMOTE_PYTHON' | awk '{print \$1}'")"; then
   echo "remote python is missing or not executable: $REMOTE_PYTHON" >&2
@@ -125,17 +136,27 @@ AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && unset EUF_VIPER_PRO
 AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
 case "$AUDIT_JOB" in *[!0-9]*|'') echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
 
-mkdir -p results
-python3 - "$ROOT/results/typed-parser-parity-submission-$PREPARE_JOB.json" <<PY
-import json
-import sys
-from pathlib import Path
+if ! RECEIPT_PYTHON_SHA256="$(ssh "$REMOTE_HOST" "sha256sum '$REMOTE_PYTHON' | awk '{print \$1}'")" || [ "$RECEIPT_PYTHON_SHA256" != "$REMOTE_PYTHON_SHA256" ]; then
+  echo "remote python target drifted before receipt serialization" >&2
+  exit 2
+fi
+if ! RECEIPT_PYTHON_VERSION="$(ssh "$REMOTE_HOST" "'$REMOTE_PYTHON' --version 2>&1")" || [ "$RECEIPT_PYTHON_VERSION" != "$REMOTE_PYTHON_VERSION" ]; then
+  echo "remote python version drifted before receipt serialization" >&2
+  exit 2
+fi
 
-path = Path(sys.argv[1])
+mkdir -p results
+RECEIPT="$ROOT/results/typed-parser-parity-submission-$PREPARE_JOB.json"
+RECEIPT_TEMPORARY="$RECEIPT.tmp.$$"
+trap 'rm -f "$RECEIPT_TEMPORARY"' EXIT
+ssh "$REMOTE_HOST" "'$REMOTE_PYTHON' -" > "$RECEIPT_TEMPORARY" <<PY
+import json
+
 payload = {
-    "schema": "euf-viper.typed-parser-parity-submission.v2",
+    "schema": "euf-viper.typed-parser-parity-submission.v3",
     "status": "submitted",
     "byte_binding": "single-open-buffer.v1",
+    "executable_binding": "inherited-descriptor.v1",
     "revision": "$REVISION",
     "published_ref": "$PUBLISHED_REF",
     "remote_host": "$REMOTE_HOST",
@@ -166,8 +187,8 @@ payload = {
     "array_job": "$ARRAY_JOB",
     "audit_job": "$AUDIT_JOB",
 }
-temporary = path.with_name(f".{path.name}.tmp")
-temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-temporary.replace(path)
-print(json.dumps(payload, indent=2, sort_keys=True))
+print(json.dumps(payload, allow_nan=False, indent=2, sort_keys=True))
 PY
+mv "$RECEIPT_TEMPORARY" "$RECEIPT"
+trap - EXIT
+cat "$RECEIPT"

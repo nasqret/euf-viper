@@ -98,6 +98,32 @@ def parser_stdout(payload: object) -> bytes:
     )
 
 
+def replace_json_field(
+    content: bytes, key: str, value: object, replacement: bytes
+) -> bytes:
+    encoded = json.dumps(
+        value, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    token = json.dumps(key).encode("ascii") + b":" + encoded
+    if content.count(token) != 1:
+        raise AssertionError(f"expected one {key!r} token, found {content.count(token)}")
+    return content.replace(token, replacement, 1)
+
+
+def duplicate_json_field(content: bytes, key: str, value: object) -> bytes:
+    encoded = json.dumps(
+        value, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    token = json.dumps(key).encode("ascii") + b":" + encoded
+    return replace_json_field(content, key, value, token + b"," + token)
+
+
+def nonfinite_json_field(content: bytes, key: str, value: object) -> bytes:
+    return replace_json_field(
+        content, key, value, json.dumps(key).encode("ascii") + b":NaN"
+    )
+
+
 class TypedParserParityFixture:
     def __init__(self, temporary: str, sources: list[str]) -> None:
         self.root = Path(temporary)
@@ -107,6 +133,10 @@ class TypedParserParityFixture:
         self.binary = self.root / "fake-euf-viper"
         self.binary.write_text(FAKE_BINARY, encoding="utf-8")
         self.binary.chmod(0o755)
+        self.preflight = self.repository / "preflight.smt2"
+        self.preflight.write_text(
+            "(set-logic QF_UF) (assert true) (check-sat)\n", encoding="utf-8"
+        )
         self.manifest = self.repository / "manifest.jsonl"
         rows = []
         for index, source in enumerate(sources):
@@ -115,11 +145,16 @@ class TypedParserParityFixture:
             raw = path.read_bytes()
             rows.append(
                 {
+                    "archive_md5": "0" * 32,
+                    "bytes": len(raw),
                     "id": index,
+                    "logic": "QF_UF",
                     "path": str(path.relative_to(self.repository)),
                     "relative_path": f"corpus/family/case-{index}.smt2",
-                    "bytes": len(raw),
                     "sha256": PARITY.sha256_bytes(raw),
+                    "source_doi": "10.0000/test",
+                    "source_url": "https://example.invalid/qf-uf",
+                    "status": "sat",
                 }
             )
         self.manifest.write_text(
@@ -137,6 +172,7 @@ class TypedParserParityFixture:
                 repository_root=self.repository,
                 manifest=self.manifest,
                 binary=self.binary,
+                preflight_source=self.preflight,
                 expected_sources=len(list(self.corpus.glob("*.smt2"))),
                 shards=2,
                 timeout_seconds=5,
@@ -292,15 +328,15 @@ class TypedParserParityTests(unittest.TestCase):
 
     def test_bound_artifacts_are_parsed_and_hashed_from_one_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            path = root / "object.json"
-            original = PARITY.canonical_bytes(
-                {"schema": PARITY.PREPARE_SCHEMA, "value": "original"}
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
             )
-            replacement = PARITY.canonical_bytes(
-                {"schema": PARITY.PREPARE_SCHEMA, "value": "replacement"}
-            )
-            path.write_bytes(original)
+            fixture.prepare()
+            path = fixture.output / "prepare.json"
+            original = path.read_bytes()
+            replacement_value = json.loads(original)
+            replacement_value["timeout_seconds"] += 1
+            replacement = PARITY.canonical_bytes(replacement_value)
             reads = 0
             original_read_bytes = Path.read_bytes
 
@@ -318,10 +354,63 @@ class TypedParserParityTests(unittest.TestCase):
                 )
 
             self.assertEqual(reads, 1)
-            self.assertEqual(value["value"], "original")
+            self.assertEqual(value["timeout_seconds"], 5)
             self.assertEqual(artifact.content, original)
             self.assertEqual(artifact.sha256, PARITY.sha256_bytes(original))
             self.assertEqual(path.read_bytes(), replacement)
+
+    def test_same_size_parser_path_replacement_cannot_forge_a_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            fixture.prepare()
+            original = fixture.binary.read_bytes()
+            original_sha256 = PARITY.sha256_bytes(original)
+            replacement_prefix = (
+                b"#!/usr/bin/env python3\n"
+                b"import sys\n"
+                b"print('replacement executable ran', file=sys.stderr)\n"
+                b"raise SystemExit(91)\n#"
+            )
+            self.assertLess(len(replacement_prefix), len(original))
+            replacement = replacement_prefix + b"x" * (
+                len(original) - len(replacement_prefix)
+            )
+            replacement_path = fixture.root / "replacement-parser"
+            replacement_path.write_bytes(replacement)
+            replacement_path.chmod(0o755)
+            original_execute = PARITY.execute_parser
+            replaced = False
+
+            def replace_then_execute(
+                executable: PARITY.OpenedExecutable,
+                source: bytes,
+                timeout_seconds: int,
+            ) -> PARITY.ParserExecution:
+                nonlocal replaced
+                if not replaced:
+                    os.replace(replacement_path, fixture.binary)
+                    replaced = True
+                return original_execute(executable, source, timeout_seconds)
+
+            with patch.object(PARITY, "execute_parser", replace_then_execute):
+                PARITY.run_shard(
+                    Namespace(
+                        root=fixture.output, revision=fixture.revision, shard=0
+                    )
+                )
+
+            self.assertTrue(replaced)
+            self.assertEqual(len(fixture.binary.read_bytes()), len(original))
+            self.assertNotEqual(PARITY.sha256_file(fixture.binary), original_sha256)
+            record = json.loads(
+                (fixture.output / "shards" / "shard-00000.jsonl").read_text(
+                    encoding="ascii"
+                )
+            )
+            self.assertEqual(record["status"], "match")
+            self.assertEqual(record["binary"]["sha256"], original_sha256)
 
     def test_prepare_hashes_generated_workset_without_reopening_it(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -419,12 +508,148 @@ class TypedParserParityTests(unittest.TestCase):
                 "integer boolean",
                 parser_stdout(valid_parser_payload(tree_well_sorted=1)),
             ),
+            (
+                "duplicate key",
+                duplicate_json_field(
+                    parser_stdout(valid_parser_payload()), "terms", 0
+                ),
+            ),
+            (
+                "non-finite count",
+                nonfinite_json_field(
+                    parser_stdout(valid_parser_payload()), "terms", 0
+                ),
+            ),
         ]
         for label, stdout in cases:
             with self.subTest(label=label):
                 parsed, diagnostic = PARITY.parser_payload(stdout)
                 self.assertIsNone(parsed)
                 self.assertIsNotNone(diagnostic)
+
+    def test_campaign_artifact_boundaries_reject_duplicates_and_nonfinite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            fixture.prepare()
+            fixture.run_all_shards()
+            self.assertTrue(
+                PARITY.audit_campaign(
+                    Namespace(
+                        root=fixture.output,
+                        revision=fixture.revision,
+                        expected_sources=1,
+                    )
+                )
+            )
+
+            boundaries = (
+                (
+                    "prepare",
+                    fixture.output / "prepare.json",
+                    PARITY.PREPARE_SCHEMA,
+                    PARITY.load_object,
+                    "timeout_seconds",
+                ),
+                (
+                    "workset",
+                    fixture.output / "workset.jsonl",
+                    PARITY.WORK_SCHEMA,
+                    PARITY.load_jsonl,
+                    "manifest_line",
+                ),
+                (
+                    "shard",
+                    fixture.output / "shards" / "shard-00000.jsonl",
+                    PARITY.RECORD_SCHEMA,
+                    PARITY.load_jsonl,
+                    "exit_code",
+                ),
+                (
+                    "records",
+                    fixture.output / "records.jsonl",
+                    PARITY.RECORD_SCHEMA,
+                    PARITY.load_jsonl,
+                    "elapsed_seconds",
+                ),
+                (
+                    "audit",
+                    fixture.output / "audit.json",
+                    PARITY.AUDIT_SCHEMA,
+                    PARITY.load_object,
+                    "source_count",
+                ),
+            )
+            for label, path, schema, loader, field in boundaries:
+                original = path.read_bytes()
+                value = json.loads(original.splitlines()[0])[field]
+                mutations = (
+                    ("duplicate", duplicate_json_field(original, field, value)),
+                    ("nonfinite", nonfinite_json_field(original, field, value)),
+                )
+                for mutation, content in mutations:
+                    with self.subTest(boundary=label, mutation=mutation):
+                        path.write_bytes(content)
+                        with self.assertRaisesRegex(
+                            PARITY.CampaignError,
+                            "duplicate JSON key|non-finite JSON number",
+                        ):
+                            loader(path, schema=schema)
+                        path.write_bytes(original)
+
+    def test_strict_serialization_rejects_nonfinite_values(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                PARITY.CampaignError, "strict JSON"
+            ):
+                PARITY.canonical_bytes({"value": value})
+
+        for token in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(token=token), self.assertRaisesRegex(
+                PARITY.CampaignError, "non-finite JSON number"
+            ):
+                PARITY.strict_json(f'{{"value":{token}}}', where="test")
+
+    def test_every_record_status_has_strict_exit_and_timing_types(self) -> None:
+        cases = (
+            ("match", "(set-logic QF_UF) (assert true)\n"),
+            ("fallback", "(set-logic QF_UF) ; FALLBACK\n(assert true)\n"),
+            ("mismatch", "(set-logic QF_UF) ; MISMATCH\n(assert true)\n"),
+            ("error", "(set-logic QF_UF) ; DEPTH\n(assert true)\n"),
+        )
+        for expected_status, source in cases:
+            with self.subTest(status=expected_status), tempfile.TemporaryDirectory() as temporary:
+                fixture = TypedParserParityFixture(temporary, [source])
+                fixture.prepare()
+                PARITY.run_shard(
+                    Namespace(
+                        root=fixture.output,
+                        revision=fixture.revision,
+                        shard=0,
+                    )
+                )
+                record = json.loads(
+                    (fixture.output / "shards" / "shard-00000.jsonl").read_text(
+                        encoding="ascii"
+                    )
+                )
+                self.assertEqual(record["status"], expected_status)
+                PARITY.validate_record_row(record, where="valid status row")
+                for field, invalid in (
+                    ("exit_code", True),
+                    ("elapsed_seconds", 0),
+                ):
+                    malformed = dict(record)
+                    malformed[field] = invalid
+                    with self.assertRaises(PARITY.CampaignError):
+                        PARITY.validate_record_row(
+                            malformed, where=f"invalid {expected_status} row"
+                        )
+                extra = dict(record)
+                extra["unexpected"] = None
+                with self.assertRaisesRegex(PARITY.CampaignError, "fields differ"):
+                    PARITY.validate_record_row(extra, where="extra record field")
 
     def test_prepare_rejects_ambient_parser_overrides(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -465,6 +690,27 @@ class TypedParserParityTests(unittest.TestCase):
                     os.environ, override, clear=False
                 ), self.assertRaisesRegex(PARITY.CampaignError, diagnostic):
                     fixture.prepare(output=fixture.root / f"python-rejected-{index}")
+
+    def test_python_symlink_alias_and_target_hash_drift_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            alias = Path(temporary) / "python-alias"
+            alias.symlink_to(TEST_PYTHON)
+            with patch.dict(
+                os.environ, {"EUF_VIPER_PYTHON": str(alias)}, clear=False
+            ), self.assertRaisesRegex(PARITY.CampaignError, "canonical realpath"):
+                PARITY.validate_python_identity()
+
+            original_sha256_file = PARITY.sha256_file
+
+            def target_drift(path: Path) -> str:
+                if path.resolve(strict=True) == TEST_PYTHON:
+                    return "f" * 64
+                return original_sha256_file(path)
+
+            with patch.object(PARITY, "sha256_file", target_drift), self.assertRaisesRegex(
+                PARITY.CampaignError, "hash mismatch"
+            ):
+                PARITY.validate_python_identity()
 
     def test_shard_and_audit_reject_python_identity_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -554,7 +800,7 @@ class TypedParserParityTests(unittest.TestCase):
                 encoding="ascii",
             )
             with self.assertRaisesRegex(
-                PARITY.CampaignError, "environment contract mismatch"
+                PARITY.CampaignError, "invalid parser setting"
             ):
                 PARITY.run_shard(
                     Namespace(root=fixture.output, revision=fixture.revision, shard=0)
@@ -575,7 +821,7 @@ class TypedParserParityTests(unittest.TestCase):
                 encoding="ascii",
             )
             with self.assertRaisesRegex(
-                PARITY.CampaignError, "parser environment drift"
+                PARITY.CampaignError, "invalid parser setting"
             ):
                 PARITY.audit_campaign(
                     Namespace(

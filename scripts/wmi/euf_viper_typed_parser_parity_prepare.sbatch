@@ -48,13 +48,21 @@ if [ "$ACTUAL_CARGO_VERSION" != "$EXPECTED_CARGO_VERSION" ]; then
   exit 2
 fi
 
-PYTHON="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
+CONFIGURED_PYTHON="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
 EXPECTED_PYTHON_SHA256="${EUF_VIPER_PYTHON_SHA256:?set EUF_VIPER_PYTHON_SHA256}"
 EXPECTED_PYTHON_VERSION="${EUF_VIPER_PYTHON_VERSION:?set EUF_VIPER_PYTHON_VERSION}"
-case "$PYTHON" in
+case "$CONFIGURED_PYTHON" in
   /*) ;;
-  *) echo "EUF_VIPER_PYTHON must be an absolute path: $PYTHON" >&2; exit 127 ;;
+  *) echo "EUF_VIPER_PYTHON must be an absolute path: $CONFIGURED_PYTHON" >&2; exit 127 ;;
 esac
+if ! PYTHON="$(readlink -f -- "$CONFIGURED_PYTHON")" || [ -z "$PYTHON" ]; then
+  echo "cannot canonicalize pinned python: $CONFIGURED_PYTHON" >&2
+  exit 2
+fi
+if [ "$PYTHON" != "$CONFIGURED_PYTHON" ]; then
+  echo "EUF_VIPER_PYTHON must be its canonical realpath: $PYTHON" >&2
+  exit 2
+fi
 if [ ! -f "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
   echo "pinned python is not an executable file: $PYTHON" >&2
   exit 127
@@ -122,16 +130,11 @@ printf '%s  %s\n' "$ACTUAL_PYTHON_SHA256" "$PYTHON" \
 "$CARGO" build --release --locked
 BINARY="$PWD/target/release/euf-viper"
 test -x "$BINARY"
-"$BINARY" parse-check - \
-  < tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2 \
-  > "$CAMPAIGN_ROOT/preflight.json"
-"$PYTHON" scripts/bench/typed_parser_parity.py validate-payload \
-  < "$CAMPAIGN_ROOT/preflight.json"
-
 "$PYTHON" scripts/bench/typed_parser_parity.py prepare \
   --manifest "$MANIFEST" \
   --repository-root "$PWD" \
   --binary "$BINARY" \
+  --preflight-source tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2 \
   --revision "$EXPECTED_REVISION" \
   --expected-sources "$EXPECTED_SOURCES" \
   --shards "$SHARDS" \
