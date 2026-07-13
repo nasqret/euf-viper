@@ -915,6 +915,13 @@
   first checked assignment/conflicts and moves to conflict-only IPASIR-UP; it
   remains default-off and is explicitly not a novelty claim. A safe local
   RustSAT/CaDiCaL callback bridge is the active isolated prerequisite.
+- Added the source-only guard-conditioned adequate-range/Hall census in
+  `012c963`, then bound the independent parser hash and durable exact-revision
+  WMI runner/submitter in `02b68d5`/`86d76fc`. All 33 focused census/parser
+  tests and the 274-test Python suite pass; hosted run `29215823607` passes.
+  Full-corpus census `145027` is dependency-bound to P0 prepare `144990` and
+  cannot emit SAT/UNSAT. No Hall/PB solver route is justified before its
+  returned population and value-cell savings are audited.
 
 ## Next Entry Template
 

@@ -190,6 +190,12 @@ independent evidence checks, and a frozen family holdout.
 
 ### T4: Adequate-Range Hall/PB
 
+- [ ] Complete source-only opportunity census `145027`, exact revision
+  `86d76fc`, after P0 prepare. The structured independent parser now emits
+  hash-bound guard-conditioned ranges, non-uniform value-cell savings, bounded
+  Hall-tight/conflict witnesses, caps, and abstentions without invoking a
+  solver or producing SAT/UNSAT. Reject implementation if the returned corpus
+  population misses the preregistered 30% cell-saving threshold.
 - [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
   near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
   through at least `n=32`.

@@ -671,3 +671,9 @@
   validation-pressure control, not a SAT proof-pressure claim. Whole-instance
   rollback is known; novelty remains component-local checked representation
   migration after the pilot wins.
+- Source-only adequate-range/Hall census commits `012c963`/`02b68d5` and
+  exact-revision submitter `86d76fc` use the independent structured parser,
+  bind its hash, report only proved guard-conditioned ranges and bounded Hall
+  witnesses, and never solve or claim SAT/UNSAT. Full-corpus WMI job `145027`
+  depends on P0 prepare `144990`; audit its eligible population and 30% cell
+  saving gate before implementing Hall/PB in the solver.
