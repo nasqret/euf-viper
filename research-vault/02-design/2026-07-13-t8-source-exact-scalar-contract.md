@@ -38,8 +38,9 @@ implementation.
 
 The freeze is executable. `scripts/bench/validate_t8_scalar_contract.py` binds
 the exact contract, strict JSON types and keys, T4 record identity, the raw P12
-summary SHA-256, all 12 source paths, and every zero-range field in hosted CI.
-Its successful result reports `implementation_authorized=false` and
+summary and T4 rejection-receipt SHA-256 values, all 12 source paths, and every
+zero-range field in hosted CI. Both evidence paths are mandatory in the CLI and
+Python API. Its successful result reports `implementation_authorized=false` and
 `simd_authorized=false`; passing this freeze check cannot satisfy a prerequisite.
 
 ## Source Ledger

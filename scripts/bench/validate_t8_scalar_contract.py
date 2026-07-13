@@ -43,6 +43,9 @@ EXPECTED_CONTRACT: dict[str, Any] = {
         "corrected_finite_range_p12_summary_sha256": (
             "68d4d44bf17a1c674bbfbc416335a8e2bf302d3ccf632430cbba378e17d35b51"
         ),
+        "corrected_finite_range_receipt_sha256": (
+            "2f54e37e125d5da69a971ed88a8444cb414e38bb7df49869dad81753a9ca8d80"
+        ),
         "p12_sources_with_proven_non_bool_range": 0,
         "p12_checked_finite_domain_certificate": "missing",
     },
@@ -200,6 +203,99 @@ EXPECTED_P12_SUMMARY: dict[str, Any] = {
     "interpretation": "evidence_only_paths_forbidden_as_runtime_features",
 }
 
+EXPECTED_T4_RECEIPT: dict[str, Any] = {
+    "schema": "euf-viper.guard-range-hall-decision.v1",
+    "status": "reject",
+    "decision": "stop_before_hall_pb_implementation",
+    "revision": "8f785437830e9ae25ba3d0eb96e2f4c9ef66daa3",
+    "job": {
+        "job_id": 146071,
+        "slurm_state": "COMPLETED",
+        "exit_code": "0:0",
+        "elapsed": "01:53:20",
+        "hostname": "c1n1.cluster.wmi.amu.edu.pl",
+    },
+    "validation": {
+        "expected_sources": 7503,
+        "observed_sources": 7503,
+        "structured_parse_errors": 0,
+        "eligible_sources": 0,
+        "ineligible_sources": 7503,
+    },
+    "opportunity": {
+        "uniform_value_cells": 124698,
+        "non_uniform_value_cells": 124698,
+        "value_cell_savings": 0,
+        "value_cell_savings_fraction": 0.0,
+        "minimum_required_savings_fraction": 0.3,
+        "certified_uniform_domains": 157,
+        "effective_candidate_ranges": 25760,
+        "proven_range_facts": 24365,
+        "hall_subsets_checked": 24,
+        "hall_checked_conflicts": 0,
+        "gate_passed": False,
+    },
+    "p12_t8_prerequisite": {
+        "source_count": 12,
+        "sources_with_proven_non_bool_range": 0,
+        "sources_with_certified_domain": 0,
+        "total_proven_range_facts": 0,
+        "status": "not_satisfied",
+    },
+    "artifacts": {
+        "aggregate": {
+            "path": "aggregate.json",
+            "sha256": (
+                "b37b95509c36b29c1f6ab5f55d5754ce1aab0b4ec2efe447488ecfacc8cc4e42"
+            ),
+        },
+        "metadata": {
+            "path": "metadata.json",
+            "sha256": (
+                "f4efbe5a08f85c59d7aa44150064a835233a66f1853b2b1a5c642cc505df474e"
+            ),
+        },
+        "records": {
+            "remote_path": (
+                "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/"
+                "guarded-range-census-146071/records.jsonl"
+            ),
+            "sha256": (
+                "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c"
+            ),
+            "locally_preserved": False,
+        },
+        "p12_range_summary": {
+            "path": "p12-range-summary.json",
+            "sha256": (
+                "68d4d44bf17a1c674bbfbc416335a8e2bf302d3ccf632430cbba378e17d35b51"
+            ),
+        },
+        "run": {
+            "path": "run.txt",
+            "sha256": (
+                "2a00ce36ee11b00c7bf3fa45b9a9cd34bc448da3dff8a8e2a6a07df825961021"
+            ),
+        },
+        "stdout": {
+            "path": "guarded-range-census-146071.out",
+            "sha256": (
+                "4f612d41f2712c2a67f6bff7a15bf4b5445640e316b4b3c6646b42ccbcbd9a06"
+            ),
+        },
+        "stderr": {
+            "path": "guarded-range-census-146071.err",
+            "sha256": (
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            ),
+        },
+    },
+    "released_certificate_chains": {
+        "full": [146076, 146077, 146078],
+        "official": [146079, 146080, 146081],
+    },
+}
+
 
 class T8ScalarContractError(ValueError):
     def __init__(self, errors: list[str]):
@@ -340,15 +436,33 @@ def validate_p12_summary(raw: bytes, summary: Any) -> None:
         raise T8ScalarContractError(errors)
 
 
+def validate_t4_receipt(raw: bytes, receipt: Any) -> None:
+    errors: list[str] = []
+    expected_sha256 = EXPECTED_CONTRACT["prerequisites"][
+        "corrected_finite_range_receipt_sha256"
+    ]
+    actual_sha256 = hashlib.sha256(raw).hexdigest()
+    if actual_sha256 != expected_sha256:
+        errors.append(
+            "t4_receipt SHA-256 must be "
+            f"{expected_sha256!r}, not {actual_sha256!r}"
+        )
+    _validate_exact(receipt, EXPECTED_T4_RECEIPT, "t4_receipt", errors)
+    if errors:
+        raise T8ScalarContractError(errors)
+
+
 def load_and_validate(
     path: Path,
-    p12_summary_path: Path | None = None,
+    p12_summary_path: Path,
+    receipt_path: Path,
 ) -> dict[str, Any]:
     _, contract = _load_json(path)
     result = validate_contract(contract)
-    if p12_summary_path is not None:
-        raw, summary = _load_json(p12_summary_path)
-        validate_p12_summary(raw, summary)
+    raw, summary = _load_json(p12_summary_path)
+    validate_p12_summary(raw, summary)
+    raw, receipt = _load_json(receipt_path)
+    validate_t4_receipt(raw, receipt)
     return result
 
 
@@ -358,11 +472,12 @@ def main() -> int:
     )
     parser.add_argument("contract", type=Path)
     parser.add_argument("--p12-summary", type=Path, required=True)
+    parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
     try:
-        result = load_and_validate(args.contract, args.p12_summary)
+        result = load_and_validate(args.contract, args.p12_summary, args.receipt)
     except T8ScalarContractError as error:
         for message in error.errors:
             print(f"error: {message}", file=sys.stderr)

@@ -21,6 +21,7 @@ P12_SUMMARY = (
     / "guarded-range-census-146071"
     / "p12-range-summary.json"
 )
+RECEIPT = P12_SUMMARY.with_name("receipt.json")
 MODULE_SPEC = importlib.util.spec_from_file_location(
     "validate_t8_scalar_contract", SCRIPT
 )
@@ -53,7 +54,7 @@ class T8ScalarContractTests(unittest.TestCase):
     def test_repository_contract_is_valid_but_authorizes_no_implementation(
         self,
     ) -> None:
-        result = VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY)
+        result = VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY, RECEIPT)
 
         self.assertEqual(result["campaign_id"], "t8-scalar-frontier-census-v1")
         self.assertEqual(
@@ -109,6 +110,10 @@ class T8ScalarContractTests(unittest.TestCase):
             ),
             (
                 ("prerequisites", "corrected_finite_range_p12_summary_sha256"),
+                "0" * 64,
+            ),
+            (
+                ("prerequisites", "corrected_finite_range_receipt_sha256"),
                 "0" * 64,
             ),
             (
@@ -300,7 +305,7 @@ class T8ScalarContractTests(unittest.TestCase):
                     path = Path(temp_dir) / f"{name}.json"
                     path.write_bytes(payload)
                     with self.assertRaises(VALIDATOR.T8ScalarContractError) as caught:
-                        VALIDATOR.load_and_validate(path)
+                        VALIDATOR.load_and_validate(path, P12_SUMMARY, RECEIPT)
                     message = str(caught.exception)
                     if name == "duplicate":
                         self.assertIn("duplicate JSON key", message)
@@ -329,18 +334,45 @@ class T8ScalarContractTests(unittest.TestCase):
             path = Path(temp_dir) / "p12-range-summary.json"
             path.write_text(json.dumps(original), encoding="ascii")
             with self.assertRaises(VALIDATOR.T8ScalarContractError) as caught:
-                VALIDATOR.load_and_validate(CONTRACT, path)
+                VALIDATOR.load_and_validate(CONTRACT, path, RECEIPT)
 
         message = "\n".join(caught.exception.errors)
         self.assertIn("p12_summary SHA-256", message)
         self.assertIn("p12_summary.sources_with_certified_domain", message)
+
+    def test_t4_receipt_bytes_and_semantics_are_bound(self) -> None:
+        mutated = json.loads(RECEIPT.read_text(encoding="ascii"))
+        mutated["status"] = "accept"
+        mutated["artifacts"]["p12_range_summary"]["sha256"] = "0" * 64
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "receipt.json"
+            path.write_text(json.dumps(mutated), encoding="ascii")
+            with self.assertRaises(VALIDATOR.T8ScalarContractError) as caught:
+                VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY, path)
+
+        message = "\n".join(caught.exception.errors)
+        self.assertIn("t4_receipt SHA-256", message)
+        self.assertIn("t4_receipt.status", message)
+        self.assertIn("t4_receipt.artifacts.p12_range_summary.sha256", message)
+
+    def test_python_api_requires_both_evidence_paths(self) -> None:
+        with self.assertRaises(TypeError):
+            VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY)
 
     def test_cli_is_executable_and_emits_a_compact_machine_readable_summary(
         self,
     ) -> None:
         self.assertTrue(os.access(SCRIPT, os.X_OK))
         completed = subprocess.run(
-            [str(SCRIPT), str(CONTRACT), "--p12-summary", str(P12_SUMMARY)],
+            [
+                str(SCRIPT),
+                str(CONTRACT),
+                "--p12-summary",
+                str(P12_SUMMARY),
+                "--receipt",
+                str(RECEIPT),
+            ],
             check=False,
             capture_output=True,
             text=True,

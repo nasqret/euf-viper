@@ -854,6 +854,7 @@
   its source ledger before scalar state construction.
 - T8's machine contract and exact P12 negative-range artifact are enforced by
   `scripts/bench/validate_t8_scalar_contract.py` in hosted CI. The validator
-  binds the raw summary hash, all 12 paths, strict JSON, and zero-range fields;
-  a successful validation means the design is correctly frozen and blocked,
-  not that scalar or SIMD implementation is authorized.
+  binds the raw summary and T4 receipt hashes, all 12 paths, strict JSON, and
+  zero-range fields; both evidence paths are mandatory. A successful validation
+  means the design is correctly frozen and blocked, not that scalar or SIMD
+  implementation is authorized.

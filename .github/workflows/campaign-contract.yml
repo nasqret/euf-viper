@@ -25,7 +25,9 @@ jobs:
           python3 scripts/bench/validate_t8_scalar_contract.py \
             campaigns/t8-scalar-frontier-census-v1.json \
             --p12-summary \
-            results/wmi/guarded-range-census-146071/p12-range-summary.json
+            results/wmi/guarded-range-census-146071/p12-range-summary.json \
+            --receipt \
+            results/wmi/guarded-range-census-146071/receipt.json
       - name: Test campaign validator
         run: |
           python3 -m unittest \

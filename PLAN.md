@@ -447,9 +447,10 @@ Do not compose two candidates in P2. Attribution must remain exact.
     search has `0/12` source-exact UNSAT coverage and is an accelerator/control,
     never the authoritative state.
   - [x] Enforce the exact contract and P12 negative-range artifact in hosted CI
-    with `validate_t8_scalar_contract.py`. Strict JSON, the raw summary hash,
-    all 12 paths, and every zero-range field are bound; a valid contract still
-    authorizes neither implementation nor SIMD.
+    with `validate_t8_scalar_contract.py`. Strict JSON, the raw summary and T4
+    receipt hashes, all 12 paths, and every zero-range field are bound; both
+    evidence paths are mandatory and a valid contract still authorizes neither
+    implementation nor SIMD.
   - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
     source assertion and parser-generated auxiliary. T1 parser parity alone
     does not provide this ledger.

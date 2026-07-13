@@ -248,10 +248,11 @@ at least 7/12. T1 review, the missing assertion-lineage ledger, and corrected
 T4 range evidence were the initial gates. T4 is now complete but rejects
 Hall/PB with zero savings. Every one of the 12 frozen qg7 rows has an empty
 domain list and zero range facts, so T4 also fails to supply T8's finite-domain
-certificate. Hosted CI strictly validates the machine contract and raw P12
-negative-evidence artifact; successful validation explicitly authorizes neither
-implementation nor SIMD. T1 review, the missing assertion-lineage ledger, and
-a separate checked domain-seven proof still block T8.
+certificate. Hosted CI strictly validates the machine contract, raw P12
+negative-evidence artifact, and exact T4 rejection receipt; both evidence paths
+are mandatory. Successful validation explicitly authorizes neither
+implementation nor SIMD. T1 review, the missing assertion-lineage ledger, and a
+separate checked domain-seven proof still block T8.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an
