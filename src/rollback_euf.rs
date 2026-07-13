@@ -243,6 +243,14 @@ impl<'arena> RollbackEuf<'arena> {
         self.levels.len() - 1
     }
 
+    pub(crate) fn term_count(&self) -> usize {
+        self.arena.terms.len()
+    }
+
+    pub(crate) fn arena(&self) -> &TermArena {
+        self.arena
+    }
+
     pub(crate) fn push_level(&mut self) {
         self.levels.push(self.snapshot());
     }

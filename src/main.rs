@@ -25,6 +25,8 @@ mod quotient_csp;
 mod quotient_state_search;
 #[allow(dead_code)]
 mod rollback_euf;
+#[allow(dead_code)]
+mod rollback_propagator;
 #[cfg(test)]
 mod stabilizer_order;
 
