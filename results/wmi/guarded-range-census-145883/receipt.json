@@ -1,0 +1,14 @@
+{
+  "aggregate_sha256": "77d96f7ca414d0223ad5bb303790a2b075b00dc9a815675f8e6f9febd687a6e4",
+  "elapsed": "01:52:20",
+  "exit_code": "2:0",
+  "interpretation": "failed_zero_parser_error_gate_not_a_t4_decision",
+  "job_id": "145883",
+  "records_bytes": 26258039,
+  "records_remote_path": "/home/bnaskrecki/euf-viper-campaigns/628dabfd077d/results/guarded-range-census-145883/records.jsonl",
+  "records_sha256": "d806be064546ce18465d7cd451592479d0df44564ad2d1b2826ee77a64b3a3b6",
+  "revision": "628dabfd077d",
+  "schema": "euf-viper.failed-wmi-artifact-receipt.v1",
+  "slurm_state": "FAILED",
+  "stderr_sha256": "d0607c0cdb10e3558b5a9b782af89bd0798c2a585568f7c422fec90b027d2462"
+}
