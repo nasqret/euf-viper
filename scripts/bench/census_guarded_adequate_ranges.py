@@ -34,6 +34,7 @@ from scripts.cert import independent_qfuf as qfuf  # noqa: E402
 RECORD_SCHEMA = "euf-viper.guard-range-hall-source-census.v1"
 AGGREGATE_SCHEMA = "euf-viper.guard-range-hall-source-census-summary.v1"
 PARSER_API = "scripts.cert.independent_qfuf.parse_and_encode"
+PARSER_PATH = ROOT / "scripts" / "cert" / "independent_qfuf.py"
 INTERPRETATION = "conditional_source_opportunity_only_no_satisfiability_result"
 TRUE_GUARD: tuple[object, ...] = ("const", True)
 FALSE_GUARD: tuple[object, ...] = ("const", False)
@@ -661,6 +662,7 @@ def _base_record(
             "sha256": source.source_sha256,
         },
         "parser_api": PARSER_API,
+        "parser_sha256": sha256_bytes(PARSER_PATH.read_bytes()),
         "caps": asdict(caps),
         "eligible": False,
         "ineligibility_reason": None,
@@ -913,6 +915,7 @@ def aggregate_records(
             "input_manifest_sha256": manifest_sha256,
             "records_jsonl_sha256": records_sha256,
             "analyzer_sha256": sha256_bytes(Path(__file__).read_bytes()),
+            "parser_sha256": sha256_bytes(PARSER_PATH.read_bytes()),
         },
         "sources": {
             "total": len(records),

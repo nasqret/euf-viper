@@ -323,6 +323,11 @@ class FailClosedAndDeterminismTests(unittest.TestCase):
             first[1]["hashes"]["records_jsonl_sha256"],
             hashlib.sha256(first[2]).hexdigest(),
         )
+        parser_hash = hashlib.sha256(CENSUS.PARSER_PATH.read_bytes()).hexdigest()
+        self.assertEqual(first[1]["hashes"]["parser_sha256"], parser_hash)
+        self.assertTrue(
+            all(record["parser_sha256"] == parser_hash for record in first[0])
+        )
         paths = [record["source"]["relative_path"] for record in first[0]]
         self.assertEqual(paths, sorted(paths))
 
