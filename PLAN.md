@@ -134,6 +134,14 @@ result cache can satisfy V1-V4.
   dirty builds and independently verifies that the recorded production
   assignment satisfies every exact production CNF clause with a complete atom
   map. Source-model validity alone is not literal production-path evidence.
+  Schema v2 revision `e3add515` is also rejected. A sidecar-controlled
+  `congruence_closure` origin bypassed CNF/assignment checks; exact CNF,
+  variable, and atom-map completeness was not independently reconstructed; the
+  primary analyzer counted unchecked SAT; final shadow publication raced its
+  rehash; parent symlinks escaped containment; incomplete frames were silently
+  truncated; and preparation JSON remained permissive. Schema v3 must replay
+  source/config-derived initial CNF plus every dynamic API-clause event and gate
+  SAT classification directly on the checker. Nothing is integration-ready.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke

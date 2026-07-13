@@ -1173,6 +1173,16 @@
   buffer repair is confirmed correct. Descriptor-bound execution, realpath
   identity, strict JSON, and a fresh full chain are active; old evidence is
   superseded for promotion.
+- Independent production-evidence review rejected schema v2 `e3add515`.
+  Sidecar-controlled `congruence_closure` downgraded genuine backend evidence
+  past CNF/assignment checks; self-consistent clause/variable/atom omissions or
+  additions passed because the checker did not independently reconstruct the
+  exact namespace and stream; and the primary analyzer accepted unchecked SAT.
+  Final shadow publication raced rehash, parent symlinks escaped lexical
+  containment, incomplete journal tails were truncated, and preparation JSON
+  accepted ambiguity. UNSAT remained fail-closed. Schema v3 repair now requires
+  source/config CNF reconstruction, replayed dynamic-clause transcripts, exact
+  maps, checker-gated classification, no-symlink traversal, and strict frames.
 
 ## Next Entry Template
 

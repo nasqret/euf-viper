@@ -833,3 +833,11 @@
   realpath, and non-finite shard JSON passed audit. Require descriptor-bound
   executable use, canonical interpreter identity, strict JSON everywhere, and
   a fresh full chain before integration or timing.
+- Production-evidence schema v2 `e3add515` remains no-go. A sidecar-controlled
+  congruence-closure origin bypassed CNF checks; exact clauses, variables, and
+  atom maps were not independently reconstructible; the analyzer could count
+  unchecked SAT; final shadow publication preceded rehash; parent symlinks and
+  incomplete frames were accepted. Keep UNSAT unsupported. Schema v3 must
+  reconstruct initial CNF from source/config, replay dynamic API clauses,
+  require exact maps, gate analyzer SAT on the checker, and fail closed on path,
+  frame, or JSON ambiguity.

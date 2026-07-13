@@ -96,6 +96,15 @@ declare completion after a sidecar was deleted. Schema v2 repair must bind the
 exact clause stream, complete variable map, trusted executable hash, same-byte
 parsing, and resume-time evidence rechecks before integration.
 
+Schema v2 revision `e3add515` is also rejected. Its sidecar-controlled
+congruence-closure origin bypassed CNF/assignment checks; self-consistent CNF,
+variable, and atom-map omissions passed; and the primary analyzer could count
+unchecked SAT before shadow verification. Final summary publication also
+preceded rehash, parent symlinks escaped containment, incomplete journal tails
+were truncated, and preparation JSON accepted ambiguity. Schema v3 must
+independently reconstruct source/config CNF and namespace, replay dynamic API
+clauses, require exact maps, and run the checker before SAT classification.
+
 ## Causal Controls
 
 ### Modern Kissat
