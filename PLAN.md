@@ -13,25 +13,26 @@ executable contract is
 
 ## Current Truth
 
-Authoritative sound two-second campaign: `144328`/`144329`/`144330`, solver
-revision `3c178dced8eb44e13a6381bdc43290c71658ac40`, binary SHA-256
-`808c59ceef559062bb61befea2030b16b890bd18b8936a98d1ea3bc3172903ff`.
+Authoritative exact-revision campaign: prepare/full/official/global-audit
+`144990`/`144991`/`144992`/`144993`, solver revision `30828a4`, with all six
+configurations and both corpus selections hash-bound by the campaign locks.
 
-| Solver | Correct / 7,503 | Median | Timeout-charged total |
-| --- | ---: | ---: | ---: |
-| euf-viper | 7,408 | 0.00939s | 885.69s |
-| Z3 4.16.0 | 7,450 | 0.02199s | 639.66s |
-| cvc5 1.3.4 snapshot | 7,373 | 0.03061s | 976.53s |
-| Yices2 2.7.0 | 7,490 | 0.00504s | 228.56s |
+| Solver configuration | Full 2s / 7,503 | Official 2s / 3,521 | Full 60s / 7,503 | Official 60s / 3,521 |
+| --- | ---: | ---: | ---: | ---: |
+| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 |
+| cvc5 | 7,222 | 3,384 | 7,479 | 3,510 |
+| OpenSMT | 6,916 | 3,215 | 7,448 | 3,497 |
+| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 |
+| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 |
+| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,484 | 3,511 |
 
-Euf-viper beats cvc5 overall and Z3 geometrically on common solves. It does not
-beat Z3 overall and trails Yices2 decisively. Historical 60/1,200-second rows
-use an unsound predecessor and are opportunity evidence only; current main must
-be rerun.
-
-The official SMT-COMP 2025 primary set is also missing. Its QF_Equality division
-contains 3,521 selected QF_UF instances; Yices2 won every performance category,
-and OpenSMT ranked second. OpenSMT is therefore a mandatory comparator.
+All four global audits reject promotion. At 60 seconds euf-viper's common-wall
+geometric factor is `1.5685x` over Z3 default on the full corpus and `1.5214x`
+on the official set, but common-wall aggregate factors are only `0.5873x` and
+`0.6146x`; Yices2 geometric factors are `0.4910x` and `0.4710x`. Euf-viper is
+therefore not yet the overall leader. Full and official 1,200-second arrays
+`145785` and `145787` remain scheduler-pending, with audits/finalizer
+`145786`/`145788`/`145789` dependency-held.
 
 ## Victory Contract
 
@@ -120,7 +121,7 @@ result cache can satisfy V1-V4.
   tests. The sharded journal runner, strict global auditor, physical-stage
   wrapper, and staged physical-origin union auditor are implemented; returned
   corpus evidence remains before this item closes.
-- [ ] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
+- [x] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
   chain at `1308be8` passed hosted CI but was cancelled during preparation when
@@ -138,12 +139,15 @@ result cache can satisfy V1-V4.
   `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, the solver configuration hash is
   `490e959e...a2570`, and the euf-viper binary hash is
   `edcf8d1a...ba576`. Both parent locks are promotion-eligible and bind all six
-  configurations over `7,503`/`3,521` instances. Full array `144991` is
-  producing rows; official `144992` and global audit `144993` remain pending.
-  Preparation and partial shards are not comparison evidence.
+  configurations over `7,503`/`3,521` instances. Full array `144991`, official
+  array `144992`, and global audit `144993` completed. Both exact two-second
+  audits rejected promotion: euf-viper solved `7,269`/`3,400`, versus Yices2
+  `7,445`/`3,490` and Z3 default `7,412`/`3,474`.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
-  at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
-  assembly, and exact carried-row provenance are implemented but not yet run.
+  at 1,200 seconds. Both 60-second continuations and audits completed and
+  rejected promotion. Dispatcher `145397` generated full/official 1,200-second
+  arrays `145785`/`145787`, audits `145786`/`145788`, and finalizer `145789`;
+  those jobs remain pending on node availability, priority, and dependencies.
 - [ ] Publish a new current-main opportunity atlas before tuning a route.
 
 P0 exit: exact manifests, five hashed binaries, complete current baselines,
@@ -153,16 +157,19 @@ independent evidence checks, and a frozen family holdout.
 
 ### T0: Modern SAT Backend
 
-- [ ] Embed Kissat 4.0.4 behind the current clause/model interface while
+- [x] Embed Kissat 4.0.4 behind the current clause/model interface while
   preserving the SC2021 backend as an exact control. Research branch
   `research-modern-kissat` at `d7c14da` implements the feature-selected pinned
   backend and fail-closed option surface. WMI validation `144945` passed with
   preserved SC2021/4.0.4 binary hashes `d7321602...c70362` and
-  `ecbcfebb...ea6b6`. Exact paired campaign revision `e67c688` fixes every
+  `ecbcfebb...ea6b6`. Exact paired campaign revision `45ba12c` fixes every
   `EUF_VIPER_*` value identically in both arms, sanitizes ambient state, binds
-  one CPU, and verifies all 7,503 source hashes. Sample `145029`, broad array
-  `145030`, and merge `145031` are queued behind successful P0 audit `144993`;
-  broad timing releases only if the deterministic 64-case sample passes.
+  one CPU, and verifies all 7,503 source hashes. The first post-P0 sample
+  `145884` failed before timing because inherited absolute paths named another
+  checkout. Corrected source rebinding passed hosted run `29274065472`;
+  replacement sample `145905`, broad array `145906`, and merge `145907` are
+  dependency-guarded, and broad timing releases only if the deterministic
+  64-case sample passes.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
   A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal
@@ -202,18 +209,24 @@ independent evidence checks, and a frozen family holdout.
   term pair after each transition; cap, typing, rollback, literal-reuse, and
   tampering regressions also pass. Root tests pass `230` default and `234`
   all-feature cases; hosted run `29217833901` passes. No timing claim exists.
-- [ ] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
+- [x] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
   must carry an independently replayable typed EUF explanation; no external
   decisions or propagations are permitted in the first pilot, and the existing
-  complete-model validator remains authoritative.
-- [ ] Preserve the first invalid eager assignment, checked conflict clauses,
+  complete-model validator remains authoritative. Public rollback checkpoint
+  `4b60113` connects a default-off standalone backend and fails closed as
+  `unsupported` on any bridge or validation failure.
+- [x] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only
-  for causal tests. Unknown settings fail closed.
+  for causal tests. Unknown settings fail closed. Root matrices passed `241`
+  default and `247` all-feature tests; hosted run `29270646223` passed.
 - [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
   dynamic full Ackermannization. Require fewer complete validations on every
   multi-round target, `1.10x` target speedup, no baseline-only solve, and
-  independently replayed conflicts before selector work.
+  independently replayed conflicts before selector work. Public harness
+  `e8fb05c` passed hosted validation. The first WMI attempt was rejected before
+  timing on a corpus-root mismatch; corrected prepare `145900` completed,
+  array `145901` is active, and audit `145902` is dependency-held.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -221,11 +234,12 @@ independent evidence checks, and a frozen family holdout.
 
 ### T4: Adequate-Range Hall/PB
 
-- [ ] Complete source-only opportunity census `145027`, exact revision
-  `86d76fc`, after P0 prepare. The structured independent parser now emits
+- [ ] Complete source-only opportunity census `145883`, exact main revision
+  `628dabf`, after P0. The structured independent parser now emits
   hash-bound guard-conditioned ranges, non-uniform value-cell savings, bounded
   Hall-tight/conflict witnesses, caps, and abstentions without invoking a
-  solver or producing SAT/UNSAT. Reject implementation if the returned corpus
+  solver or producing SAT/UNSAT. The hardened runner requires exactly 7,503
+  sources and zero parse errors. Reject implementation if the returned corpus
   population misses the preregistered 30% cell-saving threshold.
 - [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
   near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
@@ -329,14 +343,21 @@ fallback can be an operational portfolio but never a standalone victory.
 
 ## Immediate Queue
 
-1. Publish the complete P0 contract revision and require green hosted CI.
-2. Run the immutable two-second WMI full/official chain with all comparators.
-3. Batch-shadow and globally audit base-stage SAT/UNSAT certificates.
-4. Resume only two-second timeouts at 60 and remaining timeouts at 1,200.
-5. Certify each physical continuation stage and audit their union against the
-   final per-observation physical-origin ledger.
-6. Publish the opportunity atlas, then ablate Kissat and run T1/T2/T4/T5/T6.
-7. Select the first novel architecture only from measured opportunity.
+1. Finish hardened range census `145883`; reject T4 if its preregistered
+   opportunity threshold fails.
+2. Let dependency-bound full/official certificate chains
+   `145892`-`145894` and `145897`-`145899` batch-shadow and globally audit the
+   exact two-second rows.
+3. Complete strict rollback control `145901`/`145902`; promote no selector from
+   partial rows.
+4. Complete Kissat sample `145905`; release broad `145906` and merge `145907`
+   only through the preregistered gate.
+5. Preserve the existing 1,200-second continuation graph `145785`-`145789`;
+   diagnose scheduler state without changing its evidence.
+6. Publish the post-census opportunity atlas, then run T1/T5/T6 projections and
+   only mechanisms that pass their frozen construction thresholds.
+7. Select and compose a novel architecture only from independently checked,
+   broad paired wins; then rerun P4/P5 on two CPU classes.
 
-No WMI campaign beyond the P0 baseline enters the queue before the campaign
-lock and independent validation prerequisites pass.
+No result enters promotion because it was submitted, queued, or partially
+observed. Every branch remains isolated until its complete audit passes.
