@@ -20,15 +20,34 @@ static int print_version(void) {
     return 0;
 }
 
+static int set_supported_parameter(const char *argument) {
+    if (strcmp(argument, "sat.euf=true") == 0) {
+        Z3_global_param_set("sat.euf", "true");
+        return 1;
+    }
+    if (strcmp(argument, "sat.euf=false") == 0) {
+        Z3_global_param_set("sat.euf", "false");
+        return 1;
+    }
+
+    fprintf(stderr, "unsupported Z3 parameter: %s\n", argument);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 &&
         (strcmp(argv[1], "-version") == 0 || strcmp(argv[1], "--version") == 0)) {
         return print_version();
     }
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s FILE.smt2\n", argv[0]);
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "usage: %s [sat.euf=true|sat.euf=false] FILE.smt2\n", argv[0]);
         return 64;
     }
+    if (argc == 3 && !set_supported_parameter(argv[1])) {
+        return 64;
+    }
+
+    const char *input_path = argv[argc - 1];
 
     Z3_config config = Z3_mk_config();
     Z3_context context = Z3_mk_context(config);
@@ -38,7 +57,7 @@ int main(int argc, char **argv) {
     Z3_symbol logic = Z3_mk_string_symbol(context, "QF_UF");
     Z3_solver solver = Z3_mk_solver_for_logic(context, logic);
     Z3_solver_inc_ref(context, solver);
-    Z3_solver_from_file(context, solver, argv[1]);
+    Z3_solver_from_file(context, solver, input_path);
     Z3_lbool result = z3_error ? Z3_L_UNDEF : Z3_solver_check(context, solver);
 
     int exit_code = z3_error ? 2 : 0;

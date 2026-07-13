@@ -194,4 +194,7 @@ fi
 if [ -x "$DEST/bin/z3" ]; then
   "$DEST/bin/z3" -version
 fi
+if [ "$BUILD_Z3_API_RUNNER" = 1 ]; then
+  "$ROOT/scripts/bench/test_z3_native_runner.sh" "$DEST/bin/z3"
+fi
 "$DEST/bin/opensmt" --version | head -1
