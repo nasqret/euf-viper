@@ -1032,6 +1032,19 @@
   and decoder work over every source. Broad QG and Goel savings, variable-growth
   control, complete provenance, and decoder caps must all pass before any solver
   implementation.
+- Refreshed the tail opportunity atlas from the authoritative post-fix full
+  60-second audit, SHA-256
+  `2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a`.
+  Z3 default and Yices2 share exactly 22 solves that euf-viper misses: nine
+  Goel, `PEQ012_size6`, and twelve `qg7` isomorphism instances. Euf-viper has
+  13 Z3-only but only two Yices-only solves, so it needs ten additional solves
+  to lead Z3 and 21 to lead Yices without regression. The Yices common-set gap
+  is broad: about `2.04x` geometric and `4.89x` aggregate improvement. This
+  supersedes old `58efe9d` scoreboard numbers while preserving their frozen
+  structural selectors as discovery artifacts.
+- Full 1,200-second continuation task `145785_0` began on `c3n1`; remaining
+  full tasks and official array `145787` stay scheduler-bound. The existing
+  dependency graph and evidence origins remain unchanged.
 
 ## Next Entry Template
 

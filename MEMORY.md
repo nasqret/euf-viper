@@ -717,6 +717,13 @@
   `7,445`/`3,490` and `7,500`/`3,518`; Z3 default is `7,412`/`3,474` and
   `7,489`/`3,514`. The fast common-instance head does not offset aggregate and
   tail losses. Do not claim euf-viper is better overall.
+- The authoritative full 60-second audit has SHA-256
+  `2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a`.
+  Z3 default and Yices2 solve the same 22 instances missed by euf-viper: nine
+  Goel, `PEQ012_size6`, and twelve `qg7` isomorphism cases. Euf-viper has 13
+  Z3-only and two Yices-only solves; without regressions it needs ten new solves
+  to lead Z3 and 21 to lead Yices. Matching Yices common timing needs about
+  `2.04x` geometric and `4.89x` aggregate improvement.
 - Valid modern-Kissat sample `145905` rejected replacement: equal 53/64
   coverage, 16 candidate wins versus 37 losses, geometric speed `0.928694`,
   common-total speed `0.963416`, and sign-flip `p=0.999500` when ratios are

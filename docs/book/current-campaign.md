@@ -50,6 +50,15 @@ instance. The corresponding ratios of summed common wall time are only
 geometric ratios are `0.4910` and `0.4710`; Yices2 is both faster and more
 complete. A ratio above one favors euf-viper.
 
+The full 60-second pairwise boundary is exact. Z3 default and Yices2 both solve
+22 instances that euf-viper misses: nine Goel cases, `PEQ012_size6`, and twelve
+`qg7` isomorphism cases. Euf-viper has 13 Z3-only solves but only two
+Yices-only solves. With no regression it needs ten new solves to lead Z3 and
+21 to lead Yices. On the Yices common set, parity also requires approximately
+`2.04x` broad geometric and `4.89x` aggregate improvement. The post-fix full
+60-second audit SHA-256 is
+`2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a`.
+
 ## Evidence Boundary
 
 The independent Python checker reconstructs typed source terms, theory atoms,

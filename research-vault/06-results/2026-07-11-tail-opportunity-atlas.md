@@ -1,9 +1,65 @@
 # QF_UF Tail Opportunity Atlas
 
-Date: 2026-07-11
+Date: 2026-07-11; authoritative post-fix update 2026-07-13
 
-Status: discovery analysis; selectors and manifests frozen below; not a
-performance-validation result
+Status: the selector derivation below is historical discovery analysis. The
+post-fix update is authoritative for current ranking requirements; neither is
+a mechanism-promotion result.
+
+## Authoritative post-fix 60-second update
+
+The frozen P0 continuation at revision
+`30828a4f0c1e7e478a9c6f406ccb245eeefc4961` supersedes the old `58efe9d`
+scoreboard. Jobs `144990`-`144993` produced the exact two-second base and chain
+`145036` produced the audited 60-second continuation. The full audit is
+`p0-144990/continuations/chain-145036/audit/full-60.json`, SHA-256
+`2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a`.
+It rejects promotion.
+
+| Solver | Solved / 7,503 | Timeouts | Timeout-charged wall | Median wall | p95 wall |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| euf-viper | 7,480 | 23 | 4,512.684s | 0.02677s | 1.23385s |
+| cvc5 | 7,479 | 24 | 5,580.626s | 0.08970s | 1.45948s |
+| OpenSMT | 7,448 | 55 | 9,277.443s | 0.04644s | 3.08234s |
+| Yices2 | 7,500 | 3 | 833.987s | 0.01715s | 0.18973s |
+| Z3 default | 7,489 | 14 | 2,659.694s | 0.05704s | 0.79747s |
+| Z3 `sat.euf=true` | 7,484 | 19 | 2,975.225s | 0.06523s | 0.94290s |
+
+Against Z3 default, euf-viper is geometrically faster on 7,467 common solves
+by `1.56851x`, but its common-wall aggregate ratio is only `0.58731`; 13
+euf-viper-only solves do not offset 22 Z3-only solves. Beating Z3 without a
+regression requires at least ten additional solves and a `1.7027x` reduction
+of euf-viper's current common-solve aggregate.
+
+Against Yices2, euf-viper has only two unique solves and misses 22 Yices-only
+instances. It must add at least 21 solves to lead coverage. On 7,478 common
+solves, its geometric and aggregate ratios are `0.49096` and `0.20452`;
+matching Yices therefore requires about `2.04x` broad geometric and `4.89x`
+common-aggregate improvement, not merely a hard-tail repair.
+
+### Exact common deficit
+
+The 22 instances solved within 60 seconds by both Z3 default and Yices2 but
+missed by euf-viper are:
+
+- nine Goel cases: both `firewire_tree.5` regularity properties,
+  `frogs.{2,3,5}.prop1_ab_br_max`, `h_TicTacToe_ab_cti_max`,
+  `hanoi.3.prop1_ab_br_max`, and `sokoban.{2,3}.prop1_ab_br_max`;
+- `QF_UF/PEQ/PEQ012_size6.smt2`;
+- `qg7/iso_icl_nogen{001,002,003,004,005,007}.smt2` and
+  `qg7/iso_icl_nogen_sk{001,002,003,004,005,007}.smt2`.
+
+The one instance missed by all three is outside this pairwise deficit.
+euf-viper's two Yices-only wins are `PEQ003_size10` and `PEQ014_size11`; its
+13 Z3-only wins are two NEQ, seven PEQ, and four SEQ instances. This makes the
+current objective precise: T4/T5/T6/T8 must recover almost the entire common
+22-instance deficit while also reducing broad QG and Goel aggregate cost.
+Path names remain diagnostic evidence only and are forbidden runtime routing
+features.
+
+All sections below remain useful for frozen structural selectors and oracle
+ceilings, but their performance numbers predate the Boolean-data parser fix
+and must not be used as the current scoreboard.
 
 ## Decision summary
 

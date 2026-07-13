@@ -30,9 +30,13 @@ All four global audits reject promotion. At 60 seconds euf-viper's common-wall
 geometric factor is `1.5685x` over Z3 default on the full corpus and `1.5214x`
 on the official set, but common-wall aggregate factors are only `0.5873x` and
 `0.6146x`; Yices2 geometric factors are `0.4910x` and `0.4710x`. Euf-viper is
-therefore not yet the overall leader. Full and official 1,200-second arrays
-`145785` and `145787` remain scheduler-pending, with audits/finalizer
-`145786`/`145788`/`145789` dependency-held.
+therefore not yet the overall leader. The exact full 60-second pairwise deficit
+is 22 shared Z3/Yices solves missed by euf-viper: nine Goel, one PEQ, and twelve
+QG `qg7` cases. With no regressions, euf-viper needs ten added solves to lead
+Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
+`2.04x` geometric and `4.89x` aggregate improvement. Full 1,200-second array
+`145785` has started on WMI; official array `145787` remains priority-bound,
+with audits/finalizer `145786`/`145788`/`145789` dependency-held.
 
 ## Victory Contract
 
