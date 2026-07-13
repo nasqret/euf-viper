@@ -11,6 +11,7 @@ PREPARE = WMI / "euf_viper_typed_parser_parity_prepare.sbatch"
 ARRAY = WMI / "euf_viper_typed_parser_parity_array.sbatch"
 AUDIT = WMI / "euf_viper_typed_parser_parity_audit.sbatch"
 SUBMIT = WMI / "submit_typed_parser_parity.sh"
+DRIVER = ROOT / "scripts" / "bench" / "typed_parser_parity.py"
 
 
 class TypedParserParityWmiTests(unittest.TestCase):
@@ -33,8 +34,8 @@ class TypedParserParityWmiTests(unittest.TestCase):
         self.assertNotIn("command -v cargo", text)
         self.assertIn('"$CARGO" build --release --locked', text)
         self.assertIn("git status --porcelain=v1 --untracked-files=no", text)
-        self.assertIn("parse-check", text)
-        self.assertIn('"fallback": False', text)
+        self.assertIn('"$BINARY" parse-check -', text)
+        self.assertIn("validate-payload", text)
         self.assertIn("typed_parser_parity.py prepare", text)
         self.assertIn("EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES", text)
         self.assertNotIn("EUF_VIPER_PARSER_MODE", text)
@@ -49,6 +50,26 @@ class TypedParserParityWmiTests(unittest.TestCase):
                 )
                 self.assertIn("unset EUF_VIPER_PROFILE", text)
 
+    def test_all_stages_fail_closed_on_pinned_python_identity_drift(self) -> None:
+        for script in (PREPARE, ARRAY, AUDIT):
+            text = script.read_text(encoding="utf-8")
+            with self.subTest(script=script.name):
+                self.assertIn('${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}', text)
+                self.assertIn("EUF_VIPER_PYTHON_SHA256", text)
+                self.assertIn("EUF_VIPER_PYTHON_VERSION", text)
+                self.assertIn('sha256sum "$PYTHON"', text)
+                self.assertIn('"$PYTHON" --version', text)
+                self.assertIn("python hash mismatch", text)
+                self.assertIn("python version mismatch", text)
+                self.assertIn('"$PYTHON" scripts/bench/typed_parser_parity.py', text)
+                self.assertNotIn(
+                    "python3 scripts/bench/typed_parser_parity.py", text
+                )
+
+        prepare_text = PREPARE.read_text(encoding="utf-8")
+        self.assertIn("python-version.txt", prepare_text)
+        self.assertIn("python-sha256.txt", prepare_text)
+
     def test_array_is_parse_only_and_writes_one_owned_shard(self) -> None:
         text = ARRAY.read_text(encoding="utf-8")
         self.assertIn("SLURM_ARRAY_TASK_ID", text)
@@ -56,6 +77,13 @@ class TypedParserParityWmiTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_TYPED_PARSER_ROOT", text)
         self.assertNotIn(" solve ", text)
         self.assertNotIn("EUF_VIPER_PARSER_MODE", text)
+
+    def test_campaign_driver_pipes_the_captured_source_bytes_to_stdin(self) -> None:
+        text = DRIVER.read_text(encoding="utf-8")
+        self.assertIn('[str(binary), "parse-check", "-"]', text)
+        self.assertIn("input=source_artifact.content", text)
+        self.assertNotIn('[str(binary), "parse-check", str(source)]', text)
+        self.assertNotIn("source_hash = sha256_file(source)", text)
 
     def test_audit_preregisters_full_7503_source_gate(self) -> None:
         text = AUDIT.read_text(encoding="utf-8")
@@ -68,6 +96,9 @@ class TypedParserParityWmiTests(unittest.TestCase):
         self.assertIn("origin/research-typed-stream-parity", text)
         self.assertIn("EUF_VIPER_CARGO_REMOTE_PATH", text)
         self.assertIn("REMOTE_CARGO_SHA256", text)
+        self.assertIn("EUF_VIPER_PYTHON_REMOTE_PATH", text)
+        self.assertIn("REMOTE_PYTHON_SHA256", text)
+        self.assertIn("REMOTE_PYTHON_VERSION", text)
         self.assertIn("EUF_VIPER_TYPED_PARSER_PARTITION", text)
         self.assertIn("--partition='$PARTITION'", text)
         self.assertIn('PUBLISHED_REVISION="$(git rev-parse "$PUBLISHED_REF")"', text)
@@ -85,6 +116,19 @@ class TypedParserParityWmiTests(unittest.TestCase):
         )
         self.assertEqual(text.count("unset EUF_VIPER_PROFILE && sbatch"), 3)
         self.assertIn('"EUF_VIPER_PROFILE": None', text)
+        self.assertIn('"schema": "euf-viper.typed-parser-parity-submission.v2"', text)
+        self.assertIn('"byte_binding": "single-open-buffer.v1"', text)
+        self.assertEqual(text.count("EUF_VIPER_PYTHON='$REMOTE_PYTHON'"), 3)
+        self.assertEqual(
+            text.count("EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256'"), 3
+        )
+        self.assertEqual(
+            text.count("EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION'"), 3
+        )
+        self.assertIn('"python": {', text)
+        self.assertIn('"path": "$REMOTE_PYTHON"', text)
+        self.assertIn('"sha256": "$REMOTE_PYTHON_SHA256"', text)
+        self.assertIn('"version": "$REMOTE_PYTHON_VERSION"', text)
 
 
 if __name__ == "__main__":

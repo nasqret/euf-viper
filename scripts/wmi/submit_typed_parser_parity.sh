@@ -71,6 +71,33 @@ case "$REMOTE_CARGO_VERSION" in
   cargo\ [0-9]*\ \(*\)) ;;
   *) echo "remote cargo version is malformed: $REMOTE_CARGO_VERSION" >&2; exit 2 ;;
 esac
+REMOTE_PYTHON="${EUF_VIPER_PYTHON_REMOTE_PATH:-/usr/bin/python3}"
+case "$REMOTE_PYTHON" in
+  /*) ;;
+  *) echo "remote python path must be absolute" >&2; exit 2 ;;
+esac
+case "$REMOTE_PYTHON" in
+  *[!A-Za-z0-9_./-]*) echo "remote python path contains unsafe characters" >&2; exit 2 ;;
+esac
+if ! REMOTE_PYTHON_SHA256="$(ssh "$REMOTE_HOST" "test -f '$REMOTE_PYTHON' && test -x '$REMOTE_PYTHON' && sha256sum '$REMOTE_PYTHON' | awk '{print \$1}'")"; then
+  echo "remote python is missing or not executable: $REMOTE_PYTHON" >&2
+  exit 2
+fi
+if [ "${#REMOTE_PYTHON_SHA256}" -ne 64 ]; then
+  echo "failed to pin remote python SHA-256 at $REMOTE_PYTHON" >&2
+  exit 2
+fi
+case "$REMOTE_PYTHON_SHA256" in
+  *[!0-9a-f]*) echo "remote python SHA-256 is malformed" >&2; exit 2 ;;
+esac
+if ! REMOTE_PYTHON_VERSION="$(ssh "$REMOTE_HOST" "'$REMOTE_PYTHON' --version 2>&1")"; then
+  echo "failed to read remote python version at $REMOTE_PYTHON" >&2
+  exit 2
+fi
+if [[ ! "$REMOTE_PYTHON_VERSION" =~ ^Python\ [0-9]+\.[0-9]+\.[0-9]+([A-Za-z0-9.+-]*)?$ ]]; then
+  echo "remote python version is malformed: $REMOTE_PYTHON_VERSION" >&2
+  exit 2
+fi
 REMOTE_WORK="$REMOTE_PARENT/$SHORT_REVISION"
 CAMPAIGN_TAG="${EUF_VIPER_TYPED_PARSER_CAMPAIGN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 case "$CAMPAIGN_TAG" in
@@ -85,16 +112,16 @@ PREPARE_ARGS=(--parsable)
 if [ -n "$DEPENDENCY" ]; then
   PREPARE_ARGS+=(--dependency="afterok:$DEPENDENCY")
 fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && unset EUF_VIPER_PROFILE && sbatch ${PREPARE_ARGS[*]} --partition='$PARTITION' --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_CARGO='$REMOTE_CARGO',EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256',EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES',EUF_VIPER_TYPED_PARSER_SHARDS='$SHARDS',EUF_VIPER_TYPED_PARSER_TIMEOUT_SECONDS='$TIMEOUT_SECONDS' scripts/wmi/euf_viper_typed_parser_parity_prepare.sbatch")"
+PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && unset EUF_VIPER_PROFILE && sbatch ${PREPARE_ARGS[*]} --partition='$PARTITION' --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_CARGO='$REMOTE_CARGO',EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256',EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION',EUF_VIPER_PYTHON='$REMOTE_PYTHON',EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256',EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES',EUF_VIPER_TYPED_PARSER_SHARDS='$SHARDS',EUF_VIPER_TYPED_PARSER_TIMEOUT_SECONDS='$TIMEOUT_SECONDS' scripts/wmi/euf_viper_typed_parser_parity_prepare.sbatch")"
 PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
 case "$PREPARE_JOB" in *[!0-9]*|'') echo "invalid prepare job id: $PREPARE_SUBMISSION" >&2; exit 2 ;; esac
 
 LAST_SHARD="$((SHARDS - 1))"
-ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && unset EUF_VIPER_PROFILE && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$PREPARE_JOB --array=0-$LAST_SHARD%$MAX_PARALLEL --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT' scripts/wmi/euf_viper_typed_parser_parity_array.sbatch")"
+ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && unset EUF_VIPER_PROFILE && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$PREPARE_JOB --array=0-$LAST_SHARD%$MAX_PARALLEL --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_PYTHON='$REMOTE_PYTHON',EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256',EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT' scripts/wmi/euf_viper_typed_parser_parity_array.sbatch")"
 ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
 case "$ARRAY_JOB" in *[!0-9]*|'') echo "invalid array job id: $ARRAY_SUBMISSION" >&2; exit 2 ;; esac
 
-AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && unset EUF_VIPER_PROFILE && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$ARRAY_JOB --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch")"
+AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && unset EUF_VIPER_PROFILE && sbatch --parsable --partition='$PARTITION' --dependency=afterok:$ARRAY_JOB --export=ALL,EUF_VIPER_SCOPED_LET=auto,EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_PYTHON='$REMOTE_PYTHON',EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256',EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION',EUF_VIPER_TYPED_PARSER_ROOT='$CAMPAIGN_ROOT',EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch")"
 AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
 case "$AUDIT_JOB" in *[!0-9]*|'') echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
 
@@ -106,8 +133,9 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 payload = {
-    "schema": "euf-viper.typed-parser-parity-submission.v1",
+    "schema": "euf-viper.typed-parser-parity-submission.v2",
     "status": "submitted",
+    "byte_binding": "single-open-buffer.v1",
     "revision": "$REVISION",
     "published_ref": "$PUBLISHED_REF",
     "remote_host": "$REMOTE_HOST",
@@ -118,6 +146,11 @@ payload = {
         "path": "$REMOTE_CARGO",
         "sha256": "$REMOTE_CARGO_SHA256",
         "version": "$REMOTE_CARGO_VERSION",
+    },
+    "python": {
+        "path": "$REMOTE_PYTHON",
+        "sha256": "$REMOTE_PYTHON_SHA256",
+        "version": "$REMOTE_PYTHON_VERSION",
     },
     "parser_environment": {
         "EUF_VIPER_SCOPED_LET": "auto",

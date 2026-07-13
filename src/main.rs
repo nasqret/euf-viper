@@ -47,8 +47,9 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::env;
 use std::fs;
+use std::io::{self, Read};
 #[cfg(feature = "certificates")]
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 #[cfg(feature = "certificates")]
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -6938,8 +6939,23 @@ fn stats_file(path: &str) -> Result<i32, String> {
     Ok(0)
 }
 
+fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
+    if path != "-" {
+        return fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"));
+    }
+    let mut input = String::new();
+    stdin
+        .read_to_string(&mut input)
+        .map_err(|e| format!("failed to read parse-check stdin: {e}"))?;
+    Ok(input)
+}
+
 fn parse_check_file(path: &str) -> Result<i32, String> {
-    let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let input = if path == "-" {
+        read_parse_check_input(path, &mut io::stdin().lock())?
+    } else {
+        read_parse_check_input(path, &mut io::empty())?
+    };
     smt2_stream::check_typed_parity(&input, selected_scoped_let_mode()?)?;
     Ok(0)
 }
@@ -7200,7 +7216,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
-  euf-viper parse-check FILE
+  euf-viper parse-check FILE|-
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
   euf-viper gen diamond BRANCHES DEPTH
@@ -7215,7 +7231,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
-  euf-viper parse-check FILE
+  euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
@@ -7253,7 +7269,7 @@ fn run() -> Result<i32, String> {
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             if args.len() != 3 {
-                return Err("usage: euf-viper parse-check FILE".to_owned());
+                return Err("usage: euf-viper parse-check FILE|-".to_owned());
             }
             parse_check_file(file)
         }
@@ -10348,6 +10364,17 @@ mod tests {
             "#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn parse_check_dash_reads_the_supplied_stdin_bytes() {
+        let source = b"(set-logic QF_UF)\n(assert true)\n(check-sat)\n";
+        let mut stdin = std::io::Cursor::new(source);
+        assert_eq!(
+            read_parse_check_input("-", &mut stdin).unwrap().as_bytes(),
+            source
+        );
+        assert_eq!(stdin.position(), source.len() as u64);
     }
 
     #[test]

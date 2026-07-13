@@ -48,6 +48,35 @@ if [ "$ACTUAL_CARGO_VERSION" != "$EXPECTED_CARGO_VERSION" ]; then
   exit 2
 fi
 
+PYTHON="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
+EXPECTED_PYTHON_SHA256="${EUF_VIPER_PYTHON_SHA256:?set EUF_VIPER_PYTHON_SHA256}"
+EXPECTED_PYTHON_VERSION="${EUF_VIPER_PYTHON_VERSION:?set EUF_VIPER_PYTHON_VERSION}"
+case "$PYTHON" in
+  /*) ;;
+  *) echo "EUF_VIPER_PYTHON must be an absolute path: $PYTHON" >&2; exit 127 ;;
+esac
+if [ ! -f "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
+  echo "pinned python is not an executable file: $PYTHON" >&2
+  exit 127
+fi
+if [ "${#EXPECTED_PYTHON_SHA256}" -ne 64 ]; then
+  echo "EUF_VIPER_PYTHON_SHA256 must be a lowercase SHA-256" >&2
+  exit 2
+fi
+case "$EXPECTED_PYTHON_SHA256" in
+  *[!0-9a-f]*) echo "EUF_VIPER_PYTHON_SHA256 must be a lowercase SHA-256" >&2; exit 2 ;;
+esac
+ACTUAL_PYTHON_SHA256="$(sha256sum "$PYTHON" | awk '{print $1}')"
+if [ "$ACTUAL_PYTHON_SHA256" != "$EXPECTED_PYTHON_SHA256" ]; then
+  echo "python hash mismatch: expected $EXPECTED_PYTHON_SHA256, got $ACTUAL_PYTHON_SHA256" >&2
+  exit 2
+fi
+ACTUAL_PYTHON_VERSION="$("$PYTHON" --version 2>&1)"
+if [ "$ACTUAL_PYTHON_VERSION" != "$EXPECTED_PYTHON_VERSION" ]; then
+  echo "python version mismatch: expected $EXPECTED_PYTHON_VERSION, got $ACTUAL_PYTHON_VERSION" >&2
+  exit 2
+fi
+
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 CAMPAIGN_ROOT="${EUF_VIPER_TYPED_PARSER_ROOT:?set EUF_VIPER_TYPED_PARSER_ROOT}"
 EXPECTED_SOURCES="${EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES:-7503}"
@@ -87,31 +116,19 @@ mkdir -p "$CAMPAIGN_ROOT"
 printf '%s\n' "$ACTUAL_CARGO_VERSION" > "$CAMPAIGN_ROOT/cargo-version.txt"
 printf '%s  %s\n' "$ACTUAL_CARGO_SHA256" "$CARGO" \
   > "$CAMPAIGN_ROOT/cargo-sha256.txt"
+printf '%s\n' "$ACTUAL_PYTHON_VERSION" > "$CAMPAIGN_ROOT/python-version.txt"
+printf '%s  %s\n' "$ACTUAL_PYTHON_SHA256" "$PYTHON" \
+  > "$CAMPAIGN_ROOT/python-sha256.txt"
 "$CARGO" build --release --locked
 BINARY="$PWD/target/release/euf-viper"
 test -x "$BINARY"
-"$BINARY" parse-check tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2 \
+"$BINARY" parse-check - \
+  < tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2 \
   > "$CAMPAIGN_ROOT/preflight.json"
-python3 - "$CAMPAIGN_ROOT/preflight.json" <<'PY'
-import json
-import sys
-from pathlib import Path
+"$PYTHON" scripts/bench/typed_parser_parity.py validate-payload \
+  < "$CAMPAIGN_ROOT/preflight.json"
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
-if payload.get("schema") != "euf-viper.typed-parser-parity.v1":
-    raise SystemExit("typed parser preflight schema mismatch")
-required = {
-    "status": "match",
-    "tree_well_sorted": True,
-    "stream_well_sorted": True,
-    "fallback": False,
-}
-for key, expected in required.items():
-    if payload.get(key) != expected:
-        raise SystemExit(f"typed parser preflight failed: {key}={payload.get(key)!r}")
-PY
-
-python3 scripts/bench/typed_parser_parity.py prepare \
+"$PYTHON" scripts/bench/typed_parser_parity.py prepare \
   --manifest "$MANIFEST" \
   --repository-root "$PWD" \
   --binary "$BINARY" \
