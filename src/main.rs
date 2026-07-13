@@ -23,6 +23,7 @@ mod orbit_cover;
 mod quotient_csp;
 #[cfg(test)]
 mod quotient_state_search;
+mod smt2_stream;
 #[cfg(test)]
 mod stabilizer_order;
 
@@ -90,6 +91,14 @@ impl SymbolInterner {
         let id = self.ids.len() as SymId;
         self.ids.insert(text.to_owned(), id);
         id
+    }
+
+    fn ordered_names(&self) -> Vec<String> {
+        let mut names = vec![String::new(); self.ids.len()];
+        for (name, &symbol) in &self.ids {
+            names[symbol as usize] = name.clone();
+        }
+        names
     }
 }
 
@@ -380,6 +389,11 @@ impl ParseCtx {
             bool_problem,
             contradiction: self.contradiction,
         }
+    }
+
+    fn finish_with_symbol_names(self) -> (Problem, Vec<String>) {
+        let symbol_names = self.symbols.ordered_names();
+        (self.finish(), symbol_names)
     }
 
     fn add_unsupported(&mut self, msg: impl Into<String>) {
@@ -6708,6 +6722,21 @@ fn parse_problem_with_scoped_let_mode(
     input: &str,
     scoped_let_mode: ScopedLetMode,
 ) -> Result<Problem, String> {
+    parse_context_with_scoped_let_mode(input, scoped_let_mode).map(ParseCtx::finish)
+}
+
+fn parse_problem_with_scoped_let_mode_and_symbols(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<(Problem, Vec<String>), String> {
+    parse_context_with_scoped_let_mode(input, scoped_let_mode)
+        .map(ParseCtx::finish_with_symbol_names)
+}
+
+fn parse_context_with_scoped_let_mode(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<ParseCtx, String> {
     let bounded_let_count = bounded_lexical_let_count(input);
     let scoped_let_selected = scoped_let_selected(scoped_let_mode, bounded_let_count);
     profile_scoped_let(scoped_let_mode, bounded_let_count, scoped_let_selected);
@@ -6729,7 +6758,7 @@ fn parse_problem_with_scoped_let_mode(
     for sexp in &sexps {
         ctx.parse_command(sexp)?;
     }
-    Ok(ctx.finish())
+    Ok(ctx)
 }
 
 fn status_text(result: &SolveResult) -> &'static str {
@@ -6906,6 +6935,12 @@ fn stats_file(path: &str) -> Result<i32, String> {
         println!("bool_unsupported 0");
     }
     println!("contradiction {}", problem.contradiction);
+    Ok(0)
+}
+
+fn parse_check_file(path: &str) -> Result<i32, String> {
+    let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    smt2_stream::check_typed_parity(&input, selected_scoped_let_mode()?)?;
     Ok(0)
 }
 
@@ -7165,6 +7200,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
+  euf-viper parse-check FILE
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
   euf-viper gen diamond BRANCHES DEPTH
@@ -7179,6 +7215,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
+  euf-viper parse-check FILE
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
@@ -7212,6 +7249,13 @@ fn run() -> Result<i32, String> {
         "stats" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             stats_file(file)
+        }
+        "parse-check" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            if args.len() != 3 {
+                return Err("usage: euf-viper parse-check FILE".to_owned());
+            }
+            parse_check_file(file)
         }
         #[cfg(feature = "certificates")]
         "dump-eager-cnf" => {
