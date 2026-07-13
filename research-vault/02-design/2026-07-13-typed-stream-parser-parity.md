@@ -44,16 +44,24 @@ telemetry, not a speed result.
 
 1. `prepare` validates the exact 7,503-row source manifest, source bytes and
    SHA-256 hashes, exact Git revision, executable hash, tool hash, and a frozen
-   contiguous workset.
+   contiguous workset. It also records the fixed parser environment:
+   `EUF_VIPER_SCOPED_LET=auto`,
+   `EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024`, and an unset
+   `EUF_VIPER_PROFILE`.
 2. `run-shard` rechecks every source hash and invokes only `parse-check`.
    Tree rejection, mismatch, fallback, malformed output, timeout, and generic
-   errors remain separate record statuses.
+   errors remain separate record statuses. Every row records the same parser
+   environment, and execution fails before parsing if the ambient values drift.
 3. `audit` requires exactly 7,503 contiguous source-bound records and the count
    `{match: 7503, fallback: 0, mismatch: 0, error: 0}`. It writes merged records
-   and hashes every shard and aggregate input.
+   and hashes every shard and aggregate input. Ambient or row-level parser
+   environment drift is a hard audit error.
 
 The WMI prepare, array, and audit jobs form an `afterok` chain. Preparation
 builds the exact detached revision and runs a typed Bool-as-data preflight.
+All three jobs override inherited scoped-let and term-limit values and unset
+the profile before invoking the campaign tool; the submitter also pins these
+values explicitly despite retaining `--export=ALL` for unrelated job state.
 The submitter accepts only a clean revision published at
 `origin/research-typed-stream-parity`.
 

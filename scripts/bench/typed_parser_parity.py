@@ -23,10 +23,32 @@ AUDIT_SCHEMA = "euf-viper.typed-parser-parity-audit.v1"
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 REVISION_RE = re.compile(r"[0-9a-f]{40}")
 DIAGNOSTIC_LIMIT = 4096
+PARSER_ENVIRONMENT: dict[str, str | None] = {
+    "EUF_VIPER_SCOPED_LET": "auto",
+    "EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "1024",
+    "EUF_VIPER_PROFILE": None,
+}
 
 
 class CampaignError(ValueError):
     """Raised when an input or artifact violates the parity contract."""
+
+
+def validate_parser_environment() -> dict[str, str | None]:
+    for name, expected in PARSER_ENVIRONMENT.items():
+        if expected is None:
+            if name in os.environ:
+                raise CampaignError(
+                    f"parser environment drift: {name} must be unset"
+                )
+            continue
+        actual = os.environ.get(name)
+        if actual != expected:
+            raise CampaignError(
+                f"parser environment drift: {name} must be {expected!r}, "
+                f"got {actual!r}"
+            )
+    return dict(PARSER_ENVIRONMENT)
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -214,6 +236,7 @@ def load_manifest(manifest: Path, repository_root: Path) -> tuple[list[dict[str,
 
 
 def prepare_campaign(args: argparse.Namespace) -> None:
+    parser_environment = validate_parser_environment()
     revision = require_revision(args.revision)
     repository_root = args.repository_root.resolve(strict=True)
     manifest = args.manifest.resolve(strict=True)
@@ -244,6 +267,7 @@ def prepare_campaign(args: argparse.Namespace) -> None:
         "source_count": len(rows),
         "shard_count": args.shards,
         "timeout_seconds": args.timeout_seconds,
+        "parser_environment": parser_environment,
         "manifest": {"path": str(manifest), "sha256": sha256_bytes(manifest_bytes)},
         "binary": {"path": str(binary), "sha256": sha256_file(binary)},
         "tool": {"path": str(tool), "sha256": sha256_file(tool)},
@@ -280,10 +304,13 @@ def load_jsonl(path: Path, *, schema: str) -> list[dict[str, Any]]:
 
 
 def load_prepared(root: Path, revision: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    parser_environment = validate_parser_environment()
     revision = require_revision(revision)
     prepare = load_object(root / "prepare.json", schema=PREPARE_SCHEMA)
     if prepare.get("revision") != revision:
         raise CampaignError("prepare revision does not match executing revision")
+    if prepare.get("parser_environment") != parser_environment:
+        raise CampaignError("prepared parser environment contract mismatch")
     for artifact in ("manifest", "binary", "tool", "workset"):
         value = prepare.get(artifact)
         if not isinstance(value, dict):
@@ -397,6 +424,7 @@ def run_shard(args: argparse.Namespace) -> None:
                 "sequence": sequence,
                 "shard": args.shard,
                 "revision": prepare["revision"],
+                "parser_environment": prepare["parser_environment"],
                 "relative_path": work["relative_path"],
                 "source_sha256": work["source_sha256"],
                 "status": status,
@@ -433,6 +461,8 @@ def audit_campaign(args: argparse.Namespace) -> bool:
         for row in rows:
             if row.get("shard") != shard or row.get("revision") != prepare["revision"]:
                 raise CampaignError(f"shard {shard}: row provenance mismatch")
+            if row.get("parser_environment") != prepare["parser_environment"]:
+                raise CampaignError(f"shard {shard}: parser environment drift")
             records.append(row)
     records.sort(key=lambda row: row.get("sequence", -1))
     if [row.get("sequence") for row in records] != list(range(expected_sources)):
@@ -471,6 +501,7 @@ def audit_campaign(args: argparse.Namespace) -> bool:
         "revision": prepare["revision"],
         "source_count": len(records),
         "expected_sources": expected_sources,
+        "parser_environment": prepare["parser_environment"],
         "counts": counts,
         "gate": {
             "all_tree_parses_succeeded": counts["error"] == 0,

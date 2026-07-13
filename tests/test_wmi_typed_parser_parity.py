@@ -39,6 +39,16 @@ class TypedParserParityWmiTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_TYPED_PARSER_EXPECTED_SOURCES", text)
         self.assertNotIn("EUF_VIPER_PARSER_MODE", text)
 
+    def test_all_stages_sanitize_ambient_parser_configuration(self) -> None:
+        for script in (PREPARE, ARRAY, AUDIT):
+            text = script.read_text(encoding="utf-8")
+            with self.subTest(script=script.name):
+                self.assertIn("export EUF_VIPER_SCOPED_LET=auto", text)
+                self.assertIn(
+                    "export EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024", text
+                )
+                self.assertIn("unset EUF_VIPER_PROFILE", text)
+
     def test_array_is_parse_only_and_writes_one_owned_shard(self) -> None:
         text = ARRAY.read_text(encoding="utf-8")
         self.assertIn("SLURM_ARRAY_TASK_ID", text)
@@ -66,6 +76,15 @@ class TypedParserParityWmiTests(unittest.TestCase):
         self.assertIn("--array=0-$LAST_SHARD%$MAX_PARALLEL", text)
         self.assertIn("typed-parser-parity-submission-$PREPARE_JOB.json", text)
         self.assertIn('"expected_sources": int("$EXPECTED_SOURCES")', text)
+        self.assertEqual(
+            text.count(
+                "--export=ALL,EUF_VIPER_SCOPED_LET=auto,"
+                "EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024"
+            ),
+            3,
+        )
+        self.assertEqual(text.count("unset EUF_VIPER_PROFILE && sbatch"), 3)
+        self.assertIn('"EUF_VIPER_PROFILE": None', text)
 
 
 if __name__ == "__main__":

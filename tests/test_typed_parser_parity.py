@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,9 +20,16 @@ SPEC.loader.exec_module(PARITY)
 
 FAKE_BINARY = """#!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
 
+if os.environ.get("EUF_VIPER_SCOPED_LET") != "auto":
+    raise SystemExit("scoped-let parser environment drift")
+if os.environ.get("EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT") != "1024":
+    raise SystemExit("preprocess-limit parser environment drift")
+if "EUF_VIPER_PROFILE" in os.environ:
+    raise SystemExit("profile parser environment drift")
 source = Path(sys.argv[-1]).read_text(encoding="utf-8")
 if "MISMATCH" in source:
     print("typed parser semantic mismatch", file=sys.stderr)
@@ -92,6 +101,19 @@ class TypedParserParityFixture:
 
 
 class TypedParserParityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        environment = patch.dict(
+            os.environ,
+            {
+                "EUF_VIPER_SCOPED_LET": "auto",
+                "EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "1024",
+            },
+            clear=False,
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("EUF_VIPER_PROFILE", None)
+
     def test_complete_campaign_passes_and_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = TypedParserParityFixture(
@@ -119,11 +141,122 @@ class TypedParserParityTests(unittest.TestCase):
                 )
             )
             audit = json.loads((first / "audit.json").read_text(encoding="ascii"))
+            prepare = json.loads(
+                (first / "prepare.json").read_text(encoding="ascii")
+            )
+            records = [
+                json.loads(line)
+                for line in (first / "records.jsonl")
+                .read_text(encoding="ascii")
+                .splitlines()
+            ]
+            self.assertEqual(prepare["parser_environment"], PARITY.PARSER_ENVIRONMENT)
+            self.assertEqual(audit["parser_environment"], PARITY.PARSER_ENVIRONMENT)
+            self.assertTrue(
+                all(
+                    record["parser_environment"] == PARITY.PARSER_ENVIRONMENT
+                    for record in records
+                )
+            )
             self.assertEqual(
                 audit["counts"],
                 {"match": 3, "fallback": 0, "mismatch": 0, "error": 0},
             )
             self.assertTrue(audit["gate"]["passed"])
+
+    def test_prepare_rejects_ambient_parser_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            cases = (
+                ({"EUF_VIPER_SCOPED_LET": "legacy"}, "SCOPED_LET"),
+                (
+                    {"EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "4096"},
+                    "PREPROCESS_TERM_LIMIT",
+                ),
+                ({"EUF_VIPER_PROFILE": ""}, "PROFILE"),
+            )
+            for index, (override, diagnostic) in enumerate(cases):
+                with self.subTest(override=override), patch.dict(
+                    os.environ, override, clear=False
+                ):
+                    with self.assertRaisesRegex(
+                        PARITY.CampaignError, diagnostic
+                    ):
+                        fixture.prepare(output=fixture.root / f"rejected-{index}")
+
+    def test_shard_and_audit_reject_ambient_parser_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            fixture.prepare()
+            with patch.dict(
+                os.environ, {"EUF_VIPER_SCOPED_LET": "legacy"}, clear=False
+            ), self.assertRaisesRegex(PARITY.CampaignError, "SCOPED_LET"):
+                PARITY.run_shard(
+                    Namespace(root=fixture.output, revision=fixture.revision, shard=0)
+                )
+
+            fixture.run_all_shards()
+            with patch.dict(
+                os.environ,
+                {"EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "4096"},
+                clear=False,
+            ), self.assertRaisesRegex(PARITY.CampaignError, "PREPROCESS_TERM_LIMIT"):
+                PARITY.audit_campaign(
+                    Namespace(
+                        root=fixture.output,
+                        revision=fixture.revision,
+                        expected_sources=1,
+                    )
+                )
+
+    def test_prepared_parser_environment_tampering_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            fixture.prepare()
+            path = fixture.output / "prepare.json"
+            payload = json.loads(path.read_text(encoding="ascii"))
+            payload["parser_environment"]["EUF_VIPER_SCOPED_LET"] = "legacy"
+            path.write_text(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(
+                PARITY.CampaignError, "environment contract mismatch"
+            ):
+                PARITY.run_shard(
+                    Namespace(root=fixture.output, revision=fixture.revision, shard=0)
+                )
+
+    def test_shard_parser_environment_tampering_fails_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = TypedParserParityFixture(
+                temporary, ["(set-logic QF_UF) (assert true)\n"]
+            )
+            fixture.prepare()
+            fixture.run_all_shards()
+            path = fixture.output / "shards" / "shard-00000.jsonl"
+            record = json.loads(path.read_text(encoding="ascii"))
+            record["parser_environment"]["EUF_VIPER_PROFILE"] = "ambient"
+            path.write_text(
+                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="ascii",
+            )
+            with self.assertRaisesRegex(
+                PARITY.CampaignError, "parser environment drift"
+            ):
+                PARITY.audit_campaign(
+                    Namespace(
+                        root=fixture.output,
+                        revision=fixture.revision,
+                        expected_sources=1,
+                    )
+                )
 
     def test_fallback_is_recorded_and_rejects_audit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
