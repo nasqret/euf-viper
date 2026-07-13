@@ -2,8 +2,8 @@
 #SBATCH --job-name=euf-parser-prepare
 #SBATCH --partition=cpu_idle
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
 #SBATCH --time=00:30:00
 #SBATCH --output=results/typed-parser-prepare-%j.out
 #SBATCH --error=results/typed-parser-prepare-%j.err
@@ -14,7 +14,7 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 export LANG=C
 export LC_ALL=C
 export TZ=UTC
-export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-4}"
+export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-1}"
 
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 CAMPAIGN_ROOT="${EUF_VIPER_TYPED_PARSER_ROOT:?set EUF_VIPER_TYPED_PARSER_ROOT}"

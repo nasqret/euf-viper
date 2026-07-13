@@ -21,6 +21,8 @@ class TypedParserParityWmiTests(unittest.TestCase):
     def test_prepare_binds_exact_revision_binary_manifest_and_preflight(self) -> None:
         text = PREPARE.read_text(encoding="utf-8")
         self.assertIn("EUF_VIPER_EXPECTED_REVISION", text)
+        self.assertIn("#SBATCH --cpus-per-task=1", text)
+        self.assertIn("#SBATCH --mem=8G", text)
         self.assertIn("git status --porcelain=v1 --untracked-files=no", text)
         self.assertIn("cargo build --release --locked", text)
         self.assertIn("parse-check", text)
