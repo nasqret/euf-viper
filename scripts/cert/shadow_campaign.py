@@ -316,7 +316,7 @@ def derive_work_records(
     *,
     corpus_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Select correct decisive candidate rows and freeze one work item per instance."""
+    """Select decisive candidate rows and reject any wrong candidate claim."""
 
     lock = campaign["lock"]
     solver = _candidate_solver(lock)
@@ -330,10 +330,14 @@ def derive_work_records(
             raise ShadowError(
                 f"validated observation solver hash drift for {relative_path!r}"
             )
-        if (
-            observation["result"] in DECISIVE_RESULTS
-            and observation["result"] == observation["expected_status"]
-        ):
+        if observation["result"] in DECISIVE_RESULTS:
+            if observation["result"] != observation["expected_status"]:
+                raise ShadowError(
+                    "wrong decisive euf-viper observation: "
+                    f"{relative_path!r} at budget {budget_s} claimed "
+                    f"{observation['result']!r}, expected "
+                    f"{observation['expected_status']!r}"
+                )
             candidate_budgets[relative_path].append(float(budget_s))
     selected: list[tuple[Mapping[str, Any], list[float], Path]] = []
 

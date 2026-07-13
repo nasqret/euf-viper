@@ -432,7 +432,7 @@ class CampaignFixture:
 
 
 class SelectionAndPartitionTests(unittest.TestCase):
-    def test_selects_only_decisive_correct_euf_viper_instances(self) -> None:
+    def test_selects_decisive_correct_euf_viper_instances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = CampaignFixture(Path(temporary))
             fixture.add_instance("alpha/a.smt2", expected="sat")
@@ -456,6 +456,23 @@ class SelectionAndPartitionTests(unittest.TestCase):
             self.assertTrue(
                 all(SHADOW._is_sha256(work["work_sha256"]) for work in works)
             )
+
+    def test_wrong_decisive_candidate_result_rejects_the_workset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("family/wrong.smt2", expected="sat")
+            lock_path, raw_path = fixture.finalize()
+
+            campaign = SHADOW.load_validated_campaign(lock_path, raw_path)
+            candidate_key = next(
+                key for key in campaign["observations"] if key[2] == "euf-viper"
+            )
+            campaign["observations"][candidate_key]["result"] = "unsat"
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError,
+                "wrong decisive euf-viper observation.*claimed 'unsat'.*expected 'sat'",
+            ):
+                SHADOW.derive_work_records(campaign, lock_path)
 
     def test_independent_parser_canary_validates_and_hashes_the_complete_workset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
