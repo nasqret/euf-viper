@@ -220,6 +220,7 @@ for (relative_path, _budget_s, solver_id), observation in campaign[
         global_selected.add(relative_path)
 selected_union = set()
 selection_records = []
+selected_works = []
 shard_records = []
 selected_results = collections.Counter()
 for provenance in campaign["shards"]:
@@ -230,6 +231,7 @@ for provenance in campaign["shards"]:
     works = shadow.derive_work_records(
         child, lock_path, corpus_root=corpus_root
     )
+    selected_works.extend(works)
     child_candidate = shadow._candidate_solver(child["lock"])
     if child_candidate["sha256"] != candidate["sha256"]:
         raise RuntimeError(f"candidate solver hash differs in base shard {index}")
@@ -283,6 +285,9 @@ if [item["index"] for item in shard_records] != list(range(shard_count)):
     raise RuntimeError("base shard indices are not the exact contiguous array")
 
 selection_records.sort(key=lambda item: item["relative_path"])
+parser_canary = shadow.validate_independent_parser_workset(selected_works)
+if parser_canary["selected_instances"] != len(selection_records):
+    raise RuntimeError("independent parser canary selection cardinality mismatch")
 payload = {
     "schema_version": 1,
     "status": "validated",
@@ -318,9 +323,11 @@ payload = {
             shadow.canonical_bytes(selection_records)
         ),
     },
+    "parser_canary": parser_canary,
 }
 shadow._atomic_write(output, shadow.canonical_bytes(payload))
 print(f"validated_base_bundle={campaign['shard_bundle_sha256']}")
 print(f"selected_instances={len(selection_records)}")
+print(f"parser_canary_sha256={parser_canary['workset_sha256']}")
 print(f"prepare_manifest={output}")
 PY_PREPARE

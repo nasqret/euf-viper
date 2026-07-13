@@ -37,6 +37,7 @@ from typing import Any, Mapping, Sequence
 ROOT = Path(__file__).resolve().parents[2]
 ANALYZER_PATH = ROOT / "scripts" / "bench" / "analyze_campaign.py"
 DEFAULT_CHECKER = ROOT / "scripts" / "cert" / "check_certificate.py"
+INDEPENDENT_PARSER_PATH = ROOT / "scripts" / "cert" / "independent_qfuf.py"
 
 SCHEMA_VERSION = 1
 DECISIVE_RESULTS = {"sat", "unsat"}
@@ -226,15 +227,26 @@ def _require_exact_keys(
     return value
 
 
-def _load_analyzer() -> ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "shadow_campaign_analyze_campaign", ANALYZER_PATH
-    )
+def _load_module(name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise ShadowError(f"cannot import strict campaign validator {ANALYZER_PATH}")
+        raise ShadowError(f"cannot import campaign dependency {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        raise
     return module
+
+
+def _load_analyzer() -> ModuleType:
+    return _load_module("shadow_campaign_analyze_campaign", ANALYZER_PATH)
 
 
 def load_validated_campaign(lock_path: Path, raw_path: Path) -> dict[str, Any]:
@@ -364,6 +376,88 @@ def derive_work_records(
         work["work_sha256"] = _work_digest(work)
         works.append(work)
     return works
+
+
+def validate_independent_parser_workset(
+    works: Sequence[Mapping[str, Any]],
+    parser_path: Path = INDEPENDENT_PARSER_PATH,
+) -> dict[str, Any]:
+    """Parse every selected source before a certificate array is released."""
+
+    try:
+        parser_path = parser_path.expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ShadowError(f"cannot resolve independent parser: {error}") from error
+    if not parser_path.is_file():
+        raise ShadowError(f"independent parser is not a file: {parser_path}")
+    parser = _load_module("certificate_shadow_independent_qfuf_canary", parser_path)
+    parser_hash = sha256_file(parser_path)
+    records: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for index, work in enumerate(works):
+        relative_path = work.get("relative_path")
+        source_path = work.get("source_path")
+        expected_hash = work.get("source_sha256")
+        if type(relative_path) is not str or not relative_path:
+            raise ShadowError(f"parser canary work {index} has an invalid relative path")
+        if relative_path in seen_paths:
+            raise ShadowError(f"parser canary workset repeats {relative_path!r}")
+        seen_paths.add(relative_path)
+        if type(source_path) is not str or not source_path:
+            raise ShadowError(
+                f"parser canary work {relative_path!r} has no source path"
+            )
+        if type(expected_hash) is not str or not _is_sha256(expected_hash):
+            raise ShadowError(
+                f"parser canary work {relative_path!r} has an invalid source hash"
+            )
+        try:
+            source = Path(source_path).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ShadowError(
+                f"cannot resolve parser canary source {relative_path!r}: {error}"
+            ) from error
+        if not source.is_file():
+            raise ShadowError(f"parser canary source is not a file: {source}")
+        if sha256_file(source) != expected_hash:
+            raise ShadowError(f"parser canary source SHA-256 mismatch for {relative_path!r}")
+        try:
+            source_text = source.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ShadowError(
+                f"independent parser canary rejected {relative_path!r}: "
+                f"source is not UTF-8: {error}"
+            ) from error
+        try:
+            problem = parser.parse_and_encode(source_text)
+        except parser.IndependentQfufError as error:
+            raise ShadowError(
+                f"independent parser canary rejected {relative_path!r}: {error}"
+            ) from error
+        records.append(
+            {
+                "relative_path": relative_path,
+                "source_sha256": expected_hash,
+                "terms": len(problem.terms),
+                "atoms": len(problem.atoms),
+                "base_clauses": len(problem.clauses),
+                "bool_data_terms": len(problem.bool_data_terms),
+            }
+        )
+    records.sort(key=lambda record: record["relative_path"])
+    return {
+        "schema_version": 1,
+        "status": "validated",
+        "parser": {"path": str(parser_path), "sha256": parser_hash},
+        "selected_instances": len(records),
+        "workset_sha256": sha256_bytes(canonical_bytes(records)),
+        "totals": {
+            "terms": sum(record["terms"] for record in records),
+            "atoms": sum(record["atoms"] for record in records),
+            "base_clauses": sum(record["base_clauses"] for record in records),
+            "bool_data_terms": sum(record["bool_data_terms"] for record in records),
+        },
+    }
 
 
 def validate_work_record(work: object, context: str = "work record") -> dict[str, Any]:

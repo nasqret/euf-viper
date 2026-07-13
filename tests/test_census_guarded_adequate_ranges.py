@@ -363,6 +363,46 @@ class FailClosedAndDeterminismTests(unittest.TestCase):
             aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
             self.assertIn(aggregate["hashes"]["records_jsonl_sha256"], completed.stdout)
 
+    def test_cli_parse_error_budget_fails_closed_after_writing_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CensusFixture(root)
+            fixture.add("malformed", "(set-logic QF_UF) (assert (or")
+            manifest = fixture.manifest()
+            records_path = root / "records.jsonl"
+            aggregate_path = root / "aggregate.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    str(manifest),
+                    "--repository-root",
+                    str(root),
+                    "--records-out",
+                    str(records_path),
+                    "--aggregate-out",
+                    str(aggregate_path),
+                    "--max-structured-parse-errors",
+                    "0",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn(
+                "structured parse errors 1 exceed the allowed maximum 0",
+                completed.stderr,
+            )
+            self.assertTrue(records_path.is_file())
+            aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                aggregate["sources"]["ineligibility_reasons"],
+                {"structured_parse_error": 1},
+            )
+
     def test_source_fact_and_hall_caps_abstain_explicitly(self) -> None:
         source = query(guarded_pressure_body())
         with tempfile.TemporaryDirectory() as temporary:

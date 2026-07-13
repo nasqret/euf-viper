@@ -5,12 +5,19 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REMOTE_HOST="${EUF_VIPER_WMI_HOST:-wmicluster}"
 REMOTE_PARENT="${EUF_VIPER_WMI_CAMPAIGN_ROOT:-}"
 DEPENDENCY="${EUF_VIPER_RANGE_CENSUS_DEPENDENCY:-}"
+EXPECTED_SOURCES="${EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES:-7503}"
 
 if [ -n "$DEPENDENCY" ]; then
   case "$DEPENDENCY" in
     *[!0-9]*) echo "dependency must be a numeric SLURM job id" >&2; exit 2 ;;
   esac
 fi
+case "$EXPECTED_SOURCES" in
+  ''|0|0*|*[!0-9]*)
+    echo "expected source count must be a canonical positive integer" >&2
+    exit 2
+    ;;
+esac
 
 cd "$ROOT"
 if [ -z "$REMOTE_PARENT" ]; then
@@ -36,7 +43,7 @@ SBATCH_ARGS=(--parsable)
 if [ -n "$DEPENDENCY" ]; then
   SBATCH_ARGS+=(--dependency="afterok:$DEPENDENCY")
 fi
-SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${SBATCH_ARGS[*]} --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION' scripts/wmi/euf_viper_guarded_range_census.sbatch")"
+SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${SBATCH_ARGS[*]} --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_guarded_range_census.sbatch")"
 JOB_ID="${SUBMISSION%%;*}"
 case "$JOB_ID" in
   *[!0-9]*|'') echo "invalid census job id: $SUBMISSION" >&2; exit 2 ;;
@@ -56,6 +63,7 @@ payload = {
     "remote_host": "$REMOTE_HOST",
     "remote_worktree": "$REMOTE_WORK",
     "dependency": "$DEPENDENCY" or None,
+    "expected_sources": int("$EXPECTED_SOURCES"),
     "job_id": "$JOB_ID",
 }
 temporary = path.with_name(f".{path.name}.tmp")

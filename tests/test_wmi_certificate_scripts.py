@@ -76,6 +76,9 @@ class WmiCertificateScriptTests(unittest.TestCase):
         self.assertIn('"scope": "single_physical_stage_certificate_coverage_only"', text)
         self.assertIn("checker SHA-256 mismatch", text)
         self.assertIn("drat-trim SHA-256 mismatch", text)
+        self.assertIn("validate_independent_parser_workset", text)
+        self.assertIn('"parser_canary": parser_canary', text)
+        self.assertIn("independent parser canary selection cardinality mismatch", text)
 
     def test_array_uses_runner_and_auditor_layout_for_every_source_shard(self) -> None:
         text = self.text(WMI / "euf_viper_certificate_shard.sbatch")
@@ -112,6 +115,16 @@ class WmiCertificateScriptTests(unittest.TestCase):
         self.assertGreaterEqual(text.count("afterok:"), 3)
         self.assertNotIn("afterany:", text)
         self.assertIn("abort_partial_chain", text)
+        self.assertIn("submission receipt already exists for run ID", text)
+        self.assertIn("test ! -e '$RUN_ROOT'", text)
+        self.assertIn('write_receipt "submission_intent"', text)
+        self.assertIn('write_receipt "submitting"', text)
+        self.assertIn('write_receipt "submitted"', text)
+        self.assertIn('"submission_state_may_be_incomplete"', text)
+        self.assertLess(
+            text.index('write_receipt "submission_intent"'),
+            text.index('PREPARE_SUBMISSION="'),
+        )
         self.assertIn('"scope": "single_physical_stage_certificate_coverage_only"', text)
         self.assertIn('"performance_claims": []', text)
 
