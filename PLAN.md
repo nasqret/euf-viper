@@ -220,7 +220,7 @@ independent evidence checks, and a frozen family holdout.
 
 ### T1: Typed IR And Staged Formula Machine
 
-- [ ] Port only the useful streaming lexer/collector from old untyped checkpoint
+- [x] Port only the useful streaming lexer/collector from old untyped checkpoint
   `58f015b` onto current typed main. Keep the tree parser authoritative and run
   exact opened-byte semantic-snapshot parity over all 7,503 files, including
   every sort, function signature, term sort, application, assertion,
@@ -237,8 +237,14 @@ independent evidence checks, and a frozen family holdout.
   matches and zero other statuses, but independent review rejected its evidence
   boundary: the verified parser executable was reopened by path, Python was
   pinned as an alias rather than a realpath, and `NaN` passed shard JSON audit.
-  Another descriptor-execution/strict-JSON repair and fresh full chain are
-  active; neither historical chain authorizes integration or timing.
+  Final revision `e77846d` executes the no-follow-opened binary through its
+  inherited descriptor, pins canonical Python identity, and strictly rejects
+  ambiguous or non-finite JSON. Fresh chain `146510`/`146511`/`146512` plus
+  independent reconstruction `146652` produced 7,503 matches and zero fallback,
+  mismatch, error, or other status. Independent review reproduced all rows and
+  hashes and is GO for parity-only integration, now on main at `84b4c8e`.
+  Ninety-eight matching rows contain 4,851 unsupported diagnostics, so this is
+  not parser-completeness, timing, or solver evidence.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
   1%; otherwise stop T1.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at

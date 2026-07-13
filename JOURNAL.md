@@ -1216,6 +1216,14 @@
   published; and a failed same-job rerun left the old completed archive visible.
   No WMI census was submitted. Exact Git-blob verification, fd-bound publication,
   and attempt-scoped current markers are active repairs.
+- T1 revision `e77846d` completed WMI `146510`/`146511`/`146512` and independent
+  reconstruction `146652`. All 128 shards completed; both reconstructions report
+  7,503 matches and zero fallback, mismatch, error, or other status. Independent
+  review confirmed descriptor-bound execution, canonical Python identity,
+  strict JSON, all source and artifact hashes, and public/remote revision
+  equality. T1 parity machinery is integrated on main at `84b4c8e` with hosted
+  tests. The result authorizes parity only: 98 matching rows carry 4,851
+  unsupported diagnostics, and no timing or parser-completeness claim exists.
 
 ## Next Entry Template
 

@@ -187,19 +187,15 @@ No representation enters the solver merely because it is unusual.
    reduce projected CNF by at least 25% on 8/10 frozen hard cases and beat both
    generic controls by at least five percentage points.
 
-T1 typed-parser parity is isolated on `research-typed-stream-parity`; its first
-prepare failed before testing because WMI did not resolve bare `cargo`. Final
-revision `8952dcb` raises a tested fail-closed nesting cap above the measured
-corpus maximum and pins Cargo plus parser semantics. WMI chain
-`146214`/`146215`/`146216` completed with all 7,503 snapshots matching and zero
-fallback, mismatch, or error. This is under independent adversarial review and
-permits only the next timing gate. A same-source-byte repair at `7214d63` also
-completed fresh chain `146374`/`146375`/`146376` with 7,503 matches and zero
-other statuses, but review rejected its remaining evidence boundary: the
-parser executable was hashed then reopened by path, Python was bound as an
-alias rather than its realpath, and non-finite shard JSON passed audit. A
-descriptor-bound execution and strict-JSON repair is active; neither chain
-currently permits timing or integration.
+T1 typed-parser parity is complete. Final revision `e77846d` executes the
+no-follow-opened parser binary through its inherited descriptor, pins canonical
+Python identity, and strictly rejects ambiguous or non-finite JSON. WMI chain
+`146510`/`146511`/`146512` plus independent reconstruction `146652` covered all
+7,503 sources with zero fallback, mismatch, error, or other status. A separate
+review reconstructed every row and artifact hash and approved parity-only
+integration, now on main at `84b4c8e`. This does not authorize timing or parser
+completeness: 98 matching rows contain 4,851 unsupported diagnostics, and the
+production tree-parser solve path is unchanged.
 
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,

@@ -1,0 +1,55 @@
+{
+  "schema": "euf-viper.typed-parser-parity-decision.v1",
+  "status": "accepted_for_parser_parity_only",
+  "research_revision": "e77846df010ff777a3dd50d510d0a89cff10f1e6",
+  "main_integration_commit": "84b4c8e",
+  "jobs": {
+    "prepare": 146510,
+    "array": 146511,
+    "audit": 146512,
+    "independent_reconstruction": 146652
+  },
+  "counts": {
+    "sources": 7503,
+    "shards": 128,
+    "match": 7503,
+    "fallback": 0,
+    "mismatch": 0,
+    "error": 0,
+    "other": 0,
+    "source_bytes": 988035549
+  },
+  "identities": {
+    "binary_execution": "inherited-descriptor.v1",
+    "binary_sha256": "001df316c18d86efce4f81b20a640daa334177dbd0effcf944734999e32e46e2",
+    "python_path": "/usr/bin/python3.10",
+    "python_version": "Python 3.10.12",
+    "python_sha256": "d6bca2b84e73c7775a0dd5e6a76899cfe4ee62863d7c8f88513811d1fda23f49"
+  },
+  "remote_artifacts": {
+    "manifest_sha256": "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4",
+    "prepare_sha256": "a65a05ed35f4b24670d56cb4eb88ee829523d296482c1efd6ab5a463ca0e5f66",
+    "workset_sha256": "35127766939028747b170b2dc26ca74b78a89c39833c37cd6961146b09cbb7a3",
+    "preflight_sha256": "c11620a10198e98c9ecc0570038171b56a13c88c884e61cc69de37c73c680ce0",
+    "records_sha256": "9b40c47167bc7f6adc45004469d76fc06ca25c7e56b5f592c74b5b4dfa4d720d",
+    "audit_sha256": "7724a375a4f62d0862aa38230ed008ee877118298dd1ceaecfda76eb58af7b92",
+    "shard_set_sha256": "113bc4fe55e6023dab5d0500f1f66c112c6edbbfab2a24965df063404f6f48f9",
+    "independent_sha256": "61d3a50d57683b126cfe20bc581f1e57b033b6f9bdd9b0bd943cfce2f3295596"
+  },
+  "local_artifacts": {
+    "audit_json_sha256": "7724a375a4f62d0862aa38230ed008ee877118298dd1ceaecfda76eb58af7b92",
+    "prepare_json_sha256": "a65a05ed35f4b24670d56cb4eb88ee829523d296482c1efd6ab5a463ca0e5f66",
+    "preflight_json_sha256": "c11620a10198e98c9ecc0570038171b56a13c88c884e61cc69de37c73c680ce0",
+    "independent_json_sha256": "61d3a50d57683b126cfe20bc581f1e57b033b6f9bdd9b0bd943cfce2f3295596",
+    "submission_json_sha256": "e395b077eafebf5b54254e55f2c97d264fc11f2ae248c1d43949f5e77576533f"
+  },
+  "scope": {
+    "unsupported_diagnostic_rows": 98,
+    "unsupported_diagnostics": 4851,
+    "parser_completeness_claim": false,
+    "solver_result_claim": false,
+    "performance_claim": false,
+    "production_tree_parser_changed": false
+  },
+  "independent_review": "go_for_parity_only"
+}

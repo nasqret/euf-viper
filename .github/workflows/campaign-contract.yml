@@ -34,6 +34,9 @@ jobs:
             tests.test_validate_campaign_spec \
             tests.test_validate_t3_m0_contract \
             tests.test_validate_t8_scalar_contract \
+            tests.test_typed_parser_parity \
+            tests.test_wmi_typed_parser_parity \
+            tests.test_t1_parity_receipt \
             tests.test_ingest_smtcomp_2025_qf_uf \
             tests.test_record_solver_config \
             tests.test_freeze_campaign \
@@ -68,5 +71,9 @@ jobs:
           bash -n scripts/wmi/submit_certificate_shadow.sh
           bash -n scripts/wmi/euf_viper_certificate_staged_audit.sbatch
           bash -n scripts/wmi/submit_staged_certificate_audit.sh
+          bash -n scripts/wmi/euf_viper_typed_parser_parity_prepare.sbatch
+          bash -n scripts/wmi/euf_viper_typed_parser_parity_array.sbatch
+          bash -n scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch
+          bash -n scripts/wmi/submit_typed_parser_parity.sh
       - name: Test Rust solver
         run: cargo test --all-features

@@ -1,0 +1,35 @@
+{
+  "array_job": "146511",
+  "audit_job": "146512",
+  "byte_binding": "single-open-buffer.v1",
+  "campaign_root": "/home/bnaskrecki/euf-viper-parser-parity-campaigns/e77846df010f/results/typed-parser-parity-20260713T221314Z-66099",
+  "cargo": {
+    "path": "/home/bnaskrecki/.cargo/bin/cargo",
+    "sha256": "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10",
+    "version": "cargo 1.93.0 (083ac5135 2025-12-15)"
+  },
+  "dependency": null,
+  "executable_binding": "inherited-descriptor.v1",
+  "expected_sources": 7503,
+  "max_parallel": 32,
+  "parser_environment": {
+    "EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "1024",
+    "EUF_VIPER_PROFILE": null,
+    "EUF_VIPER_SCOPED_LET": "auto"
+  },
+  "partition": "cpu_idle",
+  "prepare_job": "146510",
+  "published_ref": "origin/research-typed-stream-parity",
+  "python": {
+    "path": "/usr/bin/python3.10",
+    "sha256": "d6bca2b84e73c7775a0dd5e6a76899cfe4ee62863d7c8f88513811d1fda23f49",
+    "version": "Python 3.10.12"
+  },
+  "remote_host": "wmicluster",
+  "remote_worktree": "/home/bnaskrecki/euf-viper-parser-parity-campaigns/e77846df010f",
+  "revision": "e77846df010ff777a3dd50d510d0a89cff10f1e6",
+  "schema": "euf-viper.typed-parser-parity-submission.v3",
+  "shards": 128,
+  "status": "submitted",
+  "timeout_seconds": 60
+}
