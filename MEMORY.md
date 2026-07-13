@@ -800,3 +800,12 @@
   `7.6029x`/`9.0741x`/`7.3178x`. Anti-target p95 overhead
   `11.1689x`/`32.7545x`/`23.3462x` fails the `1.10x` cap. Never promote
   whole-instance rollback; use its frozen split only for M0 telemetry.
+- T3 M0 is preregistered in `campaigns/t3-m0-component-pressure-v1.json`.
+  The 24-source rollback panel is family-confounded and its coverage-aware
+  PAR-2 oracle headroom is only `3.74%`, so it cannot train or authorize a
+  selector. S0 is representation-neutral typed/base-CNF telemetry; S1 is an
+  identical bounded eager shadow prefix. Runtime features exclude path, family,
+  lineage, names, hashes, expected/final result, final runtime, winner, and
+  post-checkpoint events. Require two eligible fixed arms, headroom LCB at least
+  `10%`, balanced-accuracy LCB at least `0.80`, telemetry p95 ratio UCB below
+  `1.01`, and byte-identical off/on traces before migration.

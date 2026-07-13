@@ -380,6 +380,19 @@ Do not compose two candidates in P2. Attribution must remain exact.
   family-disjoint held-out balanced accuracy at least `0.80` with p95 overhead
   below `1%`. Stop before migration if fewer than two fixed representations
   survive or their oracle headroom is below `10%`.
+  - [x] Preregister S0/S1 checkpoints, semantic feature allowlists, forbidden
+    leakage fields, Williams labels, duplicate-closure splits, depth-four tree,
+    coverage-aware PAR-2 headroom, and confidence gates in
+    `campaigns/t3-m0-component-pressure-v1.json`.
+  - [x] Reject the 24-source rollback panel as selector training evidence: its
+    target/control split is perfectly family-confounded and its coverage-aware
+    oracle headroom is only `3.74%` (`223.453 / 215.403 - 1`). Preserve it only
+    for schema and label-pipeline tests.
+  - [ ] Collect all-source S0 features only after reviewed T1 integration;
+    freeze family/lineage/raw-plus-normalized-duplicate closure before labels.
+  - [ ] Run the four-arm label panel only after at least two arms become
+    migration-eligible; require the 95% cluster-bootstrap lower bound on
+    headroom at least `10%` before training or implementing migration.
 - [ ] M1: implement one-way eager-to-rollback migration with byte-identical
   behavior when no migration occurs.
 - [ ] M2: add finite-to-PB/CQRAM migration only after M1 passes.
@@ -466,7 +479,9 @@ fallback can be an operational portfolio but never a standalone victory.
    submission; run T6 `146075`; implement only mechanisms that pass their
    frozen construction thresholds.
 8. If at least two fixed representations survive with 10% oracle headroom, run
-   T3 M0 component-pressure telemetry. Otherwise stop migration and test the
+   T3 M0 component-pressure telemetry under the frozen S0/S1 contract. The
+   current family-confounded 24-source panel has only 3.74% coverage-aware
+   headroom and cannot authorize it. Otherwise stop migration and test the
    scalar source-exact T8 qg7 frontier census before any SIMD work.
 9. Select and compose a novel architecture only from independently checked,
    broad paired wins; then rerun P4/P5 on two CPU classes.

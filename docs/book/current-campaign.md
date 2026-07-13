@@ -198,6 +198,20 @@ their oracle headroom is below 10%. The qg7-specific backup is a scalar,
 source-exact frontier quotient census; SIMD remains conditional on at least 70%
 useful lane occupancy.
 
+The M0 contract is now frozen in
+`campaigns/t3-m0-component-pressure-v1.json`. The existing 24-source rollback
+panel is not admissible training evidence because every target is Goel and every
+control is QG. Under coverage-aware PAR-2 its best fixed arm totals `223.453`
+seconds and its per-source oracle totals `215.403` seconds, only `3.74%`
+headroom. M0 therefore remains stopped. If later fixed arms create at least 10%
+cluster-bootstrap lower-bound headroom, S0 will expose only static typed and
+base-CNF semantics and S1 only a common bounded eager prefix. Paths, families,
+lineages, names, hashes, expected/final results, final runtimes, winners, and
+post-checkpoint events are forbidden selector inputs. The fixed classifier is a
+depth-four tree; sealed balanced-accuracy LCB must reach `0.80`, telemetry p95
+ratio UCB must stay below `1.01`, and off/on semantic traces must be byte
+identical.
+
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an
 isolated implementation; it does not establish speed.

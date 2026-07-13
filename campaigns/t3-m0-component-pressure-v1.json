@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "campaign_id": "t3-m0-component-pressure-v1",
+  "status": "preregistered_design_migration_forbidden",
+  "scope": {
+    "logic": "QF_UF",
+    "source_census": 7503,
+    "heavy_compute_site": "WMI",
+    "timeout_s": 60,
+    "par2_miss_s": 120
+  },
+  "prerequisites": {
+    "minimum_migration_eligible_fixed_arms": 2,
+    "fixed_arm_correctness_and_timing_gate_required": true,
+    "minimum_oracle_headroom_lcb": 0.1,
+    "confidence": 0.95
+  },
+  "preliminary_evidence": {
+    "source_count": 24,
+    "family_confounded": true,
+    "best_fixed_par2_s": 223.453,
+    "oracle_par2_s": 215.403,
+    "oracle_headroom": 0.0374,
+    "decision": "insufficient_and_below_gate"
+  },
+  "arms": [
+    "current_eager",
+    "whole_instance_conflict_only_rollback",
+    "dynamic_ackermann",
+    "model_directed_cuts"
+  ],
+  "stable_unit": {
+    "kind": "typed_formula_local_component",
+    "id_rule": "deterministic_typed_traversal_index",
+    "ownership_freeze": "after_typed_parse_before_representation_rewrite",
+    "content_hash_is_runtime_feature": false
+  },
+  "checkpoints": {
+    "S0": {
+      "position": "after_typed_parse_and_representation_neutral_base_cnf",
+      "before": [
+        "finite_routing",
+        "ackermann_expansion",
+        "refinement",
+        "rollback_setup",
+        "sat_search"
+      ],
+      "feature_groups": [
+        "typed_term_application_function_constant_counts",
+        "arity_and_depth_histograms",
+        "equality_graph_statistics",
+        "base_cnf_size_and_cross_component_sharing",
+        "projected_ackermann_cost",
+        "capped_chordal_fill",
+        "proved_domain_table_clique_and_hall_statistics"
+      ]
+    },
+    "S1": {
+      "position": "identical_fixed_eager_shadow_prefix",
+      "stop_at_first": {
+        "invalid_complete_model": 1,
+        "conflicts": 4096,
+        "theory_events": 65536,
+        "budget_fraction": 0.005
+      },
+      "feature_groups": [
+        "component_attributed_assignments_levels_backtracks_conflicts",
+        "invalid_models_and_repeated_signatures",
+        "bounded_validator_cpu_share",
+        "refinement_cuts_emitted_and_accepted",
+        "projected_versus_realized_fill"
+      ],
+      "excluded": ["backend_lbd", "post_checkpoint_events"]
+    }
+  },
+  "forbidden_runtime_features": [
+    "source_path",
+    "family",
+    "lineage",
+    "taxonomy",
+    "manifest_index",
+    "raw_or_normalized_hash",
+    "benchmark_or_symbol_name",
+    "expected_status",
+    "final_result",
+    "final_runtime",
+    "winning_arm",
+    "post_checkpoint_events"
+  ],
+  "measurement": {
+    "repeats": 4,
+    "order": "balanced_williams",
+    "unique_label_rule": {
+      "coverage_dominance": true,
+      "equal_coverage_minimum_median_advantage": 0.05,
+      "minimum_same_direction_blocks": 3,
+      "blocks": 4,
+      "otherwise": "unresolved"
+    },
+    "oracle_headroom_formula": "min_arm(sum_i_PAR2_i_arm)/sum_i(min_arm_PAR2_i_arm)-1"
+  },
+  "population": {
+    "s0_all_sources": 7503,
+    "label_strata": [
+      "GRAPH_32",
+      "DOMAIN7_TABLE",
+      "FINITE_HALL",
+      "DEEP_LET_512"
+    ],
+    "semantic_quantile_lineage_controls": 512,
+    "maximum_label_panel_before_overlap": 1762,
+    "split_group_closure": [
+      "family",
+      "generator_lineage",
+      "raw_duplicates",
+      "normalized_duplicates"
+    ],
+    "minimum_lineages_per_class_per_split": 64,
+    "sealed_evaluation_minimum": "max(256,64*K)",
+    "sealed_unseen_families_minimum": 3
+  },
+  "classifier": {
+    "kind": "deterministic_decision_tree",
+    "maximum_depth": 4,
+    "sealed_feature_selection": false
+  },
+  "gates": {
+    "balanced_accuracy_cluster_bootstrap_lcb": 0.8,
+    "telemetry_p95_ratio_ucb": 1.01,
+    "telemetry_paired_blocks": 8,
+    "semantic_trace": "byte_identical_off_on",
+    "wrong_or_missing_or_hash_failures_allowed": 0,
+    "leaked_split_groups_allowed": 0
+  },
+  "stop_rule": "any_failed_prerequisite_or_gate_stops_before_migration"
+}

@@ -1128,6 +1128,16 @@
   and a compact decision receipt under
   `results/wmi/rollback-control-145929/`. Slurm reports the audit job as failed
   because the auditor intentionally exits one on a scientific rejection.
+- Froze T3 M0 in `campaigns/t3-m0-component-pressure-v1.json` and
+  `research-vault/02-design/2026-07-13-t3-m0-telemetry-contract.md`. The
+  24-source rollback panel is perfectly family-confounded and provides only
+  `3.74%` coverage-aware PAR-2 oracle headroom (`223.453` best fixed versus
+  `215.403` oracle), below the `10%` gate. It is retained only to test schemas
+  and labels. M0 now has representation-neutral S0 and bounded eager-prefix S1
+  checkpoints, an explicit semantic allowlist and leakage denylist,
+  duplicate-closure group splits, Williams labels, a fixed depth-four tree,
+  and confidence-bounded accuracy/overhead/headroom gates. Migration remains
+  forbidden until at least two independently accepted fixed arms pass.
 
 ## Next Entry Template
 
