@@ -39,7 +39,13 @@ if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
   echo "tracked repository state must be clean before WMI submission" >&2
   exit 2
 fi
-REVISION="$(git rev-parse --verify 'HEAD^{commit}')"
+SUBMITTER_REVISION="$(git rev-parse --verify 'HEAD^{commit}')"
+REVISION="${EUF_VIPER_CONTINUATION_REVISION:-$SUBMITTER_REVISION}"
+case "$REVISION" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+  *) echo "campaign revision must be a full lowercase Git object id" >&2; exit 2 ;;
+esac
+git cat-file -e "$REVISION^{commit}"
 PUBLISHED_LINE="$(git ls-remote --exit-code origin refs/heads/main)"
 case "$PUBLISHED_LINE" in
   *$'\n'*) echo "origin/main resolved to multiple revisions" >&2; exit 2 ;;
@@ -48,8 +54,12 @@ PUBLISHED_REVISION="${PUBLISHED_LINE%%$'\t'*}"
 case "$PUBLISHED_REVISION" in
   ''|*[!0-9a-f]*) echo "origin/main did not resolve to a lowercase Git object id" >&2; exit 2 ;;
 esac
-if [ "$REVISION" != "$PUBLISHED_REVISION" ]; then
-  echo "HEAD $REVISION is not the published origin/main revision $PUBLISHED_REVISION" >&2
+if [ "$SUBMITTER_REVISION" != "$PUBLISHED_REVISION" ]; then
+  echo "submitter HEAD $SUBMITTER_REVISION is not published as origin/main $PUBLISHED_REVISION" >&2
+  exit 2
+fi
+if ! git merge-base --is-ancestor "$REVISION" "$PUBLISHED_REVISION"; then
+  echo "campaign revision $REVISION is not an ancestor of published origin/main $PUBLISHED_REVISION" >&2
   exit 2
 fi
 
@@ -62,7 +72,7 @@ case "$REMOTE_PARENT" in
   *) echo "remote campaign root must be absolute" >&2; exit 2 ;;
 esac
 
-SHORT_REVISION="$(git rev-parse --short=12 HEAD)"
+SHORT_REVISION="${REVISION:0:12}"
 REMOTE_WORK="$REMOTE_PARENT/$SHORT_REVISION"
 printf -v Q_REMOTE_PARENT '%q' "$REMOTE_PARENT"
 printf -v Q_REMOTE_WORK '%q' "$REMOTE_WORK"
@@ -90,6 +100,7 @@ mkdir -p "$ROOT/results"
 RECEIPT="$ROOT/results/locked-continuation-submission-$DISPATCH_JOB_ID.json"
 python3 - \
   "$RECEIPT" "$REVISION" "$REMOTE_HOST" "$REMOTE_WORK" \
+  "$SUBMITTER_REVISION" \
   "$BASE_PREPARE_JOB_ID" "$BASE_AUDIT_JOB_ID" "$DISPATCH_JOB_ID" \
   "$SHARDS" "$MAX_ACTIVE" "$BOOTSTRAP_REPLICATES" \
   "$WALL_TIME_60" "$WALL_TIME_1200" <<'PY'
@@ -99,7 +110,7 @@ import sys
 from pathlib import Path
 
 (
-    output_raw, revision, remote_host, remote_worktree, base_prepare,
+    output_raw, revision, remote_host, remote_worktree, submitter_revision, base_prepare,
     base_audit, dispatcher, shards, max_active, bootstrap_replicates,
     wall_time_60, wall_time_1200,
 ) = sys.argv[1:]
@@ -107,6 +118,7 @@ payload = {
     "schema_version": 1,
     "status": "submitted",
     "revision": revision,
+    "submitter_revision": submitter_revision,
     "remote_host": remote_host,
     "remote_worktree": remote_worktree,
     "base_prepare_job_id": int(base_prepare),
