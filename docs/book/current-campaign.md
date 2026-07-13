@@ -193,7 +193,9 @@ Python identity, and strictly rejects ambiguous or non-finite JSON. WMI chain
 `146510`/`146511`/`146512` plus independent reconstruction `146652` covered all
 7,503 sources with zero fallback, mismatch, error, or other status. A separate
 review reconstructed every row and artifact hash and approved parity-only
-integration, now on main at `84b4c8e`. This does not authorize timing or parser
+integration. Evidence machinery landed at `84b4c8e`, and the exact reviewed
+parser source plus fixtures are source-complete on main at `00c11a5`. This does
+not authorize timing or parser
 completeness: 98 matching rows contain 4,851 unsupported diagnostics, and the
 production tree-parser solve path is unchanged.
 

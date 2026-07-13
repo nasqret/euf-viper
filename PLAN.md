@@ -242,7 +242,9 @@ independent evidence checks, and a frozen family holdout.
   ambiguous or non-finite JSON. Fresh chain `146510`/`146511`/`146512` plus
   independent reconstruction `146652` produced 7,503 matches and zero fallback,
   mismatch, error, or other status. Independent review reproduced all rows and
-  hashes and is GO for parity-only integration, now on main at `84b4c8e`.
+  hashes and is GO for parity-only integration. Evidence machinery landed at
+  `84b4c8e`; the exact reviewed parser source and fixtures are source-complete
+  on main at `00c11a5`.
   Ninety-eight matching rows contain 4,851 unsupported diagnostics, so this is
   not parser-completeness, timing, or solver evidence.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below

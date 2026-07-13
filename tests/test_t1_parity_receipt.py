@@ -63,7 +63,11 @@ class T1ParityReceiptTests(unittest.TestCase):
             receipt["research_revision"],
             "e77846df010ff777a3dd50d510d0a89cff10f1e6",
         )
-        self.assertEqual(receipt["main_integration_commit"], "84b4c8e")
+        self.assertEqual(receipt["evidence_integration_commit"], "84b4c8e")
+        self.assertEqual(
+            receipt["source_integration_commit"],
+            "00c11a5a69a53d24f3f09aed516f483a17de1e86",
+        )
         self.assertEqual(
             receipt["jobs"],
             {

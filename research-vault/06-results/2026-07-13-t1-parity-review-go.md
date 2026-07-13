@@ -4,7 +4,9 @@ Date: 2026-07-13
 
 Research revision: `e77846df010ff777a3dd50d510d0a89cff10f1e6`
 
-Main integration commit: `84b4c8e`
+Evidence integration commit: `84b4c8e`
+
+Source-complete integration commit: `00c11a5a69a53d24f3f09aed516f483a17de1e86`
 
 Decision: GO for typed-parser parity integration only.
 

@@ -2,7 +2,8 @@
   "schema": "euf-viper.typed-parser-parity-decision.v1",
   "status": "accepted_for_parser_parity_only",
   "research_revision": "e77846df010ff777a3dd50d510d0a89cff10f1e6",
-  "main_integration_commit": "84b4c8e",
+  "evidence_integration_commit": "84b4c8e",
+  "source_integration_commit": "00c11a5a69a53d24f3f09aed516f483a17de1e86",
   "jobs": {
     "prepare": 146510,
     "array": 146511,

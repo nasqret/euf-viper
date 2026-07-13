@@ -1221,8 +1221,10 @@
   7,503 matches and zero fallback, mismatch, error, or other status. Independent
   review confirmed descriptor-bound execution, canonical Python identity,
   strict JSON, all source and artifact hashes, and public/remote revision
-  equality. T1 parity machinery is integrated on main at `84b4c8e` with hosted
-  tests. The result authorizes parity only: 98 matching rows carry 4,851
+  equality. T1 evidence machinery landed on main at `84b4c8e`; the omitted
+  reviewed parser source and fixtures were restored exactly at `00c11a5` after
+  blob-identity checks, both Rust feature matrices, release build, and file/stdin
+  CLI smoke tests. The result authorizes parity only: 98 matching rows carry 4,851
   unsupported diagnostics, and no timing or parser-completeness claim exists.
 
 ## Next Entry Template

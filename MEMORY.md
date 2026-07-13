@@ -868,7 +868,8 @@
   exposed an old completed bundle. Require exact HEAD-blob comparison,
   publication of the checked inode, and attempt-scoped current completion before
   any WMI submission.
-- T1 typed-parser parity is accepted and integrated at main commit `84b4c8e`.
+- T1 typed-parser parity evidence is accepted at main commit `84b4c8e`; the
+  exact reviewed parser source and fixtures are source-complete at `00c11a5`.
   Exact revision `e77846d`, jobs `146510`/`146511`/`146512` and independent
   reconstruction `146652` produced 7,503 matches with zero fallback, mismatch,
   error, or other status. Descriptor execution, canonical Python, strict JSON,
