@@ -10,7 +10,7 @@ finite-symmetry = []
 
 [dependencies]
 rustsat = "0.7.5"
-rustsat-cadical = { version = "0.7.5", features = ["quiet"] }
+rustsat-cadical = { version = "0.7.5", features = ["quiet", "v2-2-1"] }
 rustc-hash = "2.1.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
@@ -25,6 +25,7 @@ rustsat-kissat = { version = "0.7.5", features = ["quiet"] }
 
 [patch.crates-io]
 kissat = { path = "vendor/kissat" }
+rustsat-cadical = { path = "vendor/rustsat-cadical" }
 
 [profile.release]
 codegen-units = 1
