@@ -36,6 +36,12 @@ domain-seven semantics in its source ledger with a separate checked certificate
 or stop. T1 review, assertion lineage, and this P12 certificate all block
 implementation.
 
+The freeze is executable. `scripts/bench/validate_t8_scalar_contract.py` binds
+the exact contract, strict JSON types and keys, T4 record identity, the raw P12
+summary SHA-256, all 12 source paths, and every zero-range field in hosted CI.
+Its successful result reports `implementation_authorized=false` and
+`simd_authorized=false`; passing this freeze check cannot satisfy a prerequisite.
+
 ## Source Ledger
 
 Each source `(assert A_i)` receives a command-level identity containing its

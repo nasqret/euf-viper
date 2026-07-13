@@ -14,6 +14,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bench" / "validate_t8_scalar_contract.py"
 CONTRACT = ROOT / "campaigns" / "t8-scalar-frontier-census-v1.json"
+P12_SUMMARY = (
+    ROOT
+    / "results"
+    / "wmi"
+    / "guarded-range-census-146071"
+    / "p12-range-summary.json"
+)
 MODULE_SPEC = importlib.util.spec_from_file_location(
     "validate_t8_scalar_contract", SCRIPT
 )
@@ -46,7 +53,7 @@ class T8ScalarContractTests(unittest.TestCase):
     def test_repository_contract_is_valid_but_authorizes_no_implementation(
         self,
     ) -> None:
-        result = VALIDATOR.load_and_validate(CONTRACT)
+        result = VALIDATOR.load_and_validate(CONTRACT, P12_SUMMARY)
 
         self.assertEqual(result["campaign_id"], "t8-scalar-frontier-census-v1")
         self.assertEqual(
@@ -99,6 +106,18 @@ class T8ScalarContractTests(unittest.TestCase):
             (
                 ("prerequisites", "corrected_finite_range_records_sha256"),
                 "0" * 64,
+            ),
+            (
+                ("prerequisites", "corrected_finite_range_p12_summary_sha256"),
+                "0" * 64,
+            ),
+            (
+                ("prerequisites", "p12_sources_with_proven_non_bool_range"),
+                12,
+            ),
+            (
+                ("prerequisites", "p12_checked_finite_domain_certificate"),
+                "verified",
             ),
         ]
 
@@ -232,6 +251,7 @@ class T8ScalarContractTests(unittest.TestCase):
         mutations = [
             (("schema_version",), True),
             (("prerequisites", "corrected_finite_range_job"), True),
+            (("prerequisites", "p12_sources_with_proven_non_bool_range"), True),
             (("independent_oracle", "domain_sizes", 0), True),
             (("state_cap", "maximum_unique_reachable_canonical_states"), True),
             (("populations", "DOMAIN7_TABLE", "count"), True),
@@ -301,12 +321,26 @@ class T8ScalarContractTests(unittest.TestCase):
         self.assertIn("source_ledger.auxiliary_id is required", message)
         self.assertIn("state_cap.cap_is_advisory is not allowed", message)
 
+    def test_p12_summary_bytes_and_semantics_are_bound(self) -> None:
+        original = json.loads(P12_SUMMARY.read_text(encoding="ascii"))
+        original["sources_with_certified_domain"] = 1
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "p12-range-summary.json"
+            path.write_text(json.dumps(original), encoding="ascii")
+            with self.assertRaises(VALIDATOR.T8ScalarContractError) as caught:
+                VALIDATOR.load_and_validate(CONTRACT, path)
+
+        message = "\n".join(caught.exception.errors)
+        self.assertIn("p12_summary SHA-256", message)
+        self.assertIn("p12_summary.sources_with_certified_domain", message)
+
     def test_cli_is_executable_and_emits_a_compact_machine_readable_summary(
         self,
     ) -> None:
         self.assertTrue(os.access(SCRIPT, os.X_OK))
         completed = subprocess.run(
-            [str(SCRIPT), str(CONTRACT)],
+            [str(SCRIPT), str(CONTRACT), "--p12-summary", str(P12_SUMMARY)],
             check=False,
             capture_output=True,
             text=True,

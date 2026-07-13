@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -31,7 +32,7 @@ EXPECTED_CONTRACT: dict[str, Any] = {
         "command_and_auxiliary_assertion_lineage": "missing",
         "corrected_finite_range_job": 146071,
         "corrected_finite_range_status": (
-            "completed_zero_error_opportunity_rejected"
+            "completed_zero_error_no_p12_ranges"
         ),
         "corrected_finite_range_aggregate_sha256": (
             "b37b95509c36b29c1f6ab5f55d5754ce1aab0b4ec2efe447488ecfacc8cc4e42"
@@ -39,6 +40,11 @@ EXPECTED_CONTRACT: dict[str, Any] = {
         "corrected_finite_range_records_sha256": (
             "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c"
         ),
+        "corrected_finite_range_p12_summary_sha256": (
+            "68d4d44bf17a1c674bbfbc416335a8e2bf302d3ccf632430cbba378e17d35b51"
+        ),
+        "p12_sources_with_proven_non_bool_range": 0,
+        "p12_checked_finite_domain_certificate": "missing",
     },
     "source_ledger": {
         "source_assertion_id": [
@@ -164,6 +170,36 @@ EXPECTED_CONTRACT: dict[str, Any] = {
     ),
 }
 
+EXPECTED_P12_SUMMARY: dict[str, Any] = {
+    "schema": "euf-viper.guard-range-hall-p12-summary.v1",
+    "records_sha256": (
+        "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c"
+    ),
+    "sorted_path_stream_sha256": (
+        "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa"
+    ),
+    "source_count": 12,
+    "sources_with_proven_non_bool_range": 0,
+    "sources_with_certified_domain": 0,
+    "total_proven_range_facts": 0,
+    "ineligibility_reason": "no_proven_non_bool_range",
+    "paths": [
+        "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen003.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen004.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen005.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+        "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+    ],
+    "interpretation": "evidence_only_paths_forbidden_as_runtime_features",
+}
+
 
 class T8ScalarContractError(ValueError):
     def __init__(self, errors: list[str]):
@@ -274,10 +310,10 @@ def validate_contract(contract: Any) -> dict[str, Any]:
     }
 
 
-def load_and_validate(path: Path) -> dict[str, Any]:
+def _load_json(path: Path) -> tuple[bytes, Any]:
     try:
         raw = path.read_bytes()
-        contract = json.loads(
+        value = json.loads(
             raw.decode("ascii"),
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
@@ -285,7 +321,35 @@ def load_and_validate(path: Path) -> dict[str, Any]:
         )
     except (OSError, UnicodeError, ValueError) as error:
         raise T8ScalarContractError([f"cannot load {path}: {error}"]) from error
-    return validate_contract(contract)
+    return raw, value
+
+
+def validate_p12_summary(raw: bytes, summary: Any) -> None:
+    errors: list[str] = []
+    expected_sha256 = EXPECTED_CONTRACT["prerequisites"][
+        "corrected_finite_range_p12_summary_sha256"
+    ]
+    actual_sha256 = hashlib.sha256(raw).hexdigest()
+    if actual_sha256 != expected_sha256:
+        errors.append(
+            "p12_summary SHA-256 must be "
+            f"{expected_sha256!r}, not {actual_sha256!r}"
+        )
+    _validate_exact(summary, EXPECTED_P12_SUMMARY, "p12_summary", errors)
+    if errors:
+        raise T8ScalarContractError(errors)
+
+
+def load_and_validate(
+    path: Path,
+    p12_summary_path: Path | None = None,
+) -> dict[str, Any]:
+    _, contract = _load_json(path)
+    result = validate_contract(contract)
+    if p12_summary_path is not None:
+        raw, summary = _load_json(p12_summary_path)
+        validate_p12_summary(raw, summary)
+    return result
 
 
 def main() -> int:
@@ -293,11 +357,12 @@ def main() -> int:
         description="Validate the frozen T8 scalar frontier contract."
     )
     parser.add_argument("contract", type=Path)
+    parser.add_argument("--p12-summary", type=Path, required=True)
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
     try:
-        result = load_and_validate(args.contract)
+        result = load_and_validate(args.contract, args.p12_summary)
     except T8ScalarContractError as error:
         for message in error.errors:
             print(f"error: {message}", file=sys.stderr)

@@ -1198,6 +1198,11 @@
   prerequisite. Added a source-bound P12 summary; T8 now requires a separate
   checked finite-domain certificate in addition to T1 review and assertion
   lineage.
+- Added `validate_t8_scalar_contract.py`, hosted-CI enforcement, and 22 combined
+  T3/T8 contract tests. T8 validation now binds strict JSON types and keys, the
+  exact preregistration, the raw P12 summary SHA-256, all 12 source paths, the
+  T4 records hash, and every zero-range field. Its successful output explicitly
+  keeps both implementation and SIMD unauthorized.
 
 ## Next Entry Template
 

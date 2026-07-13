@@ -18,6 +18,7 @@
     "corrected_finite_range_status": "completed_zero_error_no_p12_ranges",
     "corrected_finite_range_aggregate_sha256": "b37b95509c36b29c1f6ab5f55d5754ce1aab0b4ec2efe447488ecfacc8cc4e42",
     "corrected_finite_range_records_sha256": "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c",
+    "corrected_finite_range_p12_summary_sha256": "68d4d44bf17a1c674bbfbc416335a8e2bf302d3ccf632430cbba378e17d35b51",
     "p12_sources_with_proven_non_bool_range": 0,
     "p12_checked_finite_domain_certificate": "missing"
   },
