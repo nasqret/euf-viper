@@ -340,7 +340,9 @@ independent evidence checks, and a frozen family holdout.
   totalizer, near-optimal CNF, native PB, and reversible matching work is not
   authorized.
 - [x] Reject frozen PEQ/SEQ timing for T4. Its source range telemetry may feed
-  T8's independently checked ledger, but no Hall/PB route survives.
+  T8's independently checked ledger, but no Hall/PB route survives. All 12 P12
+  qg7 rows have empty domains and zero range facts, so T4 does not satisfy T8's
+  finite-domain prerequisite.
 
 ### T5: Component Quotient RAM
 
@@ -447,9 +449,10 @@ Do not compose two candidates in P2. Attribution must remain exact.
   - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
     source assertion and parser-generated auxiliary. T1 parser parity alone
     does not provide this ledger.
-  - [ ] Require corrected T4 finite-range evidence and independent review of
-    T1 before scalar implementation; neither prerequisite may be inferred from
-    queue state or an author's report.
+  - [ ] Require a checked P12 finite-domain certificate and independent review
+    of T1 before scalar implementation. Corrected T4 evidence is complete but
+    proves no non-Boolean range on all 12 P12 sources, so a separate source-
+    ledger proof is mandatory.
 - [ ] Run canonical scalar frontier census over one-table and domain-seven
   targets, recording state reuse, separator width, and transition cost. Require
   zero exhaustive-checker mismatches, at least 10/12 frozen qg7 targets under a

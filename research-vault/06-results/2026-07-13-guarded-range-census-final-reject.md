@@ -46,8 +46,10 @@ The preregistered implementation gate required at least 30% fewer value cells
 on a broad source population. The measured reduction is exactly 0%; every
 source is ineligible. T4 is therefore scientifically rejected before encoding,
 native PB, reversible matching, or timing work. The finite-range facts remain
-valid source telemetry and may be consumed by the separately checked T8 ledger,
-but they do not authorize a Hall/PB solver path.
+valid source telemetry but do not authorize a Hall/PB solver path. A direct
+read of the 12 frozen qg7 rows found zero domains and zero range facts in every
+case, each with `no_proven_non_bool_range`. T4 therefore cannot supply T8's
+domain-seven certificate; T8 must prove that boundary separately or stop.
 
 Successful completion released certificate prepare jobs `146076` and `146079`.
 Those chains certify canonical source reruns only and remain separate from this

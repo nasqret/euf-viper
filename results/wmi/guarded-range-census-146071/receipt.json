@@ -30,6 +30,13 @@
     "hall_checked_conflicts": 0,
     "gate_passed": false
   },
+  "p12_t8_prerequisite": {
+    "source_count": 12,
+    "sources_with_proven_non_bool_range": 0,
+    "sources_with_certified_domain": 0,
+    "total_proven_range_facts": 0,
+    "status": "not_satisfied"
+  },
   "artifacts": {
     "aggregate": {
       "path": "aggregate.json",
@@ -43,6 +50,10 @@
       "remote_path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/guarded-range-census-146071/records.jsonl",
       "sha256": "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c",
       "locally_preserved": false
+    },
+    "p12_range_summary": {
+      "path": "p12-range-summary.json",
+      "sha256": "68d4d44bf17a1c674bbfbc416335a8e2bf302d3ccf632430cbba378e17d35b51"
     },
     "run": {
       "path": "run.txt",

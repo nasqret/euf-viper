@@ -245,9 +245,11 @@ checked SAT interpretations or UNSAT cube-cover DAGs. It must make at least
 200/261 one-table cases source-complete, finish at least 10/12 deficits below
 one million states, and keep complete graph-build cost below 10% of Yices2 on
 at least 7/12. T1 review, the missing assertion-lineage ledger, and corrected
-T4 range evidence is now complete but rejects Hall/PB with zero savings. T1
-review and the missing assertion-lineage ledger still block T8; SIMD is not
-authorized.
+T4 range evidence is now complete but rejects Hall/PB with zero savings. Every
+one of the 12 frozen qg7 rows has an empty domain list and zero range facts, so
+T4 also fails to supply T8's finite-domain certificate. T1 review, the missing
+assertion-lineage ledger, and a separate checked domain-seven proof still block
+T8; SIMD is not authorized.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

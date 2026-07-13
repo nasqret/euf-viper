@@ -1192,6 +1192,12 @@
   the 30% gate. Aggregate SHA-256 is `b37b9550...c4e42`; records SHA-256 is
   `4cfb2d1d...ff961c`. Full/official certificate prepares `146076`/`146079`
   released automatically and remain separate evidence chains.
+- Inspected the exact 12 P12 qg7 rows inside T4 records
+  `4cfb2d1d...ff961c`. Every row has empty domains, zero proven range facts, and
+  `no_proven_non_bool_range`. T4 cannot discharge T8's domain-seven
+  prerequisite. Added a source-bound P12 summary; T8 now requires a separate
+  checked finite-domain certificate in addition to T1 review and assertion
+  lineage.
 
 ## Next Entry Template
 

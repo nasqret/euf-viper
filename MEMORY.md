@@ -848,3 +848,7 @@
   zero Hall conflicts. Aggregate/records SHA-256 are
   `b37b9550...c4e42`/`4cfb2d1d...ff961c`. Do not implement Hall/PB; exact range
   telemetry may feed T8 only through its independent source ledger.
+- The 12 frozen P12 qg7 rows in T4 records all have empty domains, zero range
+  facts, and `no_proven_non_bool_range`. Do not cite global T4 telemetry as T8's
+  domain-seven certificate. T8 needs a separate checked finite-domain proof in
+  its source ledger before scalar state construction.

@@ -1,0 +1,25 @@
+{
+  "schema": "euf-viper.guard-range-hall-p12-summary.v1",
+  "records_sha256": "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c",
+  "sorted_path_stream_sha256": "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa",
+  "source_count": 12,
+  "sources_with_proven_non_bool_range": 0,
+  "sources_with_certified_domain": 0,
+  "total_proven_range_facts": 0,
+  "ineligibility_reason": "no_proven_non_bool_range",
+  "paths": [
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen004.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen005.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2"
+  ],
+  "interpretation": "evidence_only_paths_forbidden_as_runtime_features"
+}

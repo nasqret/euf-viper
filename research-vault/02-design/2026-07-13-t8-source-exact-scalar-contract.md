@@ -28,9 +28,13 @@ No implementation starts until:
 - the frozen source populations and independent tiny oracle are hash bound.
 
 T4 has now completed with 7,503 rows and zero parse errors. It found zero
-non-uniform value-cell savings and is rejected as a Hall/PB implementation, but
-its exact range telemetry remains available to T8. T1 review and the assertion
-ledger still block T8 implementation.
+non-uniform value-cell savings and is rejected as a Hall/PB implementation.
+More importantly for T8, all 12 P12 rows report
+`no_proven_non_bool_range`, empty domains, and zero range facts. T4 therefore
+does not discharge T8's finite-domain prerequisite. T8 must prove the exact
+domain-seven semantics in its source ledger with a separate checked certificate
+or stop. T1 review, assertion lineage, and this P12 certificate all block
+implementation.
 
 ## Source Ledger
 
