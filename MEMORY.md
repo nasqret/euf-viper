@@ -677,3 +677,9 @@
   witnesses, and never solve or claim SAT/UNSAT. Full-corpus WMI job `145027`
   depends on P0 prepare `144990`; audit its eligible population and 30% cell
   saving gate before implementing Hall/PB in the solver.
+- Modern SAT paired campaign revision `e67c688` fixes identical complete
+  runtime environments for validated SC2021/Kissat-4 binaries, checks all
+  source and artifact hashes, binds one CPU, and audits exact shard coverage.
+  Jobs `145029`/`145030`/`145031` are externally dependency-bound to successful
+  P0 audit `144993`; broad timing runs only after the deterministic sample
+  passes. Queue state is not performance evidence.

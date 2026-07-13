@@ -151,7 +151,11 @@ independent evidence checks, and a frozen family holdout.
   `research-modern-kissat` at `d7c14da` implements the feature-selected pinned
   backend and fail-closed option surface. WMI validation `144945` passed with
   preserved SC2021/4.0.4 binary hashes `d7321602...c70362` and
-  `ecbcfebb...ea6b6`; timing remains blocked on P0 audit.
+  `ecbcfebb...ea6b6`. Exact paired campaign revision `e67c688` fixes every
+  `EUF_VIPER_*` value identically in both arms, sanitizes ambient state, binds
+  one CPU, and verifies all 7,503 source hashes. Sample `145029`, broad array
+  `145030`, and merge `145031` are queued behind successful P0 audit `144993`;
+  broad timing releases only if the deterministic 64-case sample passes.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
   A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal

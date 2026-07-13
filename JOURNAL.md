@@ -922,6 +922,14 @@
   Full-corpus census `145027` is dependency-bound to P0 prepare `144990` and
   cannot emit SAT/UNSAT. No Hall/PB solver route is justified before its
   returned population and value-cell savings are audited.
+- Published the causal SC2021-versus-Kissat-4 campaign on isolated revision
+  `e67c688`; hosted run `29216075206` passes after 228 all-feature Rust tests.
+  It validates the two job-`144945` binary hashes/backend identities, fixes
+  every solver environment key identically, verifies all 7,503 source hashes,
+  binds one CPU, and rejects incomplete/duplicate shard evidence. Queued sample
+  `145029`, broad array `145030`, and merge `145031` behind P0 audit `144993`.
+  No T0 timing begins before the baseline audit and no promotion follows from
+  validation or queue state.
 
 ## Next Entry Template
 
