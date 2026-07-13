@@ -21,10 +21,48 @@ export PYTHONHASHSEED=0
 
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 EXPECTED_SOURCES="${EUF_VIPER_COMPONENT_QUOTIENT_EXPECTED_SOURCES:-7503}"
+PYTHON_REALPATH="${EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_REALPATH:?set EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_REALPATH}"
+PYTHON_VERSION="${EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_VERSION:?set EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_VERSION}"
+PYTHON_SHA256="${EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_SHA256:?set EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_SHA256}"
 if [ "$EXPECTED_SOURCES" != 7503 ]; then
   echo "component quotient census requires exactly 7503 sources" >&2
   exit 2
 fi
+if [[ "$PYTHON_REALPATH" != /* ]] || [ ! -x "$PYTHON_REALPATH" ]; then
+  echo "pinned Python executable must be an absolute executable path" >&2
+  exit 2
+fi
+if [[ ! "$PYTHON_SHA256" =~ ^[0-9a-f]{64}$ ]] || [ -z "$PYTHON_VERSION" ]; then
+  echo "pinned Python version or SHA-256 is malformed" >&2
+  exit 2
+fi
+
+verify_python_identity() {
+  local phase="$1"
+  local actual_realpath actual_reported_realpath actual_version actual_sha256
+  actual_realpath="$(readlink -f -- "$PYTHON_REALPATH")"
+  if [ "$actual_realpath" != "$PYTHON_REALPATH" ]; then
+    echo "$phase Python realpath drift: expected $PYTHON_REALPATH, got $actual_realpath" >&2
+    exit 2
+  fi
+  actual_sha256="$(sha256sum -- "$PYTHON_REALPATH")"
+  actual_sha256="${actual_sha256%% *}"
+  if [ "$actual_sha256" != "$PYTHON_SHA256" ]; then
+    echo "$phase Python SHA-256 drift: expected $PYTHON_SHA256, got $actual_sha256" >&2
+    exit 2
+  fi
+  actual_reported_realpath="$("$PYTHON_REALPATH" -c 'import os, sys; print(os.path.realpath(sys.executable))')"
+  if [ "$actual_reported_realpath" != "$PYTHON_REALPATH" ]; then
+    echo "$phase Python sys.executable drift: expected $PYTHON_REALPATH, got $actual_reported_realpath" >&2
+    exit 2
+  fi
+  actual_version="$("$PYTHON_REALPATH" -c 'import platform; print(platform.python_version())')"
+  if [ "$actual_version" != "$PYTHON_VERSION" ]; then
+    echo "$phase Python version drift: expected $PYTHON_VERSION, got $actual_version" >&2
+    exit 2
+  fi
+}
+
 ACTUAL_REVISION="$(git rev-parse HEAD)"
 if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
   echo "revision mismatch: expected $EXPECTED_REVISION, got $ACTUAL_REVISION" >&2
@@ -53,7 +91,8 @@ fi
 
 OUT="$PWD/results/component-quotient-census-${SLURM_JOB_ID}"
 mkdir -p "$OUT"
-python3 scripts/bench/census_component_quotient_ram.py \
+verify_python_identity analyzer
+"$PYTHON_REALPATH" scripts/bench/census_component_quotient_ram.py \
   "$MANIFEST" \
   --repository-root "$PWD" \
   --lock "$LOCK" \
@@ -62,7 +101,8 @@ python3 scripts/bench/census_component_quotient_ram.py \
   --targets-out "$OUT/targets.jsonl" \
   > "$OUT/run.txt"
 
-python3 scripts/bench/verify_component_quotient_ram_bundle.py \
+verify_python_identity verifier
+"$PYTHON_REALPATH" scripts/bench/verify_component_quotient_ram_bundle.py \
   "$MANIFEST" \
   --repository-root "$PWD" \
   --lock "$LOCK" \
@@ -73,123 +113,24 @@ python3 scripts/bench/verify_component_quotient_ram_bundle.py \
   --require-validity \
   > "$OUT/verification.txt"
 
-python3 - \
-  "$OUT/metadata.json" \
-  "$MANIFEST" \
-  "$EXPECTED_SOURCES" \
-  "$OUT/verification.json" <<'PY'
-import hashlib
-import json
-import os
-import platform
-import sys
-from pathlib import Path
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-out = Path(sys.argv[1])
-root = out.parent
-manifest = Path(sys.argv[2]).resolve()
-expected_sources = int(sys.argv[3])
-verification_path = Path(sys.argv[4])
-verification = json.loads(verification_path.read_text(encoding="ascii"))
-expected_hashes = {
-    "lock_sha256",
-    "input_manifest_sha256",
-    "portable_source_set_sha256",
-    "analyzer_sha256",
-    "parser_sha256",
-    "taxonomy_builder_sha256",
-    "records_jsonl_sha256",
-    "terminal_record_sha256",
-    "derived_target_manifest_sha256",
-    "aggregate_json_sha256",
-    "recomputed_gates_sha256",
-}
-if (
-    not isinstance(verification, dict)
-    or set(verification)
-    != {
-        "schema",
-        "verified",
-        "campaign_id",
-        "interpretation",
-        "sources",
-        "targets",
-        "validity_pass",
-        "implementation_allowed",
-        "decoder_oracle_sha256",
-        "hashes",
-    }
-    or verification.get("schema")
-    != "euf-viper.component-quotient-ram-bundle-verification.v1"
-    or verification.get("campaign_id")
-    != "t5-component-quotient-ram-opportunity-census-v1"
-    or verification.get("interpretation")
-    != "structural_projection_only_no_solver_invocation_no_timing_claim"
-    or verification.get("verified") is not True
-    or verification.get("validity_pass") is not True
-    or verification.get("sources") != expected_sources
-    or type(verification.get("targets")) is not int
-    or verification["targets"] < 0
-    or verification.get("decoder_oracle_sha256")
-    != "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89"
-    or type(verification.get("implementation_allowed")) is not bool
-    or not isinstance(verification.get("hashes"), dict)
-    or set(verification["hashes"]) != expected_hashes
-    or any(
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-        for value in verification["hashes"].values()
-    )
-):
-    raise SystemExit("component quotient strict bundle verification did not pass")
-
-artifacts = {
-    "manifest": manifest,
-    "lock": Path("campaigns/component-quotient-ram-census-v1.json"),
-    "analyzer": Path("scripts/bench/census_component_quotient_ram.py"),
-    "verifier": Path("scripts/bench/verify_component_quotient_ram_bundle.py"),
-    "parser": Path("scripts/cert/independent_qfuf.py"),
-    "taxonomy_builder": Path("scripts/bench/build_family_manifest.py"),
-    "records": root / "records.jsonl",
-    "aggregate": root / "aggregate.json",
-    "targets": root / "targets.jsonl",
-    "run": root / "run.txt",
-    "verification": verification_path,
-    "verification_run": root / "verification.txt",
-}
-payload = {
-    "schema": "euf-viper.component-quotient-ram-wmi-run.v1",
-    "status": "completed",
-    "revision": os.environ["EUF_VIPER_EXPECTED_REVISION"],
-    "job_id": int(os.environ["SLURM_JOB_ID"]),
-    "hostname": platform.node(),
-    "validation": {
-        "expected_sources": expected_sources,
-        "observed_sources": verification["sources"],
-        "validity_pass": verification["validity_pass"],
-        "decoder_oracle_sha256": verification["decoder_oracle_sha256"],
-        "implementation_allowed": verification["implementation_allowed"],
-        "verification_receipt_sha256": sha256(verification_path),
-    },
-    "artifacts": {
-        name: {"path": str(path.resolve()), "sha256": sha256(path)}
-        for name, path in artifacts.items()
-    },
-}
-temporary = out.with_name(f".{out.name}.tmp")
-temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-temporary.replace(out)
-PY
+verify_python_identity metadata
+"$PYTHON_REALPATH" scripts/bench/finalize_component_quotient_ram_metadata.py \
+  --metadata-out "$OUT/metadata.json" \
+  --repository-root "$PWD" \
+  --manifest "$MANIFEST" \
+  --lock "$LOCK" \
+  --records "$OUT/records.jsonl" \
+  --aggregate "$OUT/aggregate.json" \
+  --targets "$OUT/targets.jsonl" \
+  --verification "$OUT/verification.json" \
+  --run-log "$OUT/run.txt" \
+  --verification-log "$OUT/verification.txt" \
+  --expected-sources "$EXPECTED_SOURCES" \
+  --revision "$EXPECTED_REVISION" \
+  --job-id "$SLURM_JOB_ID" \
+  --python-realpath "$PYTHON_REALPATH" \
+  --python-version "$PYTHON_VERSION" \
+  --python-sha256 "$PYTHON_SHA256"
 
 printf 'census_root=%s\n' "$OUT"
 printf 'revision=%s\n' "$ACTUAL_REVISION"
