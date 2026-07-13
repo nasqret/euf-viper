@@ -865,3 +865,18 @@
 - Result:
 - Discrepancies:
 - Next action:
+
+## 2026-07-13 Kissat 4.0.4 Causal Sample
+
+- Corrected source rebinding at `45ba12c` passed hosted run `29274065472` and
+  removed the checkout-path failure from sample `145884`.
+- WMI sample `145905` completed all 384 observations over the deterministic
+  64-case set with identical environments, zero wrong answers, zero execution
+  errors, and equal `53/64` instance coverage.
+- Kissat 4.0.4 regressed SC2021: geometric speedup `0.928694x` with 95% interval
+  `[0.868663, 0.970203]`, common-total `0.963416x` with interval
+  `[0.941532, 0.980834]`, and wins/losses `16/37`.
+- The sample gate rejected. Broad `145906` and merge `145907` were cancelled by
+  dependency. No broad or promotion claim exists.
+- Freeze unconditional backend replacement as rejected. Future individual-pass
+  tests require new same-binary causal contracts and may not weaken this gate.

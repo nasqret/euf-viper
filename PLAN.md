@@ -138,12 +138,15 @@ independent evidence checks, and a frozen family holdout.
 
 ### T0: Modern SAT Backend
 
-- [ ] Embed Kissat 4.0.4 behind the current clause/model interface while
-  preserving the SC2021 backend as an exact control.
+- [x] Embed Kissat 4.0.4 behind the current clause/model interface while
+  preserving the SC2021 backend as an exact control. Corrected sample `145905`
+  preserved `53/64` coverage but lost geometrically at `0.928694x`; reject the
+  unconditional backend replacement and do not release broad timing.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
-- [ ] Require independent SAT-model/proof checks and broad end-to-end gain;
-  formula-size reduction alone cannot pass.
+- [x] Require independent SAT-model/proof checks and broad end-to-end gain;
+  formula-size reduction alone cannot pass. The sample timing gate rejected,
+  so broad `145906` and merge `145907` were dependency-cancelled.
 
 ### T1: Typed IR And Staged Formula Machine
 

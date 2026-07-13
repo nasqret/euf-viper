@@ -581,6 +581,13 @@
   Keep the 7,503-file corpus as development regression, not a fresh holdout.
 - Production Linux uses a Kissat SC2021 wrapper. Causally test Kissat 4.0.4 and
   modern inprocessing before attributing broad gains to new SMT mechanisms.
+- The corrected causal sample is complete and rejects unconditional Kissat
+  4.0.4 replacement. Exact revision `45ba12c`, WMI job `145905`, and hosted run
+  `29274065472` produced equal `53/64` coverage with zero wrong/errors, but
+  geometric speedup was `0.928694x` (95% lower bound `0.868663`) and
+  common-total speedup was `0.963416x` (lower bound `0.941532`). Broad `145906`
+  and merge `145907` were dependency-cancelled. Individual modern passes remain
+  separate causal controls, not evidence for a wholesale swap.
 - Primary architecture hypothesis: stable-ID, proof-carrying per-component
   migration among eager CNF, rollback EUF, quotient/class coding, and native
   adequate-range Hall/PB. Parser/formula staging, semantic DAG factoring,
