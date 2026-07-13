@@ -67,11 +67,20 @@ The hardened two-second shadow campaigns are:
 
 | Scope | Prepare | Array | Audit | Dependency |
 | --- | ---: | ---: | ---: | --- |
-| Full | `145892` | `145893` | `145894` | source census `145883` |
-| Official | `145897` | `145898` | `145899` | source census `145883` |
+| Full | `146076` | `146077` | `146078` | corrected source census `146071` |
+| Official | `146079` | `146080` | `146081` | corrected source census `146071` |
 
-These campaigns can establish that each reported source result has an
-independently checked canonical witness or refutation. They do **not** yet prove
+The first source dependency `145883` wrote all 7,503 rows but terminated
+nonzero because 17 deeply nested NEQ `let` chains exceeded the independent
+Python parser's expression recursion limit. Its certificate dependents were
+cancelled. Commits `6b51b39` and `8f78543` replace recursive `let` expansion
+with an iterative, simultaneous-scope-preserving machine and pin a four-hour
+wall limit. Corrected census `146071` runs at exact revision `8f78543`; no T4
+decision or certificate evidence follows until its zero-error aggregate
+returns.
+
+These replacement campaigns can establish that each reported source result has
+an independently checked canonical witness or refutation. They do **not** yet prove
 that the literal timed production invocation emitted that same model, proof, or
 CNF trace. Production promotion therefore also requires an atomic sidecar that
 binds source hash, solver revision/configuration, returned status, actual model
@@ -117,7 +126,8 @@ Exact branch head `6e402f0` passed hosted run `29277510106`. Fresh prepare
 conflicts. Its locked binary SHA-256 is `0cff30a189d46423...`, the preflight
 journal SHA-256 is `e223befc265ee95e...`, and the preflight-summary file SHA-256
 is `2809e913e30b5bb7...`. Array `145928` released automatically and final audit
-`145929` remains dependency-held. Only that immutable final audit may decide
+`145929` remains dependency-held. Six array shards are complete and two are
+active at this checkpoint. Only that immutable final audit may decide
 whether validation-count, target-speed, anti-target-overhead, and conflict-
 evidence gates pass. Partial state is not timing evidence.
 
@@ -128,9 +138,8 @@ Audits `145786`/`145788` and finalizer `145789` depend on their completion. Each
 task requests one CPU and 10 GiB in `cpu_idle`; the current wait is scheduler
 availability/priority, not an impossible resource shape. The graph is preserved
 without cancellation or resubmission so physical-origin evidence remains
-intact. At the latest live check, the full array had an estimated start of
-`2026-07-13T21:36:47`; the official array remained priority-bound without an
-estimated start.
+intact. Two full shards are complete and a third is active at this checkpoint;
+the remaining full shards and official array are scheduler-bound.
 
 ## Opportunity Gates
 
@@ -139,9 +148,11 @@ No representation enters the solver merely because it is unusual.
 1. T1 must match the authoritative typed tree parser on every one of 7,503
    sources with all sorts, signatures, term types, applications, assertions,
    Boolean-data terms, and unsupported diagnostics preserved.
-2. T4 job `145883` must return exactly 7,503 source-only rows and zero parser
-   errors. Hall/PB implementation additionally needs the preregistered 30%
-   value-cell reduction on a broad population.
+2. T4 replacement job `146071` must return exactly 7,503 source-only rows and
+   zero parser errors. The failed predecessor projected zero savings on its
+   successfully parsed population, so Hall/PB implementation is unlikely but
+   cannot be rejected before all 17 omitted sources are included. It still
+   needs the preregistered 30% value-cell reduction on a broad population.
 3. T5 must project exact class-code, restricted-growth, sorting-network,
    clause, literal, two-watch, and decoder costs. Both QG and Goel must show at
    least 25% broad reduction without weighted or p95 variable growth above
@@ -150,6 +161,14 @@ No representation enters the solver merely because it is unusual.
    union plus DAG, and full typed EUF quotient plus DAG. The full route must
    reduce projected CNF by at least 25% on 8/10 frozen hard cases and beat both
    generic controls by at least five percentage points.
+
+T1 typed-parser parity is isolated on `research-typed-stream-parity`; its first
+prepare failed before testing because WMI did not resolve bare `cargo`. The
+branch now pins Cargo and parser semantics and is repairing one remaining
+semantic-snapshot edge before resubmission. T5's hardened source-only census is
+at `b51c75e` under a second independent review. T6 exact revision `9833ec3` is
+queued as job `146075`, with promotion disabled until its current 12-source
+manifest is derived mechanically from the frozen P0 audit.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

@@ -1046,6 +1046,51 @@
   full tasks and official array `145787` stay scheduler-bound. The existing
   dependency graph and evidence origins remain unchanged.
 
+## 2026-07-13 Corrected Opportunity And Evidence Gates
+
+- Guarded-range census `145883` terminated `FAILED 2:0` after `01:52:20`, but
+  wrote exactly 7,503 source records with SHA-256
+  `d806be064546ce18465d7cd451592479d0df44564ad2d1b2826ee77a64b3a3b6`.
+  Seventeen deeply nested NEQ sources reported `SMT-LIB expression nesting is
+  too deep`. The parsed projection had 91,895 uniform and 91,895 non-uniform
+  cells, zero cell savings, 151 certified uniform domains, 14,311 effective
+  ranges, 24 checked Hall subsets, and zero Hall conflicts. This cannot reject
+  T4 because its preregistered zero-parser-error gate failed.
+- Reproduced the deepest omitted case, `NEQ033_size4`, and replaced recursive
+  `let` expansion in the independent Python parser with an iterative frame
+  machine that preserves simultaneous binding scope. It now parses that source
+  as 5,676 variables, 13,984 clauses, and 2,733 terms; all 282 Python tests
+  pass. Published `6b51b39`. Commit `8f78543` additionally records and pins the
+  census wall limit, defaulting to four hours.
+- Submitted corrected census `146071` from exact public revision `8f78543`.
+  Replacement certificate-shadow chains are full
+  `146076`/`146077`/`146078` and official
+  `146079`/`146080`/`146081`, all dependency-held behind the corrected census.
+  The old `145892`-`145894` and `145897`-`145899` chains were cancelled rather
+  than allowed to inherit a failed source gate.
+- Rollback array `145928` has six completed and two active shards at this
+  checkpoint; audit `145929` remains dependency-held. No partial timing was
+  interpreted. Full 1,200-second array `145785` has two completed and one
+  active shard; official `145787` remains priority-bound and the original
+  audits/finalizer `145786`/`145788`/`145789` remain intact.
+- T1 branch `research-typed-stream-parity` reached `47d7b0a`, pinning Cargo and
+  parser semantics after prepare `145940` failed before testing on an absent
+  bare `cargo`; its dependents cancelled. A final semantic-snapshot repair is
+  in progress before resubmission.
+- T5 branch `research-t5-component-quotient-census` at `b51c75e` now includes a
+  bounded executable 316-assignment decoder oracle, complete parser-symbol
+  accounting, and weighted plus p95 literal/watch no-regression gates. A
+  second independent review is pending; no WMI submission exists.
+- T6 branch `research-t6-theory-dag` at `9833ec3` pins Cargo and provenance.
+  Census `146075` is priority-pending. Historical hard-10 rows are explicitly
+  pre-fix development evidence, and promotion is disabled until the frozen P0
+  audit mechanically supplies a current 12-source manifest.
+- Production-evidence branch `research-production-evidence` at `6095e29`
+  remains under adversarial review. Integration requires more than a
+  source-valid model: the independent checker must reject dirty builds and
+  replay the production assignment against every exact production CNF clause
+  with a complete atom map.
+
 ## Next Entry Template
 
 - Benchmark corpus:

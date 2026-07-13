@@ -757,3 +757,25 @@
   each eligible family individually at that threshold, weighted and p95
   variable ratio at most `1.25`, eight lineages, complete decoder telemetry,
   and zero parse/hash/cap failures before implementing quotient RAM.
+
+## Corrected Gate Checkpoint (2026-07-13)
+
+- First T4 census `145883` is invalid as a final opportunity decision: it wrote
+  7,503 records but had 17 deep-`let` parser errors. Its parsed subset projected
+  zero value-cell savings, but T4 can only be rejected after corrected exact
+  census `146071` returns 7,503 rows with zero errors. Parser fix `6b51b39` and
+  wall-time pin `8f78543` are public.
+- Replacement certificate chains are full `146076`-`146078` and official
+  `146079`-`146081`, dependency-held behind `146071`. The predecessor chains
+  were cancelled; never treat them as corpus evidence.
+- Rollback evidence remains array `145928` plus audit `145929`; 1,200-second
+  evidence remains `145785`-`145789`. Preserve both graphs and use final audits
+  only.
+- T1 is isolated at `research-typed-stream-parity` `47d7b0a` pending a final
+  snapshot repair and fresh WMI parity chain. T5 is isolated at `b51c75e`
+  pending second review. T6 is isolated at `9833ec3`, job `146075`, and cannot
+  promote from its historical hard-10 set.
+- Production sidecar branch `6095e29` is review-only. A source-valid SAT model
+  is not enough: integration requires an independent check that the exact
+  production assignment satisfies every production CNF clause and that the
+  atom map is complete, plus fail-closed clean-build identity.
