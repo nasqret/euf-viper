@@ -607,6 +607,25 @@ instead of recovering gates from clauses. See
 [Boolean Satisfiability with Transitivity Constraints](https://www.cs.cmu.edu/~bryant/pubdir/tocl-trans01.pdf)
 and [Clausal Congruence Closure](https://doi.org/10.4230/LIPIcs.SAT.2024.6).
 
+## Modern SAT Control
+
+The Linux production baseline embedded Kissat's SAT Competition 2021 source.
+The `research-modern-kissat` branch now provides a controlled Kissat 4.0.4
+build without changing the SMT encoding architecture. WMI validation `144945`
+preserves exact SC2021 and 4.0.4 release binaries with SHA-256 prefixes
+`d7321602` and `ecbcfebb`. Both pass the shared semantic fixtures; the modern
+artifact also passes the independent certificate smoke. Invalid option names,
+values, and configurations fail closed rather than silently routing to another
+backend.
+
+This closes an engineering prerequisite, not a timing claim. A local CaDiCaL
+clausal-congruence canary reduced conflicts but regressed median end-to-end
+time by 1.209x, reinforcing the rule that internal SAT metrics cannot promote
+an SMT configuration. Exact SC2021-versus-4.0.4 timing starts only after the
+current P0 global audit, followed by one-factor ablations of congruence,
+sweeping, factor/BVA, vivification, and phase search. The full evidence is in
+the [modern Kissat control note](https://github.com/nasqret/euf-viper/blob/main/research-vault/06-results/2026-07-13-modern-kissat-control.md).
+
 ## Sources And Artifacts
 
 The four dated repository sources for this chapter are:
