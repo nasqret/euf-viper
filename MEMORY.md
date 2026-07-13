@@ -736,7 +736,13 @@
   deterministic coverage misses from a persistent-lemma recurrence during
   `notify_assignment`; `145924`/`145925` cancelled. Commit `8e26569` suppresses
   and counts only assignment-time repeats. Complete-model or handoff recurrence
-  still aborts. A fresh run awaits exact-head CI.
+  still aborts. Exact branch head `6e402f0` passed hosted run `29277510106`.
+  Fresh prepare `145927` passed its four-observation ABBA canary with baseline
+  `correct:2`, candidate `correct:2`, and four bounded repeated-assignment
+  conflicts. Binary SHA-256 is `0cff30a189d46423...`, preflight journal SHA-256
+  is `e223befc265ee95e...`, and preflight-summary file SHA-256 is
+  `2809e913e30b5bb7...`. Array `145928` released automatically; audit `145929`
+  remains dependency-held, so no promotion claim exists.
 - Full/official 1,200-second continuation graph `145785`-`145789` is intact and
   scheduler-pending. Do not cancel or resubmit from queue state alone.
 - T5 must first pass a 7,503-source typed, hash-chained structural projection.

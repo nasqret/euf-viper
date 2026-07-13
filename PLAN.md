@@ -248,7 +248,13 @@ independent evidence checks, and a frozen family holdout.
   an already persistent lemma recurred during `notify_assignment`. Dependents
   `145924`/`145925` cancelled. Commit `8e26569` suppresses and counts only
   assignment-time repeats; complete-model or handoff duplicates still abort.
-  A fresh run is pending exact-head CI, and only its final audit can promote.
+  Exact branch head `6e402f0` passed hosted run `29277510106`. Fresh prepare
+  `145927` completed in `00:06:06`: its immutable ABBA canary returned baseline
+  `correct:2`, candidate `correct:2`, and four bounded repeated-assignment
+  conflicts. The exact binary SHA-256 is `0cff30a189d46423...`, preflight
+  journal SHA-256 is `e223befc265ee95e...`, and summary SHA-256 is
+  `2809e913e30b5bb7...`. Array `145928` released automatically; audit `145929`
+  remains dependency-held. Only that final audit can promote.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts

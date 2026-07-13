@@ -1010,12 +1010,22 @@
   assignment-time recurrences already covered by a delivered persistent clause
   and records them as telemetry. Complete-model and duplicate-handoff cases
   remain fail-closed. Seven focused, `242` default, and `248` all-feature tests
-  pass; a fresh run awaits exact-head CI.
+  pass. Exact branch head `6e402f0` passed hosted run `29277510106`. Fresh
+  prepare `145927` completed in `00:06:06` and passed its four-row ABBA canary:
+  baseline `correct:2`, candidate `correct:2`, with four bounded assignment-
+  time persistent-lemma recurrences recorded by the new telemetry. The locked
+  binary SHA-256 is `0cff30a189d464231dabf6a893a31dc23f9a44a7d115c65ee784508597cdb4ad`,
+  manifest SHA-256 is `85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390`,
+  preflight journal SHA-256 is `e223befc265ee95e20510fdce5a85cd9ade66c618b1e766a643b0ff49ef57734`,
+  and preflight-summary file SHA-256 is
+  `2809e913e30b5bb77cb7abb7f78841f8601165cb294b76110d632caf4c9f2e73`.
+  Slurm released array `145928` automatically; final audit `145929` remains
+  dependency-held, so no timing or promotion conclusion exists yet.
 - Full/official 1,200-second arrays `145785` and `145787` remain scheduler
   pending with 10 GiB, one-core requests; their dependent audits/finalizer
   `145786`/`145788`/`145789` remain held. The full array has a scheduler estimate
-  on `c3n1`; the official array is waiting on priority. No evidence graph was
-  changed.
+  of `2026-07-13T21:36:47` on `c3n1`; the official array is waiting on priority
+  without an estimated start. No evidence graph was changed.
 - T5 remains census-gated. Its next artifact must deterministically project
   typed component class codes, restricted-growth constraints, bitonic record
   sorting, eager Ackermann/triangle controls, exact clause/literal/watch costs,

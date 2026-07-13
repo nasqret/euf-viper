@@ -101,9 +101,16 @@ already persistent lemma reported during `notify_assignment`, before ordinary
 propagation consumed it on the retained trail. Commit `8e26569` suppresses and
 counts only that bounded assignment-time repeat. An emitted lemma reaching a
 complete model, a duplicate callback handoff, or cap exhaustion still aborts.
-Only a fresh exact-head prepare and immutable final audit may decide whether
-validation-count, target-speed, anti-target-overhead, and conflict-evidence
-gates pass. Partial state is not timing evidence.
+
+Exact branch head `6e402f0` passed hosted run `29277510106`. Fresh prepare
+`145927` completed in `00:06:06`; its immutable ABBA canary returned baseline
+`correct:2`, candidate `correct:2`, and four bounded repeated-assignment
+conflicts. Its locked binary SHA-256 is `0cff30a189d46423...`, the preflight
+journal SHA-256 is `e223befc265ee95e...`, and the preflight-summary file SHA-256
+is `2809e913e30b5bb7...`. Array `145928` released automatically and final audit
+`145929` remains dependency-held. Only that immutable final audit may decide
+whether validation-count, target-speed, anti-target-overhead, and conflict-
+evidence gates pass. Partial state is not timing evidence.
 
 ## Long-Timeout Graph
 
@@ -112,7 +119,9 @@ Audits `145786`/`145788` and finalizer `145789` depend on their completion. Each
 task requests one CPU and 10 GiB in `cpu_idle`; the current wait is scheduler
 availability/priority, not an impossible resource shape. The graph is preserved
 without cancellation or resubmission so physical-origin evidence remains
-intact.
+intact. At the latest live check, the full array had an estimated start of
+`2026-07-13T21:36:47`; the official array remained priority-bound without an
+estimated start.
 
 ## Opportunity Gates
 
