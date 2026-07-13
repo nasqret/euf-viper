@@ -8,6 +8,7 @@
   "corpus": {
     "manifest": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
     "expected_sources": 7503,
+    "portable_source_set_sha256": "d8997c621fbd58034e55bef1e6636ea0f0a28bc63bb6391be39e9195c6f44653",
     "families": {
       "goel": {
         "source_family": "QF_UF/2018-Goel-hwbench",

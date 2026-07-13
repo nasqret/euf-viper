@@ -168,6 +168,7 @@ class CampaignLock:
     sha256: str
     campaign_id: str
     expected_sources: int
+    portable_source_set_sha256: str
     families: tuple[FamilyLock, ...]
     caps: Caps
     minimum_total_applications: int
@@ -297,9 +298,19 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
         raise CensusError("campaign_id must be a nonempty string")
 
     corpus = _exact_keys(
-        raw["corpus"], {"manifest", "expected_sources", "families"}, "corpus"
+        raw["corpus"],
+        {
+            "manifest",
+            "expected_sources",
+            "portable_source_set_sha256",
+            "families",
+        },
+        "corpus",
     )
     expected_sources = _positive_int(corpus["expected_sources"], "expected_sources")
+    portable_source_set_sha256 = corpus["portable_source_set_sha256"]
+    if not _is_lower_sha256(portable_source_set_sha256):
+        raise CensusError("corpus portable_source_set_sha256 must be lowercase SHA-256")
     families_value = corpus["families"]
     if type(families_value) is not dict or not families_value:
         raise CensusError("corpus.families must be a nonempty object")
@@ -434,6 +445,7 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
         sha256=sha256_bytes(raw_bytes),
         campaign_id=campaign_id,
         expected_sources=expected_sources,
+        portable_source_set_sha256=portable_source_set_sha256,
         families=tuple(families),
         caps=caps,
         minimum_total_applications=_positive_int(
@@ -2049,6 +2061,13 @@ def run_census(
         manifest_path, repository_root, lock.expected_sources
     )
     manifest_sha256 = sha256_bytes(manifest_bytes)
+    portable_source_set_sha256 = sha256_bytes(portable_bytes)
+    if portable_source_set_sha256 != lock.portable_source_set_sha256:
+        raise CensusError(
+            "portable source-set SHA-256 mismatch: "
+            f"expected {lock.portable_source_set_sha256}, "
+            f"got {portable_source_set_sha256}"
+        )
     parser_sha256 = sha256_path(PARSER_PATH)
     analyzed = [
         analyze_source(source, lock, manifest_sha256, parser_sha256)
@@ -2065,7 +2084,7 @@ def run_census(
         records,
         lock,
         manifest_sha256=manifest_sha256,
-        portable_source_set_sha256=sha256_bytes(portable_bytes),
+        portable_source_set_sha256=portable_source_set_sha256,
         records_sha256=sha256_bytes(records_bytes),
         terminal_record_sha256=(
             str(records[-1]["record_sha256"]) if records else None

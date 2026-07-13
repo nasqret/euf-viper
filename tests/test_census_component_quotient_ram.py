@@ -410,6 +410,20 @@ class CensusFixture:
     def lock(self) -> Path:
         value = json.loads(CENSUS.DEFAULT_LOCK_PATH.read_text(encoding="ascii"))
         value["corpus"]["expected_sources"] = 2
+        portable_rows = sorted(self.rows, key=lambda row: row["relative_path"])
+        portable_bytes = b"".join(
+            CENSUS.canonical_json_bytes(
+                {
+                    "relative_path": row["relative_path"],
+                    "bytes": row["bytes"],
+                    "sha256": row["sha256"],
+                }
+            )
+            for row in portable_rows
+        )
+        value["corpus"]["portable_source_set_sha256"] = hashlib.sha256(
+            portable_bytes
+        ).hexdigest()
         value["corpus"]["families"]["qg"]["expected_population"] = 1
         value["corpus"]["families"]["goel"]["expected_population"] = 1
         value["gates"]["validity"]["required_sources"] = 2
@@ -458,6 +472,36 @@ class ProvenanceAndDeterminismTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(CENSUS.CensusError, "cardinality mismatch"):
                 CENSUS.load_manifest(fixture.manifest(), root, 7503)
+
+    def test_census_rejects_a_different_source_set_with_the_same_cardinality(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CensusFixture(root)
+            fixture.add(
+                "QF_UF/2018-Goel-hwbench/QF_UF_demo_ab_br_max.smt2",
+                query("(assert true)"),
+                2,
+            )
+            fixture.add(
+                "QF_UF/QG-classification/qg1/demo1.smt2",
+                query("(assert true)"),
+                1,
+            )
+            lock = fixture.lock()
+            value = json.loads(lock.read_text(encoding="ascii"))
+            value["corpus"]["portable_source_set_sha256"] = "0" * 64
+            lock.write_text(json.dumps(value), encoding="ascii")
+            with self.assertRaisesRegex(
+                CENSUS.CensusError, "portable source-set SHA-256 mismatch"
+            ):
+                CENSUS.run_census(
+                    fixture.manifest(),
+                    root / "records.jsonl",
+                    root / "aggregate.json",
+                    root / "targets.jsonl",
+                    repository_root=root,
+                    lock_path=lock,
+                )
 
     def test_outputs_are_byte_deterministic_and_portably_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

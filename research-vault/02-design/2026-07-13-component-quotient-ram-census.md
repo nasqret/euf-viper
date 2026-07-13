@@ -74,6 +74,9 @@ structural telemetry only, not a performance estimate.
 The campaign lock fixes:
 
 - exactly 7,503 source records;
+- the portable source-set SHA-256
+  `d8997c621fbd58034e55bef1e6636ea0f0a28bc63bb6391be39e9195c6f44653`,
+  independently reproduced from the local and WMI manifests;
 - QG population 6,396 and Goel population 773;
 - parser, analyzer, taxonomy builder, lock, manifest, portable source-set,
   record-stream, terminal-record, and target-manifest hashes;
