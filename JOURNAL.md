@@ -1145,6 +1145,16 @@
   inconsistent frozen PAR-2 arithmetic. Duplicate JSON keys and non-finite
   constants also fail during loading; exact evidence totals, component-ID rule,
   and Williams arm order cannot drift. Local validator and unit tests pass.
+- Froze T8 M0 in `campaigns/t8-scalar-frontier-census-v1.json` and
+  `research-vault/02-design/2026-07-13-t8-source-exact-scalar-contract.md`.
+  Existing right-translation/orbit code is not source-complete and has `0/12`
+  source-exact UNSAT coverage on the frozen qg7 deficit. The replacement is a
+  deterministic no-forget typed partial-algebra transducer with command-level
+  assertion/auxiliary lineage, complete residual source state, checked
+  automorphisms, an independent domain-1--3 total-model-set oracle, and checked
+  SAT interpretations or UNSAT cube-cover DAGs. It stops before implementation
+  until T1 review, the missing assertion ledger, and corrected T4 evidence
+  complete.
 
 ## Next Entry Template
 

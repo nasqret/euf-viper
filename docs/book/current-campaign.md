@@ -212,6 +212,19 @@ depth-four tree; sealed balanced-accuracy LCB must reach `0.80`, telemetry p95
 ratio UCB must stay below `1.01`, and off/on semantic traces must be byte
 identical.
 
+The conditional qg7 route is also frozen as
+`campaigns/t8-scalar-frontier-census-v1.json`. The prior right-translation
+search has no source-exact UNSAT coverage on the frozen 12 deficits: it omits
+the residual source from its state and can only abstain after an abstract
+witness. T8 therefore starts, if prerequisites pass, as a scalar no-forget
+typed partial-algebra transducer with command-level assertion lineage, complete
+residual Boolean state, an independent domain-1--3 total-model-set oracle, and
+checked SAT interpretations or UNSAT cube-cover DAGs. It must make at least
+200/261 one-table cases source-complete, finish at least 10/12 deficits below
+one million states, and keep complete graph-build cost below 10% of Yices2 on
+at least 7/12. T1 review, the missing assertion-lineage ledger, and corrected
+T4 evidence block implementation; SIMD is not authorized.
+
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an
 isolated implementation; it does not establish speed.

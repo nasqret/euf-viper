@@ -809,3 +809,13 @@
   post-checkpoint events. Require two eligible fixed arms, headroom LCB at least
   `10%`, balanced-accuracy LCB at least `0.80`, telemetry p95 ratio UCB below
   `1.01`, and byte-identical off/on traces before migration.
+- T8 M0 is preregistered in `campaigns/t8-scalar-frontier-census-v1.json`.
+  Historical right-translation/orbit search is source-incomplete and has `0/12`
+  source-exact UNSAT coverage on the frozen qg7 deficits. The authoritative
+  design is a no-forget typed partial-algebra transducer with command-level
+  source/auxiliary lineage, complete residual state, an independent tiny-domain
+  total-model-set oracle, checked SAT models, and checked UNSAT cube-cover DAGs.
+  Do not implement it before independent T1 review, the missing assertion
+  ledger, and corrected T4 finite-range evidence. Scalar gates are 200/261
+  source-complete one-table cases, 10/12 P12 below one million states, and build
+  cost at most 10% of Yices2 on at least 7/12; SIMD remains conditional.

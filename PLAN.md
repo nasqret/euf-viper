@@ -416,10 +416,24 @@ Do not compose two candidates in P2. Attribution must remain exact.
 
 - [ ] Reopen finite-table search only with source-complete semantics from T1 and
   checked finite ranges from T4.
+  - [x] Freeze the source-ledgered scalar contract in
+    `campaigns/t8-scalar-frontier-census-v1.json`. Historical right-translation
+    search has `0/12` source-exact UNSAT coverage and is an accelerator/control,
+    never the authoritative state.
+  - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
+    source assertion and parser-generated auxiliary. T1 parser parity alone
+    does not provide this ledger.
+  - [ ] Require corrected T4 finite-range evidence and independent review of
+    T1 before scalar implementation; neither prerequisite may be inferred from
+    queue state or an author's report.
 - [ ] Run canonical scalar frontier census over one-table and domain-seven
   targets, recording state reuse, separator width, and transition cost. Require
   zero exhaustive-checker mismatches, at least 10/12 frozen qg7 targets under a
   `1,000,000`-state cap, and build cost at most 10% on most targets.
+  - [ ] Start with a no-forget authoritative state, an independent domain-1--3
+    total-model-set oracle, and checked SAT models/UNSAT cube-cover DAGs.
+  - [ ] Require at least 200/261 `DOMAIN7_ONE_TABLE` sources to be
+    source-complete and the build-cost gate on at least 7/12 P12 targets.
 - [ ] Require at least 70% useful SIMD lane occupancy before AVX2 work.
 - [ ] Validate every SAT model; require exhaustive checked cube covers for UNSAT.
 - [ ] Beat Yices2 directly on the target including setup before broad QG routing.
@@ -482,7 +496,9 @@ fallback can be an operational portfolio but never a standalone victory.
    T3 M0 component-pressure telemetry under the frozen S0/S1 contract. The
    current family-confounded 24-source panel has only 3.74% coverage-aware
    headroom and cannot authorize it. Otherwise stop migration and test the
-   scalar source-exact T8 qg7 frontier census before any SIMD work.
+   scalar source-exact T8 qg7 frontier census under its frozen no-forget/source-
+   ledger contract before any SIMD work. T8 remains blocked until T1 review,
+   assertion lineage, and corrected T4 evidence complete.
 9. Select and compose a novel architecture only from independently checked,
    broad paired wins; then rerun P4/P5 on two CPU classes.
 

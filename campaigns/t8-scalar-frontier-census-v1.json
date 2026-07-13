@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "campaign_id": "t8-scalar-frontier-census-v1",
+  "status": "preregistered_design_blocked_on_prerequisites",
+  "scope": {
+    "logic": "QF_UF",
+    "heavy_compute_site": "WMI",
+    "mode": "source_only_opportunity_census",
+    "solver_result_claim_allowed": false,
+    "simd_allowed": false
+  },
+  "prerequisites": {
+    "typed_parser_revision": "7214d6396905466b459ca7d614bc2e1c6c85ec93",
+    "typed_parser_audit_sha256": "fea1b2ec59df0187e62d38bd7a996f3fa30c9cbdecee6520dca485364c59d355",
+    "typed_parser_independent_review": "pending",
+    "command_and_auxiliary_assertion_lineage": "missing",
+    "corrected_finite_range_job": 146071,
+    "corrected_finite_range_status": "running"
+  },
+  "source_ledger": {
+    "source_assertion_id": [
+      "source_ordinal",
+      "exact_byte_span",
+      "raw_ast_sha256"
+    ],
+    "auxiliary_id": [
+      "origin_assertion",
+      "kind",
+      "local_index"
+    ],
+    "required_bindings": [
+      "raw_source_sha256",
+      "declarations_and_definitions",
+      "parser_revision_and_mode",
+      "checked_finite_range_certificate",
+      "active_check_sat"
+    ],
+    "all_assertions_and_live_symbols_required": true
+  },
+  "state": {
+    "schedule": "deterministic_min_fill_source_incidence",
+    "key": [
+      "layer",
+      "live_typed_term_partition",
+      "ghost_tokens",
+      "function_memos",
+      "live_atom_and_gate_values",
+      "derived_specialized_summaries"
+    ],
+    "anonymous_value_canonicalization": "typed_restricted_growth",
+    "named_value_permutation": "checked_complete_source_prefix_automorphism_only",
+    "m0_forgetting": "term_id_after_final_incidence_only",
+    "retain_all_value_tokens_and_function_memos": true,
+    "full_key_compare_after_hash_match": true
+  },
+  "transitions": [
+    "introduce_term",
+    "introduce_application",
+    "evaluate_source_atom",
+    "evaluate_boolean_gate",
+    "forget_term_after_final_incidence"
+  ],
+  "right_translation_macro": {
+    "allowed": true,
+    "primitive_table_cell_transitions": 7,
+    "complete_source_derived_partition_required": true,
+    "authoritative_semantics": false
+  },
+  "independent_oracle": {
+    "separate_parser_and_evaluator": true,
+    "domain_sizes": [1, 2, 3],
+    "maximum_total_interpretations": 1000000,
+    "comparison": "exact_satisfying_total_model_set_sha256",
+    "shared_lowering_or_state_code_allowed": false
+  },
+  "evidence": {
+    "sat": "total_interpretation_accepting_path_and_per_assertion_replay",
+    "unsat": "checked_disjoint_cube_cover_decision_dag",
+    "capped_graph_can_prove_unsat": false,
+    "independent_checker_required": true
+  },
+  "state_cap": {
+    "maximum_unique_reachable_canonical_states": 1000000,
+    "includes": ["root", "accepting_states"],
+    "excludes": ["immediately_rejected_transitions"],
+    "overflow_status": "ABSTAIN_STATE_CAP",
+    "partial_result_disposition": "discard"
+  },
+  "populations": {
+    "P12": {
+      "count": 12,
+      "sorted_path_stream_sha256": "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa",
+      "source_bound_tsv_sha256": "78e09b9437525c77f61014f865a5e91242a713c54d1550550903500c970753c3",
+      "path_or_expected_status_is_runtime_feature": false
+    },
+    "DOMAIN7_ONE_TABLE": {
+      "count": 261,
+      "selector_manifest_sha256": "feaee694c894b899938494ca70b9c1641e032452e217c21233bd12e4c688fbe5"
+    },
+    "DOMAIN7_TABLE": {
+      "count": 431,
+      "selector_manifest_sha256": "3c40aa2d1a6a7a2751a73af3a1b20a589f23b601644dbcc3321c85fdf723f758"
+    },
+    "historical_sat_controls": {
+      "count": 12,
+      "source_bound_tsv_sha256": "8a4ca8e5464abd2964788b3e151603b0e37d7c2497655a9d01de0dca0886e6be"
+    },
+    "historical_residual_controls": {
+      "count": 19,
+      "source_bound_tsv_sha256": "1f98164da78bb7783a8dcfe1e8a1f094b0841f24b315968100d935e102c6c3f7"
+    }
+  },
+  "gates": {
+    "tiny_oracle_mismatches_allowed": 0,
+    "source_or_auxiliary_lineage_gaps_allowed": 0,
+    "minimum_source_complete_domain7_one_table": 200,
+    "minimum_p12_below_state_cap": 10,
+    "maximum_build_cost_fraction_of_yices2": 0.1,
+    "minimum_p12_meeting_build_cost": 7,
+    "minimum_broader_population_build_cost_fraction": 0.5,
+    "sat_and_unsat_evidence_check_failures_allowed": 0,
+    "minimum_direct_yices2_speedup_after_census": 1.1,
+    "minimum_useful_simd_lane_occupancy_after_scalar_pass": 0.7
+  },
+  "stop_rule": "any_prerequisite_or_gate_failure_stops_before_solver_or_simd_implementation"
+}
