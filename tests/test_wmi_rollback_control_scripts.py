@@ -75,6 +75,9 @@ class WmiRollbackControlScriptTests(unittest.TestCase):
         self.assertIn("--shard-count \"$CONTROL_ROWS\"", text)
         self.assertIn('"candidate": {"correct": 2}', text)
         self.assertIn('"preflight": {', text)
+        self.assertIn('PYTHON_BIN="$(command -v python3)"', text)
+        self.assertIn('"$PYTHON_BIN" "$RUNNER"', text)
+        self.assertNotRegex(text, r"(?m)^\s+python3 \"\$RUNNER\"")
 
     def test_array_is_exact_three_way_control_and_uses_pinned_binary(self) -> None:
         text = self.text(CONTROL)

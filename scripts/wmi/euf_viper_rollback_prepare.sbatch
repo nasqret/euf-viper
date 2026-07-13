@@ -23,6 +23,12 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
 
+PYTHON_BIN="$(command -v python3)"
+[ -n "$PYTHON_BIN" ] && [ -x "$PYTHON_BIN" ] || {
+  echo "rollback preparation requires an executable python3" >&2
+  exit 2
+}
+
 EXPECTED_REVISION="${EUF_VIPER_ROLLBACK_EXPECTED_REVISION:?set expected revision}"
 RUN_ROOT="${EUF_VIPER_ROLLBACK_RUN_ROOT:?set rollback run root}"
 CORPUS_ROOT="${EUF_VIPER_ROLLBACK_CORPUS_ROOT:?set corpus root}"
@@ -101,7 +107,7 @@ CARGO_LOCK_SHA256="$(sha256sum Cargo.lock | awk '{print $1}')"
 
 CONTROL_MANIFEST="$RUN_ROOT/control-manifest.jsonl"
 CONTROL_SUMMARY="$RUN_ROOT/control-manifest-summary.json"
-python3 "$BUILDER" \
+"$PYTHON_BIN" "$BUILDER" \
   "$CORPUS_MANIFEST" \
   --out "$CONTROL_MANIFEST" \
   --summary "$CONTROL_SUMMARY" \
@@ -114,7 +120,7 @@ PREFLIGHT_JOURNAL="$RUN_ROOT/preflight.jsonl"
 PREFLIGHT_SUMMARY="$RUN_ROOT/preflight-summary.json"
 CONTROL_ROWS=$((TARGET_COUNT + ANTI_TARGET_COUNT))
 srun --exclusive --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
-  python3 "$RUNNER" \
+  "$PYTHON_BIN" "$RUNNER" \
   "$CONTROL_MANIFEST" \
   --binary "$RUN_ROOT/bin/euf-viper" \
   --comparison current \
@@ -127,7 +133,7 @@ srun --exclusive --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
   --out "$PREFLIGHT_JOURNAL" \
   --summary "$PREFLIGHT_SUMMARY"
 
-python3 - "$PREFLIGHT_SUMMARY" <<'PY_PREFLIGHT_GATE'
+"$PYTHON_BIN" - "$PREFLIGHT_SUMMARY" <<'PY_PREFLIGHT_GATE'
 import json
 import sys
 from pathlib import Path
@@ -146,7 +152,7 @@ if summary.get("outcomes") != {
     raise SystemExit("rollback preflight has a wrong, unsupported, or missing result")
 PY_PREFLIGHT_GATE
 
-python3 - \
+"$PYTHON_BIN" - \
   "$RUN_ROOT/prepare.json" \
   "$EXPECTED_REVISION" \
   "$RUN_ROOT" \
