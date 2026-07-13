@@ -20,6 +20,7 @@ include = [
     "build.rs",
     "CHANGELOG.md",
     "README.md",
+    "VENDORING.md",
     "/src/",
     "/solvertests/",
     "/tests/",

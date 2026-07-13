@@ -11,5 +11,6 @@
 __pycache__/
 *.pyc
 /vendor/rustsat-kissat/
+/vendor/rustsat-cadical/target/
 **/.cargo-ok
 **/.cargo_vcs_info.json

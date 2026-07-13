@@ -4,7 +4,7 @@ use rustsat::{
 };
 use rustsat_cadical::{
     CaDiCaL, ExternalClause, ExternalPropagator, ExternalPropagatorError,
-    ExternalPropagatorFailure, PropagatorResult,
+    ExternalPropagatorFailure, PropagatorAbort, PropagatorResult,
 };
 
 struct UnitConflict {
@@ -43,9 +43,29 @@ fn callback_conflict_refutes_otherwise_sat_instance() {
     };
 
     let result = solver
-        .with_external_propagator(&mut propagator, [x.var()], |solver, control| {
-            assert_eq!(control.failure(), None);
-            solver.solve().unwrap()
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            assert_eq!(session.failure(), None);
+            session.solve().unwrap()
+        })
+        .unwrap();
+
+    assert_eq!(result, SolverResult::Unsat);
+}
+
+#[test]
+fn cached_sat_result_is_revalidated_after_connection() {
+    let x = Lit::positive(0);
+    let mut solver = CaDiCaL::default();
+    solver.add_unit(x).unwrap();
+    assert_eq!(solver.solve().unwrap(), SolverResult::Sat);
+    let mut propagator = UnitConflict {
+        variable: x.var(),
+        pending: false,
+    };
+
+    let result = solver
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            session.solve().unwrap()
         })
         .unwrap();
 
@@ -101,9 +121,9 @@ fn model_rejection_continues_search_and_backtracks_in_order() {
     let mut propagator = RejectFirstModel::default();
 
     let result = solver
-        .with_external_propagator(&mut propagator, [x.var(), y.var()], |solver, control| {
-            let result = solver.solve().unwrap();
-            assert_eq!(control.failure(), None);
+        .with_external_propagator(&mut propagator, [x.var(), y.var()], |session| {
+            let result = session.solve().unwrap();
+            assert_eq!(session.failure(), None);
             result
         })
         .unwrap();
@@ -139,6 +159,39 @@ impl ExternalPropagator for PanickingPropagator {
     }
 }
 
+struct AbortOnAssignment;
+
+impl ExternalPropagator for AbortOnAssignment {
+    fn notify_assignment(&mut self, _literals: &[Lit]) -> PropagatorResult<()> {
+        Err(PropagatorAbort::new("reject fixed assignment"))
+    }
+}
+
+#[test]
+fn registration_callback_failure_prevents_operation() {
+    let x = Lit::positive(0);
+    let mut solver = CaDiCaL::default();
+    solver.add_unit(x).unwrap();
+    assert_eq!(solver.solve().unwrap(), SolverResult::Sat);
+    let mut propagator = AbortOnAssignment;
+    let operation_called = std::cell::Cell::new(false);
+
+    let failure = solver
+        .with_external_propagator(&mut propagator, [x.var()], |_session| {
+            operation_called.set(true);
+        })
+        .unwrap_err();
+
+    assert!(!operation_called.get());
+    assert!(matches!(
+        failure,
+        ExternalPropagatorError::Callback(ExternalPropagatorFailure::CallbackAborted {
+            callback: "notify_assignment",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn callback_panic_terminates_without_unwinding_through_ffi() {
     let x = Lit::positive(0);
@@ -147,8 +200,8 @@ fn callback_panic_terminates_without_unwinding_through_ffi() {
     let mut propagator = PanickingPropagator;
 
     let failure = solver
-        .with_external_propagator(&mut propagator, [x.var()], |solver, _control| {
-            solver.solve().unwrap()
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            session.solve().unwrap()
         })
         .unwrap_err();
 
@@ -192,8 +245,8 @@ fn malformed_clause_output_terminates_before_reaching_cadical() {
     };
 
     let failure = solver
-        .with_external_propagator(&mut propagator, [x.var()], |solver, _control| {
-            solver.solve().unwrap()
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            session.solve().unwrap()
         })
         .unwrap_err();
 
@@ -214,8 +267,8 @@ fn explicit_abort_fails_the_scope() {
     let mut propagator = RejectFirstModel::default();
 
     let failure = solver
-        .with_external_propagator(&mut propagator, [x.var()], |_solver, control| {
-            control.abort("test requested stop");
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            session.abort("test requested stop");
         })
         .unwrap_err();
 
@@ -225,6 +278,23 @@ fn explicit_abort_fails_the_scope() {
             message
         }) if message == "test requested stop"
     ));
+}
+
+#[test]
+fn operation_panic_disconnects_before_unwinding() {
+    let x = Lit::positive(0);
+    let mut solver = CaDiCaL::default();
+    solver.add_unit(x).unwrap();
+    let mut propagator = RejectFirstModel::default();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = solver.with_external_propagator(&mut propagator, [x.var()], |_session| {
+            panic!("intentional operation panic");
+        });
+    }));
+
+    assert!(panic.is_err());
+    assert_eq!(solver.solve().unwrap(), SolverResult::Sat);
 }
 
 struct RejectWithoutClause;
@@ -243,8 +313,8 @@ fn rejected_model_without_clause_fails_callback_order() {
     let mut propagator = RejectWithoutClause;
 
     let failure = solver
-        .with_external_propagator(&mut propagator, [x.var()], |solver, _control| {
-            solver.solve().unwrap()
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            session.solve().unwrap()
         })
         .unwrap_err();
 

@@ -129,8 +129,8 @@ mod ffi;
 mod external_propagator;
 #[cfg(cadical_version = "v2.2.0")]
 pub use external_propagator::{
-    ExternalClause, ExternalPropagator, ExternalPropagatorConnectError, ExternalPropagatorControl,
-    ExternalPropagatorError, ExternalPropagatorFailure, PropagatorAbort, PropagatorResult,
+    ExternalClause, ExternalPropagator, ExternalPropagatorConnectError, ExternalPropagatorError,
+    ExternalPropagatorFailure, ExternalPropagatorSession, PropagatorAbort, PropagatorResult,
 };
 
 #[cfg(cadical_version = "v2.0.0")]

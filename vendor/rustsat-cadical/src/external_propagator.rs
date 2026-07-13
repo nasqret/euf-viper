@@ -12,7 +12,10 @@ use std::{
     slice,
 };
 
-use rustsat::types::{Lit, Var};
+use rustsat::{
+    solvers::{Solve, SolverResult},
+    types::{Lit, Var},
+};
 use thiserror::Error;
 
 use crate::{ffi, CaDiCaL, InternalSolverState};
@@ -768,23 +771,33 @@ impl Drop for DisconnectGuard {
     }
 }
 
-/// Control and status handle valid only inside a connected solve scope.
-pub struct ExternalPropagatorControl<'scope, 'prop> {
+/// Restricted solver and status handle valid only inside a connected scope.
+///
+/// This type deliberately does not expose `&mut CaDiCaL`: replacing or
+/// reconnecting the solver while the native adapter holds pointers into the
+/// callback state would invalidate those pointers.
+pub struct ExternalPropagatorSession<'scope, 'prop, 'term, 'learn> {
+    solver: &'scope mut CaDiCaL<'term, 'learn>,
     native: NonNull<ffi::CCaDiCaLExternalPropagator>,
     state: &'scope CallbackState<'prop>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-impl std::fmt::Debug for ExternalPropagatorControl<'_, '_> {
+impl std::fmt::Debug for ExternalPropagatorSession<'_, '_, '_, '_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("ExternalPropagatorControl")
+            .debug_struct("ExternalPropagatorSession")
             .field("failure", &self.failure())
             .finish_non_exhaustive()
     }
 }
 
-impl ExternalPropagatorControl<'_, '_> {
+impl ExternalPropagatorSession<'_, '_, '_, '_> {
+    /// Solves with the external propagator connected.
+    pub fn solve(&mut self) -> anyhow::Result<SolverResult> {
+        self.solver.solve()
+    }
+
     /// Requests termination and records an explicit failure.
     pub fn abort(&self, message: impl Into<String>) {
         self.state
@@ -818,15 +831,15 @@ impl<'term, 'learn> CaDiCaL<'term, 'learn> {
     /// A callback failure takes precedence over `operation`'s return value.
     /// Callers must wait for this method to return before acting on a solver
     /// result produced inside the closure.
-    pub fn with_external_propagator<I, F, R>(
+    pub fn with_external_propagator<'prop, I, F, R>(
         &mut self,
-        propagator: &mut dyn ExternalPropagator,
+        propagator: &'prop mut dyn ExternalPropagator,
         observed: I,
         operation: F,
     ) -> Result<R, ExternalPropagatorError>
     where
         I: IntoIterator<Item = Var>,
-        F: FnOnce(&mut Self, &ExternalPropagatorControl<'_, '_>) -> R,
+        F: FnOnce(&mut ExternalPropagatorSession<'_, 'prop, 'term, 'learn>) -> R,
     {
         let observed: BTreeSet<c_int> = observed.into_iter().map(Var::to_ipasir).collect();
         let state = CallbackState {
@@ -852,25 +865,38 @@ impl<'term, 'learn> CaDiCaL<'term, 'learn> {
         })
         .ok_or(ExternalPropagatorConnectError::NativeConnectionFailed)?;
         let guard = DisconnectGuard { native };
+        if self.state != InternalSolverState::Configuring {
+            // Connecting can backtrack the native solver. More importantly,
+            // a cached SAT result must never bypass the propagator callbacks.
+            self.state = InternalSolverState::Input;
+        }
         for variable in observed {
             let accepted = unsafe {
                 ffi::ccadical_external_propagator_add_observed_var(native.as_ptr(), variable)
             };
             if accepted != 1 {
                 drop(guard);
+                self.state = InternalSolverState::Input;
                 return Err(
                     ExternalPropagatorConnectError::ObserveVariableFailed { variable }.into(),
                 );
             }
+            if let Some(failure) = state.failure.borrow().clone() {
+                drop(guard);
+                self.state = InternalSolverState::Input;
+                return Err(ExternalPropagatorError::Callback(failure));
+            }
         }
-        let control = ExternalPropagatorControl {
+        let mut session = ExternalPropagatorSession {
+            solver: self,
             native,
             state: state.as_ref().get_ref(),
             _not_send_or_sync: PhantomData,
         };
-        let result = operation(self, &control);
-        let failure = control.failure();
+        let result = operation(&mut session);
+        drop(session);
         drop(guard);
+        let failure = state.failure.borrow().clone();
         if let Some(failure) = failure {
             self.state = InternalSolverState::Input;
             Err(ExternalPropagatorError::Callback(failure))
