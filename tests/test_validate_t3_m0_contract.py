@@ -114,6 +114,22 @@ class T3M0ContractTests(unittest.TestCase):
                 VALIDATOR.load_and_validate(non_finite_path)
             self.assertIn("non-finite JSON constant", str(non_finite_error.exception))
 
+    def test_frozen_evidence_ids_and_arm_order_cannot_drift(self) -> None:
+        contract = load_contract()
+        contract["preliminary_evidence"]["best_fixed_par2_s"] *= 2
+        contract["preliminary_evidence"]["oracle_par2_s"] *= 2
+        contract["stable_unit"]["id_rule"] = "representation_specific_hash"
+        contract["arms"].reverse()
+
+        with self.assertRaises(VALIDATOR.T3M0ContractError) as caught:
+            VALIDATOR.validate_contract(contract)
+
+        message = "\n".join(caught.exception.errors)
+        self.assertIn("best-fixed PAR-2", message)
+        self.assertIn("oracle PAR-2", message)
+        self.assertIn("id_rule", message)
+        self.assertIn("Williams-schedule order", message)
+
     def test_cli_writes_machine_readable_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "summary.json"

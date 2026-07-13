@@ -17,6 +17,12 @@ REQUIRED_ARMS = {
     "dynamic_ackermann",
     "model_directed_cuts",
 }
+REQUIRED_ARM_ORDER = [
+    "current_eager",
+    "whole_instance_conflict_only_rollback",
+    "dynamic_ackermann",
+    "model_directed_cuts",
+]
 REQUIRED_S0_BEFORE = {
     "finite_routing",
     "ackermann_expansion",
@@ -166,6 +172,12 @@ def validate_contract(contract: Any) -> dict[str, Any]:
     best_fixed = evidence.get("best_fixed_par2_s")
     oracle = evidence.get("oracle_par2_s")
     headroom = evidence.get("oracle_headroom")
+    if not _matches(best_fixed, 223.453):
+        errors.append("preliminary best-fixed PAR-2 must remain 223.453")
+    if not _matches(oracle, 215.403):
+        errors.append("preliminary oracle PAR-2 must remain 215.403")
+    if not _matches(headroom, 0.0374):
+        errors.append("preliminary oracle headroom must remain 0.0374")
     if not all(type(value) in {int, float} for value in (best_fixed, oracle, headroom)):
         errors.append("preliminary PAR-2 values and headroom must be numeric")
     elif oracle <= 0:
@@ -178,10 +190,14 @@ def validate_contract(contract: Any) -> dict[str, Any]:
             errors.append("preliminary evidence must remain below the M0 headroom gate")
 
     _exact_set(contract.get("arms"), REQUIRED_ARMS, "arms", errors)
+    if contract.get("arms") != REQUIRED_ARM_ORDER:
+        errors.append("arms must retain their frozen Williams-schedule order")
 
     unit = _object(contract, "stable_unit", errors)
     if unit.get("kind") != "typed_formula_local_component":
         errors.append("stable_unit.kind must be typed_formula_local_component")
+    if unit.get("id_rule") != "deterministic_typed_traversal_index":
+        errors.append("stable_unit.id_rule must remain deterministic typed traversal")
     if unit.get("ownership_freeze") != (
         "after_typed_parse_before_representation_rewrite"
     ):
