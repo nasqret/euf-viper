@@ -380,6 +380,18 @@ class TseitinEncodingTests(unittest.TestCase):
             )
         )
 
+    def test_deep_let_chain_is_independent_of_python_recursion_limit(self) -> None:
+        body = "p"
+        for _ in range(600):
+            body = f"(let ((p p)) {body})"
+        deep = QFUF.parse_and_encode(
+            query(f"(declare-const p Bool) (assert {body})")
+        )
+        plain = QFUF.parse_and_encode(query("(declare-const p Bool) (assert p)"))
+
+        self.assertEqual(deep.atoms, plain.atoms)
+        self.assertEqual(deep.clauses, plain.clauses)
+
 
 class ModelAndTheoryTests(unittest.TestCase):
     def test_basic_equality_sat_and_congruence_unsat_assignment(self) -> None:

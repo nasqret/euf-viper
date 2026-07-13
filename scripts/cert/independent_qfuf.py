@@ -606,12 +606,12 @@ class _Builder:
                 )
         return _and(disequalities)
 
-    def _parse_let(
+    def _enter_let_scope(
         self,
         sexp: _ListSexp,
         env: Mapping[str, _Value],
         expansion_stack: tuple[int, ...],
-    ) -> _Value:
+    ) -> tuple[_Sexp, Mapping[str, _Value]]:
         if len(sexp.items) != 3:
             _reject(sexp, "let expression must have bindings and one body")
         bindings = sexp.items[1]
@@ -631,7 +631,7 @@ class _Builder:
             parsed.append((name_token.text, value))
         local = dict(env)
         local.update(parsed)
-        return self._parse_value(sexp.items[2], local, expansion_stack)
+        return sexp.items[2], local
 
     def _parse_ite(
         self,
@@ -731,6 +731,16 @@ class _Builder:
         env: Mapping[str, _Value],
         expansion_stack: tuple[int, ...] = (),
     ) -> _Value:
+        # Generated NEQ instances contain hundreds of nested lets. Enter their
+        # scopes iteratively so valid input does not depend on Python's process-
+        # global recursion limit. Binding right-hand sides still use the outer
+        # scope, preserving SMT-LIB's simultaneous-binding semantics.
+        while isinstance(sexp, _ListSexp) and sexp.items:
+            head = _symbol_token(sexp.items[0], "expression head")
+            if head.kind != "SYMBOL" or head.text != "let":
+                break
+            sexp, env = self._enter_let_scope(sexp, env, expansion_stack)
+
         if isinstance(sexp, _AtomSexp):
             token = sexp.token
             if token.kind not in {"SYMBOL", "QUOTED_SYMBOL"}:
@@ -750,8 +760,6 @@ class _Builder:
         syntax = head.text if head.kind == "SYMBOL" else None
         arguments = sexp.items[1:]
 
-        if syntax == "let":
-            return self._parse_let(sexp, env, expansion_stack)
         if syntax == "ite":
             return self._parse_ite(sexp, env, expansion_stack)
         if syntax == "!":
