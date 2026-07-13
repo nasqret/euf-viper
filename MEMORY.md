@@ -862,3 +862,9 @@
   preregistration retention only. Hosted run `29290493620` passed, and explicit
   regressions reject receipt drift plus omitted summary, receipt, or both API
   evidence paths. T8 implementation remains blocked on its three prerequisites.
+- T5 `ea8dee5` remains no-go. Its semantic reconstruction and Python identity
+  passed review, but skip-worktree could hide changed imported bytes, the final
+  digest-to-pathname-link interval remained mutable, and failed same-job reruns
+  exposed an old completed bundle. Require exact HEAD-blob comparison,
+  publication of the checked inode, and attempt-scoped current completion before
+  any WMI submission.

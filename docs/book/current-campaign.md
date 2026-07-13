@@ -210,6 +210,11 @@ target, gate, and decoder mutations could still reach `completed`, publication
 had a final digest race, failed reruns retained stale completion metadata, and
 untracked Python modules escaped revision integrity. The next repair must
 semantically verify captured bytes and atomically publish an immutable bundle.
+Revision `ea8dee5` closed the semantic replay and Python-identity defects but
+also failed independent review: skip-worktree hid modified tracked imports, the
+final digest still preceded pathname publication, and a failed same-job rerun
+left an older completed bundle visible. Exact Git-blob checks, publication of
+the checked inode, and attempt-scoped current markers are required before WMI.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit.

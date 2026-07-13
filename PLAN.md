@@ -369,8 +369,12 @@ independent evidence checks, and a frozen family holdout.
   third review: coordinated semantic mutations still reached `completed`, a
   final check-to-publish race remained, failed reruns preserved stale completed
   metadata, and untracked Python modules were outside revision integrity. A new
-  immutable captured-byte publication repair is active. No WMI submission is
-  allowed before another independent review.
+  immutable captured-byte publication repair at `ea8dee5` closed semantic
+  reconstruction and interpreter identity but failed the next review:
+  skip-worktree tracked bytes escaped revision checking, the final staged digest
+  still preceded pathname publication, and failed same-job reruns exposed an old
+  completed bundle. Attempt-scoped publication and exact Git-blob checks are
+  active. No WMI submission is allowed before another independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 

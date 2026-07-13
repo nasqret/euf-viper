@@ -1209,6 +1209,13 @@
   omitted receipt, and omitted-both API calls all raise `TypeError`, and hosted
   run `29290493620` passed. This is permission to retain the freeze only, not to
   implement scalar search or SIMD.
+- Independent T5 review rejected `ea8dee5` despite 68 passing focused tests and
+  correct captured-byte semantic reconstruction. A tracked imported module with
+  `skip-worktree` could differ from `HEAD` while the checkout guard passed; a
+  mutation after the final staged-archive digest but before pathname linking was
+  published; and a failed same-job rerun left the old completed archive visible.
+  No WMI census was submitted. Exact Git-blob verification, fd-bound publication,
+  and attempt-scoped current markers are active repairs.
 
 ## Next Entry Template
 
