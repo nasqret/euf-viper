@@ -165,12 +165,15 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
         self.assertIn("--dry-run", text)
         self.assertEqual(text.count("sbatch --parsable"), 3)
         self.assertGreaterEqual(text.count("--kill-on-invalid-dep=yes"), 3)
+        self.assertIn("EUF_VIPER_KISSAT4_DEPENDENCY", text)
+        self.assertIn('SAMPLE_DEPENDENCY="--dependency=afterok:$EXTERNAL_DEPENDENCY"', text)
         self.assertIn("--dependency=afterok:'$SAMPLE_JOB'", text)
         self.assertIn("--dependency=afterok:'$BROAD_JOB'", text)
         self.assertNotIn("afterany:", text)
         self.assertIn("--array=0-$((SHARDS - 1))%'$MAX_ACTIVE'", text)
         self.assertIn("abort_partial_chain", text)
         self.assertIn("git ls-remote --exit-code", text)
+        self.assertIn('"external_dependency": optional_int', text)
 
     def test_sample_and_broad_results_are_machine_readable_and_hashed(self) -> None:
         runner = self.text(RUNNER)

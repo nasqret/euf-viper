@@ -33,6 +33,7 @@ BROAD_MIN_PAIRED="${EUF_VIPER_KISSAT4_BROAD_MIN_PAIRED:-100}"
 BROAD_MIN_SPEEDUP="${EUF_VIPER_KISSAT4_BROAD_MIN_SPEEDUP:-1.0}"
 BROAD_MAX_P_VALUE="${EUF_VIPER_KISSAT4_BROAD_MAX_P_VALUE:-0.05}"
 BROAD_ITERATIONS="${EUF_VIPER_KISSAT4_BROAD_ITERATIONS:-10000}"
+EXTERNAL_DEPENDENCY="${EUF_VIPER_KISSAT4_DEPENDENCY:-}"
 kissat4_require_safe_remote_value REMOTE_HOST "$REMOTE_HOST"
 case "$REMOTE_HOST" in -*) kissat4_die "REMOTE_HOST cannot begin with '-'" ;; esac
 
@@ -53,6 +54,9 @@ kissat4_require_nonnegative_int SAMPLE_SEED "$SAMPLE_SEED"
 kissat4_require_positive_decimal SAMPLE_MIN_SPEEDUP "$SAMPLE_MIN_SPEEDUP"
 kissat4_require_positive_decimal BROAD_MIN_SPEEDUP "$BROAD_MIN_SPEEDUP"
 kissat4_require_probability BROAD_MAX_P_VALUE "$BROAD_MAX_P_VALUE"
+if [ -n "$EXTERNAL_DEPENDENCY" ]; then
+  kissat4_require_positive_int EUF_VIPER_KISSAT4_DEPENDENCY "$EXTERNAL_DEPENDENCY"
+fi
 [ "$MAX_ACTIVE" -le "$SHARDS" ] || kissat4_die "MAX_ACTIVE cannot exceed SHARDS"
 [ "$SAMPLE_MIN_PAIRED" -le "$SAMPLE_LIMIT" ] || \
   kissat4_die "SAMPLE_MIN_PAIRED cannot exceed SAMPLE_LIMIT"
@@ -127,7 +131,11 @@ if [ "$DRY_RUN" = 1 ]; then
 else
   COMMON_EXPORTS="HOME=$REMOTE_HOME,EUF_VIPER_KISSAT4_EXPECTED_REVISION=$REVISION,EUF_VIPER_KISSAT4_SCRIPT_BUNDLE_SHA256=$SCRIPT_BUNDLE_SHA256,EUF_VIPER_KISSAT4_VALIDATION_ROOT=$VALIDATION_ROOT,EUF_VIPER_KISSAT4_MANIFEST=$REMOTE_MANIFEST,EUF_VIPER_KISSAT4_MANIFEST_SHA256=$MANIFEST_SHA256,EUF_VIPER_KISSAT4_TIMEOUT=$TIMEOUT,EUF_VIPER_KISSAT4_REPEATS=$REPEATS,EUF_VIPER_KISSAT4_WARMUPS=$WARMUPS"
   SAMPLE_EXPORTS="$COMMON_EXPORTS,EUF_VIPER_KISSAT4_STAGE=sample,EUF_VIPER_KISSAT4_SAMPLE_LIMIT=$SAMPLE_LIMIT,EUF_VIPER_KISSAT4_SAMPLE_SEED=$SAMPLE_SEED,EUF_VIPER_KISSAT4_SAMPLE_MIN_PAIRED=$SAMPLE_MIN_PAIRED,EUF_VIPER_KISSAT4_SAMPLE_MIN_SPEEDUP=$SAMPLE_MIN_SPEEDUP"
-  SAMPLE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch --parsable --kill-on-invalid-dep=yes --job-name=euf-k4-sample --output=results/kissat4-paired-sample-%j.out --error=results/kissat4-paired-sample-%j.err --export='$SAMPLE_EXPORTS' scripts/wmi/euf_viper_kissat4_paired.sbatch")"
+  SAMPLE_DEPENDENCY=""
+  if [ -n "$EXTERNAL_DEPENDENCY" ]; then
+    SAMPLE_DEPENDENCY="--dependency=afterok:$EXTERNAL_DEPENDENCY"
+  fi
+  SAMPLE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch --parsable --kill-on-invalid-dep=yes $SAMPLE_DEPENDENCY --job-name=euf-k4-sample --output=results/kissat4-paired-sample-%j.out --error=results/kissat4-paired-sample-%j.err --export='$SAMPLE_EXPORTS' scripts/wmi/euf_viper_kissat4_paired.sbatch")"
   SAMPLE_JOB="${SAMPLE_SUBMISSION%%;*}"
   case "$SAMPLE_JOB" in ''|*[!0-9]*) kissat4_die "invalid sample job id: $SAMPLE_SUBMISSION" ;; esac
 
@@ -174,6 +182,7 @@ export KISSAT4_SUBMISSION_BROAD_MIN_PAIRED="$BROAD_MIN_PAIRED"
 export KISSAT4_SUBMISSION_BROAD_MIN_SPEEDUP="$BROAD_MIN_SPEEDUP"
 export KISSAT4_SUBMISSION_BROAD_MAX_P_VALUE="$BROAD_MAX_P_VALUE"
 export KISSAT4_SUBMISSION_BROAD_ITERATIONS="$BROAD_ITERATIONS"
+export KISSAT4_SUBMISSION_EXTERNAL_DEPENDENCY="$EXTERNAL_DEPENDENCY"
 export KISSAT4_SUBMISSION_SAMPLE_JOB="$SAMPLE_JOB"
 export KISSAT4_SUBMISSION_BROAD_JOB="$BROAD_JOB"
 export KISSAT4_SUBMISSION_MERGE_JOB="$MERGE_JOB"
@@ -258,7 +267,8 @@ payload = {
         "sample": sample_job,
         "broad": optional_int("KISSAT4_SUBMISSION_BROAD_JOB"),
         "merge": optional_int("KISSAT4_SUBMISSION_MERGE_JOB"),
-        "dependency": "sample afterok -> broad array afterok -> merge",
+        "external_dependency": optional_int("KISSAT4_SUBMISSION_EXTERNAL_DEPENDENCY"),
+        "dependency": "external afterok -> sample afterok -> broad array afterok -> merge",
     },
     "outputs": {
         "run_root": run_root,
