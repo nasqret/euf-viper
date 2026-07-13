@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -104,14 +105,37 @@ def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
         **record.get("environment", {}),
     }
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=environment,
-        )
+        with tempfile.TemporaryDirectory(prefix="euf-viper-config-smoke-") as directory:
+            evidence_path = Path(directory) / "production-evidence.json"
+            evidence = record.get("evidence")
+            if evidence is not None:
+                command.extend([evidence["argv_flag"], str(evidence_path)])
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=environment,
+            )
+            if expected in {"sat", "unsat"} and evidence is not None:
+                if expected not in evidence["accepted_decisive_statuses"]:
+                    raise SolverConfigError(
+                        f"evidence contract does not accept smoke status {expected!r}"
+                    )
+                if not evidence_path.is_file():
+                    raise SolverConfigError("euf-viper smoke run omitted production evidence")
+                try:
+                    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as error:
+                    raise SolverConfigError(
+                        f"cannot read euf-viper smoke evidence: {error}"
+                    ) from error
+                if (
+                    payload.get("schema") != evidence["schema"]
+                    or payload.get("status") != expected
+                ):
+                    raise SolverConfigError("euf-viper smoke evidence schema/status mismatch")
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SolverConfigError(f"smoke run failed for {record['id']}: {error}") from error
     observed = result_token(completed.stdout)
@@ -147,6 +171,11 @@ def make_records(
             "version": viper_version,
             "binary": paths["euf-viper"],
             "argv_template": ["{binary}", "solve", "{instance}"],
+            "evidence": {
+                "schema": "euf-viper.production-evidence.v1",
+                "argv_flag": "--evidence-out",
+                "accepted_decisive_statuses": ["sat"],
+            },
             "version_argv": ["--version"],
             "version_output_contains": "euf-viper",
         },

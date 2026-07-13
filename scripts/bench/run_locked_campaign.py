@@ -127,6 +127,11 @@ SOLVER_KEYS = {
     "version_output_sha256",
     "environment",
 }
+EVIDENCE_CONTRACT_KEYS = {
+    "schema",
+    "argv_flag",
+    "accepted_decisive_statuses",
+}
 EXECUTION_KEYS = {
     "resource_model",
     "cpu_ids",
@@ -191,6 +196,19 @@ RUN_RECORD_KEYS = {
     "previous_record_sha256",
     "record_sha256",
 }
+PRODUCTION_EVIDENCE_KEYS = {
+    "path",
+    "sha256",
+    "bytes",
+    "schema",
+    "source_sha256",
+    "solver_revision",
+    "solver_configuration",
+    "solver_config_sha256",
+    "solver_runtime_config_sha256",
+    "status",
+    "backend_status",
+}
 
 
 class CampaignError(RuntimeError):
@@ -216,6 +234,7 @@ class Job:
     argv: list[str]
     environment: dict[str, str]
     environment_sha256: str
+    evidence_path: Path | None
 
     @property
     def key(self) -> dict[str, Any]:
@@ -414,6 +433,19 @@ def _validate_environment(value: Any, context: str) -> dict[str, str]:
     return result
 
 
+def _validate_evidence_contract(value: Any, context: str) -> dict[str, Any]:
+    contract = require_exact_keys(value, EVIDENCE_CONTRACT_KEYS, context)
+    if contract["schema"] != "euf-viper.production-evidence.v1":
+        raise CampaignError(f"{context}.schema is unsupported")
+    if contract["argv_flag"] != "--evidence-out":
+        raise CampaignError(f"{context}.argv_flag must be --evidence-out")
+    if contract["accepted_decisive_statuses"] != ["sat"]:
+        raise CampaignError(
+            f"{context} must accept SAT and fail closed on production UNSAT"
+        )
+    return contract
+
+
 def _validate_template(value: Any, context: str) -> list[str]:
     if type(value) is not list or not value:
         raise CampaignError(f"{context} must be a non-empty array")
@@ -484,6 +516,7 @@ def build_jobs(
     solver_paths: tuple[Path, ...],
     budgets: list[int | float],
     execution: dict[str, Any],
+    output_directory: Path,
     run_selection: list[dict[str, str]] | None = None,
 ) -> tuple[Job, ...]:
     jobs: list[Job] = []
@@ -520,6 +553,15 @@ def build_jobs(
                     instance_paths[instance_index],
                     budget_s,
                 )
+                evidence_path = None
+                evidence = solver.get("evidence")
+                if evidence is not None:
+                    evidence_path = (
+                        output_directory
+                        / "production-evidence"
+                        / f"run-{sequence:08d}.json"
+                    )
+                    argv.extend([evidence["argv_flag"], str(evidence_path)])
                 jobs.append(
                     Job(
                         sequence=sequence,
@@ -533,6 +575,7 @@ def build_jobs(
                         argv=argv,
                         environment=environment,
                         environment_sha256=sha256_bytes(canonical_bytes(environment)),
+                        evidence_path=evidence_path,
                     )
                 )
                 repetitions[solver_index] += 1
@@ -735,7 +778,12 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
     seen_solver_ids: set[str] = set()
     for index, raw_solver in enumerate(raw_solvers):
         context = f"solvers[{index}]"
-        solver = require_exact_keys(raw_solver, SOLVER_KEYS, context)
+        solver_keys = SOLVER_KEYS | (
+            {"evidence"}
+            if type(raw_solver) is dict and "evidence" in raw_solver
+            else set()
+        )
+        solver = require_exact_keys(raw_solver, solver_keys, context)
         identifier = require_string(solver["id"], f"{context}.id")
         if identifier in seen_solver_ids:
             raise CampaignError(f"duplicate solver id {identifier!r}")
@@ -769,6 +817,10 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         solver["environment"] = _validate_environment(
             solver["environment"], f"{context}.environment"
         )
+        if "evidence" in solver:
+            solver["evidence"] = _validate_evidence_contract(
+                solver["evidence"], f"{context}.evidence"
+            )
         solvers.append(solver)
         solver_paths.append(solver_path)
         seen_solver_ids.add(identifier)
@@ -970,6 +1022,7 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         tuple(solver_paths),
         budgets,
         execution,
+        output_directory,
         run_selection,
     )
     return LockedCampaign(
@@ -1412,16 +1465,140 @@ def _hash_and_size(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), byte_count
 
 
+def _production_evidence_binding(
+    job: Job,
+    output_directory: Path,
+    repository_revision: str,
+    result_token: str | None,
+) -> dict[str, Any] | None:
+    contract = job.solver.get("evidence")
+    if contract is None:
+        if job.evidence_path is not None:
+            raise CampaignError("job has an evidence path without a locked contract")
+        return None
+    if job.evidence_path is None:
+        raise CampaignError("evidence-enabled job lacks an output path")
+    path = job.evidence_path
+    if not path.exists():
+        if result_token in {"sat", "unsat"}:
+            raise CampaignError(
+                f"decisive result {result_token!r} omitted production evidence for "
+                f"{job.instance['relative_path']!r}"
+            )
+        return None
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as error:
+        raise CampaignError(f"cannot resolve production evidence {path}: {error}") from error
+    if resolved != path:
+        raise CampaignError(f"production evidence path was redirected: {path}")
+    _path_under(resolved, output_directory, "production evidence path")
+    payload = read_json_strict(resolved, "production evidence")
+    require_exact_keys(
+        payload,
+        {
+            "schema",
+            "status",
+            "backend_status",
+            "source",
+            "solver",
+            "model",
+            "limitations",
+        },
+        "production evidence",
+    )
+    if payload["schema"] != contract["schema"]:
+        raise CampaignError("production evidence schema differs from the solver lock")
+    status = require_string(payload["status"], "production evidence status")
+    backend_status = require_string(
+        payload["backend_status"], "production evidence backend_status"
+    )
+    if status not in {"sat", "unsupported"}:
+        raise CampaignError("production evidence has invalid status")
+    if backend_status not in {"sat", "unsat", "unsupported"}:
+        raise CampaignError("production evidence has invalid backend_status")
+    if result_token in {"sat", "unsat"}:
+        if result_token not in contract["accepted_decisive_statuses"]:
+            raise CampaignError(
+                f"production evidence contract does not accept decisive {result_token!r}"
+            )
+        if status != result_token or backend_status != result_token:
+            raise CampaignError("production evidence status differs from stdout")
+
+    source = require_exact_keys(
+        payload["source"], {"path", "sha256", "bytes"}, "production evidence source"
+    )
+    source_sha256 = require_hash(
+        source["sha256"], "production evidence source.sha256"
+    )
+    if source_sha256 != job.instance["sha256"]:
+        raise CampaignError("production evidence source hash differs from the lock")
+    if (
+        require_int(source["bytes"], "production evidence source.bytes", minimum=0)
+        != job.instance["bytes"]
+    ):
+        raise CampaignError("production evidence source byte count differs from the lock")
+    require_string(source["path"], "production evidence source.path")
+
+    solver = require_exact_keys(
+        payload["solver"],
+        {
+            "package_version",
+            "revision",
+            "dirty",
+            "backend",
+            "config",
+            "config_sha256",
+        },
+        "production evidence solver",
+    )
+    revision = require_string(solver["revision"], "production evidence solver.revision")
+    if revision != repository_revision:
+        raise CampaignError(
+            "production evidence revision mismatch: "
+            f"expected {repository_revision}, got {revision}"
+        )
+    if require_bool(solver["dirty"], "production evidence solver.dirty"):
+        raise CampaignError("production evidence was emitted by a dirty build")
+    require_string(solver["package_version"], "production evidence package version")
+    require_string(solver["backend"], "production evidence backend")
+    config = _validate_environment(solver["config"], "production evidence solver.config")
+    runtime_config_sha256 = require_hash(
+        solver["config_sha256"], "production evidence solver.config_sha256"
+    )
+    if runtime_config_sha256 != sha256_bytes(canonical_bytes(config)):
+        raise CampaignError("production evidence runtime config hash mismatch")
+    digest, byte_count = _hash_and_size(resolved)
+    return {
+        "path": resolved.relative_to(output_directory).as_posix(),
+        "sha256": digest,
+        "bytes": byte_count,
+        "schema": payload["schema"],
+        "source_sha256": source_sha256,
+        "solver_revision": revision,
+        "solver_configuration": job.solver["configuration"],
+        "solver_config_sha256": sha256_bytes(canonical_bytes(job.solver)),
+        "solver_runtime_config_sha256": runtime_config_sha256,
+        "status": status,
+        "backend_status": backend_status,
+    }
+
+
 def run_job(
     job: Job,
     invocation: int,
     lock_sha256: str,
     output_directory: Path,
+    repository_revision: str,
     memory_bytes: int,
     grace_s: float,
     enforce_affinity: bool,
     enforce_address_space: bool,
 ) -> dict[str, Any]:
+    if job.evidence_path is not None and job.evidence_path.exists():
+        raise CampaignError(
+            f"refusing to reuse production evidence path {job.evidence_path}"
+        )
     stdout_fd, stdout_name = tempfile.mkstemp(
         prefix=".locked-stdout-", dir=output_directory
     )
@@ -1502,7 +1679,10 @@ def run_job(
             if child_user is not None and child_system is not None
             else None
         )
-        return {
+        evidence_binding = _production_evidence_binding(
+            job, output_directory, repository_revision, result_token
+        )
+        record = {
             "record_type": "run",
             "schema_version": 1,
             "lock_sha256": lock_sha256,
@@ -1542,6 +1722,9 @@ def run_job(
             "result_token": result_token,
             "result_token_status": result_status,
         }
+        if "evidence" in job.solver:
+            record["production_evidence"] = evidence_binding
+        return record
     finally:
         for temporary in (stdout_path, stderr_path):
             try:
@@ -1570,8 +1753,49 @@ def _same_json(left: Any, right: Any) -> bool:
     return canonical_bytes(left) == canonical_bytes(right)
 
 
+def _validate_recorded_production_evidence(
+    value: Any, job: Job, result_token: str | None, context: str
+) -> None:
+    if value is None:
+        if result_token in {"sat", "unsat"}:
+            raise CampaignError(f"{context} is missing for a decisive result")
+        return
+    binding = require_exact_keys(value, PRODUCTION_EVIDENCE_KEYS, context)
+    require_string(binding["path"], f"{context}.path")
+    require_hash(binding["sha256"], f"{context}.sha256")
+    require_int(binding["bytes"], f"{context}.bytes", minimum=1)
+    require_hash(binding["source_sha256"], f"{context}.source_sha256")
+    require_hash(binding["solver_config_sha256"], f"{context}.solver_config_sha256")
+    require_hash(
+        binding["solver_runtime_config_sha256"],
+        f"{context}.solver_runtime_config_sha256",
+    )
+    if binding["source_sha256"] != job.instance["sha256"]:
+        raise CampaignError(f"{context} source hash differs from the job")
+    if binding["solver_configuration"] != job.solver["configuration"]:
+        raise CampaignError(f"{context} solver configuration differs from the job")
+    if binding["solver_config_sha256"] != sha256_bytes(canonical_bytes(job.solver)):
+        raise CampaignError(f"{context} solver config hash differs from the job")
+    contract = job.solver["evidence"]
+    if binding["schema"] != contract["schema"]:
+        raise CampaignError(f"{context} schema differs from the job")
+    if binding["status"] not in {"sat", "unsupported"}:
+        raise CampaignError(f"{context} has invalid status")
+    if binding["backend_status"] not in {"sat", "unsat", "unsupported"}:
+        raise CampaignError(f"{context} has invalid backend status")
+    if result_token in {"sat", "unsat"} and (
+        result_token not in contract["accepted_decisive_statuses"]
+        or binding["status"] != result_token
+        or binding["backend_status"] != result_token
+    ):
+        raise CampaignError(f"{context} does not certify the decisive result")
+
+
 def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int]) -> None:
-    require_exact_keys(record, RUN_RECORD_KEYS, "journal run record")
+    expected_keys = RUN_RECORD_KEYS | (
+        {"production_evidence"} if "evidence" in job.solver else set()
+    )
+    require_exact_keys(record, expected_keys, "journal run record")
     invocation = require_int(record["invocation"], "journal run invocation", minimum=0)
     if invocation not in invocations:
         raise CampaignError("journal run references an unknown invocation")
@@ -1627,6 +1851,13 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
         raise CampaignError("journal run has invalid result_token_status")
     if (record["result_token"] is None) == (record["result_token_status"] == "valid"):
         raise CampaignError("journal run result token and status disagree")
+    if "evidence" in job.solver:
+        _validate_recorded_production_evidence(
+            record["production_evidence"],
+            job,
+            record["result_token"],
+            "journal run production_evidence",
+        )
 
 
 class Journal:
@@ -1921,6 +2152,7 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
                     invocation_index,
                     lock_sha256,
                     campaign.output_directory,
+                    campaign.payload["repository"]["commit"],
                     memory_bytes,
                     grace_s,
                     enforce_affinity,

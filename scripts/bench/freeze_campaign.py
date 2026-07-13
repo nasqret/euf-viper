@@ -361,24 +361,41 @@ def load_solvers(
             for key, value in environment.items()
         ):
             raise FreezeError(f"solver {identifier!r} environment must map strings")
-        solvers.append(
-            {
-                "id": identifier,
-                "comparator_id": comparator_id,
-                "configuration": configuration,
-                "version": version,
-                "binary": str(binary),
-                "sha256": actual_hash,
-                "argv_template": template,
-                "version_output": version_output,
-                "version_output_sha256": (
-                    sha256_bytes(version_output.encode("utf-8"))
-                    if version_output is not None
-                    else None
-                ),
-                "environment": dict(sorted(environment.items())),
-            }
-        )
+        evidence = raw.get("evidence")
+        if evidence is not None:
+            if not isinstance(evidence, dict) or set(evidence) != {
+                "schema",
+                "argv_flag",
+                "accepted_decisive_statuses",
+            }:
+                raise FreezeError(f"solver {identifier!r} has invalid evidence contract")
+            if evidence["schema"] != "euf-viper.production-evidence.v1":
+                raise FreezeError(f"solver {identifier!r} has unsupported evidence schema")
+            if evidence["argv_flag"] != "--evidence-out":
+                raise FreezeError(f"solver {identifier!r} has invalid evidence argv flag")
+            if evidence["accepted_decisive_statuses"] != ["sat"]:
+                raise FreezeError(
+                    f"solver {identifier!r} must fail closed on production UNSAT evidence"
+                )
+        solver_record = {
+            "id": identifier,
+            "comparator_id": comparator_id,
+            "configuration": configuration,
+            "version": version,
+            "binary": str(binary),
+            "sha256": actual_hash,
+            "argv_template": template,
+            "version_output": version_output,
+            "version_output_sha256": (
+                sha256_bytes(version_output.encode("utf-8"))
+                if version_output is not None
+                else None
+            ),
+            "environment": dict(sorted(environment.items())),
+        }
+        if evidence is not None:
+            solver_record["evidence"] = evidence
+        solvers.append(solver_record)
         seen_ids.add(identifier)
         seen_pairs.add(pair)
 

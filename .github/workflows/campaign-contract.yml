@@ -31,10 +31,12 @@ jobs:
             tests.test_bind_campaign_cpu \
             tests.test_build_family_manifest \
             tests.test_run_locked_campaign \
+            tests.test_locked_production_evidence \
             tests.test_analyze_campaign \
             tests.test_derive_timeout_continuations \
             tests.test_analyze_staged_campaign \
             tests.test_independent_qfuf \
+            tests.test_production_evidence \
             tests.test_shadow_campaign \
             tests.test_audit_shadow_campaign \
             tests.test_audit_staged_shadow_campaign \

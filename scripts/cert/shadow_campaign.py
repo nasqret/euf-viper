@@ -10,6 +10,10 @@ attempt in an append-only, hash-chained JSONL journal.
 Only a decisive result matching both the locked expectation and the
 independent checker output is verified.  In particular, unknown, unsupported,
 timeouts, malformed output, and checker abstention are failures.
+
+For evidence-enabled locks, the timed production SAT model is validated first.
+The later canonical ``certify`` invocation remains separate source-level
+evidence and is never represented as a proof of the timed backend execution.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ANALYZER_PATH = ROOT / "scripts" / "bench" / "analyze_campaign.py"
 DEFAULT_CHECKER = ROOT / "scripts" / "cert" / "check_certificate.py"
 INDEPENDENT_PARSER_PATH = ROOT / "scripts" / "cert" / "independent_qfuf.py"
+PRODUCTION_CHECKER_PATH = ROOT / "scripts" / "cert" / "check_production_evidence.py"
 
 SCHEMA_VERSION = 1
 DECISIVE_RESULTS = {"sat", "unsat"}
@@ -65,6 +70,30 @@ WORK_KEYS = {
     "solver_sha256",
     "decisive_budgets_s",
     "work_sha256",
+}
+PRODUCTION_EVIDENCE_BINDING_KEYS = {
+    "path",
+    "sha256",
+    "bytes",
+    "schema",
+    "source_sha256",
+    "solver_revision",
+    "solver_configuration",
+    "solver_config_sha256",
+    "solver_runtime_config_sha256",
+    "status",
+    "backend_status",
+}
+PRODUCTION_EVIDENCE_VALIDATION_KEYS = {
+    "schema",
+    "status",
+    "backend_status",
+    "source_sha256",
+    "solver_revision",
+    "solver_config_sha256",
+    "terms",
+    "atoms",
+    "assignment_variables",
 }
 PROCESS_KEYS = {
     "status",
@@ -322,6 +351,12 @@ def derive_work_records(
     solver = _candidate_solver(lock)
     observations = campaign["observations"]
     candidate_budgets: dict[str, list[float]] = collections.defaultdict(list)
+    candidate_evidence: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    production_checker = None
+    if "evidence" in solver:
+        production_checker = _load_module(
+            "shadow_campaign_check_production_evidence", PRODUCTION_CHECKER_PATH
+        )
     for key, observation in observations.items():
         relative_path, budget_s, solver_id = key
         if solver_id != "euf-viper":
@@ -339,6 +374,25 @@ def derive_work_records(
                     f"{observation['expected_status']!r}"
                 )
             candidate_budgets[relative_path].append(float(budget_s))
+            if "evidence" in solver:
+                bindings = observation.get("production_evidence")
+                if type(bindings) is not list or len(bindings) != observation["repetitions"]:
+                    raise ShadowError(
+                        f"production evidence count mismatch for {relative_path!r} "
+                        f"at budget {budget_s}"
+                    )
+                for repetition, binding in enumerate(bindings):
+                    if type(binding) is not dict:
+                        raise ShadowError(
+                            f"missing decisive production evidence for {relative_path!r}"
+                        )
+                    candidate_evidence[relative_path].append(
+                        {
+                            "budget_s": float(budget_s),
+                            "repetition": repetition,
+                            "binding": binding,
+                        }
+                    )
     selected: list[tuple[Mapping[str, Any], list[float], Path]] = []
 
     for instance in lock["corpus"]["instances"]:
@@ -357,6 +411,43 @@ def derive_work_records(
     selected.sort(key=lambda item: (item[0]["relative_path"], str(item[0]["id"])))
     works: list[dict[str, Any]] = []
     for global_index, (instance, budgets, source) in enumerate(selected):
+        validated_production_evidence: list[dict[str, Any]] = []
+        if production_checker is not None:
+            output_directory = Path(lock["output"]["directory"])
+            for production in sorted(
+                candidate_evidence[instance["relative_path"]],
+                key=lambda value: (value["budget_s"], value["repetition"]),
+            ):
+                binding = production["binding"]
+                evidence_path = output_directory / binding["path"]
+                try:
+                    validation = production_checker.validate_production_evidence(
+                        evidence_path,
+                        source,
+                        expected_source_sha256=instance["sha256"],
+                        expected_revision=lock["repository"]["commit"],
+                        expected_status=instance["status"],
+                    )
+                except (OSError, production_checker.ProductionEvidenceError) as error:
+                    raise ShadowError(
+                        f"production evidence rejected for {instance['relative_path']!r}: {error}"
+                    ) from error
+                if (
+                    validation["solver_config_sha256"]
+                    != binding["solver_runtime_config_sha256"]
+                ):
+                    raise ShadowError(
+                        "production evidence runtime config drift for "
+                        f"{instance['relative_path']!r}"
+                    )
+                validated_production_evidence.append(
+                    {
+                        "budget_s": production["budget_s"],
+                        "repetition": production["repetition"],
+                        "binding": binding,
+                        "validation": validation,
+                    }
+                )
         work: dict[str, Any] = {
             "record_type": "work",
             "schema_version": SCHEMA_VERSION,
@@ -377,6 +468,8 @@ def derive_work_records(
             "decisive_budgets_s": budgets,
             "work_sha256": "",
         }
+        if production_checker is not None:
+            work["production_evidence"] = validated_production_evidence
         work["work_sha256"] = _work_digest(work)
         works.append(work)
     return works
@@ -465,7 +558,12 @@ def validate_independent_parser_workset(
 
 
 def validate_work_record(work: object, context: str = "work record") -> dict[str, Any]:
-    value = _require_exact_keys(work, WORK_KEYS, context)
+    expected_keys = WORK_KEYS | (
+        {"production_evidence"}
+        if type(work) is dict and "production_evidence" in work
+        else set()
+    )
+    value = _require_exact_keys(work, expected_keys, context)
     if value["record_type"] != "work" or value["schema_version"] != SCHEMA_VERSION:
         raise ShadowError(f"{context}: invalid record type or schema")
     for field in (
@@ -494,6 +592,96 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
         raise ShadowError(f"{context}: invalid decisive budget")
     if budgets != sorted(set(float(item) for item in budgets)):
         raise ShadowError(f"{context}: decisive budgets are not canonical")
+    if "production_evidence" in value:
+        production = value["production_evidence"]
+        if type(production) is not list or not production:
+            raise ShadowError(f"{context}: production_evidence must be non-empty")
+        if value["expected_result"] != "sat":
+            raise ShadowError(f"{context}: production evidence currently certifies SAT only")
+        seen_runs: set[tuple[float, int]] = set()
+        covered_budgets: set[float] = set()
+        for index, record in enumerate(production):
+            if type(record) is not dict or set(record) != {
+                "budget_s",
+                "repetition",
+                "binding",
+                "validation",
+            }:
+                raise ShadowError(
+                    f"{context}: production_evidence[{index}] has invalid structure"
+                )
+            if record["budget_s"] not in budgets:
+                raise ShadowError(
+                    f"{context}: production evidence references an unknown budget"
+                )
+            if type(record["repetition"]) is not int or record["repetition"] < 0:
+                raise ShadowError(f"{context}: production evidence repetition is invalid")
+            run_key = (float(record["budget_s"]), record["repetition"])
+            if run_key in seen_runs:
+                raise ShadowError(f"{context}: duplicate production evidence run")
+            seen_runs.add(run_key)
+            covered_budgets.add(run_key[0])
+
+            binding = _require_exact_keys(
+                record["binding"],
+                PRODUCTION_EVIDENCE_BINDING_KEYS,
+                f"{context}.production_evidence[{index}].binding",
+            )
+            path_value = binding["path"]
+            if type(path_value) is not str or not path_value:
+                raise ShadowError(f"{context}: invalid production evidence path")
+            artifact_path = PurePosixPath(path_value)
+            if artifact_path.is_absolute() or ".." in artifact_path.parts:
+                raise ShadowError(f"{context}: invalid production evidence path")
+            for field in (
+                "sha256",
+                "source_sha256",
+                "solver_config_sha256",
+                "solver_runtime_config_sha256",
+            ):
+                if not _is_sha256(binding[field]):
+                    raise ShadowError(f"{context}: invalid production evidence {field}")
+            if type(binding["bytes"]) is not int or binding["bytes"] < 1:
+                raise ShadowError(f"{context}: invalid production evidence byte count")
+            if binding["schema"] != "euf-viper.production-evidence.v1":
+                raise ShadowError(f"{context}: invalid production evidence schema")
+            if binding["source_sha256"] != value["source_sha256"]:
+                raise ShadowError(f"{context}: production evidence source hash mismatch")
+            if (
+                type(binding["solver_revision"]) is not str
+                or not binding["solver_revision"]
+                or type(binding["solver_configuration"]) is not str
+                or not binding["solver_configuration"]
+            ):
+                raise ShadowError(f"{context}: invalid production solver identity")
+            if binding["status"] != "sat" or binding["backend_status"] != "sat":
+                raise ShadowError(f"{context}: production evidence is not decisive SAT")
+
+            validation = _require_exact_keys(
+                record["validation"],
+                PRODUCTION_EVIDENCE_VALIDATION_KEYS,
+                f"{context}.production_evidence[{index}].validation",
+            )
+            expected_validation = {
+                "schema": binding["schema"],
+                "status": binding["status"],
+                "backend_status": binding["backend_status"],
+                "source_sha256": binding["source_sha256"],
+                "solver_revision": binding["solver_revision"],
+                "solver_config_sha256": binding["solver_runtime_config_sha256"],
+            }
+            for field, expected in expected_validation.items():
+                if validation[field] != expected:
+                    raise ShadowError(
+                        f"{context}: production evidence validation {field} mismatch"
+                    )
+            for field in ("terms", "atoms", "assignment_variables"):
+                if type(validation[field]) is not int or validation[field] < 0:
+                    raise ShadowError(
+                        f"{context}: invalid production evidence validation {field}"
+                    )
+        if covered_budgets != set(float(item) for item in budgets):
+            raise ShadowError(f"{context}: production evidence does not cover every budget")
     return value
 
 

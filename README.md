@@ -29,6 +29,10 @@ SMT-LIB and SMT-COMP runs.
 cargo test
 cargo run --release -- gen chain 1000 > /tmp/chain.smt2
 cargo run --release -- solve --stats /tmp/chain.smt2
+cargo run --release -- solve /tmp/chain.smt2 \
+  --evidence-out /tmp/chain.production-evidence.json
+python3 scripts/cert/check_production_evidence.py \
+  /tmp/chain.production-evidence.json --source /tmp/chain.smt2 --status sat
 cargo run --release -- portfolio \
   --yices third_party/solvers/bin/yices-smt2 /tmp/chain.smt2
 cargo run --release -- bench --cases 10 --size 5000
@@ -55,6 +59,13 @@ Expected solver output is one of:
 
 `unsupported` is reserved for syntax or resource boundaries that are not
 implemented soundly; it is distinct from a timeout.
+
+`solve --evidence-out PATH` is the production-path evidence contract. SAT
+sidecars contain the assignment and ground model produced by that exact solve.
+The independent checker validates the model directly against the source.
+Production UNSAT proofs are not wired yet, so evidence-enabled UNSAT runs fail
+closed as `unsupported`; a later `certify` rerun is not treated as evidence for
+the timed solve. See [Production Evidence](docs/book/production-evidence.md).
 
 ## Historical Benchmark Checkpoints
 

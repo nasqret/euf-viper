@@ -25,7 +25,16 @@ class RecordSolverConfigTests(unittest.TestCase):
             "#!/bin/sh\n"
             "case \"${1:-}\" in\n"
             "  --version|-version) echo 'euf-viper 4.16.0 1.3.4 2.7.0 2.9.2' ;;\n"
-            "  *) echo sat ;;\n"
+            "  *)\n"
+            "    previous=''\n"
+            "    for argument in \"$@\"; do\n"
+            "      if [ \"$previous\" = '--evidence-out' ]; then\n"
+            "        printf '%s\\n' '{\"schema\":\"euf-viper.production-evidence.v1\",\"status\":\"sat\"}' > \"$argument\"\n"
+            "      fi\n"
+            "      previous=$argument\n"
+            "    done\n"
+            "    echo sat\n"
+            "    ;;\n"
             "esac\n",
             encoding="utf-8",
         )

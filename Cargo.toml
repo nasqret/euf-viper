@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["finite-symmetry"]
-certificates = ["dep:serde", "dep:serde_json", "dep:sha2"]
+default = ["finite-symmetry", "production-evidence"]
+certificates = ["production-evidence"]
 finite-symmetry = []
+production-evidence = ["dep:serde", "dep:serde_json", "dep:sha2"]
 
 [dependencies]
 rustsat = "0.7.5"
