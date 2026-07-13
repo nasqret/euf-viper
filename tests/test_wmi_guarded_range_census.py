@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "wmi" / "euf_viper_guarded_range_census.sbatch"
+SUBMIT = ROOT / "scripts" / "wmi" / "submit_guarded_range_census.sh"
 
 
 class GuardedRangeCensusWmiTests(unittest.TestCase):
@@ -17,6 +18,14 @@ class GuardedRangeCensusWmiTests(unittest.TestCase):
         self.assertIn("scripts/cert/independent_qfuf.py", text)
         self.assertIn('"records": root / "records.jsonl"', text)
         self.assertIn('"aggregate": root / "aggregate.json"', text)
+
+    def test_submitter_requires_published_exact_revision(self) -> None:
+        text = SUBMIT.read_text(encoding="utf-8")
+        self.assertIn("git status --porcelain=v1 --untracked-files=no", text)
+        self.assertIn("git rev-parse origin/main", text)
+        self.assertIn("EUF_VIPER_EXPECTED_REVISION", text)
+        self.assertIn("euf_viper_guarded_range_census.sbatch", text)
+        self.assertIn("guarded-range-census-submission-$JOB_ID.json", text)
 
 
 if __name__ == "__main__":
