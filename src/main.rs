@@ -4930,6 +4930,11 @@ fn profile_cadical_rollback_stats(stats: rollback_propagator::RollbackPropagator
     profile_measurement("cadical_rollback_backtracks", 0, stats.backtracks);
     profile_measurement("cadical_rollback_conflicts", 0, stats.conflicts);
     profile_measurement(
+        "cadical_rollback_repeated_assignment_conflicts",
+        0,
+        stats.repeated_assignment_conflicts,
+    );
+    profile_measurement(
         "cadical_rollback_propagator_model_checks",
         stats.model_check_time_ns,
         stats.model_checks,

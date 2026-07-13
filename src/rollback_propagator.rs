@@ -33,6 +33,7 @@ pub(crate) struct RollbackPropagatorStats {
     pub(crate) decision_levels: usize,
     pub(crate) backtracks: usize,
     pub(crate) conflicts: usize,
+    pub(crate) repeated_assignment_conflicts: usize,
     pub(crate) model_checks: usize,
     pub(crate) model_check_time_ns: u128,
 }
@@ -132,7 +133,11 @@ impl<'arena> RollbackEufPropagator<'arena> {
             })
     }
 
-    fn record_conflict(&mut self, conflict: EufConflict) -> PropagatorResult<()> {
+    fn record_conflict(
+        &mut self,
+        conflict: EufConflict,
+        assignment_callback: bool,
+    ) -> PropagatorResult<()> {
         if self.pending_clause.is_some() {
             return Ok(());
         }
@@ -143,8 +148,24 @@ impl<'arena> RollbackEufPropagator<'arena> {
         }
         let clause = conflict.clause().to_vec();
         if self.emitted_clauses.contains(&clause) {
+            if assignment_callback {
+                if self.stats.repeated_assignment_conflicts >= self.max_conflicts {
+                    return Err(PropagatorAbort::new(format!(
+                        "rollback EUF repeated-assignment conflict cap {} exhausted",
+                        self.max_conflicts
+                    )));
+                }
+                // CaDiCaL can notify the retained lower-level trail before its
+                // newly persistent external clause is processed by ordinary
+                // propagation. The clause is already in CaDiCaL, so emitting it
+                // again adds no information. A complete model that violates it
+                // remains a fail-closed error below.
+                self.stats.repeated_assignment_conflicts =
+                    self.stats.repeated_assignment_conflicts.saturating_add(1);
+                return Ok(());
+            }
             return Err(PropagatorAbort::new(
-                "rollback EUF emitted a duplicate no-progress conflict",
+                "rollback EUF reached a complete model blocked by an emitted conflict",
             ));
         }
         if self.stats.conflicts >= self.max_conflicts {
@@ -183,7 +204,7 @@ impl<'arena> RollbackEufPropagator<'arena> {
                 .map_err(core_abort)?,
         };
         if let Some(conflict) = conflict {
-            self.record_conflict(conflict)?;
+            self.record_conflict(conflict, true)?;
         }
         self.stats.assignments = self.stats.assignments.saturating_add(1);
         Ok(())
@@ -255,7 +276,7 @@ impl ExternalPropagator for RollbackEufPropagator<'_> {
         match (fresh_consistent, rollback_conflict) {
             (true, None) => Ok(true),
             (false, Some(conflict)) => {
-                self.record_conflict(conflict)?;
+                self.record_conflict(conflict, false)?;
                 Ok(false)
             }
             (fresh_consistent, rollback_conflict) => Err(PropagatorAbort::new(format!(
@@ -546,6 +567,9 @@ mod tests {
 
         propagator.notify_backtrack(0).unwrap();
         propagator.notify_new_decision_level().unwrap();
-        assert!(propagator.notify_assignment(&conflict).is_err());
+        propagator.notify_assignment(&conflict).unwrap();
+        assert!(propagator.external_clause().unwrap().is_none());
+        assert_eq!(propagator.stats().repeated_assignment_conflicts, 1);
+        assert!(propagator.check_found_model(&conflict).is_err());
     }
 }
