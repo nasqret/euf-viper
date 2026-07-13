@@ -22,11 +22,14 @@ jobs:
             campaigns/best-overall-qf-uf-2026-07.json
           python3 scripts/bench/validate_t3_m0_contract.py \
             campaigns/t3-m0-component-pressure-v1.json
+          python3 scripts/bench/validate_t8_scalar_contract.py \
+            campaigns/t8-scalar-frontier-census-v1.json
       - name: Test campaign validator
         run: |
           python3 -m unittest \
             tests.test_validate_campaign_spec \
             tests.test_validate_t3_m0_contract \
+            tests.test_validate_t8_scalar_contract \
             tests.test_ingest_smtcomp_2025_qf_uf \
             tests.test_record_solver_config \
             tests.test_freeze_campaign \
