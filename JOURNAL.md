@@ -1226,6 +1226,19 @@
   blob-identity checks, both Rust feature matrices, release build, and file/stdin
   CLI smoke tests. The result authorizes parity only: 98 matching rows carry 4,851
   unsupported diagnostics, and no timing or parser-completeness claim exists.
+- Source-complete main head `afeeb5e` passed hosted campaign run `29293318151`:
+  campaign specification, Python validators, shell checks, and the Rust solver
+  all passed. The Jupyter Book also rebuilt successfully. Live WMI refresh
+  still shows certificate prepares `146076`/`146079` complete while arrays
+  `146077`/`146080`, T6 `146075`, and long-timeout jobs `145785`/`145787` remain
+  pending; their dependent audits remain held and no partial data were read.
+- Independent T5 review rejected `64770d8` despite 71 passing focused tests and
+  exact Git-blob/runtime verification. The checked staging inode was not the
+  inode published, so a zero-length destination could become visible; early
+  preflight failures could retain an old `.current`; and cleanup could delete a
+  destination created by a racing publisher. No branch push or WMI submission
+  occurred. The next repair must publish the checked inode atomically with
+  no-replace semantics and establish cleanup ownership only after publication.
 
 ## Next Entry Template
 

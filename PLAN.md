@@ -381,8 +381,12 @@ independent evidence checks, and a frozen family holdout.
   reconstruction and interpreter identity but failed the next review:
   skip-worktree tracked bytes escaped revision checking, the final staged digest
   still preceded pathname publication, and failed same-job reruns exposed an old
-  completed bundle. Attempt-scoped publication and exact Git-blob checks are
-  active. No WMI submission is allowed before another independent review.
+  completed bundle. Revision `64770d8` repaired exact Git-blob identity and
+  semantic replay, but review still found a visible partial destination, stale
+  `.current` on early preflight failure, and cleanup ownership inferred from a
+  racy absence check. Checked-inode atomic publication and entry-first marker
+  invalidation are active repairs. No WMI submission is allowed before another
+  independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 

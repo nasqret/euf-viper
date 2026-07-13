@@ -875,3 +875,9 @@
   error, or other status. Descriptor execution, canonical Python, strict JSON,
   and hashes passed independent review. This is parity only; 98 rows contain
   4,851 unsupported diagnostics, and timing/completeness still require gates.
+- T5 revision `64770d8` remains no-go. Exact Git-blob checking and semantic
+  replay passed, but publication exposed a new destination before it was fully
+  written and checked, early preflight failure could retain stale `.current`,
+  and cleanup ownership raced destination creation. Require atomic no-replace
+  publication of the checked staging inode, entry-first marker invalidation,
+  and publisher-owned cleanup before another independent review or WMI action.
