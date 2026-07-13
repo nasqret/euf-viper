@@ -80,12 +80,21 @@ decision or certificate evidence follows until its zero-error aggregate
 returns.
 
 These replacement campaigns can establish that each reported source result has
-an independently checked canonical witness or refutation. They do **not** yet prove
+an independently checked canonical witness or refutation. They do **not** yet
+prove
 that the literal timed production invocation emitted that same model, proof, or
 CNF trace. Production promotion therefore also requires an atomic sidecar that
 binds source hash, solver revision/configuration, returned status, actual model
 or proof bytes, and evidence hash to the timed row. A later rerun is not a
 substitute for this binding.
+
+Research schema v1 at `6095e29` failed adversarial review. The independent
+checker accepted assignments whose auxiliary values falsified the production
+CNF, an empty atom map, dirty standalone builds, and incoherent statuses. The
+source and sidecar paths also had hash/parse TOCTOU windows, and resume could
+declare completion after a sidecar was deleted. Schema v2 repair must bind the
+exact clause stream, complete variable map, trusted executable hash, same-byte
+parsing, and resume-time evidence rechecks before integration.
 
 ## Causal Controls
 
@@ -163,12 +172,25 @@ No representation enters the solver merely because it is unusual.
    generic controls by at least five percentage points.
 
 T1 typed-parser parity is isolated on `research-typed-stream-parity`; its first
-prepare failed before testing because WMI did not resolve bare `cargo`. The
-branch now pins Cargo and parser semantics and is repairing one remaining
-semantic-snapshot edge before resubmission. T5's hardened source-only census is
-at `b51c75e` under a second independent review. T6 exact revision `9833ec3` is
-queued as job `146075`, with promotion disabled until its current 12-source
-manifest is derived mechanically from the frozen P0 audit.
+prepare failed before testing because WMI did not resolve bare `cargo`. Final
+revision `8952dcb` raises a tested fail-closed nesting cap above the measured
+corpus maximum and pins Cargo plus parser semantics. WMI chain
+`146214`/`146215`/`146216` completed with all 7,503 snapshots matching and zero
+fallback, mismatch, or error. This is under independent adversarial review and
+permits only the next timing gate.
+
+T5's hardened source-only census at `b51c75e` failed its second review: the WMI
+receipt trusted aggregate booleans, contradictory oracle counters could pass,
+and semantically impossible rehashed count rows were accepted. A strict bundle
+verifier repair is active; no WMI census was submitted. T6 exact revision
+`9833ec3` is queued as job `146075`, with promotion disabled until its current
+12-source manifest is derived mechanically from the frozen P0 audit.
+
+The next broad route after these gates is T3 M0 component-pressure telemetry,
+not migration code. It stops if fewer than two fixed representations survive or
+their oracle headroom is below 10%. The qg7-specific backup is a scalar,
+source-exact frontier quotient census; SIMD remains conditional on at least 70%
+useful lane occupancy.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

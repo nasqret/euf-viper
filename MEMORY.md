@@ -779,3 +779,18 @@
   is not enough: integration requires an independent check that the exact
   production assignment satisfies every production CNF clause and that the
   atom map is complete, plus fail-closed clean-build identity.
+- T1 exact revision `8952dcb` passed WMI `146214`/`146215`/`146216`: 7,503
+  semantic-snapshot matches, zero fallback/mismatch/error, records SHA
+  `593e7e9b...c82ede`, audit SHA `1a0e0d67...b93b26`. Treat this only as parser
+  parity until independent review and the ABBA timing gate pass.
+- T5 `b51c75e` is no-go pending repair because its WMI receipt did not replay the
+  full bundle, contradictory oracle counters passed, and malformed rehashed
+  count rows passed. Do not submit it before a strict independent verifier and
+  attack regressions clear review.
+- Production-evidence schema v1 `6095e29` is no-go. It did not bind the complete
+  production CNF/variable map and had TOCTOU, dirty-build, status, and resume
+  gaps. Preserve UNSAT fail-closed behavior while schema v2 is repaired.
+- Frozen shared deficit is 6 SAT and 16 UNSAT: nine Goel (6/3), one UNSAT PEQ,
+  and twelve UNSAT qg7. After T1/T2/T4/T5/T6, run T3 M0 only if two fixed arms
+  survive with at least 10% oracle headroom; otherwise test scalar source-exact
+  qg7 frontier search before SIMD.

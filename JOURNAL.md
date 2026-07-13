@@ -1090,6 +1090,31 @@
   source-valid model: the independent checker must reject dirty builds and
   replay the production assignment against every exact production CNF clause
   with a complete atom map.
+- T1 revision `8952dcb` completed WMI prepare/array/audit
+  `146214`/`146215`/`146216`. All 128 shards completed, and the exact audit has
+  7,503 matches with zero fallback, mismatch, or error. Records SHA-256 is
+  `593e7e9b...c82ede`; audit SHA-256 is `1a0e0d67...b93b26`. The tested
+  fail-closed nesting cap is 8,192, above the measured corpus maximum of 4,244.
+  This is parser parity only and is under independent review before integration
+  or timing.
+- Independent T5 review rejected `b51c75e` for evidence-integrity defects. WMI
+  completion trusted summary booleans instead of replaying the bundle,
+  contradictory oracle feature/counter receipts passed, and correctly rehashed
+  rows could contain impossible count relations. No census was submitted; a
+  strict bundle verifier and attack regressions are being implemented.
+- Independent production-evidence review rejected schema v1 `6095e29`.
+  Auxiliary assignment flips that falsified production CNF, complete atom-map
+  omission, dirty standalone builds, same-size source TOCTOU, incoherent status,
+  and deleted-sidecar resume all crossed the advertised checker boundary.
+  UNSAT remained fail-closed. Schema v2 repair must bind every production
+  clause and variable, trusted executable bytes, same-opened source/evidence
+  bytes, and resume/finalization rechecks.
+- Refreshed unresolved T0/T3/T7/T8 ordering against the frozen 22-source
+  deficit: nine Goel are six SAT/three UNSAT, PEQ is UNSAT, and all twelve qg7
+  are UNSAT. T3 M0 pressure telemetry is first if two fixed representations
+  survive with at least 10% oracle headroom. Otherwise stop migration and run a
+  scalar source-exact qg7 frontier census. Explanation economics and
+  EUF-conditioned vivification remain Goel-specific controlled backups.
 
 ## Next Entry Template
 

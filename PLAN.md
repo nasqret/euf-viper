@@ -31,8 +31,9 @@ geometric factor is `1.5685x` over Z3 default on the full corpus and `1.5214x`
 on the official set, but common-wall aggregate factors are only `0.5873x` and
 `0.6146x`; Yices2 geometric factors are `0.4910x` and `0.4710x`. Euf-viper is
 therefore not yet the overall leader. The exact full 60-second pairwise deficit
-is 22 shared Z3/Yices solves missed by euf-viper: nine Goel, one PEQ, and twelve
-QG `qg7` cases. With no regressions, euf-viper needs ten added solves to lead
+is 22 shared Z3/Yices solves missed by euf-viper: nine Goel (six SAT, three
+UNSAT), one UNSAT PEQ, and twelve UNSAT QG `qg7` cases. With no regressions,
+euf-viper needs ten added solves to lead
 Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
 `2.04x` geometric and `4.89x` aggregate improvement. Full 1,200-second array
 `145785` has started on WMI: two shards are complete, one is active, and the
@@ -123,7 +124,10 @@ result cache can satisfy V1-V4.
 - [ ] Add independent SAT-model emission/checking for every candidate SAT result.
   Public research branch `research-production-evidence` at `6095e29` adds an
   atomic `solve --evidence-out PATH` sidecar and is under independent
-  adversarial review. It is not integration-ready until the checker rejects
+  adversarial review rejected schema v1: auxiliary assignment flips, complete
+  atom-map omission, source/sidecar TOCTOU, dirty standalone builds, and a
+  deleted-sidecar resume all passed a purported validation boundary. Schema v2
+  repair is active. It is not integration-ready until the checker rejects
   dirty builds and independently verifies that the recorded production
   assignment satisfies every exact production CNF clause with a complete atom
   map. Source-model validity alone is not literal production-path evidence.
@@ -211,10 +215,13 @@ independent evidence checks, and a frozen family holdout.
   every sort, function signature, term sort, application, assertion,
   Boolean-data term, and unsupported diagnostic. Zero silent fallback.
   Public branch `research-typed-stream-parity` has the typed parity harness and
-  pins Cargo plus parser semantics at `47d7b0a`. Its first WMI prepare `145940`
+  pins Cargo plus parser semantics at `8952dcb`. Its first WMI prepare `145940`
   failed before testing because bare `cargo` was absent; dependents
-  `145941`/`145942` cancelled. A final semantic-snapshot repair is being tested
-  before a fresh immutable 7,503-source chain is submitted.
+  `145941`/`145942` cancelled. Final chain
+  `146214`/`146215`/`146216` completed at exact revision `8952dcb`: all 7,503
+  typed snapshots match with zero fallback, mismatch, or error. Audit SHA-256
+  is `1a0e0d67...b93b26`. This permits independent review and the timing gate;
+  it is not a speed or production-selection result.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
   1%; otherwise stop T1.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
@@ -323,8 +330,10 @@ independent evidence checks, and a frozen family holdout.
   Research branch `research-t5-component-quotient-census` at `b51c75e` now has
   a bounded executable decoder oracle over 316 assignments, complete parser
   symbol accounting, and weighted plus p95 literal/watch no-regression gates.
-  It remains under a second independent review and has not been integrated or
-  submitted to WMI.
+  A second review rejected its evidence wrapper: WMI completion trusted summary
+  booleans, contradictory oracle counters could pass, and rehashed rows could
+  violate count invariants. A strict independent bundle-verifier repair is
+  active; the branch has not been integrated or submitted to WMI.
 
 ### T6: Theory-Conditioned Boolean DAG
 
@@ -356,8 +365,10 @@ Do not compose two candidates in P2. Attribution must remain exact.
 
 - [ ] Assign stable semantic IDs and component ownership across eager, rollback,
   quotient-RAM, and Hall/PB representations.
-- [ ] M0 telemetry: freeze online pressure features and obtain held-out balanced
-  accuracy at least 0.80 with overhead below 1%.
+- [ ] M0 telemetry: freeze online pressure features and obtain lineage- and
+  family-disjoint held-out balanced accuracy at least `0.80` with p95 overhead
+  below `1%`. Stop before migration if fewer than two fixed representations
+  survive or their oracle headroom is below `10%`.
 - [ ] M1: implement one-way eager-to-rollback migration with byte-identical
   behavior when no migration occurs.
 - [ ] M2: add finite-to-PB/CQRAM migration only after M1 passes.
@@ -368,16 +379,23 @@ Do not compose two candidates in P2. Attribution must remain exact.
 ### T7: SAT-Aware Explanation/Vivification
 
 - [ ] Compare shortest, SAT-impact-aware, and certificate-aware congruence
-  explanations after T2 exists.
+  explanations after T2 exists. Require at least 20% fewer validation rounds or
+  downstream propagations, selection overhead below 5%, and `1.10x` target
+  speed; reject if shortest-proof alone explains the gain.
 - [ ] Run no/Boolean/EUF/combined vivification factorial and reject if generic
-  vivification explains the gain.
+  vivification explains the gain. EUF or combined must beat Boolean-only,
+  remove at least twice as many useful literals, reduce later validation or
+  propagation by at least 15%, and deliver `1.05x` target speed without broad
+  loss.
 
 ## Conditional Phase: T8 Canonical Frontier/Bit-Sliced Quotient Search
 
 - [ ] Reopen finite-table search only with source-complete semantics from T1 and
   checked finite ranges from T4.
 - [ ] Run canonical scalar frontier census over one-table and domain-seven
-  targets, recording state reuse, separator width, and transition cost.
+  targets, recording state reuse, separator width, and transition cost. Require
+  zero exhaustive-checker mismatches, at least 10/12 frozen qg7 targets under a
+  `1,000,000`-state cap, and build cost at most 10% on most targets.
 - [ ] Require at least 70% useful SIMD lane occupancy before AVX2 work.
 - [ ] Validate every SAT model; require exhaustive checked cube covers for UNSAT.
 - [ ] Beat Yices2 directly on the target including setup before broad QG routing.
@@ -435,7 +453,10 @@ fallback can be an operational portfolio but never a standalone victory.
 7. Finish and audit the T1 full parser shadow; independently review T5 before
    submission; run T6 `146075`; implement only mechanisms that pass their
    frozen construction thresholds.
-8. Select and compose a novel architecture only from independently checked,
+8. If at least two fixed representations survive with 10% oracle headroom, run
+   T3 M0 component-pressure telemetry. Otherwise stop migration and test the
+   scalar source-exact T8 qg7 frontier census before any SIMD work.
+9. Select and compose a novel architecture only from independently checked,
    broad paired wins; then rerun P4/P5 on two CPU classes.
 
 No result enters promotion because it was submitted, queued, or partially
