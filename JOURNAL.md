@@ -1239,6 +1239,15 @@
   destination created by a racing publisher. No branch push or WMI submission
   occurred. The next repair must publish the checked inode atomically with
   no-replace semantics and establish cleanup ownership only after publication.
+- Local production-evidence schema-v3 review at `578deb8` passed the exact CNF,
+  namespace, transcript, model, analyzer, no-follow path, and hash-journal unit
+  boundaries: 230 Rust tests (four ignored), 28 focused tests, and all 330
+  Python tests passed. Merge is still NO-GO. The branch predates current main,
+  adds evidence to default features without timing, and its mode disables
+  several fast routes while making every UNSAT result nondecisive. It must be
+  reconstructed on current main as opt-in and pass full-corpus shadow plus
+  paired off-mode timing. Two attempted independent agent reviews were blocked
+  by a platform content filter and were not counted as technical decisions.
 
 ## Next Entry Template
 

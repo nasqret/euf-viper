@@ -881,3 +881,9 @@
   and cleanup ownership raced destination creation. Require atomic no-replace
   publication of the checked staging inode, entry-first marker invalidation,
   and publisher-owned cleanup before another independent review or WMI action.
+- Production-evidence schema v3 `578deb8` passes its SAT-only semantic unit
+  boundary (230 Rust and 330 Python tests), including independent CNF/map/event
+  replay and analyzer gating, but remains merge NO-GO. It predates current main,
+  changes the default feature binary without timing, disables several normal
+  fast routes in evidence mode, and makes UNSAT nondecisive. Reconstruct it on
+  current main as opt-in, then require a 7,503-source shadow and off-mode timing.

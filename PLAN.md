@@ -141,7 +141,13 @@ result cache can satisfy V1-V4.
   rehash; parent symlinks escaped containment; incomplete frames were silently
   truncated; and preparation JSON remained permissive. Schema v3 must replay
   source/config-derived initial CNF plus every dynamic API-clause event and gate
-  SAT classification directly on the checker. Nothing is integration-ready.
+  SAT classification directly on the checker. Revision `578deb8` closes those
+  schema-v3 semantic checks and passes 230 Rust plus 330 Python tests, but is
+  still not integration-ready: it predates current main, enables evidence in the
+  default feature set without a timing gate, and certifies only a restricted
+  SAT configuration while all UNSAT results remain nondecisive. Reconstruct it
+  on current main as an opt-in feature, then require a full 7,503-source locked
+  shadow and paired off-mode timing before any promotion.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke
