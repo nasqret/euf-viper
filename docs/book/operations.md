@@ -48,6 +48,32 @@ EUF_VIPER_REMOTE='wmicluster:~/euf-viper-sharded-smoke' \
 bash scripts/wmi/sync_and_submit_sharded_corpus.sh
 ```
 
+## Rollback Engineering Control
+
+The rollback gate must run from clean published branch
+`research-rollback-propagator`. The corpus root is the directory containing
+both `QF_UF/` and `qf_uf_manifest.jsonl`, not the `QF_UF/` directory itself.
+
+```bash
+EUF_VIPER_WMI_HOST=wmicluster \
+EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025 \
+EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
+./scripts/wmi/submit_rollback_control.sh
+```
+
+The submitter requires the local `HEAD` to equal the public research-branch
+head. It reserves one immutable remote run root, writes a local intent receipt,
+builds and copies one read-only release binary, and submits a prepare, 12-task
+comparison array, and final audit through `afterok`. The default control uses
+four repeats, four shards, a 60-second physical timeout, 12 fixed targets, and
+12 balanced anti-targets.
+
+If SSH fails after submission begins, do not rerun with the same run ID. Read
+the receipt under `results/rollback-control-submissions/`, inventory `sacct`
+and the recorded remote run root, and classify the attempt before creating a
+new ID. A rejected final audit is still an evidence artifact and exits with
+status 1; fetch `final-audit.json` before deciding whether to stop the track.
+
 ## Certificates
 
 Install the pinned DRAT checker when it is not already available:

@@ -202,10 +202,15 @@ independent evidence checks, and a frozen family holdout.
   term pair after each transition; cap, typing, rollback, literal-reuse, and
   tampering regressions also pass. Root tests pass `230` default and `234`
   all-feature cases; hosted run `29217833901` passes. No timing claim exists.
-- [ ] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
-  must carry an independently replayable typed EUF explanation; no external
-  decisions or propagations are permitted in the first pilot, and the existing
-  complete-model validator remains authoritative.
+- [x] Attach that core behind the scoped CaDiCaL bridge as an explicit,
+  default-off standalone control. Branch `research-rollback-propagator` at
+  `4b60113` exposes `EUF_VIPER_BACKEND=cadical-rollback`, loads only the base
+  Boolean CNF, emits independently replayed typed EUF conflicts, permits no
+  external decisions or propagations, and keeps the complete-model validator
+  authoritative. Backend failures return `unsupported` without silent
+  fallback. Root tests pass `241` default and `247` all-feature cases; hosted
+  run `29270646223` passes. This is integration evidence, not timing evidence
+  or state-preserving eager migration.
 - [ ] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only
@@ -213,7 +218,14 @@ independent evidence checks, and a frozen family holdout.
 - [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
   dynamic full Ackermannization. Require fewer complete validations on every
   multi-round target, `1.10x` target speedup, no baseline-only solve, and
-  independently replayed conflicts before selector work.
+  independently replayed conflicts before selector work. The complete
+  same-binary campaign harness is published on
+  `research-rollback-propagator` at `e8fb05c`: it freezes 12 atlas targets and
+  12 deterministic balanced anti-targets, runs exact ABBA blocks over a
+  three-comparison modulo-sharded WMI array, records singleton CPU affinity and
+  hash-chained telemetry, and enforces the preregistered non-vacuous gate. The
+  campaign has not run because WMI SSH is unavailable; no timing criterion is
+  checked off from harness tests.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -221,12 +233,15 @@ independent evidence checks, and a frozen family holdout.
 
 ### T4: Adequate-Range Hall/PB
 
-- [ ] Complete source-only opportunity census `145027`, exact revision
-  `86d76fc`, after P0 prepare. The structured independent parser now emits
-  hash-bound guard-conditioned ranges, non-uniform value-cell savings, bounded
+- [ ] Rerun the source-only opportunity census from hardened main revision
+  `628dabf`. The earlier `145027` path predates the independent-parser repair
+  and is not promotion evidence. The replacement requires exactly 7,503
+  sources and zero structured parse errors, then emits hash-bound
+  guard-conditioned ranges, non-uniform value-cell savings, bounded
   Hall-tight/conflict witnesses, caps, and abstentions without invoking a
   solver or producing SAT/UNSAT. Reject implementation if the returned corpus
-  population misses the preregistered 30% cell-saving threshold.
+  population misses the preregistered 30% cell-saving threshold. Submission is
+  pending WMI recovery and an inventory of any jobs accepted during SSH loss.
 - [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
   near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
   through at least `n=32`.

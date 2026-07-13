@@ -32,6 +32,18 @@ validated again with complete EUF closure, and any adapter failure returns
 `unsupported` without entering another backend. The production default is
 unchanged until this route passes its targeted and full-corpus gates.
 
+The first mechanism gate is published separately on
+`research-rollback-propagator` at `e8fb05c`. It freezes 12 Goel validation-
+pressure targets and 12 deterministic balanced non-Goel anti-targets, then
+runs one hash-bound binary in complete ABBA blocks against current CaDiCaL
+refinement, model cuts, and dynamic completion. The independent audit verifies
+the exact comparison-by-shard cross-product, record hash chains, source and
+binary hashes, sanitized environments, and singleton CPU affinity. It rejects
+unless rollback has at least `1.10x` target geometric speedup, anti-target p95
+overhead at most `1.10x`, no baseline-only solve or coverage loss, and strictly
+fewer complete validations with checked conflicts on every qualifying target.
+The harness is ready, but no timing result exists while WMI is unreachable.
+
 The parser also retains a narrowly gated branch-intersection preprocessor for
 single-assertion equational diamonds. Finite predicate-table channeling exists
 as an experimental flag, but remains disabled after failing its WMI hard-tail

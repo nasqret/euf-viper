@@ -148,7 +148,9 @@ maintains EUF state incrementally through a rollback external propagator; it
 does not inherit finite-domain, equality-abstraction, Ackermann, chordal, or
 eager-congruence clauses. Internal adapter errors return `unsupported` instead
 of falling through to a different solver. This backend is not a default and
-requires corpus A/B evidence before any promotion decision.
+requires corpus A/B evidence before any promotion decision. Public commit
+`e8fb05c` contains its preregistered same-binary Goel and anti-target WMI gate;
+the campaign has not run, so the branch carries no rollback timing claim.
 
 The 2026-07-09 accepted iteration adds a colder, structurally gated route for
 large non-finite formulas whose first Kissat model fails EUF validation. It

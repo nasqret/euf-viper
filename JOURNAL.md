@@ -967,6 +967,55 @@
   No T0 timing begins before the baseline audit and no promotion follows from
   validation or queue state.
 
+## 2026-07-13 Parser Hardening And Rollback Control
+
+- The corrected P0 campaign on revision `30828a4` completed all 7,503 full
+  inputs and all 3,521 official inputs at two seconds. Full-corpus correct
+  counts were euf-viper `7,269`, cvc5 `7,222`, OpenSMT `6,916`, Yices2
+  `7,445`, Z3 default `7,412`, and Z3 `sat.euf=true` `7,395`. Official counts
+  were `3,400`, `3,384`, `3,215`, `3,490`, `3,474`, and `3,469` in the same
+  order. This is strong fast-head evidence but not an overall Yices2 or Z3 win.
+- The full 60-second continuation completed with euf-viper `7,480`, cvc5
+  `7,479`, OpenSMT `7,448`, Yices2 `7,500`, Z3 default `7,489`, and Z3
+  `sat.euf=true` `7,484` correct. Euf-viper's geometric factor against Z3
+  default was `1.5685x`, but common aggregate speed was `0.5873x`; Yices2's
+  corresponding geometric factor was `0.4910x`. Tail and aggregate evidence
+  therefore still reject overall superiority. The official 60-second audit and
+  dependent 1,200-second dispatcher must be re-inventoried after WMI recovery.
+- Main revision `5435b35` repaired the independent SMT-LIB parser for quoted
+  symbols spanning lines and standard annotated terms. Main `628dabf` then
+  made certificate preparation parse and hash every selected source before
+  array release, required the guarded-range census to have exactly 7,503
+  sources and zero parse errors, and added intent receipts plus exclusive run
+  roots to certificate submission. The 280-test Python suite and hosted run
+  `29270070005` passed. Certificate and census reruns have no accepted evidence
+  yet because SSH responses became unavailable.
+- The explicit standalone rollback backend on public branch
+  `research-rollback-propagator` at `4b60113` connects the verified rollback
+  core to the scoped CaDiCaL bridge. It receives only the base Boolean CNF,
+  exports conflict-only checked EUF reasons, validates final SAT models again,
+  and fails closed as `unsupported`. Telemetry measures SAT validation,
+  rollback conflicts and model checks, final validation, and total complete
+  validations. Root matrices pass `241` default and `247` all-feature tests;
+  hosted run `29270646223` passes.
+- Published complete forced-control machinery at `e8fb05c`. The builder freezes
+  12 exact Goel targets and six SAT plus six UNSAT deterministic non-Goel
+  anti-targets. The runner uses one binary, sanitized environments, complete
+  ABBA blocks, singleton affinity, modulo sharding, accumulated telemetry, and
+  canonical record chains. The auditor requires the exact three-comparison
+  shard cross-product and enforces validation reduction, conflict evidence,
+  coverage, `1.10x` target speed, and `1.10x` anti-target p95 gates without
+  vacuous passes. WMI prepare/array/audit scripts copy an immutable binary and
+  hash-bind all sources and tools. Twenty-one focused tests, including
+  submission interruption and cancellation paths, pass; full Python discovery
+  completed without a failure, and hosted run `29272420042` passes.
+- Live SSH to `access.cluster.wmi.amu.edu.pl:22` timed out before
+  authentication. The private route resolves through the VPN interface, so no
+  rollback job was submitted and no performance claim was promoted. On
+  recovery, inventory `sacct`, interrupted receipts, and run roots first; then
+  run hardened census/certificate chains, the Kissat-4 paired campaign, and
+  finally the exact `e8fb05c` rollback control.
+
 ## Next Entry Template
 
 - Benchmark corpus:

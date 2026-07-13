@@ -334,3 +334,20 @@ but loses `frogs.4.prop1_ab_br_max`; timeout-charged all-case speed is only
 `0.9894x`. With zero wrong answers or execution errors, this is a performance
 and coverage rejection rather than a correctness failure. Job `144371` is
 excluded because its wrapper omitted the causal mode environments.
+
+## Rollback Control Preregistration
+
+Published revision `e8fb05c` contains the complete forced rollback control but
+no benchmark result. It uses 12 fixed Goel targets, 12 source-hash-selected
+balanced anti-targets, four repeats in complete ABBA blocks, four modulo
+shards, and three same-binary comparisons. Every task is required to report a
+verified singleton CPU affinity.
+
+The audit rejects unless each comparison has at least two common-correct
+targets with more than one baseline validation, and rollback uses fewer
+complete validations plus checked conflicts on every one. It also requires
+target geometric speedup at least `1.10x`, anti-target p95 overhead at most
+`1.10x`, no baseline-only solve, no candidate coverage loss, and no wrong
+answer or execution error. Missing populations do not pass. WMI access is the
+current execution blocker, so this section records a protocol rather than a
+performance claim.

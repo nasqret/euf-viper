@@ -708,3 +708,37 @@
   Jobs `145029`/`145030`/`145031` are externally dependency-bound to successful
   P0 audit `144993`; broad timing runs only after the deterministic sample
   passes. Queue state is not performance evidence.
+
+## Hardened Evidence And Rollback Gate (2026-07-13)
+
+- P0 revision `30828a4` completed the 7,503-file and 3,521-file two-second
+  matrices. Euf-viper reached `7,269` and `3,400` correct; Yices2 reached
+  `7,445` and `3,490`; Z3 default reached `7,412` and `3,474`. The full
+  60-second continuation reached euf-viper `7,480`, Yices2 `7,500`, and Z3
+  default `7,489`. Euf-viper remained slower by common aggregate time against
+  Z3 and by geometric time against Yices2. Do not claim overall superiority.
+- Main `5435b35` repaired multiline quoted symbols and standard annotated
+  terms in the independent parser. Main `628dabf` requires a complete
+  all-source parser canary before certificate arrays, exactly 7,503 sources
+  and zero parse errors for the Hall census, and intent receipts plus exclusive
+  run roots for certificate submission. New census and certificate evidence is
+  still pending.
+- Public branch `research-rollback-propagator` at `4b60113` provides the
+  explicit fail-closed `cadical-rollback` backend and validation-pressure
+  telemetry. It is a standalone base-CNF control, not eager-state migration.
+  Root tests pass `241` default and `247` all-feature cases; hosted run
+  `29270646223` passes.
+- Public commit `e8fb05c` adds the complete forced rollback campaign. It freezes
+  12 exact Goel targets and 12 deterministic balanced anti-targets, runs one
+  binary in complete ABBA blocks against `current`, `model-cuts`, and
+  `dynamic`, binds one CPU and every source/output hash, and audits a strict
+  three-comparison shard cross-product. Promotion requires at least two
+  multi-round targets per comparison, fewer validations and checked conflicts
+  on each, `1.10x` target geometric speed, anti-target p95 at most `1.10x`, no
+  wrong/error/baseline-only observation, and no coverage loss. Empty
+  populations reject. Hosted campaign-contract run `29272420042` passes.
+- WMI SSH currently times out before authentication. No rollback campaign job
+  is recorded. On recovery, inventory `sacct`, interrupted receipts, and run
+  roots before submission. Use corpus root
+  `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025`, which contains `QF_UF/`
+  and `qf_uf_manifest.jsonl`; do not pass the `QF_UF/` leaf as the root.
