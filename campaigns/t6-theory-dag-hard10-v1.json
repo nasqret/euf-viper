@@ -1,0 +1,200 @@
+{
+  "schema": "euf-viper.t6-theory-dag-manifest.v1",
+  "selection": {
+    "candidate_count": 10,
+    "canonical_order": "relative_path_bytewise_ascending",
+    "canonical_path_list_sha256": "43f367dfa7bc1684cb48828415249b59779416d17ad1fb2af50d4c8366bf2523",
+    "derivation": "lexicographically sorted intersection of the frozen DOMAIN7_HUGE selector and the 10 QG entries in the exact P0 full-60 persistent-source list",
+    "domain7_huge_population_path_list_sha256": "526f0a1ad9f791ec779ddde99590154003553fff42924b54319a6bf47307f4ef",
+    "provenance_document": "research-vault/06-results/2026-07-11-tail-opportunity-atlas.md",
+    "provenance_section": "Exact 60-second timeout manifest",
+    "selection_version": "p0-full60-domain7-huge-intersection-v1"
+  },
+  "projection_contract": {
+    "arms": {
+      "A": "tree expansion with globally identified source atoms and no compound-gate sharing",
+      "B": "generic source-DAG hash-consing with signed edges and no theory rewriting",
+      "C": "B after typed union of positive equality atoms in unconditional assertion roots",
+      "D": "B after typed congruence closure seeded only by the C root unions"
+    },
+    "encoding": "signed-edge n-ary Tseitin v1: not is polarity; and/or use n binary implications plus one length-(n+1) clause; all-equal iff uses 2(n-1) ternary plus two length-(n+1) clauses; ite uses four ternary clauses; each assertion adds one unit; constants share one fixed-true variable",
+    "primary_measure": "literal_slots",
+    "secondary_measures": [
+      "variables",
+      "clauses",
+      "unit_clauses",
+      "two_watch_entries"
+    ],
+    "two_watch_rule": "two entries for every clause of length at least two; units use no ordinary watch entries"
+  },
+  "gate": {
+    "decision_rule": "pass iff at least 8 of 10 sources qualify; otherwise reject",
+    "minimum_qualifying_sources": 8,
+    "qualifying_source_rule": "D reduction from A is at least 250000 ppm and exceeds both B and C reductions from A by at least 50000 ppm",
+    "required_d_reduction_from_a_ppm": 250000,
+    "required_increment_over_b_ppm": 50000,
+    "required_increment_over_c_ppm": 50000
+  },
+  "sources": [
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 0,
+      "source_bytes": 808905,
+      "source_sha256": "f54b2b596705e0bb47870467923df4ba0aee0a55262542126b82c2fdf9f953a2",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/gensys_icl_sk",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 1,
+      "source_bytes": 6013419,
+      "source_sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 2,
+      "source_bytes": 6013089,
+      "source_sha256": "05295ac0b0b9d7757b3c2b68184ab0504fc90d56582fb97cc891b8a990bf23ac",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen003.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 3,
+      "source_bytes": 6013964,
+      "source_sha256": "5143c7d94d43c5dc077fb8c92dcc7bce4c672c79c03dcbeef901dd8a8532f5a8",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen004.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 4,
+      "source_bytes": 6013634,
+      "source_sha256": "5d487c7da1e60eb8b28ba24d8dc7bc79f40915318ec62d38b44771420d30fc8b",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 5,
+      "source_bytes": 6014935,
+      "source_sha256": "a6c8c7c8a2a8d1b67574674ea78570977245a728743eca52768b52f9ef165675",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 6,
+      "source_bytes": 6010211,
+      "source_sha256": "175547f0f09d2238085f5621dfede32190411257315b215abcc2857d96d7e78f",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 7,
+      "source_bytes": 6011031,
+      "source_sha256": "dbcbdc19201c2a39ce2839becb61f4f4191ff1e9738396d894da962b33611c2b",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 8,
+      "source_bytes": 6013082,
+      "source_sha256": "a9f9ba690dc07f211035fc43da019da8baff81c6366d51467fd64fff016d9514",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    },
+    {
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+      "selection_tags": [
+        "DOMAIN7_HUGE",
+        "P0_FULL60_PERSISTENT"
+      ],
+      "sequence": 9,
+      "source_bytes": 6013902,
+      "source_sha256": "72b5e5242f0de636f031840d9e04e4d1cf55203ac1d0653c10e3576d7561e1b8",
+      "taxonomy": {
+        "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
+        "rule": "qg-size-variant",
+        "source_family": "QF_UF/QG-classification",
+        "variant": "qg7"
+      }
+    }
+  ]
+}

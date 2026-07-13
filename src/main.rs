@@ -25,6 +25,8 @@ mod quotient_csp;
 mod quotient_state_search;
 #[cfg(test)]
 mod stabilizer_order;
+#[cfg(test)]
+mod t6_bool_dag_census;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
