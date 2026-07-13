@@ -212,21 +212,31 @@ independent evidence checks, and a frozen family holdout.
 - [x] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
   must carry an independently replayable typed EUF explanation; no external
   decisions or propagations are permitted in the first pilot, and the existing
-  complete-model validator remains authoritative. Public rollback checkpoint
-  `4b60113` connects a default-off standalone backend and fails closed as
-  `unsupported` on any bridge or validation failure.
+  complete-model validator remains authoritative. Public rollback head
+  `2dc4bf7` connects a default-off standalone backend and fails closed as
+  `unsupported` on any bridge or validation failure. Commit `01be0a9` fixes a
+  WMI-discovered pending-clause handoff defect; root matrices pass `242`
+  default and `248` all-feature tests, and hosted run `29275599640` passes.
 - [x] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only
-  for causal tests. Unknown settings fail closed. Root matrices passed `241`
-  default and `247` all-feature tests; hosted run `29270646223` passed.
+  for causal tests. Unknown settings fail closed. After the callback-handoff
+  repair, root matrices pass `242` default and `248` all-feature tests; hosted
+  run `29275599640` passes.
 - [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
   dynamic full Ackermannization. Require fewer complete validations on every
   multi-round target, `1.10x` target speedup, no baseline-only solve, and
   independently replayed conflicts before selector work. Public harness
   `e8fb05c` passed hosted validation. The first WMI attempt was rejected before
-  timing on a corpus-root mismatch; corrected prepare `145900` completed,
-  array `145901` is active, and audit `145902` is dependency-held.
+  timing on a corpus-root mismatch. The path-correct `145900`/`145901`/`145902`
+  attempt was stopped after two shards exposed 40/48 candidate `unsupported`
+  observations caused by the adapter handoff defect. Fixed commit `2dc4bf7`
+  adds an exact four-observation anti-target ABBA preflight. Chain
+  `145916`/`145917`/`145918` rejected before that canary because nested `srun`
+  could not resolve bare `python3`; dependents cancelled automatically. Commit
+  `835d134` pins one validated absolute interpreter. Exact branch head
+  `dcc7263` passed hosted run `29276687808`; fresh chain
+  `145923`/`145924`/`145925` is submitted. Only its final audit can promote.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -249,10 +259,18 @@ independent evidence checks, and a frozen family holdout.
 
 ### T5: Component Quotient RAM
 
-- [ ] Project class-code, sorting-network, clause, watch, and decoder cost over
-  all 7,503 files.
+- [ ] Project class-code, restricted-growth, sorting-network, clause, literal,
+  two-watch, and decoder cost over all 7,503 files using only the independent
+  typed parser. Require an exact hash-chained row per source, zero parse/hash/
+  cap failures, and no SAT/UNSAT execution. Compare against exact eager
+  Ackermann plus equality-triangle counts; do not convert structural estimates
+  into timing claims.
 - [ ] Implement only if a broad frozen QG/Goel stratum projects at least 25%
-  fewer clauses or watches than eager triangles/Ackermann pairs.
+  fewer clauses or watches than eager triangles/Ackermann pairs. In each family,
+  require weighted and median reduction, at least half the files individually
+  meeting the 25% threshold, weighted and p95 variable ratio at most `1.25`,
+  coverage of at least 5% of QG and Goel plus eight lineages, and complete
+  bounded decoder telemetry. Any failed gate rejects T5 before solver work.
 
 ### T6: Theory-Conditioned Boolean DAG
 
@@ -348,15 +366,17 @@ fallback can be an operational portfolio but never a standalone victory.
 2. Let dependency-bound full/official certificate chains
    `145892`-`145894` and `145897`-`145899` batch-shadow and globally audit the
    exact two-second rows.
-3. Complete strict rollback control `145901`/`145902`; promote no selector from
-   partial rows.
-4. Complete Kissat sample `145905`; release broad `145906` and merge `145907`
-   only through the preregistered gate.
+3. Require rollback prepare `145923` to pass its anti-target ABBA canary before
+   array `145924`; promote only from immutable audit `145925`.
+4. Keep modern Kissat 4 rejected: valid sample `145905` lost both geometric and
+   aggregate paired gates, so broad `145906` and merge `145907` stay cancelled.
 5. Preserve the existing 1,200-second continuation graph `145785`-`145789`;
    diagnose scheduler state without changing its evidence.
-6. Publish the post-census opportunity atlas, then run T1/T5/T6 projections and
-   only mechanisms that pass their frozen construction thresholds.
-7. Select and compose a novel architecture only from independently checked,
+6. Add literal production model/proof sidecars; canonical certificate reruns do
+   not certify the timed production path.
+7. Port T1 onto the current typed parser, then run T5/T6 projections and only
+   mechanisms that pass their frozen construction thresholds.
+8. Select and compose a novel architecture only from independently checked,
    broad paired wins; then rerun P4/P5 on two CPU classes.
 
 No result enters promotion because it was submitted, queued, or partially

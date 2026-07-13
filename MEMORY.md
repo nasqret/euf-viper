@@ -708,3 +708,35 @@
   Jobs `145029`/`145030`/`145031` are externally dependency-bound to successful
   P0 audit `144993`; broad timing runs only after the deterministic sample
   passes. Queue state is not performance evidence.
+
+## Audited Live Checkpoint (2026-07-13)
+
+- Exact P0 revision `30828a4` rejects overall superiority at every completed
+  full/official two/60-second audit. Coverage is euf-viper `7,269`/`3,400` at
+  two seconds and `7,480`/`3,508` at 60 seconds; Yices2 is
+  `7,445`/`3,490` and `7,500`/`3,518`; Z3 default is `7,412`/`3,474` and
+  `7,489`/`3,514`. The fast common-instance head does not offset aggregate and
+  tail losses. Do not claim euf-viper is better overall.
+- Valid modern-Kissat sample `145905` rejected replacement: equal 53/64
+  coverage, 16 candidate wins versus 37 losses, geometric speed `0.928694`,
+  common-total speed `0.963416`, and sign-flip `p=0.999500` when ratios are
+  SC2021/Kissat-4. Broad `145906` and merge `145907` are cancelled.
+- Range census `145883` is the only current T4 opportunity gate. Certificate
+  chains `145892`-`145894` and `145897`-`145899` are held behind it and certify
+  only canonical source reruns, not literal timed production evidence.
+- Rollback jobs `145900`/`145901`/`145902` exposed an adapter bug and were
+  stopped. Commit `01be0a9` records a conflict as emitted only when CaDiCaL
+  actually takes it through `external_clause`; undelivered pending conflicts
+  may validly recur. Head `2dc4bf7` adds a strict anti-target ABBA preflight and
+  passed hosted run `29275599640`. Chain `145916`/`145917`/`145918` failed before
+  the canary because nested `srun` could not resolve bare `python3`; dependents
+  cancelled. Commit `835d134` pins a validated absolute interpreter and passes
+  11 focused plus 302 full Python tests. Exact head `dcc7263` passed hosted run
+  `29276687808`; fresh chain `145923`/`145924`/`145925` is submitted.
+- Full/official 1,200-second continuation graph `145785`-`145789` is intact and
+  scheduler-pending. Do not cancel or resubmit from queue state alone.
+- T5 must first pass a 7,503-source typed, hash-chained structural projection.
+  Require at least 25% broad QG/Goel clause or watch reduction, at least half of
+  each eligible family individually at that threshold, weighted and p95
+  variable ratio at most `1.25`, eight lineages, complete decoder telemetry,
+  and zero parse/hash/cap failures before implementing quotient RAM.

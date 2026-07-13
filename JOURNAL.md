@@ -967,6 +967,54 @@
   No T0 timing begins before the baseline audit and no promotion follows from
   validation or queue state.
 
+## 2026-07-13 Audited Campaign And Novelty Checkpoint
+
+- Exact P0 revision `30828a4` completed the two-second full 7,503-source and
+  official 3,521-source matrices. Euf-viper solved `7,269`/`3,400`, versus
+  Yices2 `7,445`/`3,490` and Z3 default `7,412`/`3,474`. At 60 seconds it solved
+  `7,480`/`3,508`, versus Yices2 `7,500`/`3,518` and Z3 default
+  `7,489`/`3,514`. All four full/official two/60-second promotion audits reject
+  overall superiority. The full 60-second common-wall geometric factor versus
+  Z3 is `1.5685x`, but common aggregate speed is only `0.5873x`; against Yices2
+  the geometric factor is `0.4910x`.
+- The corrected SC2021-versus-Kissat-4 sample `145905` is valid and rejects the
+  backend replacement. Both solved 53/64 with zero wrong/error rows; Kissat 4
+  won 16 and lost 37 paired instances. Baseline/candidate geometric speed is
+  `0.928694`, common-total speed is `0.963416`, and the sign-flip p-value is
+  `0.999500`. Broad job `145906` and merge `145907` were dependency-cancelled.
+- Hardened source-only range census `145883` runs at exact main `628dabf` and
+  must return exactly 7,503 rows with zero parser errors. Full certificate chain
+  `145892`/`145893`/`145894` and official chain
+  `145897`/`145898`/`145899` remain dependency-held behind that gate. These
+  canonical reruns can prove source-level witness/proof existence but do not yet
+  bind the literal timed production model, proof, or production CNF trace.
+- Rollback control `145900`/`145901`/`145902` was stopped after two shards
+  exposed 40/48 candidate `unsupported` outcomes. The adapter had marked a
+  pending conflict emitted before CaDiCaL requested `external_clause`; an
+  internal SAT conflict could preempt handoff and make a valid recurrence look
+  duplicate. Commit `01be0a9` moves deduplication and telemetry to actual
+  handoff and adds the recurrence regression. Commit `2dc4bf7` adds a strict
+  four-observation anti-target ABBA prepare canary. Tests pass `242` default,
+  `248` all-feature, and `302` Python cases; hosted run `29275599640` passes.
+  WMI chain `145916`/`145917`/`145918` then rejected before the canary because
+  nested `srun` could not resolve bare `python3`; both dependents cancelled.
+  This is infrastructure-only. Commit `835d134` resolves and validates one
+  absolute interpreter for all prepare stages; 11 focused and all 302 Python
+  tests pass. Exact head `dcc7263` passed hosted run `29276687808`; fresh
+  prepare/array/audit chain `145923`/`145924`/`145925` was submitted with run
+  root `/home/bnaskrecki/euf-viper-campaigns/dcc7263eb4d3/results/rollback-control-20260713T190109Z-dcc7263eb4d3`.
+- Full/official 1,200-second arrays `145785` and `145787` remain scheduler
+  pending with 10 GiB, one-core requests; their dependent audits/finalizer
+  `145786`/`145788`/`145789` remain held. The full array has a scheduler estimate
+  on `c3n1`; the official array is waiting on priority. No evidence graph was
+  changed.
+- T5 remains census-gated. Its next artifact must deterministically project
+  typed component class codes, restricted-growth constraints, bitonic record
+  sorting, eager Ackermann/triangle controls, exact clause/literal/watch costs,
+  and decoder work over every source. Broad QG and Goel savings, variable-growth
+  control, complete provenance, and decoder caps must all pass before any solver
+  implementation.
+
 ## Next Entry Template
 
 - Benchmark corpus:
