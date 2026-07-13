@@ -297,6 +297,37 @@ fn operation_panic_disconnects_before_unwinding() {
     assert_eq!(solver.solve().unwrap(), SolverResult::Sat);
 }
 
+struct AbortOnBacktrack;
+
+impl ExternalPropagator for AbortOnBacktrack {
+    fn notify_backtrack(&mut self, _new_level: usize) -> PropagatorResult<()> {
+        Err(PropagatorAbort::new("reject teardown backtrack"))
+    }
+}
+
+#[test]
+fn disconnect_callback_failure_is_not_lost() {
+    let x = Lit::positive(0);
+    let y = Lit::positive(1);
+    let mut solver = CaDiCaL::default();
+    solver.add_binary(x, y).unwrap();
+    let mut propagator = AbortOnBacktrack;
+
+    let failure = solver
+        .with_external_propagator(&mut propagator, [x.var(), y.var()], |session| {
+            assert_eq!(session.solve().unwrap(), SolverResult::Sat);
+        })
+        .unwrap_err();
+
+    assert!(matches!(
+        failure,
+        ExternalPropagatorError::Callback(ExternalPropagatorFailure::CallbackAborted {
+            callback: "notify_backtrack",
+            ..
+        })
+    ));
+}
+
 struct RejectWithoutClause;
 
 impl ExternalPropagator for RejectWithoutClause {
