@@ -652,3 +652,14 @@
   the backend first; the next original mechanisms are proof-pressure-triggered
   conflict-only rollback for validation-dominated Goel cases and a
   source-certified guard-conditioned adequate-range Hall census.
+- Baseline prepare `144823` produced both taxonomies but failed before freezing
+  because the pinned-wheel Z3 C runner rejected the intentional
+  `sat.euf=true` comparator argument. No benchmark rows exist from that graph;
+  cancelled dependents `144824`-`144833` remain invalid. The four partial
+  taxonomy/split hashes are `ecab4f1f...c80b`, `14cf3582...f7e7`,
+  `ec3daa08...deda`, and `d7aa7720...f013`.
+- Commit `30828a4` fixes the native wrapper with fail-closed
+  `sat.euf=true|false` global-parameter translation and an install-time
+  integration smoke. Hosted run `29215009504` passed. Replacement exact-revision
+  P0 jobs are prepare `144990`, full `144991`, official `144992`, and audit
+  `144993`; no performance claim exists until the audit completes.

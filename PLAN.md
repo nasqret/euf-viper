@@ -125,9 +125,15 @@ result cache can satisfy V1-V4.
   project pause before producing benchmark rows. The replacement immutable
   chain at `1308be8` passed hosted CI but was cancelled during preparation when
   the exact locked binary lacked certificate emission. Corrected revision
-  `b46b137` is live as prepare `144823`, full array `144824`, official array
-  `144825`, and global audit `144826`. Prepare is computing the full taxonomy;
-  no benchmark rows or new performance claim exist yet.
+  `b46b137` prepare `144823` completed both taxonomies but failed before lock
+  creation because the old-glibc native Z3 adapter rejected the frozen
+  `sat.euf=true` argument. No benchmark row exists; dependent jobs
+  `144824`-`144833` were cancelled. Commit `30828a4` now translates the two
+  supported `sat.euf` values through Z3's global parameter API and installs a
+  fail-closed native-runner smoke. Hosted run `29215009504` passed. Replacement
+  prepare/full/official/audit jobs are `144990`/`144991`/`144992`/`144993` and
+  are dependency-bound to exact revision
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
   assembly, and exact carried-row provenance are implemented but not yet run.

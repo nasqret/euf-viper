@@ -889,6 +889,24 @@
   `drat-trim` SHA `58a121de...943e5`. Exact release hashes are SC2021
   `d7321602...c70362` and Kissat 4.0.4 `ecbcfebb...ea6b6`. No timing result or
   performance promotion follows yet.
+- P0 prepare `144823` finished the expensive full and official taxonomy passes
+  but then failed before campaign-lock creation. The old-glibc Z3 C-API runner
+  accepted only one filename while the frozen `z3-sat-euf` control correctly
+  invoked `z3 sat.euf=true FILE`. Full taxonomy/split hashes are
+  `ecab4f1f...c80b`/`14cf3582...f7e7`; official hashes are
+  `ec3daa08...deda`/`d7aa7720...f013`. These partial artifacts contain no
+  benchmark row and are not evidence.
+- Commit `30828a4` adds fail-closed support for `sat.euf=true|false`, applies
+  the module option before solver creation through `Z3_global_param_set`, and
+  runs SAT, UNSAT, and unsupported-option smoke tests whenever the pinned wheel
+  fallback is installed. Local verification passed all 228 all-feature Rust
+  tests and the complete Python suite; hosted campaign-contract run
+  `29215009504` passed.
+- Cancelled dependency-dead jobs `144824`-`144833` and submitted replacement
+  exact-revision graph `144990`/`144991`/`144992`/`144993` from
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare is pending WMI priority;
+  the corrected native-runner smoke executes before taxonomy work. No new
+  performance claim exists.
 
 ## Next Entry Template
 
