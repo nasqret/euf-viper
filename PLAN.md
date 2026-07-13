@@ -224,7 +224,13 @@ independent evidence checks, and a frozen family holdout.
   `146214`/`146215`/`146216` completed at exact revision `8952dcb`: all 7,503
   typed snapshots match with zero fallback, mismatch, or error. Audit SHA-256
   is `1a0e0d67...b93b26`. This permits independent review and the timing gate;
-  it is not a speed or production-selection result.
+  it is not a speed or production-selection result. Repair revision `7214d63`
+  reran exact opened-source-byte chain `146374`/`146375`/`146376` with 7,503
+  matches and zero other statuses, but independent review rejected its evidence
+  boundary: the verified parser executable was reopened by path, Python was
+  pinned as an alias rather than a realpath, and `NaN` passed shard JSON audit.
+  Another descriptor-execution/strict-JSON repair and fresh full chain are
+  active; neither historical chain authorizes integration or timing.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
   1%; otherwise stop T1.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
@@ -344,7 +350,13 @@ independent evidence checks, and a frozen family holdout.
   A second review rejected its evidence wrapper: WMI completion trusted summary
   booleans, contradictory oracle counters could pass, and rehashed rows could
   violate count invariants. A strict independent bundle-verifier repair is
-  active; the branch has not been integrated or submitted to WMI.
+  active; the branch has not been integrated or submitted to WMI. Revision
+  `e930abf` fixed direct receipt-digest and Python-identity checks but failed a
+  third review: coordinated semantic mutations still reached `completed`, a
+  final check-to-publish race remained, failed reruns preserved stale completed
+  metadata, and untracked Python modules were outside revision integrity. A new
+  immutable captured-byte publication repair is active. No WMI submission is
+  allowed before another independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 

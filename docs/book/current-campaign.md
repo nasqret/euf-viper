@@ -183,14 +183,26 @@ revision `8952dcb` raises a tested fail-closed nesting cap above the measured
 corpus maximum and pins Cargo plus parser semantics. WMI chain
 `146214`/`146215`/`146216` completed with all 7,503 snapshots matching and zero
 fallback, mismatch, or error. This is under independent adversarial review and
-permits only the next timing gate.
+permits only the next timing gate. A same-source-byte repair at `7214d63` also
+completed fresh chain `146374`/`146375`/`146376` with 7,503 matches and zero
+other statuses, but review rejected its remaining evidence boundary: the
+parser executable was hashed then reopened by path, Python was bound as an
+alias rather than its realpath, and non-finite shard JSON passed audit. A
+descriptor-bound execution and strict-JSON repair is active; neither chain
+currently permits timing or integration.
 
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle
-verifier repair is active; no WMI census was submitted. T6 exact revision
-`9833ec3` is queued as job `146075`, with promotion disabled until its current
-12-source manifest is derived mechanically from the frozen P0 audit.
+verifier repair is active; no WMI census was submitted. Revision `e930abf`
+closed those direct cases but failed the next review: coordinated record,
+target, gate, and decoder mutations could still reach `completed`, publication
+had a final digest race, failed reruns retained stale completion metadata, and
+untracked Python modules escaped revision integrity. The next repair must
+semantically verify captured bytes and atomically publish an immutable bundle.
+T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
+until its current 12-source manifest is derived mechanically from the frozen P0
+audit.
 
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or

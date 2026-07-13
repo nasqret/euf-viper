@@ -12,7 +12,7 @@
   "prerequisites": {
     "typed_parser_revision": "7214d6396905466b459ca7d614bc2e1c6c85ec93",
     "typed_parser_audit_sha256": "fea1b2ec59df0187e62d38bd7a996f3fa30c9cbdecee6520dca485364c59d355",
-    "typed_parser_independent_review": "pending",
+    "typed_parser_independent_review": "rejected_evidence_integrity",
     "command_and_auxiliary_assertion_lineage": "missing",
     "corrected_finite_range_job": 146071,
     "corrected_finite_range_status": "running"

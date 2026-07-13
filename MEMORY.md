@@ -819,3 +819,17 @@
   ledger, and corrected T4 finite-range evidence. Scalar gates are 200/261
   source-complete one-table cases, 10/12 P12 below one million states, and build
   cost at most 10% of Yices2 on at least 7/12; SIMD remains conditional.
+- T5 revision `e930abf` remains no-go after independent review. Direct digest
+  and pinned-Python checks passed, but coordinated semantic mutations could
+  still reach `completed`, the final check/publish boundary was mutable, failed
+  reruns could leave stale completed metadata, and untracked Python modules
+  were outside the exact-revision check. Require full semantic replay over
+  captured bytes, immutable atomic bundle publication, failure cleanup, and a
+  clean import environment before WMI submission.
+- T1 revision `7214d63` and WMI `146374`-`146376` mechanically produced 7,503
+  matches and zero other statuses, but remain no-go. The source bytes are now
+  correctly captured once for hash and stdin parsing; however the parser binary
+  was hashed then reopened by path, Python was not canonicalized to its
+  realpath, and non-finite shard JSON passed audit. Require descriptor-bound
+  executable use, canonical interpreter identity, strict JSON everywhere, and
+  a fresh full chain before integration or timing.

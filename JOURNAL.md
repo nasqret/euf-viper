@@ -1155,6 +1155,24 @@
   SAT interpretations or UNSAT cube-cover DAGs. It stops before implementation
   until T1 review, the missing assertion ledger, and corrected T4 evidence
   complete.
+- Independent T5 review rejected `e930abf` despite 57 passing focused tests and
+  hosted CI. The full verifier is strong, but the finalizer trusted a mutable
+  receipt instead of repeating semantic reconstruction. Coordinated record,
+  target, gate, and decoder mutations reached `completed`; an aggregate change
+  at the final publication boundary raced the receipt; a failed rerun retained
+  old completed metadata; and untracked importable Python files were excluded
+  from revision cleanliness. No WMI job was submitted. A captured-byte,
+  immutable atomic bundle repair with failure cleanup is active.
+- T1 revision `7214d63` completed fresh WMI chain
+  `146374`/`146375`/`146376` with 7,503 matches and zero fallback, mismatch, or
+  error. Records SHA-256 was `ea41a7b3...b6ebb` and audit SHA-256 was
+  `fea1b2ec...d355`. Independent review nevertheless rejected integration: the
+  binary was hashed then reopened by pathname and could be replaced to forge a
+  match, `/usr/bin/python3` was recorded as an alias rather than canonical
+  realpath, and shard `exit_code: NaN` survived artifact audit. The same-source-
+  buffer repair is confirmed correct. Descriptor-bound execution, realpath
+  identity, strict JSON, and a fresh full chain are active; old evidence is
+  superseded for promotion.
 
 ## Next Entry Template
 
