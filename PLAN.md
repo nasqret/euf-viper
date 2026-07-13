@@ -193,9 +193,19 @@ independent evidence checks, and a frozen family holdout.
   integration, and `2` doc cases; root tests pass `222` default and `228`
   all-feature cases; hosted run `29217315701` passes. This is an isolated
   prerequisite, not production integration or timing evidence.
-- [ ] Implement rollback congruence closure behind that bridge. Every callback
-  conflict must carry an independently replayable typed EUF explanation; no
-  external decisions or propagations are permitted in the first pilot.
+- [x] Implement and differentially verify the solver-independent rollback core.
+  Public branch `research-rollback-euf-core` at `0d9ec50` uses deterministic
+  union by size without path compression, rollbackable application and
+  disequality incidence, capped signature work, causal congruence edges, and
+  an independent fresh-closure conflict replay. Its randomized gate covers
+  `64 x 160 = 10,240` assignment/level/backtrack transitions and compares every
+  term pair after each transition; cap, typing, rollback, literal-reuse, and
+  tampering regressions also pass. Root tests pass `230` default and `234`
+  all-feature cases; hosted run `29217833901` passes. No timing claim exists.
+- [ ] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
+  must carry an independently replayable typed EUF explanation; no external
+  decisions or propagations are permitted in the first pilot, and the existing
+  complete-model validator remains authoritative.
 - [ ] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only

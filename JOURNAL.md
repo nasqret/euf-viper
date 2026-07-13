@@ -938,6 +938,19 @@
   cases; root tests pass `222` default and `228` all-feature cases; hosted Linux
   run `29217315701` passes. No rollback closure, EUF explanation, production
   route, or performance result exists yet.
+- Added the solver-independent rollback closure on public branch
+  `research-rollback-euf-core` at `0d9ec50`. It uses deterministic union by size
+  without path compression; rollback logs cover equality forests, application
+  parent incidence, active SAT variables, and per-class disequality incidence.
+  Derived congruence edges retain causal argument equalities, conflict clauses
+  are capped and canonical, and a separate fresh full-closure replay rejects
+  missing, duplicate, reordered, or tampered evidence. The first cap test found
+  and fixed an undo-order bug before checkpointing. The randomized differential
+  gate executes `10,240` assignment/level/backtrack transitions and compares
+  every term pair after each transition; focused cap/type/rollback tests pass.
+  Root matrices pass `230` default and `234` all-feature cases; hosted Linux run
+  `29217833901` passes. The core is not connected to CaDiCaL and has no timing
+  evidence.
 - Added the source-only guard-conditioned adequate-range/Hall census in
   `012c963`, then bound the independent parser hash and durable exact-revision
   WMI runner/submitter in `02b68d5`/`86d76fc`. All 33 focused census/parser

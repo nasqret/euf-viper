@@ -105,8 +105,13 @@ wins end-to-end target timing without a baseline-only solve.
    `11` integration, and `2` doc cases; root tests pass `222` default and `228`
    all-feature cases; hosted run `29217315701` passes. This bridge does not yet
    implement rollback closure or produce EUF explanations.
-2. Differentially test rollback closure and explanations against fresh
-   complete congruence closure over random assignment/backtrack traces.
+2. **Complete in isolation.** Public branch `research-rollback-euf-core` at
+   `0d9ec50` implements deterministic union by size without path compression,
+   rollbackable application/disequality incidence, capped causal explanations,
+   and fresh-closure replay. The randomized gate covers `10,240` transitions
+   and compares every term pair after each one. Root tests pass `230` default
+   and `234` all-feature cases; hosted run `29217833901` passes. The core is not
+   yet connected to the callback bridge.
 3. Preserve first-model timing, assignment, and conflicts with default-off
    byte-identical behavior.
 4. Run forced Goel/GRAPH ABBA plus anti-target controls.

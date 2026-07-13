@@ -688,6 +688,14 @@
   and teardown failure have regressions. Do not call this rollback EUF or a
   performance improvement until the closure, typed explanations, integration,
   and paired timing gates pass.
+- Public branch `research-rollback-euf-core` at `0d9ec50` completes the pure
+  rollback congruence and explanation core only. Its deterministic union-by-size
+  state has rollbackable parent-use and disequality incidence; independent fresh
+  closure replays canonical conflict clauses. A `64 x 160` randomized trace
+  compares every term pair after every assignment/level/backtrack operation.
+  Root tests pass `230` default and `234` all-feature cases, and hosted run
+  `29217833901` passes. CaDiCaL integration, complete-model validation, target
+  timing, and promotion remain open.
 - Source-only adequate-range/Hall census commits `012c963`/`02b68d5` and
   exact-revision submitter `86d76fc` use the independent structured parser,
   bind its hash, report only proved guard-conditioned ranges and bounded Hall

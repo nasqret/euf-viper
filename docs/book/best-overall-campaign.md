@@ -111,6 +111,15 @@ and fails closed on callback, unwind, registration, and teardown errors. Hosted
 run `29217315701` passes. This is boundary evidence only: rollback congruence
 closure, typed explanations, production integration, and timing remain open.
 
+The pure rollback core is separately checkpointed on
+`research-rollback-euf-core` at `0d9ec50`. It maintains deterministic
+union-by-size classes without path compression, rollbackable parent-use and
+disequality incidence, and causal congruence edges. Conflict clauses are
+canonical and capped, then replayed by a fresh complete-closure checker. A
+`10,240`-transition randomized gate compares every term pair after every
+assignment, level creation, and backtrack; hosted run `29217833901` passes.
+This still supplies no callback integration or performance result.
+
 ## Execution Ladder
 
 ### P0: Freeze evidence
