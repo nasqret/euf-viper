@@ -1,0 +1,38 @@
+{
+  "artifacts": {
+    "aggregate": {
+      "path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/guarded-range-census-146071/aggregate.json",
+      "sha256": "b37b95509c36b29c1f6ab5f55d5754ce1aab0b4ec2efe447488ecfacc8cc4e42"
+    },
+    "analyzer": {
+      "path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/scripts/bench/census_guarded_adequate_ranges.py",
+      "sha256": "f776cea8204ba5e588b0f2c5a21379f6b9232ffe3b8164f09ad44720d5e69c00"
+    },
+    "manifest": {
+      "path": "/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+      "sha256": "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
+    },
+    "parser": {
+      "path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/scripts/cert/independent_qfuf.py",
+      "sha256": "7438ee209f090fbc35eb15e58720ec2a54403548ec1c823641eaae28eea4811b"
+    },
+    "records": {
+      "path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/guarded-range-census-146071/records.jsonl",
+      "sha256": "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c"
+    },
+    "run": {
+      "path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/guarded-range-census-146071/run.txt",
+      "sha256": "2a00ce36ee11b00c7bf3fa45b9a9cd34bc448da3dff8a8e2a6a07df825961021"
+    }
+  },
+  "hostname": "c1n1.cluster.wmi.amu.edu.pl",
+  "job_id": 146071,
+  "revision": "8f785437830e9ae25ba3d0eb96e2f4c9ef66daa3",
+  "schema": "euf-viper.guard-range-hall-wmi-run.v1",
+  "status": "completed",
+  "validation": {
+    "expected_sources": 7503,
+    "observed_sources": 7503,
+    "structured_parse_errors": 0
+  }
+}

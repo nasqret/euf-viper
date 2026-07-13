@@ -172,11 +172,12 @@ No representation enters the solver merely because it is unusual.
 1. T1 must match the authoritative typed tree parser on every one of 7,503
    sources with all sorts, signatures, term types, applications, assertions,
    Boolean-data terms, and unsupported diagnostics preserved.
-2. T4 replacement job `146071` must return exactly 7,503 source-only rows and
-   zero parser errors. The failed predecessor projected zero savings on its
-   successfully parsed population, so Hall/PB implementation is unlikely but
-   cannot be rejected before all 17 omitted sources are included. It still
-   needs the preregistered 30% value-cell reduction on a broad population.
+2. T4 replacement job `146071` returned exactly 7,503 source-only rows and zero
+   parser errors. Its complete aggregate has 124,698 uniform and 124,698
+   non-uniform value cells, exactly zero savings, 157 certified domains, 24
+   checked Hall subsets, zero Hall conflicts, and zero eligible sources. This
+   definitively rejects Hall/PB implementation against the preregistered 30%
+   value-cell reduction gate.
 3. T5 must project exact class-code, restricted-growth, sorting-network,
    clause, literal, two-watch, and decoder costs. Both QG and Goel must show at
    least 25% broad reduction without weighted or p95 variable growth above
@@ -244,7 +245,9 @@ checked SAT interpretations or UNSAT cube-cover DAGs. It must make at least
 200/261 one-table cases source-complete, finish at least 10/12 deficits below
 one million states, and keep complete graph-build cost below 10% of Yices2 on
 at least 7/12. T1 review, the missing assertion-lineage ledger, and corrected
-T4 evidence block implementation; SIMD is not authorized.
+T4 range evidence is now complete but rejects Hall/PB with zero savings. T1
+review and the missing assertion-lineage ledger still block T8; SIMD is not
+authorized.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

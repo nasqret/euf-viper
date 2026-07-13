@@ -27,6 +27,11 @@ No implementation starts until:
 - corrected T4 census `146071` supplies exact checked finite ranges; and
 - the frozen source populations and independent tiny oracle are hash bound.
 
+T4 has now completed with 7,503 rows and zero parse errors. It found zero
+non-uniform value-cell savings and is rejected as a Hall/PB implementation, but
+its exact range telemetry remains available to T8. T1 review and the assertion
+ledger still block T8 implementation.
+
 ## Source Ledger
 
 Each source `(assert A_i)` receives a command-level identity containing its

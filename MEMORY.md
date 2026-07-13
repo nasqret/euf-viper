@@ -841,3 +841,10 @@
   reconstruct initial CNF from source/config, replay dynamic API clauses,
   require exact maps, gate analyzer SAT on the checker, and fail closed on path,
   frame, or JSON ambiguity.
+- T4 is finally rejected by corrected WMI census `146071` at revision `8f78543`.
+  It completed 7,503/7,503 rows with zero parser errors but found 124,698
+  uniform and 124,698 non-uniform value cells, zero savings, zero eligible
+  sources, 157 certified domains, 25,760 effective ranges, 24 Hall subsets, and
+  zero Hall conflicts. Aggregate/records SHA-256 are
+  `b37b9550...c4e42`/`4cfb2d1d...ff961c`. Do not implement Hall/PB; exact range
+  telemetry may feed T8 only through its independent source ledger.

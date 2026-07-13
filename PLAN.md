@@ -318,7 +318,7 @@ independent evidence checks, and a frozen family holdout.
 
 ### T4: Adequate-Range Hall/PB
 
-- [ ] Complete source-only opportunity census. First attempt `145883`, exact
+- [x] Complete source-only opportunity census. First attempt `145883`, exact
   revision `628dabf`, wrote 7,503 rows but terminated nonzero after 17 deeply
   nested NEQ sources hit Python expression recursion. Among parsed sources it
   found 91,895 uniform and 91,895 non-uniform cells, zero cell saving, 151
@@ -326,17 +326,21 @@ independent evidence checks, and a frozen family holdout.
   and zero Hall conflicts; this is not a final rejection because the zero-error
   gate failed. Commits `6b51b39`/`8f78543` parse nested `let` chains
   iteratively and pin a four-hour census wall time. Corrected exact census
-  `146071` is active on WMI. The structured independent parser emits
+  `146071` completed on WMI in `01:53:20`, exit `0:0`. The structured
+  independent parser emits
   hash-bound guard-conditioned ranges, non-uniform value-cell savings, bounded
   Hall-tight/conflict witnesses, caps, and abstentions without invoking a
   solver or producing SAT/UNSAT. The hardened runner requires exactly 7,503
-  sources and zero parse errors. Reject implementation if the returned corpus
-  population misses the preregistered 30% cell-saving threshold.
-- [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
-  near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
-  through at least `n=32`.
-- [ ] Require at least 30% fewer value cells and checked Hall/PB reasons before
-  frozen PEQ/SEQ timing.
+  sources and zero parse errors. Final aggregate has 124,698 uniform and
+  124,698 non-uniform value cells, zero savings, 157 certified uniform domains,
+  25,760 effective ranges, 24 Hall subsets, zero Hall conflicts, and zero
+  eligible sources. Records SHA-256 is `4cfb2d1d...ff961c`.
+- [x] Stop before non-uniform/PB implementation. The corrected complete corpus
+  misses the 30% cell-saving gate with exactly 0% savings, so pairwise,
+  totalizer, near-optimal CNF, native PB, and reversible matching work is not
+  authorized.
+- [x] Reject frozen PEQ/SEQ timing for T4. Its source range telemetry may feed
+  T8's independently checked ledger, but no Hall/PB route survives.
 
 ### T5: Component Quotient RAM
 
@@ -495,8 +499,9 @@ fallback can be an operational portfolio but never a standalone victory.
 
 ## Immediate Queue
 
-1. Finish corrected zero-error range census `146071`; reject T4 if its exact
-   7,503-row aggregate misses the preregistered opportunity threshold.
+1. Preserve corrected zero-error range census `146071` as a final T4 rejection:
+   7,503 rows, zero parse errors, zero eligible sources, and exactly zero
+   value-cell savings against the 30% threshold. Do not implement Hall/PB.
 2. Let dependency-bound full/official certificate chains
    `146076`-`146078` and `146079`-`146081` batch-shadow and globally audit the
    exact two-second rows only after `146071` succeeds.

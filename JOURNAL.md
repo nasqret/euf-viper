@@ -1183,6 +1183,15 @@
   accepted ambiguity. UNSAT remained fail-closed. Schema v3 repair now requires
   source/config CNF reconstruction, replayed dynamic-clause transcripts, exact
   maps, checker-gated classification, no-symlink traversal, and strict frames.
+- Corrected guarded-range census `146071` completed at exact revision `8f78543`
+  in `01:53:20`, exit `0:0`. It covered 7,503/7,503 sources with zero structured
+  parse errors, but projected 124,698 uniform and 124,698 non-uniform value
+  cells: exactly zero savings. It found 157 certified uniform domains, 25,760
+  effective ranges, 24 Hall subsets, zero Hall conflicts, and zero eligible
+  sources. This definitively rejects T4 before Hall/PB implementation against
+  the 30% gate. Aggregate SHA-256 is `b37b9550...c4e42`; records SHA-256 is
+  `4cfb2d1d...ff961c`. Full/official certificate prepares `146076`/`146079`
+  released automatically and remain separate evidence chains.
 
 ## Next Entry Template
 

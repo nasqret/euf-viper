@@ -1,0 +1,64 @@
+{
+  "schema": "euf-viper.guard-range-hall-decision.v1",
+  "status": "reject",
+  "decision": "stop_before_hall_pb_implementation",
+  "revision": "8f785437830e9ae25ba3d0eb96e2f4c9ef66daa3",
+  "job": {
+    "job_id": 146071,
+    "slurm_state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed": "01:53:20",
+    "hostname": "c1n1.cluster.wmi.amu.edu.pl"
+  },
+  "validation": {
+    "expected_sources": 7503,
+    "observed_sources": 7503,
+    "structured_parse_errors": 0,
+    "eligible_sources": 0,
+    "ineligible_sources": 7503
+  },
+  "opportunity": {
+    "uniform_value_cells": 124698,
+    "non_uniform_value_cells": 124698,
+    "value_cell_savings": 0,
+    "value_cell_savings_fraction": 0.0,
+    "minimum_required_savings_fraction": 0.3,
+    "certified_uniform_domains": 157,
+    "effective_candidate_ranges": 25760,
+    "proven_range_facts": 24365,
+    "hall_subsets_checked": 24,
+    "hall_checked_conflicts": 0,
+    "gate_passed": false
+  },
+  "artifacts": {
+    "aggregate": {
+      "path": "aggregate.json",
+      "sha256": "b37b95509c36b29c1f6ab5f55d5754ce1aab0b4ec2efe447488ecfacc8cc4e42"
+    },
+    "metadata": {
+      "path": "metadata.json",
+      "sha256": "f4efbe5a08f85c59d7aa44150064a835233a66f1853b2b1a5c642cc505df474e"
+    },
+    "records": {
+      "remote_path": "/home/bnaskrecki/euf-viper-campaigns/8f785437830e/results/guarded-range-census-146071/records.jsonl",
+      "sha256": "4cfb2d1da7f2691485978d33b5a7a39b586246ade226d455b9516e8c74ff961c",
+      "locally_preserved": false
+    },
+    "run": {
+      "path": "run.txt",
+      "sha256": "2a00ce36ee11b00c7bf3fa45b9a9cd34bc448da3dff8a8e2a6a07df825961021"
+    },
+    "stdout": {
+      "path": "guarded-range-census-146071.out",
+      "sha256": "4f612d41f2712c2a67f6bff7a15bf4b5445640e316b4b3c6646b42ccbcbd9a06"
+    },
+    "stderr": {
+      "path": "guarded-range-census-146071.err",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "released_certificate_chains": {
+    "full": [146076, 146077, 146078],
+    "official": [146079, 146080, 146081]
+  }
+}
