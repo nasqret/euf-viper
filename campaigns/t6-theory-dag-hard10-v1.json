@@ -4,11 +4,17 @@
     "candidate_count": 10,
     "canonical_order": "relative_path_bytewise_ascending",
     "canonical_path_list_sha256": "43f367dfa7bc1684cb48828415249b59779416d17ad1fb2af50d4c8366bf2523",
-    "derivation": "lexicographically sorted intersection of the frozen DOMAIN7_HUGE selector and the 10 QG entries in the exact P0 full-60 persistent-source list",
+    "derivation": "lexicographically sorted intersection of the frozen DOMAIN7_HUGE selector and the 10 QG entries in the historical pre-fix 58efe9d full-60 timeout table; retained only as the preregistered developmental 8/10 gate",
     "domain7_huge_population_path_list_sha256": "526f0a1ad9f791ec779ddde99590154003553fff42924b54319a6bf47307f4ef",
+    "evidence_scope": "historical_58efe9d_developmental_gate_not_current_p0",
+    "historical_campaign_result": "results/wmi/four-solver-60s-143248/qf-uf-corpus-143248.csv",
+    "historical_campaign_result_sha256": "f255208a70c7af4ef34039a577ba6642002397097ef3bb8ac73041293b980863",
+    "performance_revision": "58efe9d43dab65675530ad4f52b93df2bf73d729",
     "provenance_document": "research-vault/06-results/2026-07-11-tail-opportunity-atlas.md",
+    "provenance_document_revision": "70d28bf3a5f410ec38047324d581667d298ecc93",
+    "provenance_document_sha256": "2a61b9f10d9e5999d1330fe4f00f36c4b0b4b6482d159768a4040f951d02cad1",
     "provenance_section": "Exact 60-second timeout manifest",
-    "selection_version": "p0-full60-domain7-huge-intersection-v1"
+    "selection_version": "historical-58efe9d-full60-domain7-huge-intersection-v1"
   },
   "projection_contract": {
     "arms": {
@@ -35,12 +41,22 @@
     "required_increment_over_b_ppm": 50000,
     "required_increment_over_c_ppm": 50000
   },
+  "current_confirmation": {
+    "derivation_policy": "a distinct confirmation manifest must be generated mechanically from the frozen current P0 full-60 audit; hand-selected paths are forbidden",
+    "expected_source_count": 12,
+    "implementation_or_promotion_eligible": false,
+    "p0_audit_path": "p0-144990/continuations/chain-145036/audit/full-60.json",
+    "p0_audit_sha256": "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a",
+    "p0_revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+    "required_before_implementation_or_promotion": true,
+    "status": "not_materialized"
+  },
   "sources": [
     {
       "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 0,
       "source_bytes": 808905,
@@ -56,7 +72,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 1,
       "source_bytes": 6013419,
@@ -72,7 +88,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 2,
       "source_bytes": 6013089,
@@ -88,7 +104,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen003.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 3,
       "source_bytes": 6013964,
@@ -104,7 +120,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen004.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 4,
       "source_bytes": 6013634,
@@ -120,7 +136,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 5,
       "source_bytes": 6014935,
@@ -136,7 +152,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 6,
       "source_bytes": 6010211,
@@ -152,7 +168,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 7,
       "source_bytes": 6011031,
@@ -168,7 +184,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 8,
       "source_bytes": 6013082,
@@ -184,7 +200,7 @@
       "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
       "selection_tags": [
         "DOMAIN7_HUGE",
-        "P0_FULL60_PERSISTENT"
+        "HISTORICAL_58EFE9D_FULL60_PERSISTENT"
       ],
       "sequence": 9,
       "source_bytes": 6013902,

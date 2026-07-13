@@ -25,6 +25,16 @@ const REQUIRED_D_REDUCTION_PPM: i64 = 250_000;
 const REQUIRED_INCREMENT_OVER_B_PPM: i64 = 50_000;
 const REQUIRED_INCREMENT_OVER_C_PPM: i64 = 50_000;
 const REQUIRED_QUALIFYING_SOURCES: usize = 8;
+const HISTORICAL_PERFORMANCE_REVISION: &str = "58efe9d43dab65675530ad4f52b93df2bf73d729";
+const HISTORICAL_PROVENANCE_REVISION: &str = "70d28bf3a5f410ec38047324d581667d298ecc93";
+const HISTORICAL_PROVENANCE_SHA256: &str =
+    "2a61b9f10d9e5999d1330fe4f00f36c4b0b4b6482d159768a4040f951d02cad1";
+const HISTORICAL_RESULT_SHA256: &str =
+    "f255208a70c7af4ef34039a577ba6642002397097ef3bb8ac73041293b980863";
+const CURRENT_P0_REVISION: &str = "30828a4f0c1e7e478a9c6f406ccb245eeefc4961";
+const CURRENT_P0_AUDIT_SHA256: &str =
+    "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a";
+const CURRENT_P0_EXPECTED_SOURCES: usize = 12;
 const MAX_SOURCE_BYTES: usize = 16 * 1_048_576;
 const MAX_DIAGNOSTIC_CHARS: usize = 512;
 
@@ -37,6 +47,7 @@ struct FrozenManifest {
     selection: SelectionContract,
     projection_contract: ProjectionContract,
     gate: GateContract,
+    current_confirmation: CurrentConfirmationContract,
     sources: Vec<FrozenSource>,
 }
 
@@ -48,9 +59,28 @@ struct SelectionContract {
     canonical_path_list_sha256: String,
     derivation: String,
     domain7_huge_population_path_list_sha256: String,
+    evidence_scope: String,
+    historical_campaign_result: String,
+    historical_campaign_result_sha256: String,
+    performance_revision: String,
     provenance_document: String,
+    provenance_document_revision: String,
+    provenance_document_sha256: String,
     provenance_section: String,
     selection_version: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct CurrentConfirmationContract {
+    derivation_policy: String,
+    expected_source_count: usize,
+    implementation_or_promotion_eligible: bool,
+    p0_audit_path: String,
+    p0_audit_sha256: String,
+    p0_revision: String,
+    required_before_implementation_or_promotion: bool,
+    status: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,6 +141,7 @@ struct CensusReport {
     contract: ReportContract,
     manifest: ManifestRecord,
     gate: GateRecord,
+    current_confirmation: CurrentConfirmationContract,
     sources: Vec<SourceRecord>,
 }
 
@@ -138,7 +169,9 @@ enum GateDecision {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 struct GateRecord {
+    scope: &'static str,
     decision: GateDecision,
+    pass_semantics: &'static str,
     qualifying_sources: u64,
     required_qualifying_sources: u64,
     required_d_reduction_from_a_ppm: i64,
@@ -270,6 +303,7 @@ fn run_census(
         revision,
         sha256_hex(&manifest_bytes),
         manifest.selection.canonical_path_list_sha256.clone(),
+        manifest.current_confirmation.clone(),
         sources,
     )?;
     let bytes = serialize_report(&report)?;
@@ -295,20 +329,41 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
     if manifest.selection.canonical_path_list_sha256 != EXPECTED_PATH_LIST_SHA256 {
         return Err("unexpected frozen path-list digest".to_owned());
     }
-    require_nonempty(&manifest.selection.derivation, "selection derivation")?;
+    if manifest.selection.derivation
+        != "lexicographically sorted intersection of the frozen DOMAIN7_HUGE selector and the 10 QG entries in the historical pre-fix 58efe9d full-60 timeout table; retained only as the preregistered developmental 8/10 gate"
+    {
+        return Err("selection derivation drift".to_owned());
+    }
     require_sha256(
         &manifest.selection.domain7_huge_population_path_list_sha256,
         "DOMAIN7_HUGE path-list digest",
     )?;
-    if manifest.selection.provenance_document
-        != "research-vault/06-results/2026-07-11-tail-opportunity-atlas.md"
+    if manifest.selection.evidence_scope != "historical_58efe9d_developmental_gate_not_current_p0"
+        || manifest.selection.historical_campaign_result
+            != "results/wmi/four-solver-60s-143248/qf-uf-corpus-143248.csv"
+        || manifest.selection.historical_campaign_result_sha256 != HISTORICAL_RESULT_SHA256
+        || manifest.selection.performance_revision != HISTORICAL_PERFORMANCE_REVISION
+        || manifest.selection.provenance_document
+            != "research-vault/06-results/2026-07-11-tail-opportunity-atlas.md"
+        || manifest.selection.provenance_document_revision != HISTORICAL_PROVENANCE_REVISION
+        || manifest.selection.provenance_document_sha256 != HISTORICAL_PROVENANCE_SHA256
         || manifest.selection.provenance_section != "Exact 60-second timeout manifest"
-        || manifest.selection.selection_version != "p0-full60-domain7-huge-intersection-v1"
+        || manifest.selection.selection_version
+            != "historical-58efe9d-full60-domain7-huge-intersection-v1"
     {
         return Err("selection provenance drift".to_owned());
     }
+    require_sha256(
+        &manifest.selection.historical_campaign_result_sha256,
+        "historical campaign result SHA-256",
+    )?;
+    require_sha256(
+        &manifest.selection.provenance_document_sha256,
+        "provenance document SHA-256",
+    )?;
     validate_projection_contract(&manifest.projection_contract)?;
     validate_gate_contract(&manifest.gate)?;
+    validate_current_confirmation(&manifest.current_confirmation)?;
 
     let mut previous = None::<&str>;
     for (index, source) in manifest.sources.iter().enumerate() {
@@ -330,7 +385,12 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
             ));
         }
         require_sha256(&source.source_sha256, "source SHA-256")?;
-        if source.selection_tags != ["DOMAIN7_HUGE".to_owned(), "P0_FULL60_PERSISTENT".to_owned()] {
+        if source.selection_tags
+            != [
+                "DOMAIN7_HUGE".to_owned(),
+                "HISTORICAL_58EFE9D_FULL60_PERSISTENT".to_owned(),
+            ]
+        {
             return Err(format!("selection tags drift for {}", source.relative_path));
         }
         validate_taxonomy(source)?;
@@ -342,6 +402,23 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
             manifest.selection.canonical_path_list_sha256
         ));
     }
+    Ok(())
+}
+
+fn validate_current_confirmation(contract: &CurrentConfirmationContract) -> Result<(), String> {
+    if contract.derivation_policy
+        != "a distinct confirmation manifest must be generated mechanically from the frozen current P0 full-60 audit; hand-selected paths are forbidden"
+        || contract.expected_source_count != CURRENT_P0_EXPECTED_SOURCES
+        || contract.implementation_or_promotion_eligible
+        || contract.p0_audit_path != "p0-144990/continuations/chain-145036/audit/full-60.json"
+        || contract.p0_audit_sha256 != CURRENT_P0_AUDIT_SHA256
+        || contract.p0_revision != CURRENT_P0_REVISION
+        || !contract.required_before_implementation_or_promotion
+        || contract.status != "not_materialized"
+    {
+        return Err("current P0 confirmation contract drift".to_owned());
+    }
+    require_sha256(&contract.p0_audit_sha256, "current P0 audit SHA-256")?;
     Ok(())
 }
 
@@ -690,6 +767,7 @@ fn build_report(
     revision: &str,
     manifest_sha256: String,
     path_list_sha256: String,
+    current_confirmation: CurrentConfirmationContract,
     sources: Vec<SourceRecord>,
 ) -> Result<CensusReport, String> {
     if sources.len() != EXPECTED_SOURCES {
@@ -717,17 +795,20 @@ fn build_report(
             sources: sources.len() as u64,
         },
         gate: GateRecord {
+            scope: "historical_58efe9d_developmental_8_of_10",
             decision: if qualifying_sources >= REQUIRED_QUALIFYING_SOURCES {
                 GateDecision::Pass
             } else {
                 GateDecision::Reject
             },
+            pass_semantics: "developmental_only_current_12_confirmation_required_before_implementation_or_promotion",
             qualifying_sources: qualifying_sources as u64,
             required_qualifying_sources: REQUIRED_QUALIFYING_SOURCES as u64,
             required_d_reduction_from_a_ppm: REQUIRED_D_REDUCTION_PPM,
             required_increment_over_b_ppm: REQUIRED_INCREMENT_OVER_B_PPM,
             required_increment_over_c_ppm: REQUIRED_INCREMENT_OVER_C_PPM,
         },
+        current_confirmation,
         sources,
     })
 }
@@ -802,6 +883,48 @@ mod tests {
             EXPECTED_PATH_LIST_SHA256
         );
         assert_eq!(manifest.sources.len(), EXPECTED_SOURCES);
+    }
+
+    #[test]
+    fn historical_provenance_tags_and_current_confirmation_reject_drift() {
+        let mut revision_drift = frozen_manifest();
+        revision_drift.selection.performance_revision = CURRENT_P0_REVISION.to_owned();
+        assert_eq!(
+            validate_manifest(&revision_drift).unwrap_err(),
+            "selection provenance drift"
+        );
+
+        let mut version_drift = frozen_manifest();
+        version_drift.selection.selection_version =
+            "p0-full60-domain7-huge-intersection-v1".to_owned();
+        assert_eq!(
+            validate_manifest(&version_drift).unwrap_err(),
+            "selection provenance drift"
+        );
+
+        let mut tag_drift = frozen_manifest();
+        tag_drift.sources[0].selection_tags[1] = "P0_FULL60_PERSISTENT".to_owned();
+        assert!(
+            validate_manifest(&tag_drift)
+                .unwrap_err()
+                .contains("selection tags drift")
+        );
+
+        let mut audit_drift = frozen_manifest();
+        audit_drift.current_confirmation.p0_audit_sha256 = "0".repeat(64);
+        assert_eq!(
+            validate_manifest(&audit_drift).unwrap_err(),
+            "current P0 confirmation contract drift"
+        );
+
+        let mut eligibility_drift = frozen_manifest();
+        eligibility_drift
+            .current_confirmation
+            .implementation_or_promotion_eligible = true;
+        assert_eq!(
+            validate_manifest(&eligibility_drift).unwrap_err(),
+            "current P0 confirmation contract drift"
+        );
     }
 
     #[test]
@@ -930,6 +1053,7 @@ mod tests {
             "0123456789abcdef",
             "1".repeat(64),
             EXPECTED_PATH_LIST_SHA256.to_owned(),
+            frozen_manifest().current_confirmation,
             sources,
         )
         .unwrap();
@@ -940,6 +1064,17 @@ mod tests {
         assert_eq!(first_bytes.last(), Some(&b'\n'));
         assert_eq!(first.gate.decision, GateDecision::Reject);
         assert_eq!(first.gate.qualifying_sources, 7);
+        assert_eq!(first.gate.scope, "historical_58efe9d_developmental_8_of_10");
+        assert!(
+            first
+                .current_confirmation
+                .required_before_implementation_or_promotion
+        );
+        assert!(
+            !first
+                .current_confirmation
+                .implementation_or_promotion_eligible
+        );
         let text = String::from_utf8(first_bytes).unwrap();
         assert!(!text.contains("timestamp"));
     }

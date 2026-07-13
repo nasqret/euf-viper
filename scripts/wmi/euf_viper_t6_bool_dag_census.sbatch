@@ -17,6 +17,60 @@ export TZ=UTC
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
+export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-1}"
+
+CARGO="${EUF_VIPER_CARGO:-$HOME/.cargo/bin/cargo}"
+EXPECTED_CARGO_RESOLVED="${EUF_VIPER_CARGO_RESOLVED:?set EUF_VIPER_CARGO_RESOLVED}"
+EXPECTED_CARGO_SHA256="${EUF_VIPER_CARGO_SHA256:?set EUF_VIPER_CARGO_SHA256}"
+EXPECTED_CARGO_VERSION="${EUF_VIPER_CARGO_VERSION:?set EUF_VIPER_CARGO_VERSION}"
+case "$CARGO" in
+  /*) ;;
+  *) echo "EUF_VIPER_CARGO must be an absolute path: $CARGO" >&2; exit 127 ;;
+esac
+case "$EXPECTED_CARGO_RESOLVED" in
+  /*) ;;
+  *) echo "EUF_VIPER_CARGO_RESOLVED must be an absolute path" >&2; exit 2 ;;
+esac
+if [ ! -f "$CARGO" ] || [ ! -x "$CARGO" ]; then
+  echo "pinned cargo is not an executable file: $CARGO" >&2
+  exit 127
+fi
+if ! ACTUAL_CARGO_RESOLVED="$(readlink -f -- "$CARGO")"; then
+  echo "failed to resolve pinned cargo: $CARGO" >&2
+  exit 127
+fi
+if [ "$ACTUAL_CARGO_RESOLVED" != "$EXPECTED_CARGO_RESOLVED" ]; then
+  echo "cargo resolved-path mismatch: expected $EXPECTED_CARGO_RESOLVED, got $ACTUAL_CARGO_RESOLVED" >&2
+  exit 2
+fi
+if [ ! -f "$ACTUAL_CARGO_RESOLVED" ] || [ ! -x "$ACTUAL_CARGO_RESOLVED" ]; then
+  echo "resolved cargo is not an executable file: $ACTUAL_CARGO_RESOLVED" >&2
+  exit 127
+fi
+if [ "${#EXPECTED_CARGO_SHA256}" -ne 64 ]; then
+  echo "EUF_VIPER_CARGO_SHA256 must be a lowercase SHA-256" >&2
+  exit 2
+fi
+case "$EXPECTED_CARGO_SHA256" in
+  *[!0-9a-f]*) echo "EUF_VIPER_CARGO_SHA256 must be a lowercase SHA-256" >&2; exit 2 ;;
+esac
+ACTUAL_CARGO_SHA256="$(sha256sum "$ACTUAL_CARGO_RESOLVED" | awk '{print $1}')"
+if [ "$ACTUAL_CARGO_SHA256" != "$EXPECTED_CARGO_SHA256" ]; then
+  echo "cargo hash mismatch: expected $EXPECTED_CARGO_SHA256, got $ACTUAL_CARGO_SHA256" >&2
+  exit 2
+fi
+ACTUAL_CARGO_VERSION="$("$CARGO" --version)"
+if [ "$ACTUAL_CARGO_VERSION" != "$EXPECTED_CARGO_VERSION" ]; then
+  echo "cargo version mismatch: expected $EXPECTED_CARGO_VERSION, got $ACTUAL_CARGO_VERSION" >&2
+  exit 2
+fi
+export EUF_VIPER_CARGO="$CARGO"
+export EUF_VIPER_CARGO_RESOLVED="$ACTUAL_CARGO_RESOLVED"
+export EUF_VIPER_CARGO_SHA256="$ACTUAL_CARGO_SHA256"
+export EUF_VIPER_CARGO_VERSION="$ACTUAL_CARGO_VERSION"
+export PATH="$(dirname "$CARGO"):$PATH"
+printf 'cargo_configured=%s\ncargo_resolved=%s\ncargo_sha256=%s\ncargo_version=%s\n' \
+  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" "$ACTUAL_CARGO_VERSION"
 
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 EXPECTED_MANIFEST_SHA256="${EUF_VIPER_T6_EXPECTED_MANIFEST_SHA256:?set EUF_VIPER_T6_EXPECTED_MANIFEST_SHA256}"
@@ -55,13 +109,17 @@ export EUF_VIPER_T6_CORPUS_ROOT="$CORPUS_ROOT"
 export EUF_VIPER_T6_OUTPUT="$OUT/report.json"
 export EUF_VIPER_EXPECTED_REVISION="$EXPECTED_REVISION"
 mkdir -p "$OUT"
+printf 'configured=%s\nresolved=%s\nsha256=%s\nversion=%s\n' \
+  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" "$ACTUAL_CARGO_VERSION" \
+  > "$OUT/cargo-toolchain.txt"
 
-cargo test --release --all-features \
+"$CARGO" test --release --locked --all-features \
   t6_bool_dag_census::tests::hard10_census_from_env \
   -- --ignored --exact --nocapture \
   > "$OUT/run.txt"
 
-python3 - "$OUT/metadata.json" "$OUT/report.json" "$OUT/run.txt" "$MANIFEST" <<'PY'
+python3 - "$OUT/metadata.json" "$OUT/report.json" "$OUT/run.txt" "$MANIFEST" \
+  "$OUT/cargo-toolchain.txt" <<'PY'
 import hashlib
 import json
 import os
@@ -78,7 +136,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-metadata_path, report_path, run_path, manifest_path = map(Path, sys.argv[1:])
+metadata_path, report_path, run_path, manifest_path, cargo_path = map(Path, sys.argv[1:])
 report = json.loads(report_path.read_text(encoding="ascii"))
 if report.get("schema") != "euf-viper.t6-theory-dag-census.v1":
     raise SystemExit("unexpected T6 report schema")
@@ -121,6 +179,12 @@ for row in sources:
 gate = report.get("gate")
 if not isinstance(gate, dict) or gate.get("decision") not in {"pass", "reject"}:
     raise SystemExit("T6 report gate decision is invalid")
+if gate.get("scope") != "historical_58efe9d_developmental_8_of_10":
+    raise SystemExit("T6 report gate scope drift")
+if gate.get("pass_semantics") != (
+    "developmental_only_current_12_confirmation_required_before_implementation_or_promotion"
+):
+    raise SystemExit("T6 report gate pass semantics drift")
 if gate.get("required_qualifying_sources") != 8:
     raise SystemExit("T6 report qualifying-source threshold drift")
 qualifying = gate.get("qualifying_sources")
@@ -129,8 +193,27 @@ if type(qualifying) is not int or not 0 <= qualifying <= 10:
 expected_decision = "pass" if qualifying >= 8 else "reject"
 if gate["decision"] != expected_decision:
     raise SystemExit("T6 report gate decision is inconsistent")
+confirmation = report.get("current_confirmation")
+expected_confirmation = {
+    "derivation_policy": (
+        "a distinct confirmation manifest must be generated mechanically from the frozen "
+        "current P0 full-60 audit; hand-selected paths are forbidden"
+    ),
+    "expected_source_count": 12,
+    "implementation_or_promotion_eligible": False,
+    "p0_audit_path": "p0-144990/continuations/chain-145036/audit/full-60.json",
+    "p0_audit_sha256": (
+        "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a"
+    ),
+    "p0_revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+    "required_before_implementation_or_promotion": True,
+    "status": "not_materialized",
+}
+if confirmation != expected_confirmation:
+    raise SystemExit("T6 report current-P0 confirmation contract drift")
 
 artifacts = {
+    "cargo_toolchain": cargo_path,
     "manifest": manifest_path,
     "report": report_path,
     "run": run_path,
@@ -142,11 +225,20 @@ payload = {
     "revision": os.environ["EUF_VIPER_EXPECTED_REVISION"],
     "job_id": int(os.environ["SLURM_JOB_ID"]),
     "hostname": platform.node(),
+    "cargo": {
+        "configured_path": os.environ["EUF_VIPER_CARGO"],
+        "resolved_path": os.environ["EUF_VIPER_CARGO_RESOLVED"],
+        "sha256": os.environ["EUF_VIPER_CARGO_SHA256"],
+        "version": os.environ["EUF_VIPER_CARGO_VERSION"],
+    },
     "gate": {
+        "scope": gate["scope"],
         "decision": gate["decision"],
         "qualifying_sources": qualifying,
         "required_qualifying_sources": 8,
+        "implementation_or_promotion_eligible": False,
     },
+    "current_confirmation": confirmation,
     "validation": {
         "expected_sources": 10,
         "observed_sources": len(sources),
