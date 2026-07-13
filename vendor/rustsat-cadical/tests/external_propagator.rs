@@ -372,3 +372,23 @@ fn ordinary_solver_behavior_is_unchanged_without_connection() {
     solver.add_unit(!y).unwrap();
     assert_eq!(solver.solve().unwrap(), SolverResult::Unsat);
 }
+
+#[test]
+fn accepted_model_is_readable_before_disconnect() {
+    struct AcceptAll;
+    impl ExternalPropagator for AcceptAll {}
+
+    let x = Lit::positive(0);
+    let mut solver = CaDiCaL::default();
+    solver.add_unit(x).unwrap();
+    let mut propagator = AcceptAll;
+
+    let value = solver
+        .with_external_propagator(&mut propagator, [x.var()], |session| {
+            assert_eq!(session.solve().unwrap(), SolverResult::Sat);
+            session.lit_val(x).unwrap()
+        })
+        .unwrap();
+
+    assert!(value.to_bool_with_def(false));
+}

@@ -14,7 +14,7 @@ use std::{
 
 use rustsat::{
     solvers::{Solve, SolverResult},
-    types::{Lit, Var},
+    types::{Lit, TernaryVal, Var},
 };
 use thiserror::Error;
 
@@ -796,6 +796,12 @@ impl ExternalPropagatorSession<'_, '_, '_, '_> {
     /// Solves with the external propagator connected.
     pub fn solve(&mut self) -> anyhow::Result<SolverResult> {
         self.solver.solve()
+    }
+
+    /// Reads a literal from the accepted model before native disconnect can
+    /// backtrack while unobserving variables.
+    pub fn lit_val(&self, literal: Lit) -> anyhow::Result<TernaryVal> {
+        self.solver.lit_val(literal)
     }
 
     /// Requests termination and records an explicit failure.
