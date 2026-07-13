@@ -131,8 +131,12 @@ case "$RUN_ROOT" in
   *) die "run root must stay below the pinned worktree results directory" ;;
 esac
 CHECKER="$REMOTE_WORK/scripts/cert/check_certificate.py"
+SUBMISSION_DIRECTORY="$ROOT/results/certificate-shadow-submissions"
+SUBMISSION_PATH="$SUBMISSION_DIRECTORY/$RUN_ID.json"
+mkdir -p "$SUBMISSION_DIRECTORY"
+[ ! -e "$SUBMISSION_PATH" ] || die "submission receipt already exists for run ID $RUN_ID"
 
-ssh "$REMOTE_HOST" "set -euo pipefail; mkdir -p '$REMOTE_PARENT'; if [ ! -d '$REMOTE_WORK/.git' ]; then git clone --quiet '$REPOSITORY_URL' '$REMOTE_WORK'; fi; git -C '$REMOTE_WORK' fetch --quiet origin '$REVISION'; git -C '$REMOTE_WORK' checkout --quiet --detach '$REVISION'; test \"\$(git -C '$REMOTE_WORK' rev-parse HEAD)\" = '$REVISION'; test -z \"\$(git -C '$REMOTE_WORK' status --porcelain=v1 --untracked-files=all)\"; mkdir -p '$REMOTE_WORK/results' '$RUN_ROOT'"
+ssh "$REMOTE_HOST" "set -euo pipefail; mkdir -p '$REMOTE_PARENT'; if [ ! -d '$REMOTE_WORK/.git' ]; then git clone --quiet '$REPOSITORY_URL' '$REMOTE_WORK'; fi; git -C '$REMOTE_WORK' fetch --quiet origin '$REVISION'; git -C '$REMOTE_WORK' checkout --quiet --detach '$REVISION'; test \"\$(git -C '$REMOTE_WORK' rev-parse HEAD)\" = '$REVISION'; test -z \"\$(git -C '$REMOTE_WORK' status --porcelain=v1 --untracked-files=all)\"; mkdir -p '$REMOTE_WORK/results'; test ! -e '$RUN_ROOT'"
 
 REMOTE_HASHES="$(ssh "$REMOTE_HOST" "set -euo pipefail; test -x '$CHECKER'; test -x '$DRAT_TRIM'; printf '%s %s' \"\$(sha256sum '$CHECKER' | awk '{print \$1}')\" \"\$(sha256sum '$DRAT_TRIM' | awk '{print \$1}')\"")"
 read -r REMOTE_CHECKER_SHA256 REMOTE_DRAT_TRIM_SHA256 <<<"$REMOTE_HASHES"
@@ -142,71 +146,38 @@ fi
 if [ "$REMOTE_DRAT_TRIM_SHA256" != "$DRAT_TRIM_SHA256" ]; then
   die "remote drat-trim bytes do not match the explicit SHA-256 pin"
 fi
+ssh "$REMOTE_HOST" "mkdir '$RUN_ROOT'"
 
 EXPORTS="HOME=$REMOTE_HOME,EUF_VIPER_CERT_EXPECTED_REVISION=$REVISION,EUF_VIPER_CERT_RUN_ROOT=$RUN_ROOT,EUF_VIPER_CERT_BASE_PARENT_LOCK=$BASE_PARENT_LOCK,EUF_VIPER_CERT_BASE_SHARD_LOCK_DIR=$BASE_SHARD_LOCK_DIR,EUF_VIPER_CERT_BASE_SHARD_RESULTS_ROOT=$BASE_SHARD_RESULTS_ROOT,EUF_VIPER_CERT_SHARDS=$SHARDS,EUF_VIPER_CERT_CHECKER=$CHECKER,EUF_VIPER_CERT_CHECKER_SHA256=$CHECKER_SHA256,EUF_VIPER_CERT_DRAT_TRIM=$DRAT_TRIM,EUF_VIPER_CERT_DRAT_TRIM_SHA256=$DRAT_TRIM_SHA256,EUF_VIPER_CERT_CORPUS_ROOT=$CORPUS_ROOT,EUF_VIPER_CERT_TIMEOUT_S=$TIMEOUT_S,EUF_VIPER_CERT_CHECKER_TIMEOUT_S=$CHECKER_TIMEOUT_S,EUF_VIPER_CERT_TIMEOUT_GRACE_S=$TIMEOUT_GRACE_S,EUF_VIPER_CERT_STAGE_LABEL=$STAGE_LABEL,EUF_VIPER_CERT_EXPECTED_BUDGET=$EXPECTED_BUDGET"
 
-SUBMITTED_JOBS=()
-cancel_partial_chain() {
-  status=$?
-  if [ "$status" -ne 0 ] && [ "${#SUBMITTED_JOBS[@]}" -gt 0 ]; then
-    ssh "$REMOTE_HOST" "scancel ${SUBMITTED_JOBS[*]}" >/dev/null 2>&1 || true
-  fi
-  exit "$status"
-}
-trap cancel_partial_chain ERR
-
-abort_partial_chain() {
-  echo "$*" >&2
-  if [ "${#SUBMITTED_JOBS[@]}" -gt 0 ]; then
-    ssh "$REMOTE_HOST" "scancel ${SUBMITTED_JOBS[*]}" >/dev/null 2>&1 || true
-  fi
-  trap - ERR
-  exit 2
-}
-
-PREPARE_DEPENDENCY=()
-if [ -n "$BASE_DEPENDENCY_JOB" ]; then
-  PREPARE_DEPENDENCY=(--dependency="afterok:$BASE_DEPENDENCY_JOB")
-fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes ${PREPARE_DEPENDENCY[*]} --export='$EXPORTS' scripts/wmi/euf_viper_certificate_prepare.sbatch")"
-PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
-positive_integer "$PREPARE_JOB" || abort_partial_chain "invalid prepare job id: $PREPARE_SUBMISSION"
-SUBMITTED_JOBS+=("$PREPARE_JOB")
-
-ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes --dependency='afterok:$PREPARE_JOB' --array='0-$((SHARDS - 1))%$MAX_ACTIVE' --export='$EXPORTS' scripts/wmi/euf_viper_certificate_shard.sbatch")"
-ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
-positive_integer "$ARRAY_JOB" || abort_partial_chain "invalid certificate array job id: $ARRAY_SUBMISSION"
-SUBMITTED_JOBS+=("$ARRAY_JOB")
-
-AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes --dependency='afterok:$ARRAY_JOB' --export='$EXPORTS' scripts/wmi/euf_viper_certificate_audit.sbatch")"
-AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
-positive_integer "$AUDIT_JOB" || abort_partial_chain "invalid certificate audit job id: $AUDIT_SUBMISSION"
-SUBMITTED_JOBS+=("$AUDIT_JOB")
-trap - ERR
-
-mkdir -p results/certificate-shadow-submissions
-SUBMISSION_PATH="$ROOT/results/certificate-shadow-submissions/$RUN_ID.json"
-python3 - \
-  "$SUBMISSION_PATH" \
-  "$REVISION" \
-  "$SUBMITTER_REVISION" \
-  "$REMOTE_HOST" \
-  "$REMOTE_WORK" \
-  "$RUN_ROOT" \
-  "$BASE_PARENT_LOCK" \
-  "$BASE_SHARD_LOCK_DIR" \
-  "$BASE_SHARD_RESULTS_ROOT" \
-  "$SHARDS" \
-  "$MAX_ACTIVE" \
-  "$CHECKER" \
-  "$CHECKER_SHA256" \
-  "$DRAT_TRIM" \
-  "$DRAT_TRIM_SHA256" \
-  "$STAGE_LABEL" \
-  "$EXPECTED_BUDGET" \
-  "$PREPARE_JOB" \
-  "$ARRAY_JOB" \
-  "$AUDIT_JOB" <<'PY_SUBMISSION'
+write_receipt() {
+  local status="$1"
+  local prepare_job="$2"
+  local array_job="$3"
+  local audit_job="$4"
+  python3 - \
+    "$SUBMISSION_PATH" \
+    "$status" \
+    "$RUN_ID" \
+    "$REVISION" \
+    "$SUBMITTER_REVISION" \
+    "$REMOTE_HOST" \
+    "$REMOTE_WORK" \
+    "$RUN_ROOT" \
+    "$BASE_PARENT_LOCK" \
+    "$BASE_SHARD_LOCK_DIR" \
+    "$BASE_SHARD_RESULTS_ROOT" \
+    "$SHARDS" \
+    "$MAX_ACTIVE" \
+    "$CHECKER" \
+    "$CHECKER_SHA256" \
+    "$DRAT_TRIM" \
+    "$DRAT_TRIM_SHA256" \
+    "$STAGE_LABEL" \
+    "$EXPECTED_BUDGET" \
+    "$prepare_job" \
+    "$array_job" \
+    "$audit_job" <<'PY_RECEIPT'
 import json
 import os
 import sys
@@ -215,6 +186,8 @@ from pathlib import Path
 
 (
     output_raw,
+    status,
+    run_id,
     revision,
     submitter_revision,
     remote_host,
@@ -237,7 +210,8 @@ from pathlib import Path
 ) = sys.argv[1:]
 payload = {
     "schema_version": 1,
-    "status": "submitted",
+    "status": status,
+    "run_id": run_id,
     "scope": "single_physical_stage_certificate_coverage_only",
     "physical_stage": stage_label,
     "budget_s": float(expected_budget),
@@ -258,10 +232,11 @@ payload = {
         "drat_trim": {"path": drat_trim, "sha256": drat_hash},
     },
     "jobs": {
-        "prepare": prepare_job,
-        "certificate_array": array_job,
-        "audit": audit_job,
+        "prepare": prepare_job or None,
+        "certificate_array": array_job or None,
+        "audit": audit_job or None,
     },
+    "submission_state_may_be_incomplete": status != "submitted",
     "final_audit": f"{run_root}/{stage_label}-audit.json",
     "performance_claims": [],
 }
@@ -273,12 +248,70 @@ descriptor, temporary_raw = tempfile.mkstemp(
 temporary = Path(temporary_raw)
 try:
     with os.fdopen(descriptor, "w", encoding="ascii") as handle:
-        json.dump(payload, handle, allow_nan=False, ensure_ascii=True, indent=2, sort_keys=True)
+        json.dump(
+            payload,
+            handle,
+            allow_nan=False,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, output)
 finally:
     temporary.unlink(missing_ok=True)
-print(json.dumps(payload, allow_nan=False, indent=2, sort_keys=True))
-PY_SUBMISSION
+PY_RECEIPT
+}
+
+PREPARE_JOB=""
+ARRAY_JOB=""
+AUDIT_JOB=""
+write_receipt "submission_intent" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB"
+
+SUBMITTED_JOBS=()
+cancel_partial_chain() {
+  status=$?
+  trap - ERR
+  if [ "$status" -ne 0 ] && [ "${#SUBMITTED_JOBS[@]}" -gt 0 ]; then
+    ssh "$REMOTE_HOST" "scancel ${SUBMITTED_JOBS[*]}" >/dev/null 2>&1 || true
+  fi
+  write_receipt "submission_interrupted" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB" || true
+  exit "$status"
+}
+trap cancel_partial_chain ERR
+
+abort_partial_chain() {
+  echo "$*" >&2
+  if [ "${#SUBMITTED_JOBS[@]}" -gt 0 ]; then
+    ssh "$REMOTE_HOST" "scancel ${SUBMITTED_JOBS[*]}" >/dev/null 2>&1 || true
+  fi
+  trap - ERR
+  write_receipt "submission_aborted" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB" || true
+  exit 2
+}
+
+PREPARE_DEPENDENCY=()
+if [ -n "$BASE_DEPENDENCY_JOB" ]; then
+  PREPARE_DEPENDENCY=(--dependency="afterok:$BASE_DEPENDENCY_JOB")
+fi
+PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes ${PREPARE_DEPENDENCY[*]} --export='$EXPORTS' scripts/wmi/euf_viper_certificate_prepare.sbatch")"
+PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
+positive_integer "$PREPARE_JOB" || abort_partial_chain "invalid prepare job id: $PREPARE_SUBMISSION"
+SUBMITTED_JOBS+=("$PREPARE_JOB")
+write_receipt "submitting" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB"
+
+ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes --dependency='afterok:$PREPARE_JOB' --array='0-$((SHARDS - 1))%$MAX_ACTIVE' --export='$EXPORTS' scripts/wmi/euf_viper_certificate_shard.sbatch")"
+ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
+positive_integer "$ARRAY_JOB" || abort_partial_chain "invalid certificate array job id: $ARRAY_SUBMISSION"
+SUBMITTED_JOBS+=("$ARRAY_JOB")
+write_receipt "submitting" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB"
+
+AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes --dependency='afterok:$ARRAY_JOB' --export='$EXPORTS' scripts/wmi/euf_viper_certificate_audit.sbatch")"
+AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
+positive_integer "$AUDIT_JOB" || abort_partial_chain "invalid certificate audit job id: $AUDIT_SUBMISSION"
+SUBMITTED_JOBS+=("$AUDIT_JOB")
+trap - ERR
+write_receipt "submitted" "$PREPARE_JOB" "$ARRAY_JOB" "$AUDIT_JOB"
+cat "$SUBMISSION_PATH"

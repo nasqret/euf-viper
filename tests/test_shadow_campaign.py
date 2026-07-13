@@ -457,6 +457,71 @@ class SelectionAndPartitionTests(unittest.TestCase):
                 all(SHADOW._is_sha256(work["work_sha256"]) for work in works)
             )
 
+    def test_independent_parser_canary_validates_and_hashes_the_complete_workset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = {
+                "rodin/annotated.smt2": """
+                    (set-logic QF_UF)
+                    (declare-sort U 0)
+                    (declare-const a U)
+                    (declare-const b U)
+                    (assert (! (= a b) :named rodin_goal))
+                    (check-sat)
+                """,
+                "goel/multiline.smt2": """
+                    (set-info :source |first line
+                    second line|)
+                    (set-logic QF_UF)
+                    (assert true)
+                    (check-sat)
+                """,
+            }
+            works = []
+            for relative_path, source_text in sources.items():
+                source = root / relative_path
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text(source_text, encoding="utf-8")
+                works.append(
+                    {
+                        "relative_path": relative_path,
+                        "source_path": str(source),
+                        "source_sha256": sha256_file(source),
+                    }
+                )
+
+            forward = SHADOW.validate_independent_parser_workset(works)
+            reverse = SHADOW.validate_independent_parser_workset(
+                list(reversed(works))
+            )
+
+        self.assertEqual(forward["status"], "validated")
+        self.assertEqual(forward["selected_instances"], 2)
+        self.assertEqual(forward["workset_sha256"], reverse["workset_sha256"])
+        self.assertEqual(
+            forward["parser"]["sha256"], sha256_file(SHADOW.INDEPENDENT_PARSER_PATH)
+        )
+        self.assertGreater(forward["totals"]["terms"], 0)
+        self.assertGreater(forward["totals"]["base_clauses"], 0)
+
+    def test_independent_parser_canary_rejects_before_certificate_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "malformed.smt2"
+            source.write_text(
+                "(set-logic QF_UF)\n(assert (! true))\n(check-sat)\n",
+                encoding="utf-8",
+            )
+            work = {
+                "relative_path": "family/malformed.smt2",
+                "source_path": str(source),
+                "source_sha256": sha256_file(source),
+            }
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError,
+                "independent parser canary rejected 'family/malformed.smt2'",
+            ):
+                SHADOW.validate_independent_parser_workset([work])
+
     def test_modulo_partition_is_deterministic_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = CampaignFixture(Path(temporary))

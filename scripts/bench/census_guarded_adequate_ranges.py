@@ -1012,12 +1012,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-hall-witnesses", type=int, default=Caps.max_hall_witnesses
     )
+    parser.add_argument(
+        "--max-structured-parse-errors",
+        type=int,
+        default=None,
+        help="fail after writing diagnostics when the parser-error count exceeds this bound",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if (
+        args.max_structured_parse_errors is not None
+        and args.max_structured_parse_errors < 0
+    ):
+        parser.error("--max-structured-parse-errors must be non-negative")
     caps = Caps(
         max_source_bytes=args.max_source_bytes,
         max_terms=args.max_terms,
@@ -1037,6 +1048,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except CensusError as error:
         parser.exit(2, f"guarded adequate-range census failed: {error}\n")
+    parse_errors = int(
+        aggregate["sources"]["ineligibility_reasons"].get(  # type: ignore[index,union-attr]
+            "structured_parse_error", 0
+        )
+    )
+    if (
+        args.max_structured_parse_errors is not None
+        and parse_errors > args.max_structured_parse_errors
+    ):
+        parser.exit(
+            2,
+            "guarded adequate-range census failed: "
+            f"structured parse errors {parse_errors} exceed "
+            f"the allowed maximum {args.max_structured_parse_errors}\n",
+        )
     print(
         f"sources={len(records)} eligible={aggregate['sources']['eligible']} "
         f"records_sha256={aggregate['hashes']['records_jsonl_sha256']}"
