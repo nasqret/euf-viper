@@ -1072,3 +1072,10 @@
   `/home/bnaskrecki/euf-viper-campaigns/2dc4bf70e5f7/results/rollback-control-20260713T184953Z-2dc4bf70e5f7`.
   At submission, prepare was running and both dependent stages were held. No
   speed, coverage, or promotion result is inferred before `final-audit.json`.
+- Prepare `145916` then failed before the canary ran: its batch shell found
+  Python and built the solver, but the nested `srun` step returned
+  `execve(): python3: No such file or directory`. Dependents `145917` and
+  `145918` were automatically cancelled. This is an infrastructure rejection,
+  not solver evidence. Commit `835d134` resolves and validates the absolute
+  Python interpreter once and uses it for manifest, preflight, gate, and prepare
+  metadata stages. The focused 11-test contract and all 302 Python tests pass.

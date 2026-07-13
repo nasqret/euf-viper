@@ -2,7 +2,8 @@
 
 Date: 2026-07-13
 
-Status: fixed preflight-gated WMI rerun active; no timing or promotion claim
+Status: preflight infrastructure repair pending exact-head CI; no timing or
+promotion claim
 
 ## Question
 
@@ -20,6 +21,7 @@ superiority, or an overall win over Yices2 or Z3.
 - standalone backend and telemetry base: `4b60113`;
 - callback-handoff repair: `01be0a9`;
 - complete preflight-gated campaign head: `2dc4bf7`;
+- absolute preflight interpreter repair: `835d134`;
 - hosted campaign-contract run: `29275599640` passed;
 - backend selector: `EUF_VIPER_BACKEND=cadical-rollback`;
 - measured artifact: one release binary copied read-only into the reserved run
@@ -126,11 +128,18 @@ valid recurrence was misclassified as a duplicate. Commit `01be0a9` moves the
 deduplication boundary to actual handoff and adds a regression for recurrence
 before handoff. Delivered duplicates continue to fail closed.
 
-The fixed chain is prepare `145916`, array `145917`, and audit `145918`; its run
-root is
+The first fixed-backend chain was prepare `145916`, array `145917`, and audit
+`145918`; its run root is
 `/home/bnaskrecki/euf-viper-campaigns/2dc4bf70e5f7/results/rollback-control-20260713T184953Z-2dc4bf70e5f7`.
 
-1. require prepare to pass the exact four-observation anti-target canary;
-2. retain and review `final-audit.json` even if the audit rejects;
-3. proceed to eager-state migration only if all three comparison gates pass;
-4. otherwise preserve the control as negative evidence and stop this track.
+Prepare built the binary but failed before executing the canary because nested
+`srun` could not resolve bare `python3`; both dependents were automatically
+cancelled. This is infrastructure evidence only. Commit `835d134` resolves and
+validates an absolute interpreter once and uses it for every Python prepare
+stage. Its focused 11-test contract and the full 302-test Python suite pass.
+
+1. require exact-head hosted CI, then submit a fresh immutable run root;
+2. require prepare to pass the exact four-observation anti-target canary;
+3. retain and review `final-audit.json` even if the audit rejects;
+4. proceed to eager-state migration only if all three comparison gates pass;
+5. otherwise preserve the control as negative evidence and stop this track.

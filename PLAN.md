@@ -230,9 +230,11 @@ independent evidence checks, and a frozen family holdout.
   first path-correct run `145900`/`145901`/`145902` was stopped after two shards
   exposed an adapter handoff defect and candidate `unsupported` outcomes; it is
   diagnostic evidence only. Fixed revision `2dc4bf7` adds an exact four-row
-  anti-target ABBA preflight and is running as guarded chain
-  `145916`/`145917`/`145918`. No criterion is checked off before its immutable
-  final audit exists.
+  anti-target ABBA preflight. Chain `145916`/`145917`/`145918` rejected before
+  executing that canary because `srun` could not resolve a bare `python3`; both
+  dependents were automatically cancelled. Commit `835d134` resolves and
+  validates one absolute interpreter for every stage. A replacement remains
+  pending exact-head CI; no criterion is checked off from either failed prepare.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -355,8 +357,9 @@ fallback can be an operational portfolio but never a standalone victory.
    parser errors; reject T4 if its preregistered opportunity gate fails.
 2. Let certificate chains `145892`-`145894` and `145897`-`145899` release only
    after that source gate, then audit every correct two-second row globally.
-3. Require rollback prepare `145916` to pass its exact anti-target ABBA canary
-   before array `145917`; adjudicate only immutable audit `145918`.
+3. Publish and CI-gate the absolute-interpreter repair `835d134`, then require a
+   fresh rollback prepare to pass its exact anti-target ABBA canary before any
+   array; adjudicate only the immutable final audit.
 4. Leave full/official 1,200-second continuations `145785`-`145789` intact and
    certify their physical-origin union when the scheduler completes them.
 5. Port T1 onto the current typed parser, then run T5 and T6 opportunity

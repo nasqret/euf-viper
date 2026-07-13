@@ -755,3 +755,7 @@
   preflight to prepare and binds its journal and summary hashes. Hosted run
   `29275599640` passes. The fixed WMI chain is prepare `145916`, array `145917`,
   and audit `145918`; only the immutable final audit can establish a gate.
+- Prepare `145916` failed before executing its canary because nested `srun`
+  could not resolve bare `python3`; dependents `145917`/`145918` cancelled. This
+  is infrastructure-only. Commit `835d134` pins one validated absolute Python
+  path across all prepare stages; 11 focused and 302 full Python tests pass.
