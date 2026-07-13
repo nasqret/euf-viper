@@ -30,9 +30,12 @@ class GuardedRangeCensusWmiTests(unittest.TestCase):
         self.assertIn("git rev-parse origin/main", text)
         self.assertIn("EUF_VIPER_EXPECTED_REVISION", text)
         self.assertIn("EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES", text)
+        self.assertIn("EUF_VIPER_RANGE_CENSUS_WALL_TIME", text)
+        self.assertIn("--time='$WALL_TIME'", text)
         self.assertIn("euf_viper_guarded_range_census.sbatch", text)
         self.assertIn("guarded-range-census-submission-$JOB_ID.json", text)
         self.assertIn('"expected_sources": int("$EXPECTED_SOURCES")', text)
+        self.assertIn('"requested_wall_time": "$WALL_TIME"', text)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ REMOTE_HOST="${EUF_VIPER_WMI_HOST:-wmicluster}"
 REMOTE_PARENT="${EUF_VIPER_WMI_CAMPAIGN_ROOT:-}"
 DEPENDENCY="${EUF_VIPER_RANGE_CENSUS_DEPENDENCY:-}"
 EXPECTED_SOURCES="${EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES:-7503}"
+WALL_TIME="${EUF_VIPER_RANGE_CENSUS_WALL_TIME:-04:00:00}"
 
 if [ -n "$DEPENDENCY" ]; then
   case "$DEPENDENCY" in
@@ -17,6 +18,13 @@ case "$EXPECTED_SOURCES" in
     echo "expected source count must be a canonical positive integer" >&2
     exit 2
     ;;
+esac
+case "$WALL_TIME" in
+  [0-9][0-9]:[0-5][0-9]:[0-5][0-9]) ;;
+  *) echo "wall time must use canonical HH:MM:SS form: $WALL_TIME" >&2; exit 2 ;;
+esac
+case "${WALL_TIME%%:*}" in
+  00) echo "wall time must be positive" >&2; exit 2 ;;
 esac
 
 cd "$ROOT"
@@ -43,7 +51,7 @@ SBATCH_ARGS=(--parsable)
 if [ -n "$DEPENDENCY" ]; then
   SBATCH_ARGS+=(--dependency="afterok:$DEPENDENCY")
 fi
-SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${SBATCH_ARGS[*]} --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_guarded_range_census.sbatch")"
+SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch ${SBATCH_ARGS[*]} --time='$WALL_TIME' --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_RANGE_CENSUS_EXPECTED_SOURCES='$EXPECTED_SOURCES' scripts/wmi/euf_viper_guarded_range_census.sbatch")"
 JOB_ID="${SUBMISSION%%;*}"
 case "$JOB_ID" in
   *[!0-9]*|'') echo "invalid census job id: $SUBMISSION" >&2; exit 2 ;;
@@ -64,6 +72,7 @@ payload = {
     "remote_worktree": "$REMOTE_WORK",
     "dependency": "$DEPENDENCY" or None,
     "expected_sources": int("$EXPECTED_SOURCES"),
+    "requested_wall_time": "$WALL_TIME",
     "job_id": "$JOB_ID",
 }
 temporary = path.with_name(f".{path.name}.tmp")
