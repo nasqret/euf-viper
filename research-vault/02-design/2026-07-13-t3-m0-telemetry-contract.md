@@ -6,6 +6,8 @@ Status: preregistered design; migration forbidden
 
 Machine-readable contract: `campaigns/t3-m0-component-pressure-v1.json`
 
+Executable validator: `scripts/bench/validate_t3_m0_contract.py`
+
 ## Decision
 
 T3 does not yet have enough evidence to implement component migration. The
@@ -149,6 +151,11 @@ M0 passes only if all of the following hold:
 Any missing row, leaked group, forbidden feature, changed semantic trace,
 incorrect result, hash mismatch, non-unique label counted as a winner, or
 failed bound rejects M0. Failure stops T3 before M1.
+
+The repository CI validates these exact caps and thresholds. It also rejects a
+weakened headroom or accuracy gate, removal of required leakage denials,
+post-checkpoint feature admission, trace-equivalence weakening, and preliminary
+headroom inconsistent with the frozen PAR-2 totals.
 
 ## Execution Order
 

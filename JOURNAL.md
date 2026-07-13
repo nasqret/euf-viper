@@ -1138,6 +1138,11 @@
   duplicate-closure group splits, Williams labels, a fixed depth-four tree,
   and confidence-bounded accuracy/overhead/headroom gates. Migration remains
   forbidden until at least two independently accepted fixed arms pass.
+- Added `scripts/bench/validate_t3_m0_contract.py`, six mutation regressions,
+  and hosted-CI enforcement. The executable boundary rejects weakened
+  headroom/accuracy thresholds, removed leakage denials, S1 post-checkpoint
+  admission, weaker trace equivalence, and inconsistent frozen PAR-2
+  arithmetic. Local validator and unit tests pass.
 
 ## Next Entry Template
 
