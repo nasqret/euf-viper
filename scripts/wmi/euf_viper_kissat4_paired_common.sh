@@ -157,7 +157,10 @@ kissat4_check_repository() {
   git diff --quiet "$KISSAT4_VALIDATION_REVISION" "$expected_revision" -- . \
     ':(exclude)scripts/wmi/**' ':(exclude)tests/**' || \
     kissat4_die "revision changes files outside scripts/wmi and tests since validation"
-  dirty="$(git status --porcelain=v1 --untracked-files=all)"
+  # The WMI checkout carries one generated corpus symlink at this ignored-tree
+  # location. Its manifest and every selected source are hash-checked separately.
+  dirty="$(git status --porcelain=v1 --untracked-files=all -- . \
+    ':(exclude)benchmarks/smtlib-2025')"
   [ -z "$dirty" ] || kissat4_die "repository worktree is not clean"
 }
 

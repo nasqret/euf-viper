@@ -116,6 +116,7 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
         merge = self.text(MERGE)
         self.assertIn("git merge-base --is-ancestor", common)
         self.assertIn("git status --porcelain=v1 --untracked-files=all", common)
+        self.assertIn("':(exclude)benchmarks/smtlib-2025'", common)
         self.assertIn("changes files outside scripts/wmi and tests", common)
         self.assertIn("campaign script bundle mismatch", common)
         self.assertIn("source SHA-256 mismatch", common)
