@@ -671,6 +671,15 @@
   validation-pressure control, not a SAT proof-pressure claim. Whole-instance
   rollback is known; novelty remains component-local checked representation
   migration after the pilot wins.
+- Public branch `research-cadical-external-propagator` at `81e0c36` completes
+  only the safe conflict-only CaDiCaL 2.2.1/RustSAT callback prerequisite.
+  Hosted run `29217315701` passes after `19` vendored unit, `11` integration,
+  `2` doc, `222` root-default, and `228` root-all-feature tests. The restricted
+  session prevents replacing or reconnecting the solver while callback state is
+  borrowed; cached SAT, registration failure, callback panic, operation panic,
+  and teardown failure have regressions. Do not call this rollback EUF or a
+  performance improvement until the closure, typed explanations, integration,
+  and paired timing gates pass.
 - Source-only adequate-range/Hall census commits `012c963`/`02b68d5` and
   exact-revision submitter `86d76fc` use the independent structured parser,
   bind its hash, report only proved guard-conditioned ranges and bounded Hall

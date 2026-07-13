@@ -176,9 +176,19 @@ independent evidence checks, and a frozen family holdout.
 
 ### T2: Lazy-First And Rollback EUF
 
-- [ ] Add a safe conflict-only IPASIR-UP bridge to the pinned CaDiCaL/RustSAT
-  binding. No external decisions or propagations are permitted in the first
-  pilot; every callback conflict must carry a replayable EUF explanation.
+- [x] Add a safe conflict-only IPASIR-UP bridge to the pinned CaDiCaL/RustSAT
+  binding. Public branch `research-cadical-external-propagator` at `81e0c36`
+  vendors the hash-bound 0.7.5 binding and CaDiCaL 2.2.1, disables external
+  decisions and propagations, catches callback panics, validates observed
+  literals and falsified conflict clauses, preserves teardown failures, and
+  prevents safe Rust from replacing or reconnecting the solver while native
+  callbacks hold borrowed state. Vendored tests pass `19` unit, `11`
+  integration, and `2` doc cases; root tests pass `222` default and `228`
+  all-feature cases; hosted run `29217315701` passes. This is an isolated
+  prerequisite, not production integration or timing evidence.
+- [ ] Implement rollback congruence closure behind that bridge. Every callback
+  conflict must carry an independently replayable typed EUF explanation; no
+  external decisions or propagations are permitted in the first pilot.
 - [ ] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only

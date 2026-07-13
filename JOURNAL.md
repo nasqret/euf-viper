@@ -915,6 +915,18 @@
   first checked assignment/conflicts and moves to conflict-only IPASIR-UP; it
   remains default-off and is explicitly not a novelty claim. A safe local
   RustSAT/CaDiCaL callback bridge is the active isolated prerequisite.
+- Completed that isolated prerequisite on public branch
+  `research-cadical-external-propagator` at `81e0c36`. Review found and fixed
+  three boundary hazards in the first checkpoint: cached `SAT` could bypass
+  callbacks, unrestricted closure access could replace and drop a connected
+  solver, and teardown callback failures were sampled before disconnect. The
+  final API exposes only a scoped solve/status/abort session, keeps decisions
+  and propagation disabled, validates conflict clauses against observed current
+  assignments, catches callback panics before FFI return, and records vendoring
+  provenance. Vendored tests pass `19` unit, `11` integration, and `2` doc
+  cases; root tests pass `222` default and `228` all-feature cases; hosted Linux
+  run `29217315701` passes. No rollback closure, EUF explanation, production
+  route, or performance result exists yet.
 - Added the source-only guard-conditioned adequate-range/Hall census in
   `012c963`, then bound the independent parser hash and durable exact-revision
   WMI runner/submitter in `02b68d5`/`86d76fc`. All 33 focused census/parser

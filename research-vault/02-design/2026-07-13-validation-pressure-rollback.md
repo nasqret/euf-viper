@@ -2,8 +2,9 @@
 
 Date: 2026-07-13
 
-Status: pinned default-off engineering control; prerequisite callback bridge is
-under implementation; no timing or novelty claim
+Status: pinned default-off engineering control; isolated callback prerequisite
+complete; rollback closure and production integration not implemented; no
+timing or novelty claim
 
 ## Measured Problem
 
@@ -95,8 +96,15 @@ wins end-to-end target timing without a baseline-only solve.
 
 ## Implementation Gates
 
-1. Add and test a safe CaDiCaL external-propagator bridge in the pinned
-   RustSAT binding.
+1. **Complete in isolation.** Public branch
+   `research-cadical-external-propagator` at `81e0c36` vendors the pinned
+   RustSAT 0.7.5 binding with CaDiCaL 2.2.1 and exposes a restricted scoped
+   solve/status/abort session. External decisions and propagation return zero;
+   callback panics, malformed literals/clauses, registration failures, operation
+   unwind, and teardown failures are fail-closed. Vendored tests pass `19` unit,
+   `11` integration, and `2` doc cases; root tests pass `222` default and `228`
+   all-feature cases; hosted run `29217315701` passes. This bridge does not yet
+   implement rollback closure or produce EUF explanations.
 2. Differentially test rollback closure and explanations against fresh
    complete congruence closure over random assignment/backtrack traces.
 3. Preserve first-model timing, assignment, and conflicts with default-off
@@ -106,4 +114,3 @@ wins end-to-end target timing without a baseline-only solve.
    zero wrong answers, no baseline-only solve, and at least `1.10x` target
    speedup before any automatic selector work.
 6. Replay every emitted conflict independently before broad timing.
-
