@@ -110,6 +110,42 @@ python3 "$BUILDER" \
   --max-anti-target-bytes "$MAX_ANTI_TARGET_BYTES" \
   --seed "$SEED"
 
+PREFLIGHT_JOURNAL="$RUN_ROOT/preflight.jsonl"
+PREFLIGHT_SUMMARY="$RUN_ROOT/preflight-summary.json"
+CONTROL_ROWS=$((TARGET_COUNT + ANTI_TARGET_COUNT))
+srun --exclusive --ntasks=1 --cpus-per-task=1 --cpu-bind=cores \
+  python3 "$RUNNER" \
+  "$CONTROL_MANIFEST" \
+  --binary "$RUN_ROOT/bin/euf-viper" \
+  --comparison current \
+  --timeout 5 \
+  --repeats 2 \
+  --require-single-cpu \
+  --shard-index "$TARGET_COUNT" \
+  --shard-count "$CONTROL_ROWS" \
+  --corpus-root "$CORPUS_ROOT" \
+  --out "$PREFLIGHT_JOURNAL" \
+  --summary "$PREFLIGHT_SUMMARY"
+
+python3 - "$PREFLIGHT_SUMMARY" <<'PY_PREFLIGHT_GATE'
+import json
+import sys
+from pathlib import Path
+
+summary = json.loads(Path(sys.argv[1]).read_text(encoding="ascii"))
+if summary.get("schema_version") != "rollback-control-summary-v1":
+    raise SystemExit("rollback preflight has an unexpected summary schema")
+if summary.get("comparison") != "current":
+    raise SystemExit("rollback preflight comparison drift")
+if summary.get("observations") != 4 or summary.get("expected_observations") != 4:
+    raise SystemExit("rollback preflight did not complete one exact ABBA block")
+if summary.get("outcomes") != {
+    "baseline": {"correct": 2},
+    "candidate": {"correct": 2},
+}:
+    raise SystemExit("rollback preflight has a wrong, unsupported, or missing result")
+PY_PREFLIGHT_GATE
+
 python3 - \
   "$RUN_ROOT/prepare.json" \
   "$EXPECTED_REVISION" \
@@ -120,6 +156,8 @@ python3 - \
   "$EXPECTED_SOURCES" \
   "$CONTROL_MANIFEST" \
   "$CONTROL_SUMMARY" \
+  "$PREFLIGHT_JOURNAL" \
+  "$PREFLIGHT_SUMMARY" \
   "$RUN_ROOT/bin/euf-viper" \
   "$BINARY_SHA256" \
   "$BUILDER" \
@@ -206,6 +244,8 @@ def atomic_write(path: Path, payload: bytes) -> None:
     expected_sources_raw,
     control_manifest_raw,
     control_summary_raw,
+    preflight_journal_raw,
+    preflight_summary_raw,
     binary_raw,
     binary_hash,
     builder_raw,
@@ -235,6 +275,8 @@ corpus_root = Path(corpus_root_raw).resolve(strict=True)
 corpus_manifest = Path(corpus_manifest_raw).resolve(strict=True)
 control_manifest = Path(control_manifest_raw).resolve(strict=True)
 control_summary = Path(control_summary_raw).resolve(strict=True)
+preflight_journal = Path(preflight_journal_raw).resolve(strict=True)
+preflight_summary = Path(preflight_summary_raw).resolve(strict=True)
 binary = Path(binary_raw).resolve(strict=True)
 builder = Path(builder_raw).resolve(strict=True)
 runner = Path(runner_raw).resolve(strict=True)
@@ -310,6 +352,16 @@ payload = {
         "anti_target_count": anti_target_count,
         "rows": len(selected),
     },
+    "preflight": {
+        "comparison": "current",
+        "journal": str(preflight_journal),
+        "journal_sha256": sha256_file(preflight_journal),
+        "summary": str(preflight_summary),
+        "summary_sha256": sha256_file(preflight_summary),
+        "manifest_index": target_count,
+        "repeats": 2,
+        "timeout_s": 5.0,
+    },
     "binary": {"path": str(binary), "binary_sha256": binary_hash},
     "tools": {
         "builder": {"path": str(builder), "sha256": builder_hash},
@@ -348,4 +400,6 @@ PY_PREPARE
 chmod 0444 \
   "$CONTROL_MANIFEST" \
   "$CONTROL_SUMMARY" \
+  "$PREFLIGHT_JOURNAL" \
+  "$PREFLIGHT_SUMMARY" \
   "$RUN_ROOT/prepare.json"

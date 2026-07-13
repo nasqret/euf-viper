@@ -70,6 +70,11 @@ class WmiRollbackControlScriptTests(unittest.TestCase):
         self.assertIn("source_set_sha256", text)
         self.assertIn("target_count", text)
         self.assertIn("anti_target_count", text)
+        self.assertIn("PREFLIGHT_JOURNAL", text)
+        self.assertIn("--shard-index \"$TARGET_COUNT\"", text)
+        self.assertIn("--shard-count \"$CONTROL_ROWS\"", text)
+        self.assertIn('"candidate": {"correct": 2}', text)
+        self.assertIn('"preflight": {', text)
 
     def test_array_is_exact_three_way_control_and_uses_pinned_binary(self) -> None:
         text = self.text(CONTROL)
