@@ -89,14 +89,17 @@ Run only from clean published commit `e8fb05c` after restoring WMI access:
 
 ```bash
 EUF_VIPER_WMI_HOST=wmicluster \
+EUF_VIPER_ROLLBACK_REVISION=e8fb05c6e1a22bca83edbe687f93a6e0a3774c50 \
 EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025 \
 EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
 ./scripts/wmi/submit_rollback_control.sh
 ```
 
-The submitter writes `submission_intent` locally before the first `sbatch`,
-reserves the remote run root with `mkdir`, and registers prepare, array, and
-audit jobs through `afterok`. Invalid job IDs cancel the accepted prefix.
+The submitter itself must be the public research-branch head. It verifies that
+the explicit campaign revision is a published ancestor, writes
+`submission_intent` locally before the first `sbatch`, reserves the remote run
+root with `mkdir`, and registers prepare, array, and audit jobs through
+`afterok`. Invalid job IDs cancel the accepted prefix.
 After SSH response loss, the interrupted receipt and reserved run root must be
 reconciled with `sacct`; the run ID is never recycled.
 

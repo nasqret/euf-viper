@@ -99,6 +99,9 @@ class WmiRollbackControlScriptTests(unittest.TestCase):
         self.assertIn("git ls-remote --exit-code", text)
         self.assertIn("refs/heads/research-rollback-propagator", text)
         self.assertIn("git status --porcelain=v1 --untracked-files=no", text)
+        self.assertIn("EUF_VIPER_ROLLBACK_REVISION", text)
+        self.assertIn("git merge-base --is-ancestor", text)
+        self.assertIn('"submitter_revision": submitter_revision', text)
         self.assertIn("test ! -e '$RUN_ROOT'", text)
         self.assertIn('write_receipt "submission_intent"', text)
         self.assertIn('write_receipt "submitting"', text)
@@ -134,6 +137,8 @@ class RollbackSubmitterHermeticTests(unittest.TestCase):
               status) exit 0 ;;
               rev-parse) printf '%s\n' '{self.REVISION}' ;;
               ls-remote) printf '%s\t%s\n' '{self.REVISION}' "$4" ;;
+              cat-file) exit 0 ;;
+              merge-base) exit 0 ;;
               *) echo "unsupported fake git invocation: $*" >&2; exit 91 ;;
             esac
             """,
@@ -177,7 +182,9 @@ class RollbackSubmitterHermeticTests(unittest.TestCase):
         path.write_text(textwrap.dedent(body).lstrip(), encoding="ascii")
         path.chmod(0o755)
 
-    def run_submitter(self, *, fail_stage: str = "") -> subprocess.CompletedProcess[str]:
+    def run_submitter(
+        self, *, fail_stage: str = "", campaign_revision: str = ""
+    ) -> subprocess.CompletedProcess[str]:
         environment = {
             **os.environ,
             "PATH": f"{self.fake_bin}:{os.environ['PATH']}",
@@ -192,6 +199,8 @@ class RollbackSubmitterHermeticTests(unittest.TestCase):
             ),
             "EUF_VIPER_ROLLBACK_RUN_ID": "hermetic-run",
         }
+        if campaign_revision:
+            environment["EUF_VIPER_ROLLBACK_REVISION"] = campaign_revision
         return subprocess.run(
             ["/bin/bash", str(self.root / "scripts" / "wmi" / SUBMIT.name)],
             cwd=self.root,
@@ -217,6 +226,14 @@ class RollbackSubmitterHermeticTests(unittest.TestCase):
         log = self.ssh_log.read_text(encoding="ascii")
         self.assertIn("--array='0-11%8'", log)
         self.assertEqual(log.count("afterok:"), 2)
+
+    def test_published_submitter_can_pin_ancestor_campaign_revision(self) -> None:
+        campaign_revision = "2" * 40
+        completed = self.run_submitter(campaign_revision=campaign_revision)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        receipt = self.receipt()
+        self.assertEqual(receipt["revision"], campaign_revision)
+        self.assertEqual(receipt["submitter_revision"], self.REVISION)
 
     def test_invalid_array_job_aborts_and_cancels_prepare(self) -> None:
         completed = self.run_submitter(fail_stage="array")

@@ -56,14 +56,16 @@ both `QF_UF/` and `qf_uf_manifest.jsonl`, not the `QF_UF/` directory itself.
 
 ```bash
 EUF_VIPER_WMI_HOST=wmicluster \
+EUF_VIPER_ROLLBACK_REVISION=e8fb05c6e1a22bca83edbe687f93a6e0a3774c50 \
 EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025 \
 EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
 ./scripts/wmi/submit_rollback_control.sh
 ```
 
 The submitter requires the local `HEAD` to equal the public research-branch
-head. It reserves one immutable remote run root, writes a local intent receipt,
-builds and copies one read-only release binary, and submits a prepare, 12-task
+head and the explicit campaign revision to be its published ancestor. It
+reserves one immutable remote run root, writes a local intent receipt, builds
+and copies one read-only release binary, and submits a prepare, 12-task
 comparison array, and final audit through `afterok`. The default control uses
 four repeats, four shards, a 60-second physical timeout, 12 fixed targets, and
 12 balanced anti-targets.

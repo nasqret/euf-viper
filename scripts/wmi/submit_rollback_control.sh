@@ -77,12 +77,18 @@ cd "$ROOT"
 if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
   die "tracked repository state must be clean before rollback-control submission"
 fi
-REVISION="$(git rev-parse HEAD)"
-[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || die "HEAD is not a full Git revision"
+SUBMITTER_REVISION="$(git rev-parse HEAD)"
+REVISION="${EUF_VIPER_ROLLBACK_REVISION:-$SUBMITTER_REVISION}"
+[[ "$SUBMITTER_REVISION" =~ ^[0-9a-f]{40}$ ]] || die "HEAD is not a full Git revision"
+[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || die "campaign revision is not a full Git revision"
+git cat-file -e "$REVISION^{commit}"
 PUBLISHED_LINE="$(git ls-remote --exit-code "$REPOSITORY_URL" "$PUBLISHED_REF")"
 PUBLISHED_REVISION="${PUBLISHED_LINE%%[[:space:]]*}"
-if [ "$REVISION" != "$PUBLISHED_REVISION" ]; then
-  die "HEAD $REVISION is not the published $PUBLISHED_REF revision $PUBLISHED_REVISION"
+if [ "$SUBMITTER_REVISION" != "$PUBLISHED_REVISION" ]; then
+  die "submitter HEAD $SUBMITTER_REVISION is not the published $PUBLISHED_REF revision $PUBLISHED_REVISION"
+fi
+if ! git merge-base --is-ancestor "$REVISION" "$PUBLISHED_REVISION"; then
+  die "campaign revision $REVISION is not an ancestor of published $PUBLISHED_REF $PUBLISHED_REVISION"
 fi
 
 REMOTE_HOME="$(ssh "$REMOTE_HOST" 'printf %s "$HOME"')"
@@ -119,6 +125,7 @@ write_receipt() {
     "$status" \
     "$RUN_ID" \
     "$REVISION" \
+    "$SUBMITTER_REVISION" \
     "$REMOTE_HOST" \
     "$REMOTE_WORK" \
     "$RUN_ROOT" \
@@ -150,6 +157,7 @@ from pathlib import Path
     status,
     run_id,
     revision,
+    submitter_revision,
     remote_host,
     remote_work,
     run_root,
@@ -177,6 +185,7 @@ payload = {
     "run_id": run_id,
     "scope": "forced_rollback_same_binary_engineering_control",
     "revision": revision,
+    "submitter_revision": submitter_revision,
     "remote_host": remote_host,
     "remote_worktree": remote_work,
     "run_root": run_root,
