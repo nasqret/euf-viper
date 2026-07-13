@@ -23,6 +23,8 @@ mod orbit_cover;
 mod quotient_csp;
 #[cfg(test)]
 mod quotient_state_search;
+#[allow(dead_code)]
+mod rollback_euf;
 #[cfg(test)]
 mod stabilizer_order;
 
