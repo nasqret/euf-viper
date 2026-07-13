@@ -38,6 +38,11 @@ snapshot difference makes `parse-check` fail. A match emits one ASCII JSON line
 with `fallback=false` and a deterministic snapshot fingerprint. This is parity
 telemetry, not a speed result.
 
+The scanner rejects nesting above 8,192 levels. This bound is deliberately
+above the frozen corpus maximum of 4,244 while remaining finite and directly
+tested. The earlier 512-level bound rejected 17 tree-accepted NEQ sources and
+was therefore not a valid parity boundary.
+
 ## Full-Corpus Gate
 
 `scripts/bench/typed_parser_parity.py` implements three fail-closed phases:

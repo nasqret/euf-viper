@@ -3,7 +3,9 @@ use super::{
 };
 use std::borrow::Cow;
 
-const MAX_PARSE_NESTING: usize = 512;
+// The frozen 7,503-source QF_UF corpus reaches 4,244 levels. Keep a bounded,
+// auditable margin while accepting every tree-parser input in that corpus.
+const MAX_PARSE_NESTING: usize = 8_192;
 const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy)]
@@ -746,6 +748,43 @@ mod tests {
         ] {
             assert_parity(input);
         }
+    }
+
+    #[test]
+    fn tree_accepted_nesting_above_the_old_limit_matches() {
+        let nesting = 600;
+        let mut input = String::from("(assert ");
+        for _ in 0..nesting {
+            input.push_str("(not ");
+        }
+        input.push_str("true");
+        for _ in 0..nesting {
+            input.push(')');
+        }
+        input.push(')');
+        std::thread::Builder::new()
+            .name("typed-parser-deep-parity".to_owned())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || assert_parity(&input))
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn scanner_accepts_the_observed_corpus_maximum_nesting() {
+        const OBSERVED_CORPUS_MAXIMUM: usize = 4_244;
+        let input = format!(
+            "{}{}",
+            "(".repeat(OBSERVED_CORPUS_MAXIMUM),
+            ")".repeat(OBSERVED_CORPUS_MAXIMUM)
+        );
+        let mut scanner = RawScanner::new(&input);
+        let mut events = 0;
+        while scanner.next_event().unwrap().is_some() {
+            events += 1;
+        }
+        assert_eq!(events, OBSERVED_CORPUS_MAXIMUM * 2);
     }
 
     #[test]
