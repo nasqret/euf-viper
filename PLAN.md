@@ -233,8 +233,13 @@ independent evidence checks, and a frozen family holdout.
   anti-target ABBA preflight. Chain `145916`/`145917`/`145918` rejected before
   executing that canary because `srun` could not resolve a bare `python3`; both
   dependents were automatically cancelled. Commit `835d134` resolves and
-  validates one absolute interpreter for every stage. A replacement remains
-  pending exact-head CI; no criterion is checked off from either failed prepare.
+  validates one absolute interpreter for every stage. Replacement prepare
+  `145923` reached the canary but rejected: baseline was correct twice and the
+  candidate returned `unsupported` twice because an already persistent lemma
+  recurred during `notify_assignment`. Commit `8e26569` now suppresses and
+  counts only assignment-time repeats of delivered persistent clauses; a
+  complete model violating one still aborts. Another replacement remains
+  pending exact-head CI; no criterion is checked off from failed prepares.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -357,7 +362,7 @@ fallback can be an operational portfolio but never a standalone victory.
    parser errors; reject T4 if its preregistered opportunity gate fails.
 2. Let certificate chains `145892`-`145894` and `145897`-`145899` release only
    after that source gate, then audit every correct two-second row globally.
-3. Publish and CI-gate the absolute-interpreter repair `835d134`, then require a
+3. Publish and CI-gate persistent-lemma repeat repair `8e26569`, then require a
    fresh rollback prepare to pass its exact anti-target ABBA canary before any
    array; adjudicate only the immutable final audit.
 4. Leave full/official 1,200-second continuations `145785`-`145789` intact and

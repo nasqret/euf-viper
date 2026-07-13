@@ -1079,3 +1079,17 @@
   not solver evidence. Commit `835d134` resolves and validates the absolute
   Python interpreter once and uses it for manifest, preflight, gate, and prepare
   metadata stages. The focused 11-test contract and all 302 Python tests pass.
+- Exact-head prepare `145923` then reached and completed the four-observation
+  canary. Baseline returned two correct SAT answers; candidate returned two
+  deterministic `unsupported` coverage misses from `notify_assignment` with
+  the same duplicate no-progress diagnostic. Dependents `145924`/`145925`
+  cancelled automatically. Binary SHA-256 is `6e0ee9d4...b2ae23`, manifest
+  SHA-256 `85c18f76...18390`, journal SHA-256 `c15a88f8...79fdc`, terminal record
+  `9ae887a4...53fd7`, and summary SHA-256 `db6c428e...d595`.
+- The journal establishes that the duplicate appears after a persistent EUF
+  clause was delivered and while CaDiCaL notifies a retained lower-level trail,
+  before ordinary propagation consumes that clause. Commit `8e26569` therefore
+  suppresses only assignment-callback repeats already present in the persistent
+  emitted set, with a bounded telemetry counter. It still fails closed if an
+  emitted clause reaches complete-model validation or callback handoff repeats.
+  Seven focused tests, `242` default tests, and `248` all-feature tests pass.

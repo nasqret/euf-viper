@@ -759,3 +759,10 @@
   could not resolve bare `python3`; dependents `145917`/`145918` cancelled. This
   is infrastructure-only. Commit `835d134` pins one validated absolute Python
   path across all prepare stages; 11 focused and 302 full Python tests pass.
+- Prepare `145923` completed the exact canary but rejected with baseline
+  `correct:2` and candidate `coverage_miss:2`; both candidate rows aborted in
+  `notify_assignment` after an already persistent conflict recurred. Dependents
+  `145924`/`145925` cancelled. Commit `8e26569` suppresses only bounded
+  assignment-time repeats of delivered persistent clauses and records them as
+  telemetry. A complete model or duplicate handoff still fails closed. Focused
+  tests plus `242` default and `248` all-feature cases pass.

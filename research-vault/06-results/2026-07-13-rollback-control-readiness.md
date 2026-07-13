@@ -2,7 +2,7 @@
 
 Date: 2026-07-13
 
-Status: preflight infrastructure repair pending exact-head CI; no timing or
+Status: persistent-lemma callback repair pending exact-head CI; no timing or
 promotion claim
 
 ## Question
@@ -22,6 +22,7 @@ superiority, or an overall win over Yices2 or Z3.
 - callback-handoff repair: `01be0a9`;
 - complete preflight-gated campaign head: `2dc4bf7`;
 - absolute preflight interpreter repair: `835d134`;
+- persistent assignment-repeat repair: `8e26569`;
 - hosted campaign-contract run: `29275599640` passed;
 - backend selector: `EUF_VIPER_BACKEND=cadical-rollback`;
 - measured artifact: one release binary copied read-only into the reserved run
@@ -138,7 +139,22 @@ cancelled. This is infrastructure evidence only. Commit `835d134` resolves and
 validates an absolute interpreter once and uses it for every Python prepare
 stage. Its focused 11-test contract and the full 302-test Python suite pass.
 
-1. require exact-head hosted CI, then submit a fresh immutable run root;
+Replacement prepare `145923` reached the exact canary. Baseline returned two
+correct SAT observations; the candidate returned two `unsupported` coverage
+misses from `notify_assignment`. Its persistent clause had already crossed the
+callback boundary, but the same theory conflict recurred while CaDiCaL notified
+the retained lower-level trail before ordinary propagation consumed that
+clause. Dependents `145924`/`145925` cancelled automatically.
+
+Commit `8e26569` suppresses only this assignment-time recurrence when the exact
+clause is already in the persistent emitted set. It increments a bounded
+telemetry counter and emits no duplicate information. The solver still aborts
+if an emitted clause reaches complete-model validation, if handoff itself is
+duplicated, or if the recurrence cap is exhausted. Seven focused, `242`
+default, and `248` all-feature tests pass.
+
+1. require exact-head hosted CI for `8e26569`, then submit a fresh immutable
+   run root;
 2. require prepare to pass the exact four-observation anti-target canary;
 3. retain and review `final-audit.json` even if the audit rejects;
 4. proceed to eager-state migration only if all three comparison gates pass;
