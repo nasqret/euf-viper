@@ -744,3 +744,14 @@
   `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF` with sibling
   manifest `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl`.
   The extracted layout is `smtlib-2025/QF_UF/QF_UF/...`.
+- The path-correct `145900`/`145901`/`145902` attempt was deliberately stopped
+  after two shards exposed 40/48 candidate `unsupported` observations. The
+  adapter had marked pending conflicts emitted before CaDiCaL's
+  `external_clause` handoff; an internal SAT conflict could preempt delivery and
+  make a valid recurrence look duplicate. Commit `01be0a9` moves deduplication
+  and telemetry to actual handoff and adds a recurrence regression. Root tests
+  pass `242` default and `248` all-feature cases.
+- Public rollback head `2dc4bf7` adds an exact four-observation anti-target ABBA
+  preflight to prepare and binds its journal and summary hashes. Hosted run
+  `29275599640` passes. The fixed WMI chain is prepare `145916`, array `145917`,
+  and audit `145918`; only the immutable final audit can establish a gate.

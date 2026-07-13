@@ -204,13 +204,16 @@ independent evidence checks, and a frozen family holdout.
   all-feature cases; hosted run `29217833901` passes. No timing claim exists.
 - [x] Attach that core behind the scoped CaDiCaL bridge as an explicit,
   default-off standalone control. Branch `research-rollback-propagator` at
-  `4b60113` exposes `EUF_VIPER_BACKEND=cadical-rollback`, loads only the base
+  `2dc4bf7` exposes `EUF_VIPER_BACKEND=cadical-rollback`, loads only the base
   Boolean CNF, emits independently replayed typed EUF conflicts, permits no
   external decisions or propagations, and keeps the complete-model validator
   authoritative. Backend failures return `unsupported` without silent
-  fallback. Root tests pass `241` default and `247` all-feature cases; hosted
-  run `29270646223` passes. This is integration evidence, not timing evidence
-  or state-preserving eager migration.
+  fallback. A WMI-found regression now permits an undelivered pending conflict
+  to recur after an internal SAT conflict preempts callback handoff, while
+  clauses delivered through `external_clause` remain strictly deduplicated.
+  Root tests pass `242` default and `248` all-feature cases; hosted run
+  `29275599640` passes. This is integration evidence, not timing evidence or
+  state-preserving eager migration.
 - [ ] Preserve the first invalid eager assignment, checked conflict clauses,
   SAT time, and validation time. The default-off `auto` pilot triggers only
   when validation is at least `max(2ms, first SAT time)`; `force` exists only
@@ -224,8 +227,12 @@ independent evidence checks, and a frozen family holdout.
   12 deterministic balanced anti-targets, runs exact ABBA blocks over a
   three-comparison modulo-sharded WMI array, records singleton CPU affinity and
   hash-chained telemetry, and enforces the preregistered non-vacuous gate. The
-  campaign has not run because WMI SSH is unavailable; no timing criterion is
-  checked off from harness tests.
+  first path-correct run `145900`/`145901`/`145902` was stopped after two shards
+  exposed an adapter handoff defect and candidate `unsupported` outcomes; it is
+  diagnostic evidence only. Fixed revision `2dc4bf7` adds an exact four-row
+  anti-target ABBA preflight and is running as guarded chain
+  `145916`/`145917`/`145918`. No criterion is checked off before its immutable
+  final audit exists.
 - [ ] Add component-local migration and then delayed propagation only after the
   whole-instance engineering control passes. Rollback DPLL(T) itself is known;
   the differentiated claim requires stable atoms and checked bridge facts
@@ -240,8 +247,8 @@ independent evidence checks, and a frozen family holdout.
   guard-conditioned ranges, non-uniform value-cell savings, bounded
   Hall-tight/conflict witnesses, caps, and abstentions without invoking a
   solver or producing SAT/UNSAT. Reject implementation if the returned corpus
-  population misses the preregistered 30% cell-saving threshold. Submission is
-  pending WMI recovery and an inventory of any jobs accepted during SSH loss.
+  population misses the preregistered 30% cell-saving threshold. Exact job
+  `145883` is running; queue state is not opportunity evidence.
 - [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
   near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
   through at least `n=32`.
@@ -344,14 +351,19 @@ fallback can be an operational portfolio but never a standalone victory.
 
 ## Immediate Queue
 
-1. Publish the complete P0 contract revision and require green hosted CI.
-2. Run the immutable two-second WMI full/official chain with all comparators.
-3. Batch-shadow and globally audit base-stage SAT/UNSAT certificates.
-4. Resume only two-second timeouts at 60 and remaining timeouts at 1,200.
-5. Certify each physical continuation stage and audit their union against the
-   final per-observation physical-origin ledger.
-6. Publish the opportunity atlas, then ablate Kissat and run T1/T2/T4/T5/T6.
-7. Select the first novel architecture only from measured opportunity.
+1. Require guarded-range census `145883` to return exactly 7,503 rows and zero
+   parser errors; reject T4 if its preregistered opportunity gate fails.
+2. Let certificate chains `145892`-`145894` and `145897`-`145899` release only
+   after that source gate, then audit every correct two-second row globally.
+3. Require rollback prepare `145916` to pass its exact anti-target ABBA canary
+   before array `145917`; adjudicate only immutable audit `145918`.
+4. Leave full/official 1,200-second continuations `145785`-`145789` intact and
+   certify their physical-origin union when the scheduler completes them.
+5. Port T1 onto the current typed parser, then run T5 and T6 opportunity
+   projections before implementing another representation.
+6. Add literal production model/proof sidecars; canonical reruns alone do not
+   certify the timed production path.
+7. Select a novel architecture only from measured opportunity and paired gates.
 
 No WMI campaign beyond the P0 baseline enters the queue before the campaign
 lock and independent validation prerequisites pass.

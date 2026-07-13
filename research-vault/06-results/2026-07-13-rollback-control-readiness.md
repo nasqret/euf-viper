@@ -2,8 +2,7 @@
 
 Date: 2026-07-13
 
-Status: published and locally verified; WMI execution not started; no timing
-or promotion claim
+Status: fixed preflight-gated WMI rerun active; no timing or promotion claim
 
 ## Question
 
@@ -18,9 +17,10 @@ superiority, or an overall win over Yices2 or Z3.
 ## Immutable Implementation
 
 - branch: `research-rollback-propagator`;
-- standalone backend and telemetry: `4b60113`;
-- complete campaign harness: `e8fb05c`;
-- hosted campaign-contract run: `29272420042` passed;
+- standalone backend and telemetry base: `4b60113`;
+- callback-handoff repair: `01be0a9`;
+- complete preflight-gated campaign head: `2dc4bf7`;
+- hosted campaign-contract run: `29275599640` passed;
 - backend selector: `EUF_VIPER_BACKEND=cadical-rollback`;
 - measured artifact: one release binary copied read-only into the reserved run
   root and rebound by SHA-256 before every stage.
@@ -29,6 +29,9 @@ The harness tests deterministic selection, source and binary tampering,
 environment isolation, complete ABBA blocks, modulo sharding, CPU affinity,
 hash-chain integrity, missing and duplicate records, timeout and unsupported
 outcomes, telemetry accumulation, and passing and rejecting audit boundaries.
+Preparation also executes one exact two-repeat ABBA block on the first frozen
+anti-target and requires four correct observations before any array task can
+release.
 
 ## Frozen Workset
 
@@ -85,11 +88,11 @@ environment bindings. Empty timing or multi-round populations reject.
 
 ## WMI Command
 
-Run only from clean published commit `e8fb05c` after restoring WMI access:
+The active rerun was submitted from clean published commit `2dc4bf7`:
 
 ```bash
 EUF_VIPER_WMI_HOST=wmicluster \
-EUF_VIPER_ROLLBACK_REVISION=e8fb05c6e1a22bca83edbe687f93a6e0a3774c50 \
+EUF_VIPER_ROLLBACK_REVISION=2dc4bf70e5f777733211861c7d45db4db75d7fed \
 EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF \
 EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
 ./scripts/wmi/submit_rollback_control.sh
@@ -107,13 +110,27 @@ root with `mkdir`, and registers prepare, array, and audit jobs through
 After SSH response loss, the interrupted receipt and reserved run root must be
 reconciled with `sacct`; the run ID is never recycled.
 
-## Blocker And Next Decision
+## Diagnostic Attempts And Next Decision
 
-At the last live check, SSH to `access.cluster.wmi.amu.edu.pl:22` timed out
-before authentication. No rollback campaign job ID has been accepted or
-claimed. Once access returns:
+The first accepted attempt `145887`/`145888`/`145889` failed before timing due
+to a corpus-root mismatch and was cancelled. The corrected prepare `145900`
+completed, but shards 0 and 1 of array `145901` exposed 40/48 candidate
+`unsupported` observations with a duplicate no-progress conflict diagnostic.
+The remaining array and audit `145902` were cancelled because promotion had
+already become impossible.
 
-1. inventory `sacct`, existing run roots, and interrupted receipts first;
-2. submit this exact published revision and retain the returned receipt;
-3. fetch and review `final-audit.json` even when the audit job exits rejected;
-4. proceed to eager-state migration only if all three comparison gates pass.
+The adapter had inserted a pending conflict into its emitted-clause set before
+CaDiCaL actually requested it through `external_clause`. An internal SAT
+conflict could preempt delivery and backtrack the pending clause, after which a
+valid recurrence was misclassified as a duplicate. Commit `01be0a9` moves the
+deduplication boundary to actual handoff and adds a regression for recurrence
+before handoff. Delivered duplicates continue to fail closed.
+
+The fixed chain is prepare `145916`, array `145917`, and audit `145918`; its run
+root is
+`/home/bnaskrecki/euf-viper-campaigns/2dc4bf70e5f7/results/rollback-control-20260713T184953Z-2dc4bf70e5f7`.
+
+1. require prepare to pass the exact four-observation anti-target canary;
+2. retain and review `final-audit.json` even if the audit rejects;
+3. proceed to eager-state migration only if all three comparison gates pass;
+4. otherwise preserve the control as negative evidence and stop this track.

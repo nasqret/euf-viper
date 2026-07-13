@@ -1045,3 +1045,30 @@
 - Full/official 1,200-second continuation arrays `145785` and `145787` remain
   scheduler-pending; audits `145786`/`145788` and finalizer `145789` remain
   dependency-held. No result is inferred from queue state.
+
+## 2026-07-13 Rollback Adapter Repair And Guarded Rerun
+
+- The path-correct control prepared as `145900`. Completed shards 0 and 1 of
+  array `145901` returned `unsupported` for 40 of 48 candidate observations
+  with `rollback EUF emitted a duplicate no-progress conflict`; the remaining
+  array tasks and audit `145902` were cancelled before a mathematically
+  impossible promotion gate consumed more cluster time. These artifacts are
+  retained as diagnostic evidence, not timing evidence.
+- The failure was in the CaDiCaL adapter rather than the rollback closure.
+  `record_conflict` marked a clause emitted before CaDiCaL requested it through
+  `external_clause`. An internal SAT conflict could preempt that handoff and
+  backtrack away the pending clause, making a valid recurrence appear to be a
+  duplicate. Commit `01be0a9` now records deduplication and telemetry only at
+  actual callback handoff. Undelivered pending clauses may recur; delivered
+  duplicates still fail closed. The focused seven-test gate, `242` default
+  tests, and `248` all-feature tests pass.
+- Commit `2dc4bf7` adds a prepare-stage ABBA canary on the first deterministic
+  anti-target. Preparation must produce exactly four correct observations, two
+  per label, and binds the canary journal and summary hashes before releasing
+  the array. Full Python discovery passed `302` tests and hosted campaign run
+  `29275599640` succeeded.
+- The fixed immutable chain is prepare `145916`, array `145917`, and audit
+  `145918`, rooted at
+  `/home/bnaskrecki/euf-viper-campaigns/2dc4bf70e5f7/results/rollback-control-20260713T184953Z-2dc4bf70e5f7`.
+  At submission, prepare was running and both dependent stages were held. No
+  speed, coverage, or promotion result is inferred before `final-audit.json`.
