@@ -163,14 +163,9 @@ class _Lexer:
                 self._advance()
                 if self.index == len(self.source):
                     self._raise("unterminated escape in quoted symbol", line, column)
-                escaped = self.source[self.index]
-                if escaped in "\r\n":
-                    self._raise("newline escape in quoted symbol", line, column)
                 value.append(self._advance())
                 continue
-            if char in "\r\n":
-                self._raise("newline in quoted symbol", line, column)
-            if ord(char) < 0x20:
+            if ord(char) < 0x20 and char not in "\t\r\n":
                 self._raise("control character in quoted symbol", line, column)
             value.append(self._advance())
         self._raise("unterminated quoted symbol", line, column)
@@ -759,6 +754,35 @@ class _Builder:
             return self._parse_let(sexp, env, expansion_stack)
         if syntax == "ite":
             return self._parse_ite(sexp, env, expansion_stack)
+        if syntax == "!":
+            if len(arguments) < 2:
+                _reject(sexp, "annotation must contain a term and at least one attribute")
+            index = 1
+            while index < len(arguments):
+                attribute = arguments[index]
+                if (
+                    not isinstance(attribute, _AtomSexp)
+                    or attribute.token.kind != "KEYWORD"
+                ):
+                    _reject(attribute, "annotation attribute name must be a keyword")
+                name = attribute.token.text
+                value = None
+                if index + 1 < len(arguments):
+                    following = arguments[index + 1]
+                    if not (
+                        isinstance(following, _AtomSexp)
+                        and following.token.kind == "KEYWORD"
+                    ):
+                        value = following
+                        index += 1
+                if name == ":named":
+                    if (
+                        not isinstance(value, _AtomSexp)
+                        or value.token.kind not in {"SYMBOL", "QUOTED_SYMBOL"}
+                    ):
+                        _reject(attribute, "`:named` annotation must have a symbol value")
+                index += 1
+            return self._parse_value(arguments[0], env, expansion_stack)
         if syntax in {"and", "or"}:
             children = [
                 self._expect_bool(
@@ -820,7 +844,7 @@ class _Builder:
                 else self._distinct_values(values, sexp)
             )
             return self._bool_value(expression)
-        if syntax in {"!", "as", "_", "forall", "exists", "match"}:
+        if syntax in {"as", "_", "forall", "exists", "match"}:
             _reject(sexp, f"unsupported expression form `{syntax}`")
         return self._apply(head, arguments, env, expansion_stack, sexp)
 

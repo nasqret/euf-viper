@@ -907,6 +907,65 @@
   `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare is pending WMI priority;
   the corrected native-runner smoke executes before taxonomy work. No new
   performance claim exists.
+- Prepare `144990` then completed successfully in `01:09:16` with peak RSS
+  `1,214,384 KiB`. It reproduced full taxonomy/split hashes
+  `ecab4f1f...c80b`/`14cf3582...f7e7` and official hashes
+  `ec3daa08...deda`/`d7aa7720...f013`, wrote promotion-eligible full/official
+  parent locks `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, bound solver config
+  `490e959e...a2570`, and froze euf-viper binary
+  `edcf8d1a...ba576` with Z3 4.16.0, cvc5 1.3.4, Yices2 2.7.0, and OpenSMT
+  2.9.2. Full shards `144991_0` and `_1` completed cleanly in `03:15` and
+  `03:04`; the array is advancing under current node availability. Official
+  array `144992` and audit `144993` remain open, so no aggregate comparison or
+  promotion claim exists.
+- Pinned the first rollback pilot in
+  `research-vault/02-design/2026-07-13-validation-pressure-rollback.md` after a
+  source audit confirmed that current Kissat exposes no trail, LBD, conflict,
+  or learned-clause state. The honest automatic trigger is therefore first
+  model validation time `>= max(2ms, first SAT time)`. The pilot preserves the
+  first checked assignment/conflicts and moves to conflict-only IPASIR-UP; it
+  remains default-off and is explicitly not a novelty claim. A safe local
+  RustSAT/CaDiCaL callback bridge is the active isolated prerequisite.
+- Completed that isolated prerequisite on public branch
+  `research-cadical-external-propagator` at `81e0c36`. Review found and fixed
+  three boundary hazards in the first checkpoint: cached `SAT` could bypass
+  callbacks, unrestricted closure access could replace and drop a connected
+  solver, and teardown callback failures were sampled before disconnect. The
+  final API exposes only a scoped solve/status/abort session, keeps decisions
+  and propagation disabled, validates conflict clauses against observed current
+  assignments, catches callback panics before FFI return, and records vendoring
+  provenance. Vendored tests pass `19` unit, `11` integration, and `2` doc
+  cases; root tests pass `222` default and `228` all-feature cases; hosted Linux
+  run `29217315701` passes. No rollback closure, EUF explanation, production
+  route, or performance result exists yet.
+- Added the solver-independent rollback closure on public branch
+  `research-rollback-euf-core` at `0d9ec50`. It uses deterministic union by size
+  without path compression; rollback logs cover equality forests, application
+  parent incidence, active SAT variables, and per-class disequality incidence.
+  Derived congruence edges retain causal argument equalities, conflict clauses
+  are capped and canonical, and a separate fresh full-closure replay rejects
+  missing, duplicate, reordered, or tampered evidence. The first cap test found
+  and fixed an undo-order bug before checkpointing. The randomized differential
+  gate executes `10,240` assignment/level/backtrack transitions and compares
+  every term pair after each transition; focused cap/type/rollback tests pass.
+  Root matrices pass `230` default and `234` all-feature cases; hosted Linux run
+  `29217833901` passes. The core is not connected to CaDiCaL and has no timing
+  evidence.
+- Added the source-only guard-conditioned adequate-range/Hall census in
+  `012c963`, then bound the independent parser hash and durable exact-revision
+  WMI runner/submitter in `02b68d5`/`86d76fc`. All 33 focused census/parser
+  tests and the 274-test Python suite pass; hosted run `29215823607` passes.
+  Full-corpus census `145027` is dependency-bound to P0 prepare `144990` and
+  cannot emit SAT/UNSAT. No Hall/PB solver route is justified before its
+  returned population and value-cell savings are audited.
+- Published the causal SC2021-versus-Kissat-4 campaign on isolated revision
+  `e67c688`; hosted run `29216075206` passes after 228 all-feature Rust tests.
+  It validates the two job-`144945` binary hashes/backend identities, fixes
+  every solver environment key identically, verifies all 7,503 source hashes,
+  binds one CPU, and rejects incomplete/duplicate shard evidence. Queued sample
+  `145029`, broad array `145030`, and merge `145031` behind P0 audit `144993`.
+  No T0 timing begins before the baseline audit and no promotion follows from
+  validation or queue state.
 
 ## Next Entry Template
 

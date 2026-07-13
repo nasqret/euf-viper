@@ -102,6 +102,24 @@ partial-trail interface, and recent cardinality work supplies stronger controls.
 motivates the dual Boolean/EUF compiler, while its generic mechanism remains an
 ablation rather than a novelty claim.
 
+The conflict-only callback prerequisite is complete on public branch
+`research-cadical-external-propagator` at `81e0c36`. It vendors the pinned
+RustSAT 0.7.5/CaDiCaL 2.2.1 source, exposes a restricted connected session that
+cannot replace or reconnect the borrowed solver, disables external decisions
+and propagation, validates falsified conflict clauses over observed variables,
+and fails closed on callback, unwind, registration, and teardown errors. Hosted
+run `29217315701` passes. This is boundary evidence only: rollback congruence
+closure, typed explanations, production integration, and timing remain open.
+
+The pure rollback core is separately checkpointed on
+`research-rollback-euf-core` at `0d9ec50`. It maintains deterministic
+union-by-size classes without path compression, rollbackable parent-use and
+disequality incidence, and causal congruence edges. Conflict clauses are
+canonical and capped, then replayed by a fresh complete-closure checker. A
+`10,240`-transition randomized gate compares every term pair after every
+assignment, level creation, and backtrack; hosted run `29217833901` passes.
+This still supplies no callback integration or performance result.
+
 ## Execution Ladder
 
 ### P0: Freeze evidence

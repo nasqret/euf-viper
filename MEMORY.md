@@ -663,3 +663,48 @@
   integration smoke. Hosted run `29215009504` passed. Replacement exact-revision
   P0 jobs are prepare `144990`, full `144991`, official `144992`, and audit
   `144993`; no performance claim exists until the audit completes.
+- P0 prepare `144990` completed successfully in `01:09:16` at exact revision
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Full/official lock hashes are
+  `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, solver config is
+  `490e959e...a2570`, and the frozen euf-viper binary is
+  `edcf8d1a...ba576`. Both locks are promotion-eligible for all six
+  configurations. Full array `144991` is producing rows; official `144992` and
+  audit `144993` are open. Do not infer aggregate coverage from preparation or
+  partial shards.
+- The pinned rollback pilot preserves the first invalid eager assignment,
+  conflicts, SAT time, and validation time, then uses a conflict-only CaDiCaL
+  external propagator. `auto` triggers at validation time
+  `>= max(2ms, first SAT time)`; default is off and unknown settings fail.
+  Current Kissat exposes no trail/LBD/conflict telemetry, so this is a
+  validation-pressure control, not a SAT proof-pressure claim. Whole-instance
+  rollback is known; novelty remains component-local checked representation
+  migration after the pilot wins.
+- Public branch `research-cadical-external-propagator` at `81e0c36` completes
+  only the safe conflict-only CaDiCaL 2.2.1/RustSAT callback prerequisite.
+  Hosted run `29217315701` passes after `19` vendored unit, `11` integration,
+  `2` doc, `222` root-default, and `228` root-all-feature tests. The restricted
+  session prevents replacing or reconnecting the solver while callback state is
+  borrowed; cached SAT, registration failure, callback panic, operation panic,
+  and teardown failure have regressions. Do not call this rollback EUF or a
+  performance improvement until the closure, typed explanations, integration,
+  and paired timing gates pass.
+- Public branch `research-rollback-euf-core` at `0d9ec50` completes the pure
+  rollback congruence and explanation core only. Its deterministic union-by-size
+  state has rollbackable parent-use and disequality incidence; independent fresh
+  closure replays canonical conflict clauses. A `64 x 160` randomized trace
+  compares every term pair after every assignment/level/backtrack operation.
+  Root tests pass `230` default and `234` all-feature cases, and hosted run
+  `29217833901` passes. CaDiCaL integration, complete-model validation, target
+  timing, and promotion remain open.
+- Source-only adequate-range/Hall census commits `012c963`/`02b68d5` and
+  exact-revision submitter `86d76fc` use the independent structured parser,
+  bind its hash, report only proved guard-conditioned ranges and bounded Hall
+  witnesses, and never solve or claim SAT/UNSAT. Full-corpus WMI job `145027`
+  depends on P0 prepare `144990`; audit its eligible population and 30% cell
+  saving gate before implementing Hall/PB in the solver.
+- Modern SAT paired campaign revision `e67c688` fixes identical complete
+  runtime environments for validated SC2021/Kissat-4 binaries, checks all
+  source and artifact hashes, binds one CPU, and audits exact shard coverage.
+  Jobs `145029`/`145030`/`145031` are externally dependency-bound to successful
+  P0 audit `144993`; broad timing runs only after the deterministic sample
+  passes. Queue state is not performance evidence.

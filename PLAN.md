@@ -133,7 +133,14 @@ result cache can satisfy V1-V4.
   fail-closed native-runner smoke. Hosted run `29215009504` passed. Replacement
   prepare/full/official/audit jobs are `144990`/`144991`/`144992`/`144993` and
   are dependency-bound to exact revision
-  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`.
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare `144990` completed in
+  `01:09:16` with status `prepared`: full/official lock hashes are
+  `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, the solver configuration hash is
+  `490e959e...a2570`, and the euf-viper binary hash is
+  `edcf8d1a...ba576`. Both parent locks are promotion-eligible and bind all six
+  configurations over `7,503`/`3,521` instances. Full array `144991` is
+  producing rows; official `144992` and global audit `144993` remain pending.
+  Preparation and partial shards are not comparison evidence.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
   assembly, and exact carried-row provenance are implemented but not yet run.
@@ -151,7 +158,11 @@ independent evidence checks, and a frozen family holdout.
   `research-modern-kissat` at `d7c14da` implements the feature-selected pinned
   backend and fail-closed option surface. WMI validation `144945` passed with
   preserved SC2021/4.0.4 binary hashes `d7321602...c70362` and
-  `ecbcfebb...ea6b6`; timing remains blocked on P0 audit.
+  `ecbcfebb...ea6b6`. Exact paired campaign revision `e67c688` fixes every
+  `EUF_VIPER_*` value identically in both arms, sanitizes ambient state, binds
+  one CPU, and verifies all 7,503 source hashes. Sample `145029`, broad array
+  `145030`, and merge `145031` are queued behind successful P0 audit `144993`;
+  broad timing releases only if the deterministic 64-case sample passes.
 - [ ] Ablate clausal congruence, equivalence sweeping, factor/BVA,
   vivification, and phase options on identical emitted CNF.
   A 20-pair local ABBA canary rejects unconditional CaDiCaL clausal
@@ -172,15 +183,50 @@ independent evidence checks, and a frozen family holdout.
 
 ### T2: Lazy-First And Rollback EUF
 
-- [ ] Add a default-off base-CNF-only CaDiCaL refinement mode that runs before
-  eager SAT, validates every complete model, and adds only checked EUF cuts.
-- [ ] Run forced Goel/GRAPH controls and reject if more invalid models do not
-  reduce end-to-end time.
-- [ ] Add conflict-only IPASIR-UP rollback closure, then delayed propagation,
-  only after the lazy reference passes.
+- [x] Add a safe conflict-only IPASIR-UP bridge to the pinned CaDiCaL/RustSAT
+  binding. Public branch `research-cadical-external-propagator` at `81e0c36`
+  vendors the hash-bound 0.7.5 binding and CaDiCaL 2.2.1, disables external
+  decisions and propagations, catches callback panics, validates observed
+  literals and falsified conflict clauses, preserves teardown failures, and
+  prevents safe Rust from replacing or reconnecting the solver while native
+  callbacks hold borrowed state. Vendored tests pass `19` unit, `11`
+  integration, and `2` doc cases; root tests pass `222` default and `228`
+  all-feature cases; hosted run `29217315701` passes. This is an isolated
+  prerequisite, not production integration or timing evidence.
+- [x] Implement and differentially verify the solver-independent rollback core.
+  Public branch `research-rollback-euf-core` at `0d9ec50` uses deterministic
+  union by size without path compression, rollbackable application and
+  disequality incidence, capped signature work, causal congruence edges, and
+  an independent fresh-closure conflict replay. Its randomized gate covers
+  `64 x 160 = 10,240` assignment/level/backtrack transitions and compares every
+  term pair after each transition; cap, typing, rollback, literal-reuse, and
+  tampering regressions also pass. Root tests pass `230` default and `234`
+  all-feature cases; hosted run `29217833901` passes. No timing claim exists.
+- [ ] Attach that core behind the scoped CaDiCaL bridge. Every callback conflict
+  must carry an independently replayable typed EUF explanation; no external
+  decisions or propagations are permitted in the first pilot, and the existing
+  complete-model validator remains authoritative.
+- [ ] Preserve the first invalid eager assignment, checked conflict clauses,
+  SAT time, and validation time. The default-off `auto` pilot triggers only
+  when validation is at least `max(2ms, first SAT time)`; `force` exists only
+  for causal tests. Unknown settings fail closed.
+- [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
+  dynamic full Ackermannization. Require fewer complete validations on every
+  multi-round target, `1.10x` target speedup, no baseline-only solve, and
+  independently replayed conflicts before selector work.
+- [ ] Add component-local migration and then delayed propagation only after the
+  whole-instance engineering control passes. Rollback DPLL(T) itself is known;
+  the differentiated claim requires stable atoms and checked bridge facts
+  across per-component eager/rollback/Hall representations.
 
 ### T4: Adequate-Range Hall/PB
 
+- [ ] Complete source-only opportunity census `145027`, exact revision
+  `86d76fc`, after P0 prepare. The structured independent parser now emits
+  hash-bound guard-conditioned ranges, non-uniform value-cell savings, bounded
+  Hall-tight/conflict witnesses, caps, and abstentions without invoking a
+  solver or producing SAT/UNSAT. Reject implementation if the returned corpus
+  population misses the preregistered 30% cell-saving threshold.
 - [ ] Prove non-uniform finite ranges and compare pairwise, totalizer,
   near-optimal CNF, native PB, and reversible matching on generated EUF-PHP
   through at least `n=32`.
