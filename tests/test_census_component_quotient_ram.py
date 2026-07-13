@@ -4,9 +4,11 @@ import hashlib
 import importlib.util
 import itertools
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -336,14 +338,20 @@ class DecoderOracleTests(unittest.TestCase):
         self.assertEqual(receipt.assignments_examined, 316)
         self.assertEqual(receipt.assignments_accepted, 179)
         self.assertEqual(receipt.assignments_rejected, 137)
+        self.assertEqual(receipt.euf_satisfaction_checks, 2998)
         self.assertEqual(receipt.padded_assignments, 170)
         self.assertEqual(receipt.repeated_key_assignments, 55)
+        self.assertEqual(receipt.arbitrary_default_probes, 1608)
         self.assertEqual(receipt.non_nullary_default_probes, 1608)
         self.assertEqual(
             set(receipt.exercised_features),
             set(CENSUS.DECODER_ORACLE_REQUIRED_FEATURES),
         )
-        self.assertRegex(receipt.sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(receipt.sha256, CENSUS.DECODER_ORACLE_FROZEN_SHA256)
+        self.assertEqual(
+            CENSUS._decoder_oracle_counts(receipt),
+            CENSUS.DECODER_ORACLE_FROZEN_COUNTS,
+        )
 
     def test_projection_fails_closed_when_oracle_did_not_run_or_failed(self) -> None:
         problem = CENSUS.qfuf.parse_and_encode(query("(assert true)"))
@@ -353,6 +361,20 @@ class DecoderOracleTests(unittest.TestCase):
             CENSUS.project_problem(problem, self.caps, not_run)
         with self.assertRaisesRegex(CENSUS.ProjectionInvariant, "did not pass"):
             CENSUS.project_problem(problem, self.caps, failed)
+
+    def test_fabricated_and_feature_contradictory_receipts_are_rejected(self) -> None:
+        fabricated = replace(
+            self.receipt,
+            assignments_examined=318,
+            assignments_accepted=181,
+        )
+        contradictory = replace(self.receipt, padded_assignments=0)
+        with self.assertRaisesRegex(CENSUS.ProjectionInvariant, "counter drift"):
+            CENSUS._require_decoder_oracle(fabricated)
+        with self.assertRaisesRegex(
+            CENSUS.ProjectionInvariant, "feature/counter contradiction"
+        ):
+            CENSUS._require_decoder_oracle(contradictory)
 
     def test_decoder_reconstructs_typed_model_and_rejects_false_atom_claim(self) -> None:
         source = dict(CENSUS._decoder_oracle_sources())[
@@ -418,6 +440,32 @@ class DecoderOracleTests(unittest.TestCase):
             CENSUS._decoder_term_values(problem, components, {}, boolean_values)
 
 
+class CountsInvariantTests(unittest.TestCase):
+    def test_unit_binary_and_long_clause_layout_is_feasible(self) -> None:
+        self.assertEqual(
+            CENSUS.Counts(
+                clauses=3,
+                literal_slots=7,
+                unit_clauses=1,
+                watch_entries=4,
+            ).clauses,
+            3,
+        )
+
+    def test_all_count_semantic_contradictions_are_rejected(self) -> None:
+        malformed = (
+            {"variables": -1},
+            {"variables": True},
+            {"clauses": 1, "literal_slots": 2, "unit_clauses": 2},
+            {"clauses": 2, "literal_slots": 2, "unit_clauses": 1},
+            {"clauses": 1, "literal_slots": 2, "unit_clauses": 1},
+            {"clauses": 1, "literal_slots": 2, "watch_entries": 1},
+        )
+        for fields in malformed:
+            with self.subTest(fields=fields), self.assertRaises(CENSUS.CensusError):
+                CENSUS.Counts(**fields)
+
+
 def synthetic_record(
     *,
     eager: int,
@@ -432,9 +480,9 @@ def synthetic_record(
         counts = {
             "variables": variable_value,
             "clauses": value,
-            "literal_slots": value,
+            "literal_slots": 2 * value,
             "unit_clauses": 0,
-            "watch_entries": value,
+            "watch_entries": 2 * value,
         }
         counts.update(overrides or {})
         return counts
@@ -526,46 +574,189 @@ class GateBoundaryTests(unittest.TestCase):
 
 
 class HashChainTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.lock = CENSUS.load_campaign_lock()
+        cls.oracle = CENSUS.run_bounded_decoder_oracle()
+
     def records(self) -> list[dict[str, object]]:
-        return CENSUS.chain_records(
-            [
-                {
-                    "schema": CENSUS.RECORD_SCHEMA,
-                    "lock_sha256": "a" * 64,
-                    "source": {"relative_path": f"QF_UF/test/{name}.smt2"},
-                    "payload": name,
-                }
-                for name in ("a", "b", "c")
-            ]
-        )
+        source_bytes = query("(assert true)").encode("ascii")
+        parser_sha256 = CENSUS.sha256_path(CENSUS.PARSER_PATH)
+        analyzed = []
+        for line_number, name in enumerate(("a", "b", "c"), 1):
+            source = CENSUS.ManifestSource(
+                record_id=line_number,
+                line_number=line_number,
+                relative_path=f"QF_UF/test/{name}.smt2",
+                source_path=Path(name),
+                source_bytes=source_bytes,
+                source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+                source_family="QF_UF/test",
+                generator_lineage=name,
+                taxonomy_rule="test",
+            )
+            analyzed.append(
+                CENSUS.analyze_source(
+                    source,
+                    self.lock,
+                    "a" * 64,
+                    parser_sha256,
+                    self.oracle,
+                )
+            )
+        return CENSUS.chain_records(analyzed)
 
     @staticmethod
     def encode(records: list[dict[str, object]]) -> bytes:
         return b"".join(CENSUS.canonical_json_bytes(record) for record in records)
 
+    @staticmethod
+    def rechain(records: list[dict[str, object]]) -> list[dict[str, object]]:
+        return CENSUS.chain_records(records)
+
     def test_chain_accepts_intact_stream(self) -> None:
         records = self.records()
         self.assertEqual(
-            CENSUS.verify_record_stream(self.encode(records), 3, "a" * 64), records
+            CENSUS.verify_record_stream(self.encode(records), 3, self.lock), records
         )
 
     def test_deletion_reordering_and_tampering_fail(self) -> None:
         records = self.records()
         with self.assertRaisesRegex(CENSUS.CensusError, "cardinality"):
-            CENSUS.verify_record_stream(self.encode(records[:-1]), 3, "a" * 64)
+            CENSUS.verify_record_stream(self.encode(records[:-1]), 3, self.lock)
         reordered = [records[1], records[0], records[2]]
         with self.assertRaisesRegex(CENSUS.CensusError, "sequence|hash chain"):
-            CENSUS.verify_record_stream(self.encode(reordered), 3, "a" * 64)
+            CENSUS.verify_record_stream(self.encode(reordered), 3, self.lock)
         tampered = [dict(record) for record in records]
-        tampered[1]["payload"] = "changed"
+        tampered[1]["record_sha256"] = "b" * 64
         with self.assertRaisesRegex(CENSUS.CensusError, "hash drift"):
-            CENSUS.verify_record_stream(self.encode(tampered), 3, "a" * 64)
+            CENSUS.verify_record_stream(self.encode(tampered), 3, self.lock)
+
+    def test_missing_provenance_and_fabricated_oracle_fail_after_rehash(self) -> None:
+        missing = deepcopy(self.records())
+        del missing[1]["taxonomy_builder_sha256"]
+        missing = self.rechain(missing)
+        with self.assertRaisesRegex(CENSUS.CensusError, "keys differ"):
+            CENSUS.verify_record_stream(self.encode(missing), 3, self.lock)
+
+        fabricated = deepcopy(self.records())
+        fabricated[1]["decoder"]["oracle"]["sha256"] = "b" * 64
+        fabricated = self.rechain(fabricated)
+        with self.assertRaisesRegex(CENSUS.CensusError, "frozen oracle"):
+            CENSUS.verify_record_stream(self.encode(fabricated), 3, self.lock)
+
+    def test_projected_status_cannot_hide_a_rehashed_cap_event(self) -> None:
+        records = deepcopy(self.records())
+        records[0]["cap_events"] = [
+            {
+                "code": "terms",
+                "limit": self.lock.caps.max_terms,
+                "observed": self.lock.caps.max_terms + 1,
+            }
+        ]
+        records = self.rechain(records)
+        with self.assertRaisesRegex(CENSUS.CensusError, "contradicts reason/cap"):
+            CENSUS.verify_record_stream(self.encode(records), 3, self.lock)
+
+    def test_unknown_status_requires_a_real_locked_cap_violation(self) -> None:
+        record = deepcopy(self.records()[0])
+        record.update(
+            {
+                "status": "unknown_projection",
+                "reason": "terms",
+                "cap_events": [
+                    {
+                        "code": "terms",
+                        "limit": self.lock.caps.max_terms,
+                        "observed": self.lock.caps.max_terms + 1,
+                    }
+                ],
+                "shape": {},
+                "components": [],
+                "symbols": [],
+                "counts": {"eager": {}, "component_quotient_ram": {}},
+                "decoder": {"complete": False, "reason": "terms"},
+                "selector": {
+                    "eligible": False,
+                    "minimum_total_applications": self.lock.minimum_total_applications,
+                    "minimum_max_symbol_applications": self.lock.minimum_max_symbol_applications,
+                },
+                "ratios_ppm": {},
+            }
+        )
+        records = self.rechain([record])
+        self.assertEqual(
+            CENSUS.verify_record_stream(self.encode(records), 1, self.lock), records
+        )
+        records[0]["cap_events"][0]["observed"] = self.lock.caps.max_terms
+        records = self.rechain(records)
+        with self.assertRaisesRegex(CENSUS.CensusError, "does not prove"):
+            CENSUS.verify_record_stream(self.encode(records), 1, self.lock)
+
+    def test_every_row_rejects_malformed_rehashed_counts(self) -> None:
+        malformed_counts = (
+            {
+                "variables": -1,
+                "clauses": 0,
+                "literal_slots": 0,
+                "unit_clauses": 0,
+                "watch_entries": 0,
+            },
+            {
+                "variables": 0,
+                "clauses": 1,
+                "literal_slots": 2,
+                "unit_clauses": 2,
+                "watch_entries": 0,
+            },
+            {
+                "variables": 0,
+                "clauses": 2,
+                "literal_slots": 2,
+                "unit_clauses": 1,
+                "watch_entries": 2,
+            },
+            {
+                "variables": 0,
+                "clauses": 1,
+                "literal_slots": 2,
+                "unit_clauses": 1,
+                "watch_entries": 0,
+            },
+            {
+                "variables": 0,
+                "clauses": 1,
+                "literal_slots": 2,
+                "unit_clauses": 0,
+                "watch_entries": 1,
+            },
+        )
+        for row_index in range(3):
+            for malformed in malformed_counts:
+                with self.subTest(row=row_index, malformed=malformed):
+                    records = deepcopy(self.records())
+                    eager = records[row_index]["counts"]["eager"]
+                    eager["categories"]["transitivity"] = dict(malformed)
+                    eager["total"] = dict(malformed)
+                    records = self.rechain(records)
+                    with self.assertRaises(CENSUS.CensusError):
+                        CENSUS.verify_record_stream(
+                            self.encode(records), 3, self.lock
+                        )
 
 
 class CensusFixture:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        minimum_total_applications: int = 64,
+        minimum_max_symbol_applications: int = 32,
+    ) -> None:
         self.root = root
         self.rows: list[dict[str, object]] = []
+        self.minimum_total_applications = minimum_total_applications
+        self.minimum_max_symbol_applications = minimum_max_symbol_applications
 
     def add(self, relative_path: str, source: str, record_id: int) -> None:
         path = self.root / relative_path
@@ -613,6 +804,12 @@ class CensusFixture:
         value["corpus"]["families"]["qg"]["expected_population"] = 1
         value["corpus"]["families"]["goel"]["expected_population"] = 1
         value["gates"]["validity"]["required_sources"] = 2
+        value["selector"][
+            "minimum_total_applications"
+        ] = self.minimum_total_applications
+        value["selector"][
+            "minimum_max_symbol_applications"
+        ] = self.minimum_max_symbol_applications
         path = self.root / "lock.json"
         path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="ascii")
         return path
@@ -630,6 +827,240 @@ class CensusFixture:
             lock_path=self.lock(),
         )
         return records.read_bytes(), aggregate.read_bytes(), targets.read_bytes(), summary
+
+    def paths(self, suffix: str) -> dict[str, Path]:
+        return {
+            "manifest": self.root / "manifest.jsonl",
+            "lock": self.root / "lock.json",
+            "records": self.root / f"records-{suffix}.jsonl",
+            "aggregate": self.root / f"aggregate-{suffix}.json",
+            "targets": self.root / f"targets-{suffix}.jsonl",
+        }
+
+
+class BundleVerificationTests(unittest.TestCase):
+    @staticmethod
+    def fixture(root: Path, *, eligible: bool = False) -> CensusFixture:
+        fixture = CensusFixture(
+            root,
+            minimum_total_applications=1 if eligible else 64,
+            minimum_max_symbol_applications=1 if eligible else 32,
+        )
+        body = (
+            """
+            (declare-sort U 0)
+            (declare-fun f (U) U)
+            (declare-const a U)
+            (declare-const b U)
+            (assert (= (f a) (f b)))
+            """
+            if eligible
+            else "(assert true)"
+        )
+        fixture.add(
+            "QF_UF/2018-Goel-hwbench/QF_UF_demo_ab_br_max.smt2",
+            query(body),
+            2,
+        )
+        fixture.add(
+            "QF_UF/QG-classification/qg1/demo1.smt2",
+            query(body),
+            1,
+        )
+        return fixture
+
+    @staticmethod
+    def verify(fixture: CensusFixture, suffix: str) -> dict[str, object]:
+        paths = fixture.paths(suffix)
+        return CENSUS.verify_census_bundle(
+            paths["manifest"],
+            paths["records"],
+            paths["aggregate"],
+            paths["targets"],
+            repository_root=fixture.root,
+            lock_path=paths["lock"],
+        )
+
+    @staticmethod
+    def read_records(path: Path) -> list[dict[str, object]]:
+        return [json.loads(line) for line in path.read_text(encoding="ascii").splitlines()]
+
+    @staticmethod
+    def write_records(path: Path, records: list[dict[str, object]]) -> bytes:
+        payload = b"".join(CENSUS.canonical_json_bytes(record) for record in records)
+        path.write_bytes(payload)
+        return payload
+
+    @staticmethod
+    def write_json(path: Path, value: dict[str, object]) -> None:
+        path.write_bytes(CENSUS.canonical_json_bytes(value))
+
+    def test_valid_bundle_receipt_binds_all_recomputed_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary))
+            fixture.run("valid")
+            receipt = self.verify(fixture, "valid")
+        self.assertTrue(receipt["verified"])
+        self.assertTrue(receipt["validity_pass"])
+        self.assertEqual(receipt["sources"], 2)
+        self.assertEqual(
+            receipt["decoder_oracle_sha256"],
+            CENSUS.DECODER_ORACLE_FROZEN_SHA256,
+        )
+        self.assertEqual(
+            set(receipt["hashes"]),
+            {
+                "lock_sha256",
+                "input_manifest_sha256",
+                "portable_source_set_sha256",
+                "analyzer_sha256",
+                "parser_sha256",
+                "taxonomy_builder_sha256",
+                "records_jsonl_sha256",
+                "terminal_record_sha256",
+                "derived_target_manifest_sha256",
+                "aggregate_json_sha256",
+                "recomputed_gates_sha256",
+            },
+        )
+
+    def test_standalone_verifier_cli_emits_the_strict_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary))
+            fixture.run("cli")
+            paths = fixture.paths("cli")
+            receipt_path = fixture.root / "verification.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(
+                        ROOT
+                        / "scripts"
+                        / "bench"
+                        / "verify_component_quotient_ram_bundle.py"
+                    ),
+                    str(paths["manifest"]),
+                    "--repository-root",
+                    str(fixture.root),
+                    "--lock",
+                    str(paths["lock"]),
+                    "--records",
+                    str(paths["records"]),
+                    "--aggregate",
+                    str(paths["aggregate"]),
+                    "--targets",
+                    str(paths["targets"]),
+                    "--receipt-out",
+                    str(receipt_path),
+                    "--require-validity",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("verified=true", completed.stdout)
+            receipt = json.loads(receipt_path.read_text(encoding="ascii"))
+        self.assertTrue(receipt["verified"])
+        self.assertTrue(receipt["validity_pass"])
+
+    def test_reconstructed_invalid_bundle_is_verified_but_not_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CensusFixture(root)
+            fixture.add(
+                "QF_UF/2018-Goel-hwbench/QF_UF_demo_ab_br_max.smt2",
+                query("(assert true)"),
+                2,
+            )
+            fixture.add(
+                "QF_UF/QG-classification/qg1/demo1.smt2",
+                query("(assert"),
+                1,
+            )
+            fixture.run("invalid")
+            receipt = self.verify(fixture, "invalid")
+        self.assertTrue(receipt["verified"])
+        self.assertFalse(receipt["validity_pass"])
+
+    def test_rehashed_non_target_record_mutation_is_reconstructed_and_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary))
+            fixture.run("non-target")
+            paths = fixture.paths("non-target")
+            records = self.read_records(paths["records"])
+            self.assertFalse(records[0]["selector"]["eligible"])
+            records[0]["shape"]["sorts"] += 1
+            decoder_counts = records[0]["decoder"]["counts"]
+            decoder_counts["sort_defaults_materialized"] += 1
+            decoder_counts["total_operations"] += 1
+            records = CENSUS.chain_records(records)
+            records_bytes = self.write_records(paths["records"], records)
+            aggregate = json.loads(paths["aggregate"].read_text(encoding="ascii"))
+            aggregate["hashes"]["records_jsonl_sha256"] = hashlib.sha256(
+                records_bytes
+            ).hexdigest()
+            aggregate["hashes"]["terminal_record_sha256"] = records[-1][
+                "record_sha256"
+            ]
+            self.write_json(paths["aggregate"], aggregate)
+            lock = CENSUS.load_campaign_lock(paths["lock"])
+            self.assertEqual(
+                CENSUS.verify_record_stream(records_bytes, 2, lock), records
+            )
+            with self.assertRaisesRegex(CENSUS.CensusError, "fresh source"):
+                self.verify(fixture, "non-target")
+
+    def test_target_and_non_record_mutations_are_recomputed_and_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary), eligible=True)
+            fixture.run("target")
+            paths = fixture.paths("target")
+            targets = self.read_records(paths["targets"])
+            self.assertEqual(len(targets), 2)
+            targets[0]["shape"]["applications"] += 1
+            targets_bytes = self.write_records(paths["targets"], targets)
+            aggregate = json.loads(paths["aggregate"].read_text(encoding="ascii"))
+            aggregate["hashes"]["derived_target_manifest_sha256"] = hashlib.sha256(
+                targets_bytes
+            ).hexdigest()
+            self.write_json(paths["aggregate"], aggregate)
+            with self.assertRaisesRegex(CENSUS.CensusError, "target manifest differs"):
+                self.verify(fixture, "target")
+
+            fixture.run("aggregate")
+            paths = fixture.paths("aggregate")
+            aggregate = json.loads(paths["aggregate"].read_text(encoding="ascii"))
+            aggregate["gates"]["validity"]["checks"]["source_cardinality"] = False
+            aggregate["gates"]["validity"]["pass"] = True
+            self.write_json(paths["aggregate"], aggregate)
+            with self.assertRaisesRegex(CENSUS.CensusError, "full recomputation"):
+                self.verify(fixture, "aggregate")
+
+    def test_coherent_fabricated_oracle_and_source_drift_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary))
+            fixture.run("oracle")
+            paths = fixture.paths("oracle")
+            aggregate = json.loads(paths["aggregate"].read_text(encoding="ascii"))
+            oracle = aggregate["decoder_oracle"]
+            oracle["counts"]["assignments_examined"] += 1
+            oracle["counts"]["assignments_accepted"] += 1
+            evidence = dict(oracle)
+            evidence.pop("sha256")
+            oracle["sha256"] = hashlib.sha256(
+                CENSUS.canonical_json_bytes(evidence)
+            ).hexdigest()
+            self.write_json(paths["aggregate"], aggregate)
+            with self.assertRaisesRegex(CENSUS.CensusError, "full recomputation"):
+                self.verify(fixture, "oracle")
+
+            fixture.run("source")
+            source = fixture.root / str(fixture.rows[0]["relative_path"])
+            source.write_text(query("(assert false)"), encoding="ascii")
+            with self.assertRaisesRegex(CENSUS.CensusError, "sha256 mismatch"):
+                self.verify(fixture, "source")
 
 
 class ProvenanceAndDeterminismTests(unittest.TestCase):
@@ -744,6 +1175,27 @@ class ProvenanceAndDeterminismTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="ascii")
             with self.assertRaisesRegex(CENSUS.CensusError, "oracle contract drift"):
                 CENSUS.load_campaign_lock(path)
+
+            for field, value in (
+                ("receipt_sha256", "0" * 64),
+                ("counts.assignments_examined", 317),
+            ):
+                value_dict = json.loads(
+                    CENSUS.DEFAULT_LOCK_PATH.read_text(encoding="ascii")
+                )
+                oracle = value_dict["projection"]["component_quotient_ram"][
+                    "decoder_oracle"
+                ]
+                if field == "receipt_sha256":
+                    oracle[field] = value
+                else:
+                    oracle["counts"]["assignments_examined"] = value
+                path = root / f"weak-{field.replace('.', '-')}.json"
+                path.write_text(json.dumps(value_dict), encoding="ascii")
+                with self.subTest(field=field), self.assertRaisesRegex(
+                    CENSUS.CensusError, "oracle contract drift"
+                ):
+                    CENSUS.load_campaign_lock(path)
 
 
 if __name__ == "__main__":

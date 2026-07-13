@@ -91,7 +91,7 @@ alone, but their component-local, proof-carrying interchange inside one search.
 | T2 | Lazy-first CaDiCaL and rollback partial-trail EUF | Forced Goel/graph causal gate without generic axioms |
 | T3 | Proof-complexity-triggered component migration | Held-out telemetry accuracy >= 0.80, overhead < 1% |
 | T4 | Adequate ranges, matching, Hall, and PB | EUF-PHP scaling and >= 30% value-cell reduction |
-| T5 | Component quotient RAM/class codes | Decoder-oracle-checked corpus projection with >= 25% clause/watch reduction and no weighted/p95 clause or literal-slot regression |
+| T5 | Component quotient RAM/class codes | Frozen-decoder-oracle corpus projection, strict source-to-bundle reconstruction, >= 25% clause/watch reduction, and no weighted/p95 clause or literal-slot regression |
 | T6 | Theory-conditioned Boolean DAG and semantic factoring | >= 25% projected CNF reduction on 8/10 hard table cases |
 | T7 | SAT-impact explanations and EUF vivification | Boolean/EUF/combined factorial |
 | T8 | Canonical frontier and bit-sliced finite quotient search | Scalar state-reuse/frontier census, then >= 70% useful lanes |

@@ -60,10 +60,24 @@ python3 scripts/bench/census_component_quotient_ram.py \
   --records-out "$OUT/records.jsonl" \
   --aggregate-out "$OUT/aggregate.json" \
   --targets-out "$OUT/targets.jsonl" \
-  --require-validity \
   > "$OUT/run.txt"
 
-python3 - "$OUT/metadata.json" "$MANIFEST" "$EXPECTED_SOURCES" <<'PY'
+python3 scripts/bench/verify_component_quotient_ram_bundle.py \
+  "$MANIFEST" \
+  --repository-root "$PWD" \
+  --lock "$LOCK" \
+  --records "$OUT/records.jsonl" \
+  --aggregate "$OUT/aggregate.json" \
+  --targets "$OUT/targets.jsonl" \
+  --receipt-out "$OUT/verification.json" \
+  --require-validity \
+  > "$OUT/verification.txt"
+
+python3 - \
+  "$OUT/metadata.json" \
+  "$MANIFEST" \
+  "$EXPECTED_SOURCES" \
+  "$OUT/verification.json" <<'PY'
 import hashlib
 import json
 import os
@@ -80,60 +94,78 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def canonical_sha256(value: object) -> str:
-    encoded = (
-        json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-        + "\n"
-    ).encode("ascii")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 out = Path(sys.argv[1])
 root = out.parent
 manifest = Path(sys.argv[2]).resolve()
 expected_sources = int(sys.argv[3])
-aggregate = json.loads((root / "aggregate.json").read_text(encoding="ascii"))
-sources = aggregate.get("sources")
-gates = aggregate.get("gates")
-hashes = aggregate.get("hashes")
-decoder_oracle = aggregate.get("decoder_oracle")
-if not isinstance(sources, dict) or sources.get("observed") != expected_sources:
-    raise SystemExit("component quotient census source cardinality mismatch")
-if not isinstance(gates, dict) or gates.get("validity", {}).get("pass") is not True:
-    raise SystemExit("component quotient census validity gate did not pass")
+verification_path = Path(sys.argv[4])
+verification = json.loads(verification_path.read_text(encoding="ascii"))
+expected_hashes = {
+    "lock_sha256",
+    "input_manifest_sha256",
+    "portable_source_set_sha256",
+    "analyzer_sha256",
+    "parser_sha256",
+    "taxonomy_builder_sha256",
+    "records_jsonl_sha256",
+    "terminal_record_sha256",
+    "derived_target_manifest_sha256",
+    "aggregate_json_sha256",
+    "recomputed_gates_sha256",
+}
 if (
-    not isinstance(decoder_oracle, dict)
-    or decoder_oracle.get("executed") is not True
-    or decoder_oracle.get("passed") is not True
-    or not isinstance(decoder_oracle.get("sha256"), str)
-    or len(decoder_oracle["sha256"]) != 64
+    not isinstance(verification, dict)
+    or set(verification)
+    != {
+        "schema",
+        "verified",
+        "campaign_id",
+        "interpretation",
+        "sources",
+        "targets",
+        "validity_pass",
+        "implementation_allowed",
+        "decoder_oracle_sha256",
+        "hashes",
+    }
+    or verification.get("schema")
+    != "euf-viper.component-quotient-ram-bundle-verification.v1"
+    or verification.get("campaign_id")
+    != "t5-component-quotient-ram-opportunity-census-v1"
+    or verification.get("interpretation")
+    != "structural_projection_only_no_solver_invocation_no_timing_claim"
+    or verification.get("verified") is not True
+    or verification.get("validity_pass") is not True
+    or verification.get("sources") != expected_sources
+    or type(verification.get("targets")) is not int
+    or verification["targets"] < 0
+    or verification.get("decoder_oracle_sha256")
+    != "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89"
+    or type(verification.get("implementation_allowed")) is not bool
+    or not isinstance(verification.get("hashes"), dict)
+    or set(verification["hashes"]) != expected_hashes
     or any(
-        character not in "0123456789abcdef"
-        for character in decoder_oracle["sha256"]
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+        for value in verification["hashes"].values()
     )
 ):
-    raise SystemExit("component quotient bounded decoder oracle did not pass")
-oracle_evidence = dict(decoder_oracle)
-oracle_sha256 = oracle_evidence.pop("sha256")
-if canonical_sha256(oracle_evidence) != oracle_sha256:
-    raise SystemExit("component quotient bounded decoder oracle SHA-256 mismatch")
-if not isinstance(hashes, dict):
-    raise SystemExit("component quotient census aggregate lacks hashes")
-if hashes.get("records_jsonl_sha256") != sha256(root / "records.jsonl"):
-    raise SystemExit("component quotient census records hash mismatch")
-if hashes.get("derived_target_manifest_sha256") != sha256(root / "targets.jsonl"):
-    raise SystemExit("component quotient census target hash mismatch")
+    raise SystemExit("component quotient strict bundle verification did not pass")
 
 artifacts = {
     "manifest": manifest,
     "lock": Path("campaigns/component-quotient-ram-census-v1.json"),
     "analyzer": Path("scripts/bench/census_component_quotient_ram.py"),
+    "verifier": Path("scripts/bench/verify_component_quotient_ram_bundle.py"),
     "parser": Path("scripts/cert/independent_qfuf.py"),
     "taxonomy_builder": Path("scripts/bench/build_family_manifest.py"),
     "records": root / "records.jsonl",
     "aggregate": root / "aggregate.json",
     "targets": root / "targets.jsonl",
     "run": root / "run.txt",
+    "verification": verification_path,
+    "verification_run": root / "verification.txt",
 }
 payload = {
     "schema": "euf-viper.component-quotient-ram-wmi-run.v1",
@@ -143,10 +175,11 @@ payload = {
     "hostname": platform.node(),
     "validation": {
         "expected_sources": expected_sources,
-        "observed_sources": sources["observed"],
-        "validity_pass": True,
-        "decoder_oracle_sha256": oracle_sha256,
-        "implementation_allowed": gates["implementation_allowed"],
+        "observed_sources": verification["sources"],
+        "validity_pass": verification["validity_pass"],
+        "decoder_oracle_sha256": verification["decoder_oracle_sha256"],
+        "implementation_allowed": verification["implementation_allowed"],
+        "verification_receipt_sha256": sha256(verification_path),
     },
     "artifacts": {
         name: {"path": str(path.resolve()), "sha256": sha256(path)}

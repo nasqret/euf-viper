@@ -53,7 +53,18 @@
           "same_sort_disconnected_components"
         ],
         "maximum_component_terms": 4,
-        "maximum_free_boolean_terms": 2
+        "maximum_free_boolean_terms": 2,
+        "receipt_sha256": "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89",
+        "counts": {
+          "assignments_examined": 316,
+          "assignments_accepted": 179,
+          "assignments_rejected": 137,
+          "euf_satisfaction_checks": 2998,
+          "repeated_key_assignments": 55,
+          "padded_assignments": 170,
+          "arbitrary_default_probes": 1608,
+          "non_nullary_default_probes": 1608
+        }
       }
     },
     "cnf_templates": {

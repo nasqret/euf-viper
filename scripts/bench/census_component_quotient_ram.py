@@ -60,6 +60,32 @@ DECODER_ORACLE_REQUIRED_FEATURES = (
 )
 DECODER_ORACLE_MAX_COMPONENT_TERMS = 4
 DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS = 2
+DECODER_ORACLE_FROZEN_SHA256 = (
+    "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89"
+)
+DECODER_ORACLE_COUNT_FIELDS = (
+    "assignments_examined",
+    "assignments_accepted",
+    "assignments_rejected",
+    "euf_satisfaction_checks",
+    "repeated_key_assignments",
+    "padded_assignments",
+    "arbitrary_default_probes",
+    "non_nullary_default_probes",
+)
+DECODER_ORACLE_FROZEN_COUNTS = {
+    "assignments_examined": 316,
+    "assignments_accepted": 179,
+    "assignments_rejected": 137,
+    "euf_satisfaction_checks": 2998,
+    "repeated_key_assignments": 55,
+    "padded_assignments": 170,
+    "arbitrary_default_probes": 1608,
+    "non_nullary_default_probes": 1608,
+}
+BUNDLE_VERIFICATION_SCHEMA = (
+    "euf-viper.component-quotient-ram-bundle-verification.v1"
+)
 
 
 class CensusError(ValueError):
@@ -98,9 +124,15 @@ class Counts:
             raise CensusError(f"invalid structural count: {values}")
         if self.unit_clauses > self.clauses:
             raise CensusError("unit clauses cannot exceed clauses")
-        if self.literal_slots < self.unit_clauses:
-            raise CensusError("literal slots cannot be smaller than unit clauses")
-        if self.watch_entries != 2 * (self.clauses - self.unit_clauses):
+        non_unit_clauses = self.clauses - self.unit_clauses
+        minimum_literal_slots = self.unit_clauses + 2 * non_unit_clauses
+        if self.literal_slots < minimum_literal_slots:
+            raise CensusError(
+                "literal slots cannot encode the declared unit and non-unit clauses"
+            )
+        if non_unit_clauses == 0 and self.literal_slots != self.unit_clauses:
+            raise CensusError("literal slots without a binary or long clause")
+        if self.watch_entries != 2 * non_unit_clauses:
             raise CensusError("watch count must be two per non-unit clause")
 
     def __add__(self, other: Counts) -> Counts:
@@ -191,6 +223,8 @@ class CampaignLock:
     campaign_id: str
     expected_sources: int
     portable_source_set_sha256: str
+    decoder_oracle_sha256: str
+    decoder_oracle_counts: dict[str, int]
     families: tuple[FamilyLock, ...]
     caps: Caps
     minimum_total_applications: int
@@ -597,15 +631,30 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
             "required_features",
             "maximum_component_terms",
             "maximum_free_boolean_terms",
+            "receipt_sha256",
+            "counts",
         },
         "decoder oracle",
     )
+    decoder_oracle_counts = _exact_keys(
+        decoder_oracle["counts"],
+        set(DECODER_ORACLE_COUNT_FIELDS),
+        "decoder oracle counts",
+    )
+    if any(
+        type(decoder_oracle_counts[field]) is not int
+        or decoder_oracle_counts[field] < 0
+        for field in DECODER_ORACLE_COUNT_FIELDS
+    ):
+        raise CensusError("decoder oracle counters must be non-negative integers")
     if decoder_oracle != {
         "kind": "bounded_exhaustive_model_reconstruction",
         "fixtures": list(DECODER_ORACLE_FIXTURES),
         "required_features": list(DECODER_ORACLE_REQUIRED_FEATURES),
         "maximum_component_terms": DECODER_ORACLE_MAX_COMPONENT_TERMS,
         "maximum_free_boolean_terms": DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS,
+        "receipt_sha256": DECODER_ORACLE_FROZEN_SHA256,
+        "counts": DECODER_ORACLE_FROZEN_COUNTS,
     }:
         raise CensusError("bounded decoder oracle contract drift")
     templates = _exact_keys(
@@ -640,6 +689,11 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
         campaign_id=campaign_id,
         expected_sources=expected_sources,
         portable_source_set_sha256=portable_source_set_sha256,
+        decoder_oracle_sha256=DECODER_ORACLE_FROZEN_SHA256,
+        decoder_oracle_counts={
+            field: int(decoder_oracle_counts[field])
+            for field in DECODER_ORACLE_COUNT_FIELDS
+        },
         families=tuple(families),
         caps=caps,
         minimum_total_applications=_positive_int(
@@ -1728,8 +1782,14 @@ def run_bounded_decoder_oracle() -> DecoderOracleReceipt:
     )
 
 
+def _decoder_oracle_counts(receipt: DecoderOracleReceipt) -> dict[str, int]:
+    return {
+        field: getattr(receipt, field) for field in DECODER_ORACLE_COUNT_FIELDS
+    }
+
+
 def _require_decoder_oracle(receipt: DecoderOracleReceipt | None) -> DecoderOracleReceipt:
-    if receipt is None or receipt.executed is not True:
+    if type(receipt) is not DecoderOracleReceipt or receipt.executed is not True:
         raise ProjectionInvariant("bounded decoder oracle was not run")
     if receipt.passed is not True:
         raise ProjectionInvariant("bounded decoder oracle did not pass")
@@ -1740,19 +1800,39 @@ def _require_decoder_oracle(receipt: DecoderOracleReceipt | None) -> DecoderOrac
         != DECODER_ORACLE_MAX_FREE_BOOLEAN_TERMS
     ):
         raise ProjectionInvariant("bounded decoder oracle bound drift")
-    if not set(DECODER_ORACLE_REQUIRED_FEATURES).issubset(
-        receipt.exercised_features
-    ):
-        raise ProjectionInvariant("bounded decoder oracle lacks required feature coverage")
+    if receipt.exercised_features != tuple(sorted(DECODER_ORACLE_REQUIRED_FEATURES)):
+        raise ProjectionInvariant("bounded decoder oracle feature coverage drift")
+    counts = _decoder_oracle_counts(receipt)
+    if any(type(value) is not int or value < 0 for value in counts.values()):
+        raise ProjectionInvariant("bounded decoder oracle has malformed counters")
     if (
         receipt.assignments_examined
         != receipt.assignments_accepted + receipt.assignments_rejected
         or receipt.assignments_accepted < 1
         or receipt.assignments_rejected < 1
-        or receipt.euf_satisfaction_checks < 1
+        or receipt.euf_satisfaction_checks < receipt.assignments_accepted
+        or receipt.repeated_key_assignments > receipt.assignments_accepted
+        or receipt.padded_assignments > receipt.assignments_accepted
         or receipt.non_nullary_default_probes < 1
+        or receipt.non_nullary_default_probes > receipt.arbitrary_default_probes
     ):
         raise ProjectionInvariant("bounded decoder oracle evidence is incomplete")
+    features = set(receipt.exercised_features)
+    feature_counters = {
+        "arbitrary_defaults": receipt.non_nullary_default_probes,
+        "padding": receipt.padded_assignments,
+        "reconstructed_euf_satisfaction": receipt.euf_satisfaction_checks,
+        "repeated_keys": receipt.repeated_key_assignments,
+    }
+    if any(
+        (feature in features) != (counter > 0)
+        for feature, counter in feature_counters.items()
+    ):
+        raise ProjectionInvariant("bounded decoder oracle feature/counter contradiction")
+    if counts != DECODER_ORACLE_FROZEN_COUNTS:
+        raise ProjectionInvariant("bounded decoder oracle counter drift")
+    if receipt.sha256 != DECODER_ORACLE_FROZEN_SHA256:
+        raise ProjectionInvariant("bounded decoder oracle frozen receipt drift")
     return receipt
 
 
@@ -2311,9 +2391,862 @@ def chain_records(records: Sequence[dict[str, object]]) -> list[dict[str, object
     return chained
 
 
+def _nonnegative_int(value: object, context: str) -> int:
+    if type(value) is not int or value < 0:
+        raise CensusError(f"{context} must be a non-negative integer")
+    return value
+
+
+def _counts_from_json(
+    value: object, context: str, caps: Caps | None = None
+) -> Counts:
+    row = _exact_keys(value, set(Counts.__dataclass_fields__), context)
+    try:
+        counts = Counts(**row)  # type: ignore[arg-type]
+    except CensusError as error:
+        raise CensusError(f"{context}: {error}") from error
+    if caps is not None:
+        _counts_within_cap(counts, caps, context.replace(" ", "_"))
+    return counts
+
+
+def _validate_encoding_counts(
+    value: object,
+    encoding: str,
+    categories_expected: set[str],
+    caps: Caps,
+    context: str,
+) -> tuple[Counts, dict[str, Counts]]:
+    encoding_row = _exact_keys(value, {"categories", "total"}, context)
+    categories = _exact_keys(
+        encoding_row["categories"], categories_expected, f"{context}.categories"
+    )
+    parsed: dict[str, Counts] = {}
+    computed_total = ZERO_COUNTS
+    for name in sorted(categories):
+        parsed[name] = _counts_from_json(
+            categories[name], f"{context}.categories.{name}", caps
+        )
+        computed_total += parsed[name]
+        _counts_within_cap(computed_total, caps, f"{encoding}_category_sum")
+    declared_total = _counts_from_json(
+        encoding_row["total"], f"{context}.total", caps
+    )
+    if declared_total != computed_total:
+        raise CensusError(f"{context}.total does not equal its category sum")
+    return declared_total, parsed
+
+
+def _validate_channel(
+    row: Mapping[str, object],
+    sort_id: int,
+    components: Mapping[int, Mapping[str, object]],
+    context: str,
+) -> None:
+    channel = row["channel"]
+    width = _positive_int(row["width"], f"{context}.width")
+    component_id = row["component_id"]
+    if sort_id == qfuf.BOOL_SORT:
+        if channel != "boolean" or component_id is not None or width != 1:
+            raise CensusError(f"{context} has an invalid Boolean channel")
+        return
+    if channel != "component" or type(component_id) is not int:
+        raise CensusError(f"{context} has an invalid component channel")
+    component = components.get(component_id)
+    if component is None:
+        raise CensusError(f"{context} refers to an unknown component")
+    component_sort = component["sort"]
+    assert isinstance(component_sort, dict)
+    if component_sort["id"] != sort_id or component["width"] != width:
+        raise CensusError(f"{context} crosses a component namespace")
+
+
+def _validated_shape(
+    value: object, lock: CampaignLock, context: str
+) -> dict[str, int]:
+    shape = _exact_keys(
+        value,
+        {
+            "sorts",
+            "function_declarations",
+            "terms",
+            "non_boolean_terms",
+            "boolean_terms",
+            "applications",
+            "application_symbols",
+            "maximum_symbol_applications",
+            "argument_slots",
+            "source_equality_atoms",
+            "source_boolean_atoms",
+            "components",
+            "maximum_component_terms",
+            "ackermann_pairs",
+            "initial_equality_edges",
+            "ackermann_equality_edges",
+            "chordal_fill_edges",
+            "completed_equality_edges",
+            "completed_equality_triangles",
+            "eliminated_equality_vertices",
+        },
+        context,
+    )
+    result = {
+        key: _nonnegative_int(field, f"{context}.{key}")
+        for key, field in shape.items()
+    }
+    if result["sorts"] < 1:
+        raise CensusError(f"{context}.sorts must include Bool")
+    if result["terms"] != result["non_boolean_terms"] + result["boolean_terms"]:
+        raise CensusError(f"{context} term partition is inconsistent")
+    if result["boolean_terms"] < 2:
+        raise CensusError(f"{context} omits Boolean constants")
+    if result["application_symbols"] > result["applications"]:
+        raise CensusError(f"{context} has too many application symbols")
+    if result["function_declarations"] < result["application_symbols"]:
+        raise CensusError(f"{context} omits function declarations")
+    if result["maximum_symbol_applications"] > result["applications"]:
+        raise CensusError(f"{context} maximum application count is impossible")
+    empty_application_summary = (
+        result["application_symbols"] == 0
+        and result["maximum_symbol_applications"] == 0
+    )
+    if (result["applications"] == 0) != empty_application_summary:
+        raise CensusError(f"{context} application summary is inconsistent")
+    if result["source_boolean_atoms"] > result["boolean_terms"]:
+        raise CensusError(f"{context} has too many Boolean atoms")
+    if result["completed_equality_edges"] != (
+        result["initial_equality_edges"]
+        + result["ackermann_equality_edges"]
+        + result["chordal_fill_edges"]
+    ):
+        raise CensusError(f"{context} equality edge accounting is inconsistent")
+    if result["completed_equality_edges"] > choose2(result["terms"]):
+        raise CensusError(f"{context} has an impossible equality graph")
+    if result["completed_equality_triangles"] > choose3(result["terms"]):
+        raise CensusError(f"{context} has an impossible triangle count")
+    if result["eliminated_equality_vertices"] > result["terms"]:
+        raise CensusError(f"{context} has too many eliminated vertices")
+    cap_relations = {
+        "terms": lock.caps.max_terms,
+        "function_declarations": lock.caps.max_symbols,
+        "applications": lock.caps.max_applications,
+        "maximum_component_terms": lock.caps.max_component_terms,
+        "ackermann_pairs": lock.caps.max_ackermann_pairs,
+        "completed_equality_edges": lock.caps.max_equality_edges,
+        "chordal_fill_edges": lock.caps.max_fill_edges,
+    }
+    for field, limit in cap_relations.items():
+        if result[field] > limit:
+            raise CensusError(f"{context}.{field} exceeds its campaign cap")
+    return result
+
+
+def _validate_components(
+    value: object,
+    shape: Mapping[str, int],
+    caps: Caps,
+    context: str,
+) -> tuple[dict[int, Mapping[str, object]], int, Counts]:
+    if type(value) is not list:
+        raise CensusError(f"{context} must be an array")
+    components: dict[int, Mapping[str, object]] = {}
+    canonicalization_total = ZERO_COUNTS
+    term_total = 0
+    class_bit_total = 0
+    for index, component_value in enumerate(value):
+        row = _exact_keys(
+            component_value,
+            {
+                "id",
+                "sort",
+                "terms",
+                "first_term",
+                "last_term",
+                "width",
+                "class_bits",
+                "canonicalization",
+            },
+            f"{context}[{index}]",
+        )
+        if row["id"] != index:
+            raise CensusError(f"{context} is not in canonical ID order")
+        sort = _exact_keys(
+            row["sort"], {"id", "name", "quoted"}, f"{context}[{index}].sort"
+        )
+        _positive_int(sort["id"], f"{context}[{index}].sort.id")
+        if not isinstance(sort["name"], str) or type(sort["quoted"]) is not bool:
+            raise CensusError(f"{context}[{index}] has malformed sort identity")
+        terms = _positive_int(row["terms"], f"{context}[{index}].terms")
+        first_term = _nonnegative_int(
+            row["first_term"], f"{context}[{index}].first_term"
+        )
+        last_term = _nonnegative_int(
+            row["last_term"], f"{context}[{index}].last_term"
+        )
+        if first_term > last_term or last_term >= shape["terms"]:
+            raise CensusError(f"{context}[{index}] has invalid term bounds")
+        width = _positive_int(row["width"], f"{context}[{index}].width")
+        if width != component_width(terms):
+            raise CensusError(f"{context}[{index}] has incorrect width")
+        class_bits = _nonnegative_int(
+            row["class_bits"], f"{context}[{index}].class_bits"
+        )
+        if class_bits != terms * width:
+            raise CensusError(f"{context}[{index}] has incorrect class bits")
+        canonicalization = _counts_from_json(
+            row["canonicalization"], f"{context}[{index}].canonicalization", caps
+        )
+        if canonicalization != restricted_growth_counts(terms, width):
+            raise CensusError(f"{context}[{index}] canonicalization model drift")
+        components[index] = row
+        canonicalization_total += canonicalization
+        term_total += terms
+        class_bit_total += class_bits
+    if len(components) != shape["components"]:
+        raise CensusError(f"{context} does not match shape.components")
+    if term_total != shape["non_boolean_terms"]:
+        raise CensusError(f"{context} does not partition non-Boolean terms")
+    maximum_terms = max(
+        (int(component["terms"]) for component in components.values()), default=0
+    )
+    if maximum_terms != shape["maximum_component_terms"]:
+        raise CensusError(f"{context} maximum size is inconsistent")
+    return components, class_bit_total, canonicalization_total
+
+
+@dataclass(frozen=True)
+class _SymbolValidation:
+    applications: int
+    argument_slots: int
+    ackermann_pairs: int
+    maximum_symbol_records: int
+    eager_ackermann_clauses: int
+    eager_ackermann_literals: int
+    sorter: Counts
+    adjacency: Counts
+    logical_record_bits: int
+    padded_record_bits: int
+    sorter_comparators: int
+    needs_sorter_constant: bool
+
+
+def _validate_symbols(
+    value: object,
+    components: Mapping[int, Mapping[str, object]],
+    caps: Caps,
+    context: str,
+) -> _SymbolValidation:
+    if type(value) is not list:
+        raise CensusError(f"{context} must be an array")
+    previous_function_id: int | None = None
+    applications_total = 0
+    argument_slots_total = 0
+    pair_total = 0
+    maximum_symbol_records = 0
+    ackermann_clause_total = 0
+    ackermann_literal_total = 0
+    sorter_total = ZERO_COUNTS
+    adjacency_total = ZERO_COUNTS
+    logical_record_bits = 0
+    padded_record_bits = 0
+    sorter_comparators = 0
+    needs_sorter_constant = False
+    for index, symbol_value in enumerate(value):
+        row = _exact_keys(
+            symbol_value,
+            {
+                "function",
+                "signature",
+                "applications",
+                "ackermann_pairs",
+                "arguments",
+                "result",
+                "eager_ackermann",
+                "cqram",
+            },
+            f"{context}[{index}]",
+        )
+        function = _exact_keys(
+            row["function"],
+            {"id", "name", "quoted", "internal"},
+            f"{context}[{index}].function",
+        )
+        function_id = _nonnegative_int(
+            function["id"], f"{context}[{index}].function.id"
+        )
+        if previous_function_id is not None and function_id <= previous_function_id:
+            raise CensusError(f"{context} is not in strict function-ID order")
+        previous_function_id = function_id
+        if (
+            not isinstance(function["name"], str)
+            or type(function["quoted"]) is not bool
+            or type(function["internal"]) is not bool
+        ):
+            raise CensusError(f"{context}[{index}] has malformed function identity")
+        signature = _exact_keys(
+            row["signature"],
+            {"argument_sorts", "result_sort"},
+            f"{context}[{index}].signature",
+        )
+        argument_sorts = signature["argument_sorts"]
+        if type(argument_sorts) is not list or not argument_sorts:
+            raise CensusError(f"{context}[{index}] must be non-nullary")
+        if any(type(sort_id) is not int or sort_id < 0 for sort_id in argument_sorts):
+            raise CensusError(f"{context}[{index}] has malformed argument sorts")
+        result_sort = _nonnegative_int(
+            signature["result_sort"], f"{context}[{index}].result_sort"
+        )
+        applications = _positive_int(
+            row["applications"], f"{context}[{index}].applications"
+        )
+        pairs = _nonnegative_int(
+            row["ackermann_pairs"], f"{context}[{index}].ackermann_pairs"
+        )
+        if pairs != choose2(applications):
+            raise CensusError(f"{context}[{index}] has incorrect pair count")
+        arguments = row["arguments"]
+        if type(arguments) is not list or len(arguments) != len(argument_sorts):
+            raise CensusError(f"{context}[{index}] has malformed arguments")
+        differing_total = 0
+        key_width = 0
+        for position, argument_value in enumerate(arguments):
+            argument = _exact_keys(
+                argument_value,
+                {
+                    "position",
+                    "sort",
+                    "channel",
+                    "component_id",
+                    "width",
+                    "distinct_terms",
+                    "differing_application_pairs",
+                },
+                f"{context}[{index}].arguments[{position}]",
+            )
+            if (
+                argument["position"] != position
+                or argument["sort"] != argument_sorts[position]
+            ):
+                raise CensusError(f"{context}[{index}] argument identity drift")
+            _validate_channel(
+                argument,
+                int(argument_sorts[position]),
+                components,
+                f"{context}[{index}].arguments[{position}]",
+            )
+            distinct_terms = _positive_int(
+                argument["distinct_terms"],
+                f"{context}[{index}].arguments[{position}].distinct_terms",
+            )
+            differing = _nonnegative_int(
+                argument["differing_application_pairs"],
+                f"{context}[{index}].arguments[{position}].differing_pairs",
+            )
+            if distinct_terms > applications or differing > pairs:
+                raise CensusError(f"{context}[{index}] argument counts are impossible")
+            differing_total += differing
+            key_width += int(argument["width"])
+        result = _exact_keys(
+            row["result"],
+            {"channel", "component_id", "width"},
+            f"{context}[{index}].result",
+        )
+        _validate_channel(result, result_sort, components, f"{context}[{index}].result")
+        value_width = int(result["width"])
+        eager_ackermann = _exact_keys(
+            row["eager_ackermann"],
+            {"clauses", "literal_slots"},
+            f"{context}[{index}].eager_ackermann",
+        )
+        ackermann_clauses = _nonnegative_int(
+            eager_ackermann["clauses"], f"{context}[{index}].eager_ackermann.clauses"
+        )
+        ackermann_literals = _nonnegative_int(
+            eager_ackermann["literal_slots"],
+            f"{context}[{index}].eager_ackermann.literal_slots",
+        )
+        expected_ackermann = (
+            (2 * pairs, 4 * pairs + 2 * differing_total)
+            if result_sort == qfuf.BOOL_SORT
+            else (pairs, pairs + differing_total)
+        )
+        if (ackermann_clauses, ackermann_literals) != expected_ackermann:
+            raise CensusError(f"{context}[{index}] Ackermann model drift")
+        cqram = _exact_keys(
+            row["cqram"],
+            {
+                "key_width",
+                "value_width",
+                "record_width",
+                "padded_records",
+                "comparators",
+                "network_depth",
+                "sorter",
+                "adjacency",
+            },
+            f"{context}[{index}].cqram",
+        )
+        record_width = key_width + value_width + 1
+        padded_records = applications if applications < 2 else next_power_of_two(applications)
+        comparators = 0 if applications < 2 else bitonic_comparator_count(padded_records)
+        network_depth = (
+            (padded_records.bit_length() - 1) * padded_records.bit_length() // 2
+        )
+        expected_scalars = {
+            "key_width": key_width,
+            "value_width": value_width,
+            "record_width": record_width,
+            "padded_records": padded_records,
+            "comparators": comparators,
+            "network_depth": network_depth,
+        }
+        if any(cqram[field] != expected for field, expected in expected_scalars.items()):
+            raise CensusError(f"{context}[{index}] CQRAM shape drift")
+        if padded_records > caps.max_sorter_records:
+            raise CensusError(f"{context}[{index}] exceeds the sorter-record cap")
+        sorter = _counts_from_json(
+            cqram["sorter"], f"{context}[{index}].cqram.sorter", caps
+        )
+        adjacency = _counts_from_json(
+            cqram["adjacency"], f"{context}[{index}].cqram.adjacency", caps
+        )
+        if applications >= 2:
+            comparator_counts = unsigned_greater_counts(key_width + 1) + MUX2.scale(
+                2 * record_width
+            )
+            expected_sorter = comparator_counts.scale(comparators)
+            expected_adjacency = (
+                XNOR2.scale(key_width)
+                + Counts(
+                    clauses=2 * value_width,
+                    literal_slots=2 * value_width * (key_width + 4),
+                    watch_entries=4 * value_width,
+                )
+            ).scale(padded_records - 1)
+            needs_sorter_constant = True
+        else:
+            expected_sorter = ZERO_COUNTS
+            expected_adjacency = ZERO_COUNTS
+        if sorter != expected_sorter or adjacency != expected_adjacency:
+            raise CensusError(f"{context}[{index}] CQRAM count model drift")
+        applications_total += applications
+        argument_slots_total += applications * len(arguments)
+        pair_total += pairs
+        maximum_symbol_records = max(maximum_symbol_records, applications)
+        ackermann_clause_total += ackermann_clauses
+        ackermann_literal_total += ackermann_literals
+        sorter_total += sorter
+        adjacency_total += adjacency
+        logical_record_bits += applications * record_width
+        padded_record_bits += padded_records * record_width
+        sorter_comparators += comparators
+    if padded_record_bits > caps.max_packed_record_bits:
+        raise CensusError(f"{context} exceeds the packed-record-bit cap")
+    if sorter_comparators > caps.max_sorter_comparators:
+        raise CensusError(f"{context} exceeds the sorter-comparator cap")
+    return _SymbolValidation(
+        applications=applications_total,
+        argument_slots=argument_slots_total,
+        ackermann_pairs=pair_total,
+        maximum_symbol_records=maximum_symbol_records,
+        eager_ackermann_clauses=ackermann_clause_total,
+        eager_ackermann_literals=ackermann_literal_total,
+        sorter=sorter_total,
+        adjacency=adjacency_total,
+        logical_record_bits=logical_record_bits,
+        padded_record_bits=padded_record_bits,
+        sorter_comparators=sorter_comparators,
+        needs_sorter_constant=needs_sorter_constant,
+    )
+
+
+def _validate_projected_record(
+    record: Mapping[str, object], lock: CampaignLock, context: str
+) -> None:
+    if record["reason"] is not None or record["cap_events"] != []:
+        raise CensusError(f"{context} projected status contradicts reason/cap events")
+    shape = _validated_shape(record["shape"], lock, f"{context}.shape")
+    components, class_bits, canonicalization = _validate_components(
+        record["components"], shape, lock.caps, f"{context}.components"
+    )
+    _counts_within_cap(canonicalization, lock.caps, "component_canonicalization")
+    counts = _exact_keys(
+        record["counts"], {"eager", "component_quotient_ram"}, f"{context}.counts"
+    )
+    eager_total, eager_categories = _validate_encoding_counts(
+        counts["eager"],
+        "eager",
+        {"ackermann", "chordal_fill", "transitivity"},
+        lock.caps,
+        f"{context}.counts.eager",
+    )
+    cqram_total, cqram_categories = _validate_encoding_counts(
+        counts["component_quotient_ram"],
+        "component_quotient_ram",
+        {
+            "class_codes",
+            "restricted_growth",
+            "equality_links",
+            "boolean_domain",
+            "sorter_constant",
+            "sorters",
+            "adjacent_consistency",
+        },
+        lock.caps,
+        f"{context}.counts.component_quotient_ram",
+    )
+    if cqram_categories["class_codes"] != Counts(variables=class_bits):
+        raise CensusError(f"{context} class-code count does not match components")
+    if cqram_categories["restricted_growth"] != canonicalization:
+        raise CensusError(f"{context} restricted-growth count does not match components")
+    symbols_value = record["symbols"]
+    symbols = _validate_symbols(
+        symbols_value, components, lock.caps, f"{context}.symbols"
+    )
+    assert isinstance(symbols_value, list)
+    symbol_shape = {
+        "applications": symbols.applications,
+        "application_symbols": len(symbols_value),
+        "maximum_symbol_applications": symbols.maximum_symbol_records,
+        "argument_slots": symbols.argument_slots,
+        "ackermann_pairs": symbols.ackermann_pairs,
+    }
+    for field, expected in symbol_shape.items():
+        if shape[field] != expected:
+            raise CensusError(f"{context}.shape.{field} does not match symbol rows")
+
+    expected_ackermann = Counts(
+        variables=shape["ackermann_equality_edges"],
+        clauses=symbols.eager_ackermann_clauses,
+        literal_slots=symbols.eager_ackermann_literals,
+        watch_entries=2 * symbols.eager_ackermann_clauses,
+    )
+    if eager_categories["ackermann"] != expected_ackermann:
+        raise CensusError(f"{context} eager Ackermann category drift")
+    if eager_categories["chordal_fill"] != Counts(
+        variables=shape["chordal_fill_edges"]
+    ):
+        raise CensusError(f"{context} eager chordal-fill category drift")
+    transitivity = eager_categories["transitivity"]
+    triangles = shape["completed_equality_triangles"]
+    expected_transitivity = UNIT.scale(transitivity.unit_clauses) + Counts(
+        clauses=3 * triangles,
+        literal_slots=9 * triangles,
+        watch_entries=6 * triangles,
+    )
+    if (
+        transitivity != expected_transitivity
+        or transitivity.unit_clauses > shape["source_equality_atoms"]
+    ):
+        raise CensusError(f"{context} eager transitivity category drift")
+    if cqram_categories["sorters"] != symbols.sorter:
+        raise CensusError(f"{context} sorter category does not match symbols")
+    if cqram_categories["adjacent_consistency"] != symbols.adjacency:
+        raise CensusError(f"{context} adjacency category does not match symbols")
+    expected_sorter_constant = (
+        UNIT_WITH_VARIABLE if symbols.needs_sorter_constant else ZERO_COUNTS
+    )
+    if cqram_categories["sorter_constant"] != expected_sorter_constant:
+        raise CensusError(f"{context} sorter constant category drift")
+    boolean_domain = cqram_categories["boolean_domain"]
+    if boolean_domain not in (ZERO_COUNTS, UNIT, UNIT.scale(2)):
+        raise CensusError(f"{context} Boolean-domain category drift")
+
+    decoder = _exact_keys(
+        record["decoder"],
+        {
+            "complete",
+            "oracle",
+            "domain_value",
+            "boolean_carrier",
+            "unobserved_function_completion",
+            "counts",
+        },
+        f"{context}.decoder",
+    )
+    expected_oracle_reference = {
+        "schema": DECODER_ORACLE_SCHEMA,
+        "executed": True,
+        "passed": True,
+        "sha256": lock.decoder_oracle_sha256,
+    }
+    if (
+        decoder["complete"] is not True
+        or decoder["oracle"] != expected_oracle_reference
+    ):
+        raise CensusError(f"{context}.decoder has an invalid frozen oracle reference")
+    if (
+        decoder["domain_value"] != "typed_tuple_sort_id_component_id_class_code"
+        or decoder["boolean_carrier"] != "false_true"
+        or decoder["unobserved_function_completion"] != "typed_arbitrary_default"
+    ):
+        raise CensusError(f"{context}.decoder contract drift")
+    decoder_counts = _exact_keys(
+        decoder["counts"],
+        {
+            "assignment_bits_read",
+            "term_codes_materialized",
+            "equality_atoms_checked",
+            "argument_code_lookups",
+            "result_code_lookups",
+            "records_checked",
+            "map_probes",
+            "logical_record_bits",
+            "padded_record_bits",
+            "sorter_comparators_replayed",
+            "maximum_symbol_records",
+            "sort_defaults_materialized",
+            "total_operations",
+        },
+        f"{context}.decoder.counts",
+    )
+    decoder_values = {
+        key: _nonnegative_int(value, f"{context}.decoder.counts.{key}")
+        for key, value in decoder_counts.items()
+    }
+    expected_decoder_counts = {
+        "assignment_bits_read": class_bits + shape["source_boolean_atoms"],
+        "term_codes_materialized": shape["terms"],
+        "equality_atoms_checked": shape["source_equality_atoms"],
+        "argument_code_lookups": shape["argument_slots"],
+        "result_code_lookups": shape["applications"],
+        "records_checked": shape["applications"],
+        "map_probes": 2 * shape["applications"],
+        "logical_record_bits": symbols.logical_record_bits,
+        "padded_record_bits": symbols.padded_record_bits,
+        "sorter_comparators_replayed": symbols.sorter_comparators,
+        "maximum_symbol_records": symbols.maximum_symbol_records,
+        "sort_defaults_materialized": shape["sorts"],
+    }
+    if any(
+        decoder_values[field] != expected
+        for field, expected in expected_decoder_counts.items()
+    ):
+        raise CensusError(f"{context}.decoder telemetry contradicts the model")
+    expected_operations = sum(
+        value
+        for key, value in expected_decoder_counts.items()
+        if key not in {"maximum_symbol_records", "padded_record_bits"}
+    )
+    if decoder_values["total_operations"] != expected_operations:
+        raise CensusError(f"{context}.decoder total operation count drift")
+    if expected_operations > lock.caps.max_decoder_operations:
+        raise CensusError(f"{context}.decoder operation cap exceeded")
+
+    selector = _exact_keys(
+        record["selector"],
+        {
+            "eligible",
+            "minimum_total_applications",
+            "minimum_max_symbol_applications",
+        },
+        f"{context}.selector",
+    )
+    expected_eligible = (
+        shape["applications"] >= lock.minimum_total_applications
+        and shape["maximum_symbol_applications"]
+        >= lock.minimum_max_symbol_applications
+    )
+    if (
+        type(selector["eligible"]) is not bool
+        or selector["eligible"] != expected_eligible
+        or selector["minimum_total_applications"]
+        != lock.minimum_total_applications
+        or selector["minimum_max_symbol_applications"]
+        != lock.minimum_max_symbol_applications
+    ):
+        raise CensusError(f"{context}.selector contradicts the locked selector")
+    ratios = _exact_keys(
+        record["ratios_ppm"], set(Counts.__dataclass_fields__), f"{context}.ratios_ppm"
+    )
+    for field in Counts.__dataclass_fields__:
+        expected_ratio = _ppm_ratio(
+            getattr(cqram_total, field), getattr(eager_total, field)
+        )
+        if ratios[field] != expected_ratio:
+            raise CensusError(f"{context}.ratios_ppm.{field} is inconsistent")
+
+
+def _validate_nonprojected_record(
+    record: Mapping[str, object], lock: CampaignLock, context: str
+) -> None:
+    status = record["status"]
+    reason = record["reason"]
+    if not isinstance(reason, str) or not reason:
+        raise CensusError(f"{context} non-projected status lacks a reason")
+    if (
+        record["shape"] != {}
+        or record["components"] != []
+        or record["symbols"] != []
+        or record["counts"] != {"eager": {}, "component_quotient_ram": {}}
+        or record["ratios_ppm"] != {}
+    ):
+        raise CensusError(f"{context} non-projected row contains projected model data")
+    selector = _exact_keys(
+        record["selector"],
+        {
+            "eligible",
+            "minimum_total_applications",
+            "minimum_max_symbol_applications",
+        },
+        f"{context}.selector",
+    )
+    if selector != {
+        "eligible": False,
+        "minimum_total_applications": lock.minimum_total_applications,
+        "minimum_max_symbol_applications": lock.minimum_max_symbol_applications,
+    }:
+        raise CensusError(f"{context} non-projected selector drift")
+    cap_events = record["cap_events"]
+    if type(cap_events) is not list:
+        raise CensusError(f"{context}.cap_events must be an array")
+    if status == "parse_error":
+        if cap_events or record["decoder"] != {
+            "complete": False,
+            "reason": "not_projected",
+        }:
+            raise CensusError(f"{context} parse-error state is contradictory")
+        return
+    if record["decoder"] != {"complete": False, "reason": reason}:
+        raise CensusError(f"{context} unknown-projection decoder reason drift")
+    if len(cap_events) > 1:
+        raise CensusError(f"{context} has multiple cap events")
+    if not cap_events:
+        if not reason.startswith("typed_projection_invariant: "):
+            raise CensusError(f"{context} unknown projection lacks a cap or invariant")
+        return
+    event = _exact_keys(
+        cap_events[0], {"code", "limit", "observed"}, f"{context}.cap_events[0]"
+    )
+    code = event["code"]
+    if not isinstance(code, str) or not code:
+        raise CensusError(f"{context} cap event has an invalid code")
+    limit = _positive_int(event["limit"], f"{context}.cap_events[0].limit")
+    observed = _nonnegative_int(
+        event["observed"], f"{context}.cap_events[0].observed"
+    )
+    named_limits = {
+        "source_bytes": lock.caps.max_source_bytes,
+        "terms": lock.caps.max_terms,
+        "applications": lock.caps.max_applications,
+        "symbols": lock.caps.max_symbols,
+        "component_terms": lock.caps.max_component_terms,
+        "ackermann_pairs": lock.caps.max_ackermann_pairs,
+        "equality_edges": lock.caps.max_equality_edges,
+        "fill_edges": lock.caps.max_fill_edges,
+        "sorter_records": lock.caps.max_sorter_records,
+        "sorter_comparators": lock.caps.max_sorter_comparators,
+        "packed_record_bits": lock.caps.max_packed_record_bits,
+        "decoder_operations": lock.caps.max_decoder_operations,
+    }
+    expected_limit = named_limits.get(code, lock.caps.max_projected_count)
+    if limit != expected_limit or observed <= limit:
+        raise CensusError(f"{context} cap event does not prove a cap violation")
+    expected_reason = "source_byte_cap" if code == "source_bytes" else code
+    if reason != expected_reason:
+        raise CensusError(f"{context} cap event reason drift")
+    source = record["source"]
+    assert isinstance(source, dict)
+    if code == "source_bytes" and source["bytes"] != observed:
+        raise CensusError(f"{context} source-byte cap does not match source identity")
+
+
+def _validate_record_model(
+    record: Mapping[str, object], lock: CampaignLock, context: str
+) -> None:
+    _exact_keys(
+        record,
+        {
+            "schema",
+            "sequence",
+            "previous_record_sha256",
+            "record_sha256",
+            "lock_sha256",
+            "campaign_id",
+            "interpretation",
+            "parser_api",
+            "parser_sha256",
+            "taxonomy_builder_sha256",
+            "manifest",
+            "source",
+            "taxonomy",
+            "status",
+            "reason",
+            "cap_events",
+            "shape",
+            "components",
+            "symbols",
+            "counts",
+            "decoder",
+            "selector",
+            "ratios_ppm",
+        },
+        context,
+    )
+    if record["schema"] != RECORD_SCHEMA or record["lock_sha256"] != lock.sha256:
+        raise CensusError(f"{context} has schema or lock drift")
+    if (
+        record["campaign_id"] != lock.campaign_id
+        or record["interpretation"] != INTERPRETATION
+        or record["parser_api"] != PARSER_API
+    ):
+        raise CensusError(f"{context} campaign provenance drift")
+    for field in ("parser_sha256", "taxonomy_builder_sha256"):
+        if not _is_lower_sha256(record[field]):
+            raise CensusError(f"{context}.{field} is not a SHA-256")
+    manifest = _exact_keys(
+        record["manifest"], {"sha256", "record_line"}, f"{context}.manifest"
+    )
+    if not _is_lower_sha256(manifest["sha256"]):
+        raise CensusError(f"{context}.manifest.sha256 is invalid")
+    _positive_int(manifest["record_line"], f"{context}.manifest.record_line")
+    source = _exact_keys(
+        record["source"],
+        {"id", "relative_path", "bytes", "sha256"},
+        f"{context}.source",
+    )
+    if isinstance(source["id"], bool) or not isinstance(source["id"], (int, str)):
+        raise CensusError(f"{context}.source.id is invalid")
+    relative_path = source["relative_path"]
+    try:
+        validated_path = family_manifest._validated_relative_path(
+            relative_path, line_number=int(record["sequence"]) + 1
+        )
+    except (family_manifest.ManifestError, TypeError, ValueError) as error:
+        raise CensusError(f"{context}.source.relative_path is invalid: {error}") from error
+    if validated_path != relative_path:
+        raise CensusError(f"{context}.source.relative_path normalization drift")
+    source_bytes = _nonnegative_int(source["bytes"], f"{context}.source.bytes")
+    if not _is_lower_sha256(source["sha256"]):
+        raise CensusError(f"{context}.source.sha256 is invalid")
+    taxonomy = _exact_keys(
+        record["taxonomy"],
+        {"source_family", "generator_lineage", "rule"},
+        f"{context}.taxonomy",
+    )
+    if any(
+        not isinstance(taxonomy[field], str) or not taxonomy[field]
+        for field in taxonomy
+    ):
+        raise CensusError(f"{context}.taxonomy is malformed")
+    status = record["status"]
+    if status not in {"projected", "parse_error", "unknown_projection"}:
+        raise CensusError(f"{context} has an unsupported status")
+    if status == "projected":
+        if source_bytes > lock.caps.max_source_bytes:
+            raise CensusError(f"{context} projected a source above the byte cap")
+        _validate_projected_record(record, lock, context)
+    else:
+        if status == "parse_error" and source_bytes > lock.caps.max_source_bytes:
+            raise CensusError(f"{context} parse error bypassed the source-byte cap")
+        _validate_nonprojected_record(record, lock, context)
+
+
 def verify_record_stream(
-    records_bytes: bytes, expected_sources: int, lock_sha256: str
+    records_bytes: bytes, expected_sources: int, lock: CampaignLock
 ) -> list[dict[str, object]]:
+    if type(expected_sources) is not int or expected_sources < 0:
+        raise CensusError("expected record cardinality must be non-negative")
     try:
         text = records_bytes.decode("ascii")
     except UnicodeDecodeError as error:
@@ -2341,12 +3274,12 @@ def verify_record_stream(
         if type(value) is not dict:
             raise CensusError(f"record stream line {line_number} is not an object")
         record = value
-        if record.get("schema") != RECORD_SCHEMA:
-            raise CensusError(f"record stream line {line_number} has schema drift")
-        if record.get("sequence") != line_number - 1:
+        if (
+            type(record.get("sequence")) is not int
+            or record.get("sequence") != line_number - 1
+        ):
             raise CensusError(f"record stream line {line_number} breaks sequence")
-        if record.get("lock_sha256") != lock_sha256:
-            raise CensusError(f"record stream line {line_number} has lock drift")
+        _validate_record_model(record, lock, f"record stream line {line_number}")
         if record.get("previous_record_sha256") != previous:
             raise CensusError(f"record stream line {line_number} breaks hash chain")
         record_hash = record.get("record_sha256")
@@ -2354,6 +3287,8 @@ def verify_record_stream(
             raise CensusError(f"record stream line {line_number} has invalid hash")
         if _record_digest(record) != record_hash:
             raise CensusError(f"record stream line {line_number} has hash drift")
+        if canonical_json_bytes(record).decode("ascii") != line + "\n":
+            raise CensusError(f"record stream line {line_number} is not canonical JSON")
         source = record.get("source")
         if type(source) is not dict or not isinstance(source.get("relative_path"), str):
             raise CensusError(f"record stream line {line_number} lacks source path")
@@ -2376,11 +3311,9 @@ def _total_counts(record: Mapping[str, object], encoding: str) -> dict[str, int]
     encoding_counts = counts.get(encoding)
     if type(encoding_counts) is not dict or type(encoding_counts.get("total")) is not dict:
         raise CensusError(f"projected record lacks {encoding} total")
-    total = encoding_counts["total"]
-    expected = set(Counts.__dataclass_fields__)
-    if set(total) != expected or any(type(total[field]) is not int for field in expected):
-        raise CensusError(f"projected record has malformed {encoding} total")
-    return total
+    return _counts_from_json(
+        encoding_counts["total"], f"projected record {encoding} total"
+    ).to_json()
 
 
 def _ceil_fraction(value: int, ratio: Ratio) -> int:
@@ -2729,6 +3662,187 @@ def aggregate_records(
     }
 
 
+def _read_artifact(path: Path, context: str) -> bytes:
+    try:
+        return Path(path).read_bytes()
+    except OSError as error:
+        raise CensusError(f"cannot read {context} {path}: {error}") from error
+
+
+def _load_canonical_json_artifact(path: Path, context: str) -> dict[str, object]:
+    payload = _read_artifact(path, context)
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise CensusError(f"{context} must be ASCII") from error
+    try:
+        value = family_manifest.strict_json_loads(text)
+    except (json.JSONDecodeError, ValueError) as error:
+        raise CensusError(f"malformed {context}: {error}") from error
+    if type(value) is not dict:
+        raise CensusError(f"{context} must be a JSON object")
+    if canonical_json_bytes(value) != payload:
+        raise CensusError(f"{context} is not canonical JSON")
+    return value
+
+
+def _load_canonical_jsonl_artifact(
+    path: Path, context: str
+) -> tuple[bytes, list[dict[str, object]]]:
+    payload = _read_artifact(path, context)
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise CensusError(f"{context} must be ASCII") from error
+    if payload and not text.endswith("\n"):
+        raise CensusError(f"{context} ends with a partial line")
+    rows: list[dict[str, object]] = []
+    for line_number, line in enumerate(text.splitlines(), 1):
+        if not line:
+            raise CensusError(f"{context} line {line_number} is blank")
+        try:
+            value = family_manifest.strict_json_loads(line)
+        except (json.JSONDecodeError, ValueError) as error:
+            raise CensusError(
+                f"{context} line {line_number} is malformed: {error}"
+            ) from error
+        if type(value) is not dict:
+            raise CensusError(f"{context} line {line_number} is not an object")
+        if canonical_json_bytes(value).decode("ascii") != line + "\n":
+            raise CensusError(f"{context} line {line_number} is not canonical JSON")
+        rows.append(value)
+    return payload, rows
+
+
+def verify_census_bundle(
+    manifest_path: Path,
+    records_path: Path,
+    aggregate_path: Path,
+    targets_path: Path,
+    *,
+    repository_root: Path,
+    lock_path: Path = DEFAULT_LOCK_PATH,
+) -> dict[str, object]:
+    """Reopen and independently reconstruct a complete census bundle."""
+
+    lock = load_campaign_lock(lock_path)
+    oracle = _require_decoder_oracle(run_bounded_decoder_oracle())
+    if (
+        oracle.sha256 != lock.decoder_oracle_sha256
+        or _decoder_oracle_counts(oracle) != lock.decoder_oracle_counts
+    ):
+        raise ProjectionInvariant("campaign lock and decoder oracle receipt differ")
+    sources, manifest_bytes, portable_bytes = load_manifest(
+        manifest_path, repository_root, lock.expected_sources
+    )
+    manifest_sha256 = sha256_bytes(manifest_bytes)
+    portable_source_set_sha256 = sha256_bytes(portable_bytes)
+    if portable_source_set_sha256 != lock.portable_source_set_sha256:
+        raise CensusError(
+            "portable source-set SHA-256 mismatch during bundle verification"
+        )
+    parser_sha256 = sha256_path(PARSER_PATH)
+    taxonomy_builder_sha256 = sha256_path(TAXONOMY_PATH)
+    analyzer_sha256 = sha256_path(Path(__file__))
+
+    records_bytes = _read_artifact(records_path, "record stream")
+    records = verify_record_stream(records_bytes, lock.expected_sources, lock)
+    for sequence, (record, source) in enumerate(zip(records, sources)):
+        expected_source = {
+            "id": source.record_id,
+            "relative_path": source.relative_path,
+            "bytes": len(source.source_bytes),
+            "sha256": source.source_sha256,
+        }
+        expected_manifest = {
+            "sha256": manifest_sha256,
+            "record_line": source.line_number,
+        }
+        expected_taxonomy = {
+            "source_family": source.source_family,
+            "generator_lineage": source.generator_lineage,
+            "rule": source.taxonomy_rule,
+        }
+        if record["source"] != expected_source:
+            raise CensusError(f"record {sequence} source identity differs from manifest")
+        if record["manifest"] != expected_manifest:
+            raise CensusError(f"record {sequence} manifest provenance drift")
+        if record["taxonomy"] != expected_taxonomy:
+            raise CensusError(f"record {sequence} taxonomy provenance drift")
+        if (
+            record["parser_sha256"] != parser_sha256
+            or record["taxonomy_builder_sha256"] != taxonomy_builder_sha256
+        ):
+            raise CensusError(f"record {sequence} parser/taxonomy hash drift")
+
+    reconstructed_records = chain_records(
+        [
+            analyze_source(source, lock, manifest_sha256, parser_sha256, oracle)
+            for source in sources
+        ]
+    )
+    for sequence, (observed, expected) in enumerate(
+        zip(records, reconstructed_records)
+    ):
+        if observed != expected:
+            raise CensusError(
+                f"record {sequence} differs from fresh source reconstruction"
+            )
+
+    targets_bytes, targets = _load_canonical_jsonl_artifact(
+        targets_path, "target manifest"
+    )
+    expected_targets = _target_rows(reconstructed_records)
+    if targets != expected_targets:
+        raise CensusError("target manifest differs from reconstructed eligible records")
+    aggregate = _load_canonical_json_artifact(aggregate_path, "aggregate")
+    terminal_record_sha256 = (
+        str(reconstructed_records[-1]["record_sha256"])
+        if reconstructed_records
+        else None
+    )
+    expected_aggregate = aggregate_records(
+        reconstructed_records,
+        lock,
+        manifest_sha256=manifest_sha256,
+        portable_source_set_sha256=portable_source_set_sha256,
+        records_sha256=sha256_bytes(records_bytes),
+        terminal_record_sha256=terminal_record_sha256,
+        targets_sha256=sha256_bytes(targets_bytes),
+        parser_sha256=parser_sha256,
+        taxonomy_builder_sha256=taxonomy_builder_sha256,
+        analyzer_sha256=analyzer_sha256,
+        decoder_oracle=oracle,
+    )
+    if aggregate != expected_aggregate:
+        raise CensusError("aggregate or gates differ from full recomputation")
+    aggregate_bytes = _read_artifact(aggregate_path, "aggregate")
+    if aggregate_bytes != canonical_json_bytes(expected_aggregate):
+        raise CensusError("aggregate bytes differ from full recomputation")
+    gates = expected_aggregate["gates"]
+    hashes = expected_aggregate["hashes"]
+    assert isinstance(gates, dict)
+    assert isinstance(hashes, dict)
+    validity = gates["validity"]
+    assert isinstance(validity, dict)
+    return {
+        "schema": BUNDLE_VERIFICATION_SCHEMA,
+        "verified": True,
+        "campaign_id": lock.campaign_id,
+        "interpretation": INTERPRETATION,
+        "sources": len(reconstructed_records),
+        "targets": len(expected_targets),
+        "validity_pass": validity["pass"],
+        "implementation_allowed": gates["implementation_allowed"],
+        "decoder_oracle_sha256": oracle.sha256,
+        "hashes": {
+            **hashes,
+            "aggregate_json_sha256": sha256_bytes(aggregate_bytes),
+            "recomputed_gates_sha256": sha256_bytes(canonical_json_bytes(gates)),
+        },
+    }
+
+
 def _atomic_write(artifacts: Sequence[tuple[Path, bytes]]) -> None:
     resolved = [Path(path).resolve(strict=False) for path, _ in artifacts]
     if len(set(resolved)) != len(resolved):
@@ -2801,7 +3915,7 @@ def run_census(
     ]
     records = chain_records(analyzed)
     records_bytes = b"".join(canonical_json_bytes(record) for record in records)
-    verified = verify_record_stream(records_bytes, lock.expected_sources, lock.sha256)
+    verified = verify_record_stream(records_bytes, lock.expected_sources, lock)
     if verified != records:
         raise ProjectionInvariant("record stream changed during verification")
     targets = _target_rows(records)

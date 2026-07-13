@@ -2,8 +2,8 @@
 
 Date: 2026-07-13
 
-Status: implemented source-only opportunity census, repaired after independent
-review, and awaiting a second independent review. No WMI decision run has been
+Status: implemented source-only opportunity census, repaired after a second
+independent review, and awaiting re-review. No WMI decision run has been
 submitted. This is not a production solver route, a timing experiment, or
 evidence that T5 should be implemented.
 
@@ -81,10 +81,14 @@ repeated keys. The passing receipt covers Boolean carriers, multiple typed
 components and sorts, four disconnected components of one sort, three-to-four
 record padding, repeated keys, empty-sort defaults, 1,608 exhaustive
 non-nullary arbitrary-default probes, and 2,998 reconstructed term/atom
-satisfaction checks. The receipt is canonicalized and SHA-256 bound into every
-source record and the
-aggregate. A missing, failed, drifted, or feature-incomplete receipt aborts the
-census before outputs are written.
+satisfaction checks. It also fixes 1,608 total arbitrary-default probes, 170
+padded assignments, and 55 repeated-key assignments. The exact canonical
+receipt SHA-256 is
+`7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89`.
+That digest and all eight counters are frozen in the campaign lock and bound
+into every source record and the aggregate. A missing, failed, drifted,
+feature/counter-contradictory, or merely self-consistent but non-frozen receipt
+aborts the census before outputs are written.
 
 The exhaustive bound is four terms per component and two free Boolean terms.
 This is an executable regression oracle for the general decoder algorithm, not
@@ -105,15 +109,32 @@ The campaign lock fixes:
 - parser, analyzer, taxonomy builder, lock, manifest, portable source-set,
   record-stream, terminal-record, and target-manifest hashes;
 - a canonical JSONL hash chain in strict relative-path order;
+- semantic validation of every nested `Counts` object, category sum,
+  unit/non-unit literal layout, two-watch relation, component/symbol model,
+  selector, decoder, and status/cap relation;
 - explicit caps, with every cap event causing the validity gate to fail;
 - `max_symbols` counts every parser function entry, including internal,
   nullary, unused, and macro declarations, rather than only symbols with
   observed non-nullary applications;
-- a passing bounded exhaustive decoder-oracle receipt for every source.
+- the exact frozen bounded exhaustive decoder-oracle receipt for every source;
+- a separate strict bundle-verifier process that rereads the lock, manifest,
+  source files, records, targets, and aggregate; checks all parser, taxonomy,
+  analyzer, portable-source, artifact, oracle, and chain-endpoint hashes;
+  reconstructs every record from source; and recomputes the complete aggregate
+  and all gates without trusting stored `pass` booleans.
 
 The portable source-set digest hashes only relative path, byte count, and
 source SHA-256. Host-specific absolute manifest paths therefore do not make
 the local and WMI source identities appear different.
+
+The verifier emits schema
+`euf-viper.component-quotient-ram-bundle-verification.v1` only after exact
+reconstruction. Its receipt binds source and target cardinalities, the frozen
+oracle digest, validity and implementation decisions, every aggregate artifact
+hash, the aggregate JSON hash, and a separately recomputed gates hash. WMI
+metadata may acquire status `completed` only from this receipt with
+`verified=true` and recomputed `validity_pass=true`; it does not read aggregate
+validity booleans directly.
 
 ## Preregistered Decision
 

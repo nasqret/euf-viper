@@ -8,6 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SBATCH = ROOT / "scripts" / "wmi" / "euf_viper_component_quotient_census.sbatch"
 SUBMIT = ROOT / "scripts" / "wmi" / "submit_component_quotient_census.sh"
+VERIFIER = (
+    ROOT / "scripts" / "bench" / "verify_component_quotient_ram_bundle.py"
+)
 
 
 class ComponentQuotientWmiTests(unittest.TestCase):
@@ -31,16 +34,38 @@ class ComponentQuotientWmiTests(unittest.TestCase):
         self.assertIn("component-quotient-ram-census-v1.json", text)
         self.assertIn("scripts/cert/independent_qfuf.py", text)
         self.assertIn("scripts/bench/build_family_manifest.py", text)
-        self.assertIn("--require-validity", text)
+        self.assertEqual(text.count("--require-validity"), 1)
+        self.assertIn("verify_component_quotient_ram_bundle.py", text)
+        self.assertIn('--receipt-out "$OUT/verification.json"', text)
         self.assertIn('"records": root / "records.jsonl"', text)
         self.assertIn('"targets": root / "targets.jsonl"', text)
         self.assertIn('"aggregate": root / "aggregate.json"', text)
-        self.assertIn('"implementation_allowed": gates["implementation_allowed"]', text)
-        self.assertIn("component quotient bounded decoder oracle did not pass", text)
-        self.assertIn("bounded decoder oracle SHA-256 mismatch", text)
-        self.assertIn('"decoder_oracle_sha256": oracle_sha256', text)
+        self.assertIn('"verification": verification_path', text)
+        self.assertIn(
+            '"implementation_allowed": verification["implementation_allowed"]', text
+        )
+        self.assertIn("component quotient strict bundle verification did not pass", text)
+        self.assertIn(
+            "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89",
+            text,
+        )
+        self.assertIn(
+            '"decoder_oracle_sha256": verification["decoder_oracle_sha256"]', text
+        )
+        self.assertNotIn("aggregate = json.loads", text)
+        self.assertNotIn("gates = aggregate", text)
         for forbidden in ("cargo run", "target/release/euf-viper", " z3 ", "cvc5", "yices"):
             self.assertNotIn(forbidden, text)
+
+    def test_independent_verifier_has_a_strict_receipt_contract(self) -> None:
+        text = VERIFIER.read_text(encoding="utf-8")
+        self.assertIn("verify_census_bundle", text)
+        self.assertIn("--records", text)
+        self.assertIn("--aggregate", text)
+        self.assertIn("--targets", text)
+        self.assertIn("--receipt-out", text)
+        self.assertIn("--require-validity", text)
+        self.assertIn("verified=true", text)
 
     def test_submitter_requires_clean_published_exact_revision(self) -> None:
         text = SUBMIT.read_text(encoding="utf-8")
