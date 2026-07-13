@@ -86,6 +86,7 @@ if [ "$STAGE" = sample ]; then
   MANIFEST="$STAGE_ROOT/manifest.jsonl"
   mkdir -p "$STAGE_ROOT"
   kissat4_make_sample_manifest "$SOURCE_MANIFEST" "$SAMPLE_LIMIT" "$SAMPLE_SEED" "$MANIFEST"
+  kissat4_rebind_manifest_sources "$MANIFEST"
   SHARD_INDEX=""
   SHARDS=""
 else
@@ -102,6 +103,7 @@ else
   mkdir -p "$STAGE_ROOT"
   "$PYTHON" scripts/bench/shard_manifest.py "$SOURCE_MANIFEST" \
     --shards "$SHARDS" --index "$SHARD_INDEX" --out "$MANIFEST"
+  kissat4_rebind_manifest_sources "$MANIFEST"
 fi
 
 MANIFEST_SHA256="$(kissat4_sha256 "$MANIFEST")"

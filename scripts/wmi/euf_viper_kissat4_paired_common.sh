@@ -296,3 +296,57 @@ output.write_text(
 )
 PY_SAMPLE
 }
+
+kissat4_rebind_manifest_sources() {
+  local manifest="$1"
+  python3 - "$manifest" <<'PY_REBIND'
+import json
+import os
+import sys
+import tempfile
+from pathlib import Path, PurePosixPath
+
+manifest = Path(sys.argv[1])
+rows = []
+for line_number, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
+    if not line.strip():
+        continue
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"{manifest}:{line_number}: invalid JSON: {error}")
+    relative_raw = row.get("relative_path")
+    if not isinstance(relative_raw, str) or not relative_raw:
+        raise SystemExit(f"{manifest}:{line_number}: missing relative_path")
+    relative = PurePosixPath(relative_raw)
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or relative.parts[0] != "QF_UF"
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise SystemExit(f"{manifest}:{line_number}: unsafe relative_path")
+    rebound = Path("benchmarks/smtlib-2025").joinpath(*relative.parts)
+    row["path"] = rebound.as_posix()
+    rows.append(row)
+if not rows:
+    raise SystemExit(f"{manifest}: no benchmark rows")
+
+payload = "".join(
+    json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+    for row in rows
+).encode("utf-8")
+descriptor, temporary_raw = tempfile.mkstemp(
+    prefix=f".{manifest.name}.", suffix=".tmp", dir=manifest.parent
+)
+temporary = Path(temporary_raw)
+try:
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, manifest)
+finally:
+    temporary.unlink(missing_ok=True)
+PY_REBIND
+}

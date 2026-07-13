@@ -195,6 +195,7 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
         self.assertIn('"stage": "broad-merge"', merge)
         self.assertIn('"status": os.environ["KISSAT4_SUBMISSION_STATUS"]', submit)
         self.assertIn("submission.json", submit)
+        self.assertEqual(runner.count('kissat4_rebind_manifest_sources "$MANIFEST"'), 2)
 
     def test_sample_selection_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -230,6 +231,69 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             self.assertEqual(len(first.read_text().splitlines()), 5)
+
+    def test_manifest_rebinding_replaces_stale_absolute_source_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            manifest = work / "manifest.jsonl"
+            rows = [
+                {
+                    "path": "/stale/checkout/QF_UF/family/case.smt2",
+                    "relative_path": "QF_UF/family/case.smt2",
+                    "sha256": "0" * 64,
+                    "status": "sat",
+                }
+            ]
+            manifest.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {COMMON!s}; kissat4_rebind_manifest_sources {manifest!s}",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            rebound = json.loads(manifest.read_text(encoding="utf-8"))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            rebound["path"],
+            "benchmarks/smtlib-2025/QF_UF/family/case.smt2",
+        )
+
+    def test_manifest_rebinding_rejects_parent_traversal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = Path(temporary) / "manifest.jsonl"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "path": "/stale/case.smt2",
+                        "relative_path": "QF_UF/../case.smt2",
+                        "sha256": "0" * 64,
+                        "status": "sat",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    f"source {COMMON!s}; kissat4_rebind_manifest_sources {manifest!s}",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("unsafe relative_path", completed.stderr)
 
 
 if __name__ == "__main__":
