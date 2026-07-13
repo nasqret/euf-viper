@@ -907,6 +907,17 @@
   `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare is pending WMI priority;
   the corrected native-runner smoke executes before taxonomy work. No new
   performance claim exists.
+- Prepare `144990` then completed successfully in `01:09:16` with peak RSS
+  `1,214,384 KiB`. It reproduced full taxonomy/split hashes
+  `ecab4f1f...c80b`/`14cf3582...f7e7` and official hashes
+  `ec3daa08...deda`/`d7aa7720...f013`, wrote promotion-eligible full/official
+  parent locks `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, bound solver config
+  `490e959e...a2570`, and froze euf-viper binary
+  `edcf8d1a...ba576` with Z3 4.16.0, cvc5 1.3.4, Yices2 2.7.0, and OpenSMT
+  2.9.2. Full shards `144991_0` and `_1` completed cleanly in `03:15` and
+  `03:04`; the array is advancing under current node availability. Official
+  array `144992` and audit `144993` remain open, so no aggregate comparison or
+  promotion claim exists.
 - Pinned the first rollback pilot in
   `research-vault/02-design/2026-07-13-validation-pressure-rollback.md` after a
   source audit confirmed that current Kissat exposes no trail, LBD, conflict,

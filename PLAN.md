@@ -133,7 +133,14 @@ result cache can satisfy V1-V4.
   fail-closed native-runner smoke. Hosted run `29215009504` passed. Replacement
   prepare/full/official/audit jobs are `144990`/`144991`/`144992`/`144993` and
   are dependency-bound to exact revision
-  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`.
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare `144990` completed in
+  `01:09:16` with status `prepared`: full/official lock hashes are
+  `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, the solver configuration hash is
+  `490e959e...a2570`, and the euf-viper binary hash is
+  `edcf8d1a...ba576`. Both parent locks are promotion-eligible and bind all six
+  configurations over `7,503`/`3,521` instances. Full array `144991` is
+  producing rows; official `144992` and global audit `144993` remain pending.
+  Preparation and partial shards are not comparison evidence.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Schema-v2 sparse derivation, dynamic WMI shards, staged
   assembly, and exact carried-row provenance are implemented but not yet run.

@@ -663,6 +663,14 @@
   integration smoke. Hosted run `29215009504` passed. Replacement exact-revision
   P0 jobs are prepare `144990`, full `144991`, official `144992`, and audit
   `144993`; no performance claim exists until the audit completes.
+- P0 prepare `144990` completed successfully in `01:09:16` at exact revision
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Full/official lock hashes are
+  `58e6cbdf...cd886ad`/`6ba7f60a...9410f9`, solver config is
+  `490e959e...a2570`, and the frozen euf-viper binary is
+  `edcf8d1a...ba576`. Both locks are promotion-eligible for all six
+  configurations. Full array `144991` is producing rows; official `144992` and
+  audit `144993` are open. Do not infer aggregate coverage from preparation or
+  partial shards.
 - The pinned rollback pilot preserves the first invalid eager assignment,
   conflicts, SAT time, and validation time, then uses a conflict-only CaDiCaL
   external propagator. `auto` triggers at validation time
