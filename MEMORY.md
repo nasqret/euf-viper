@@ -663,3 +663,11 @@
   integration smoke. Hosted run `29215009504` passed. Replacement exact-revision
   P0 jobs are prepare `144990`, full `144991`, official `144992`, and audit
   `144993`; no performance claim exists until the audit completes.
+- The pinned rollback pilot preserves the first invalid eager assignment,
+  conflicts, SAT time, and validation time, then uses a conflict-only CaDiCaL
+  external propagator. `auto` triggers at validation time
+  `>= max(2ms, first SAT time)`; default is off and unknown settings fail.
+  Current Kissat exposes no trail/LBD/conflict telemetry, so this is a
+  validation-pressure control, not a SAT proof-pressure claim. Whole-instance
+  rollback is known; novelty remains component-local checked representation
+  migration after the pilot wins.

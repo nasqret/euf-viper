@@ -907,6 +907,14 @@
   `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`. Prepare is pending WMI priority;
   the corrected native-runner smoke executes before taxonomy work. No new
   performance claim exists.
+- Pinned the first rollback pilot in
+  `research-vault/02-design/2026-07-13-validation-pressure-rollback.md` after a
+  source audit confirmed that current Kissat exposes no trail, LBD, conflict,
+  or learned-clause state. The honest automatic trigger is therefore first
+  model validation time `>= max(2ms, first SAT time)`. The pilot preserves the
+  first checked assignment/conflicts and moves to conflict-only IPASIR-UP; it
+  remains default-off and is explicitly not a novelty claim. A safe local
+  RustSAT/CaDiCaL callback bridge is the active isolated prerequisite.
 
 ## Next Entry Template
 

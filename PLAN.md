@@ -172,12 +172,21 @@ independent evidence checks, and a frozen family holdout.
 
 ### T2: Lazy-First And Rollback EUF
 
-- [ ] Add a default-off base-CNF-only CaDiCaL refinement mode that runs before
-  eager SAT, validates every complete model, and adds only checked EUF cuts.
-- [ ] Run forced Goel/GRAPH controls and reject if more invalid models do not
-  reduce end-to-end time.
-- [ ] Add conflict-only IPASIR-UP rollback closure, then delayed propagation,
-  only after the lazy reference passes.
+- [ ] Add a safe conflict-only IPASIR-UP bridge to the pinned CaDiCaL/RustSAT
+  binding. No external decisions or propagations are permitted in the first
+  pilot; every callback conflict must carry a replayable EUF explanation.
+- [ ] Preserve the first invalid eager assignment, checked conflict clauses,
+  SAT time, and validation time. The default-off `auto` pilot triggers only
+  when validation is at least `max(2ms, first SAT time)`; `force` exists only
+  for causal tests. Unknown settings fail closed.
+- [ ] Run forced Goel/GRAPH controls against `current`, `model-cuts`, and
+  dynamic full Ackermannization. Require fewer complete validations on every
+  multi-round target, `1.10x` target speedup, no baseline-only solve, and
+  independently replayed conflicts before selector work.
+- [ ] Add component-local migration and then delayed propagation only after the
+  whole-instance engineering control passes. Rollback DPLL(T) itself is known;
+  the differentiated claim requires stable atoms and checked bridge facts
+  across per-component eager/rollback/Hall representations.
 
 ### T4: Adequate-Range Hall/PB
 
