@@ -43,7 +43,7 @@ pub(crate) struct RollbackEufPropagator<'arena> {
     observed: Vec<Var>,
     true_term: TermId,
     false_term: TermId,
-    pending_clause: Option<ExternalClause>,
+    pending_clause: Option<(Vec<i32>, ExternalClause)>,
     emitted_clauses: HashSet<Vec<i32>>,
     max_conflicts: usize,
     stats: RollbackPropagatorStats,
@@ -142,7 +142,7 @@ impl<'arena> RollbackEufPropagator<'arena> {
             ));
         }
         let clause = conflict.clause().to_vec();
-        if !self.emitted_clauses.insert(clause.clone()) {
+        if self.emitted_clauses.contains(&clause) {
             return Err(PropagatorAbort::new(
                 "rollback EUF emitted a duplicate no-progress conflict",
             ));
@@ -158,8 +158,7 @@ impl<'arena> RollbackEufPropagator<'arena> {
         let literals = literals.map_err(|_| {
             PropagatorAbort::new("rollback EUF replay produced an invalid DIMACS literal")
         })?;
-        self.pending_clause = Some(ExternalClause::new(literals));
-        self.stats.conflicts += 1;
+        self.pending_clause = Some((clause, ExternalClause::new(literals)));
         Ok(())
     }
 
@@ -267,7 +266,16 @@ impl ExternalPropagator for RollbackEufPropagator<'_> {
     }
 
     fn external_clause(&mut self) -> PropagatorResult<Option<ExternalClause>> {
-        Ok(self.pending_clause.take())
+        let Some((key, clause)) = self.pending_clause.take() else {
+            return Ok(None);
+        };
+        if !self.emitted_clauses.insert(key) {
+            return Err(PropagatorAbort::new(
+                "rollback EUF emitted a duplicate no-progress conflict",
+            ));
+        }
+        self.stats.conflicts = self.stats.conflicts.saturating_add(1);
+        Ok(Some(clause))
     }
 }
 
@@ -506,5 +514,38 @@ mod tests {
                 ])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn conflict_preempted_before_handoff_can_be_queued_again() {
+        let fixture = fixture();
+        let mut propagator = RollbackEufPropagator::from_cnf(
+            &fixture.arena,
+            &fixture.cnf,
+            fixture.true_term,
+            fixture.false_term,
+            RollbackEufLimits::default(),
+        )
+        .unwrap();
+        let conflict = [
+            Lit::from_ipasir(fixture.equality).unwrap(),
+            Lit::from_ipasir(-fixture.congruent_equality).unwrap(),
+        ];
+
+        propagator.notify_new_decision_level().unwrap();
+        propagator.notify_assignment(&conflict).unwrap();
+        assert_eq!(propagator.stats().conflicts, 0);
+
+        // An internal SAT conflict may backtrack before CaDiCaL asks for the
+        // queued theory clause. That clause was never emitted and may recur.
+        propagator.notify_backtrack(0).unwrap();
+        propagator.notify_new_decision_level().unwrap();
+        propagator.notify_assignment(&conflict).unwrap();
+        assert!(propagator.external_clause().unwrap().is_some());
+        assert_eq!(propagator.stats().conflicts, 1);
+
+        propagator.notify_backtrack(0).unwrap();
+        propagator.notify_new_decision_level().unwrap();
+        assert!(propagator.notify_assignment(&conflict).is_err());
     }
 }
