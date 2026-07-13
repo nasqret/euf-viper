@@ -86,15 +86,17 @@ cd "$ROOT"
 if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
   die "tracked repository state must be clean before certificate-shadow submission"
 fi
-REVISION="$(git rev-parse HEAD)"
-case "$REVISION" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) die "HEAD is not a full Git revision" ;;
-esac
+SUBMITTER_REVISION="$(git rev-parse HEAD)"
+REVISION="${EUF_VIPER_CERT_REVISION:-$SUBMITTER_REVISION}"
+[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || die "campaign revision is not a full Git revision"
+git cat-file -e "$REVISION^{commit}"
 PUBLISHED_LINE="$(git ls-remote --exit-code "$REPOSITORY_URL" "$PUBLISHED_REF")"
 PUBLISHED_REVISION="${PUBLISHED_LINE%%[[:space:]]*}"
-if [ "$REVISION" != "$PUBLISHED_REVISION" ]; then
-  die "HEAD $REVISION is not the published $PUBLISHED_REF revision $PUBLISHED_REVISION"
+if [ "$SUBMITTER_REVISION" != "$PUBLISHED_REVISION" ]; then
+  die "submitter HEAD $SUBMITTER_REVISION is not the published $PUBLISHED_REF revision $PUBLISHED_REVISION"
+fi
+if ! git merge-base --is-ancestor "$REVISION" "$PUBLISHED_REVISION"; then
+  die "campaign revision $REVISION is not an ancestor of published $PUBLISHED_REF $PUBLISHED_REVISION"
 fi
 
 CHECKER_LOCAL="$ROOT/scripts/cert/check_certificate.py"
@@ -187,6 +189,7 @@ SUBMISSION_PATH="$ROOT/results/certificate-shadow-submissions/$RUN_ID.json"
 python3 - \
   "$SUBMISSION_PATH" \
   "$REVISION" \
+  "$SUBMITTER_REVISION" \
   "$REMOTE_HOST" \
   "$REMOTE_WORK" \
   "$RUN_ROOT" \
@@ -213,6 +216,7 @@ from pathlib import Path
 (
     output_raw,
     revision,
+    submitter_revision,
     remote_host,
     remote_work,
     run_root,
@@ -238,6 +242,7 @@ payload = {
     "physical_stage": stage_label,
     "budget_s": float(expected_budget),
     "revision": revision,
+    "submitter_revision": submitter_revision,
     "remote_host": remote_host,
     "remote_worktree": remote_work,
     "run_root": run_root,
