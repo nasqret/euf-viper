@@ -47,6 +47,7 @@ class ContinuationScriptContractTests(unittest.TestCase):
         self.assertIn("git status --porcelain=v1", submit)
         self.assertIn("git ls-remote --exit-code origin refs/heads/main", submit)
         self.assertIn("EUF_VIPER_CONTINUATION_REVISION", submit)
+        self.assertIn('=~ ^[0-9a-f]{40}$', submit)
         self.assertIn("git merge-base --is-ancestor", submit)
         self.assertIn('SHORT_REVISION="${REVISION:0:12}"', submit)
         self.assertIn('"submitter_revision": submitter_revision', submit)

@@ -41,10 +41,10 @@ if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
 fi
 SUBMITTER_REVISION="$(git rev-parse --verify 'HEAD^{commit}')"
 REVISION="${EUF_VIPER_CONTINUATION_REVISION:-$SUBMITTER_REVISION}"
-case "$REVISION" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-  *) echo "campaign revision must be a full lowercase Git object id" >&2; exit 2 ;;
-esac
+if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "campaign revision must be a full lowercase Git object id" >&2
+  exit 2
+fi
 git cat-file -e "$REVISION^{commit}"
 PUBLISHED_LINE="$(git ls-remote --exit-code origin refs/heads/main)"
 case "$PUBLISHED_LINE" in
