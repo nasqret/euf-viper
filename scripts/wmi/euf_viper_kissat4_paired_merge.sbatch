@@ -57,7 +57,7 @@ kissat4_check_binaries "$VALIDATION_ROOT"
 if [ "${1:-}" != "--bound-step" ]; then
   SCRIPT="$ROOT/scripts/wmi/euf_viper_kissat4_paired_merge.sbatch"
   exec srun --exclusive --exact --nodes=1 --ntasks=1 --cpus-per-task=1 \
-    --cpu-bind=threads bash "$SCRIPT" --bound-step
+    --cpu-bind=threads /bin/bash "$SCRIPT" --bound-step
 fi
 
 kissat4_check_repository "$EXPECTED_REVISION"

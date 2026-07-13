@@ -159,6 +159,8 @@ class Kissat4PairedWmiScriptTests(unittest.TestCase):
             self.assertIn("sched_getaffinity", text)
             self.assertIn("AFFINITY_COUNT", text)
             self.assertIn("SLURM_CPUS_PER_TASK must be exactly 1", text)
+            self.assertIn('--cpu-bind=threads /bin/bash "$SCRIPT" --bound-step', text)
+            self.assertNotIn('--cpu-bind=threads bash "$SCRIPT" --bound-step', text)
 
     def test_submission_graph_has_sample_gate_then_broad_array_then_merge(self) -> None:
         text = self.text(SUBMIT)
