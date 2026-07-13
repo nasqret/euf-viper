@@ -1024,3 +1024,24 @@
 - Result:
 - Discrepancies:
 - Next action:
+
+## 2026-07-13 Live WMI Campaign Resumption
+
+- Hardened source-only range census `145883` is running on exact main
+  `628dabf`; it must return exactly 7,503 parsed sources and zero parser errors.
+- Full certificate chain `145892`/`145893`/`145894` and official chain
+  `145897`/`145898`/`145899` are dependency-held behind census success.
+- Rollback attempt `145887`/`145888`/`145889` failed before timing because the
+  physical corpus root omitted the archive's outer `QF_UF/`; the array and
+  audit were cancelled and produce no performance evidence.
+- Corrected rollback prepare `145900` completed. Array `145901` is running and
+  audit `145902` is dependency-held. The immutable runner root is
+  `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF`, while the manifest
+  remains at the sibling `smtlib-2025/qf_uf_manifest.jsonl` path.
+- The first repaired Kissat sample `145884` failed before timing because its
+  inherited manifest contained absolute paths from another checkout. Commit
+  `45ba12c` deterministically rebinds each source from `relative_path` to the
+  verified nested local extraction and is awaiting hosted CI before resubmit.
+- Full/official 1,200-second continuation arrays `145785` and `145787` remain
+  scheduler-pending; audits `145786`/`145788` and finalizer `145789` remain
+  dependency-held. No result is inferred from queue state.

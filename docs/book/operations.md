@@ -51,13 +51,15 @@ bash scripts/wmi/sync_and_submit_sharded_corpus.sh
 ## Rollback Engineering Control
 
 The rollback gate must run from clean published branch
-`research-rollback-propagator`. The corpus root is the directory containing
-both `QF_UF/` and `qf_uf_manifest.jsonl`, not the `QF_UF/` directory itself.
+`research-rollback-propagator`. Manifest `relative_path` values already begin
+with `QF_UF/`, while the extracted archive has an outer `QF_UF/` directory.
+The runner root is therefore the outer `QF_UF/` directory and the manifest is
+its sibling one level above.
 
 ```bash
 EUF_VIPER_WMI_HOST=wmicluster \
 EUF_VIPER_ROLLBACK_REVISION=e8fb05c6e1a22bca83edbe687f93a6e0a3774c50 \
-EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025 \
+EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF \
 EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
 ./scripts/wmi/submit_rollback_control.sh
 ```

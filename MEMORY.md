@@ -737,8 +737,10 @@
   on each, `1.10x` target geometric speed, anti-target p95 at most `1.10x`, no
   wrong/error/baseline-only observation, and no coverage loss. Empty
   populations reject. Hosted campaign-contract run `29272420042` passes.
-- WMI SSH currently times out before authentication. No rollback campaign job
-  is recorded. On recovery, inventory `sacct`, interrupted receipts, and run
-  roots before submission. Use corpus root
-  `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025`, which contains `QF_UF/`
-  and `qf_uf_manifest.jsonl`; do not pass the `QF_UF/` leaf as the root.
+- WMI access recovered. Rollback attempt `145887`/`145888`/`145889` was
+  rejected before timing because manifest-relative paths already contain
+  `QF_UF/`; its array and audit were cancelled. The corrected immutable attempt
+  is prepare `145900`, array `145901`, and audit `145902`. Use runner root
+  `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF` with sibling
+  manifest `/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl`.
+  The extracted layout is `smtlib-2025/QF_UF/QF_UF/...`.

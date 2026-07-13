@@ -90,10 +90,14 @@ Run only from clean published commit `e8fb05c` after restoring WMI access:
 ```bash
 EUF_VIPER_WMI_HOST=wmicluster \
 EUF_VIPER_ROLLBACK_REVISION=e8fb05c6e1a22bca83edbe687f93a6e0a3774c50 \
-EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025 \
+EUF_VIPER_ROLLBACK_CORPUS_ROOT=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF \
 EUF_VIPER_ROLLBACK_CORPUS_MANIFEST=/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
 ./scripts/wmi/submit_rollback_control.sh
 ```
+
+Manifest paths already include the leading `QF_UF/` component. The extracted
+archive is nested as `smtlib-2025/QF_UF/QF_UF/...`, so this root and the sibling
+manifest path are intentionally different.
 
 The submitter itself must be the public research-branch head. It verifies that
 the explicit campaign revision is a published ancestor, writes
