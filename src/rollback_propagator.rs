@@ -3,6 +3,7 @@
 use rustc_hash::FxHashSet as HashSet;
 use rustsat::types::{Lit, Var};
 use rustsat_cadical::{ExternalClause, ExternalPropagator, PropagatorAbort, PropagatorResult};
+use std::time::Instant;
 
 use super::{
     BoolAtomKey, CnfProblem, TermArena, TermId, UnionFind, congruence_closure,
@@ -33,6 +34,7 @@ pub(crate) struct RollbackPropagatorStats {
     pub(crate) backtracks: usize,
     pub(crate) conflicts: usize,
     pub(crate) model_checks: usize,
+    pub(crate) model_check_time_ns: u128,
 }
 
 pub(crate) struct RollbackEufPropagator<'arena> {
@@ -243,8 +245,13 @@ impl ExternalPropagator for RollbackEufPropagator<'_> {
     }
 
     fn check_found_model(&mut self, model: &[Lit]) -> PropagatorResult<bool> {
+        let started = Instant::now();
         self.stats.model_checks = self.stats.model_checks.saturating_add(1);
         let fresh_consistent = self.fresh_model_is_consistent(model)?;
+        self.stats.model_check_time_ns = self
+            .stats
+            .model_check_time_ns
+            .saturating_add(started.elapsed().as_nanos());
         let rollback_conflict = self.engine.current_conflict().map_err(core_abort)?;
         match (fresh_consistent, rollback_conflict) {
             (true, None) => Ok(true),

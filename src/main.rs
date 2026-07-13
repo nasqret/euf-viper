@@ -4517,8 +4517,10 @@ fn solve_kissat_euf_once(
     if !complete_cnf_assignment(cnf, &mut assignment) {
         return EagerSolveOutcome::Unavailable;
     }
-    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-    else {
+    let validation_start = Instant::now();
+    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    profile_phase("kissat_validation", validation_start, 1);
+    let Some(conflicts) = conflicts else {
         return EagerSolveOutcome::Unavailable;
     };
     if conflicts.is_empty() {
@@ -4613,8 +4615,10 @@ fn solve_kissat_euf_once(
     if !complete_cnf_assignment(cnf, &mut assignment) {
         return EagerSolveOutcome::Unavailable;
     }
-    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-    else {
+    let validation_start = Instant::now();
+    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment);
+    profile_phase("kissat_validation", validation_start, 1);
+    let Some(conflicts) = conflicts else {
         return EagerSolveOutcome::Unavailable;
     };
     if conflicts.is_empty() {
@@ -4831,6 +4835,7 @@ fn solve_cadical_rollback_euf(
     true_term: TermId,
     false_term: TermId,
 ) -> Result<(SolveResult, rollback_propagator::RollbackPropagatorStats), String> {
+    let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
     configure_cadical(&mut solver, false)
         .ok_or_else(|| "failed to configure CaDiCaL rollback control".to_owned())?;
@@ -4839,7 +4844,9 @@ fn solve_cadical_rollback_euf(
             .add_clause(rustsat_clause(clause))
             .map_err(|error| format!("failed to load rollback base clause: {error}"))?;
     }
+    profile_phase("cadical_rollback_base_load", load_start, cnf.clauses.len());
 
+    let build_start = Instant::now();
     let mut propagator = rollback_propagator::RollbackEufPropagator::from_cnf(
         arena,
         cnf,
@@ -4849,6 +4856,8 @@ fn solve_cadical_rollback_euf(
     )
     .map_err(|error| format!("failed to build rollback propagator: {error:?}"))?;
     let observed = propagator.observed_variables().to_vec();
+    profile_phase("cadical_rollback_build", build_start, observed.len());
+    let solve_start = Instant::now();
     let (result, mut assignment) = solver
         .with_external_propagator(&mut propagator, observed, |session| {
             let result = session
@@ -4874,16 +4883,35 @@ fn solve_cadical_rollback_euf(
         })
         .map_err(|error| format!("rollback propagator scope failed: {error}"))?
         .map_err(|error| format!("CaDiCaL rollback solve failed: {error}"))?;
+    profile_phase("cadical_rollback_solve", solve_start, 1);
     let stats = propagator.stats();
+    profile_cadical_rollback_stats(stats);
     match result {
-        RustSatResult::Unsat => Ok((SolveResult::Unsat, stats)),
+        RustSatResult::Unsat => {
+            profile_measurement(
+                "cadical_rollback_complete_validations",
+                stats.model_check_time_ns,
+                stats.model_checks,
+            );
+            Ok((SolveResult::Unsat, stats))
+        }
         RustSatResult::Interrupted => Err("CaDiCaL rollback solve was interrupted".to_owned()),
         RustSatResult::Sat => {
+            let validation_start = Instant::now();
             if !complete_cnf_assignment(cnf, &mut assignment) {
                 return Err("rollback SAT model failed base-CNF completion".to_owned());
             }
             let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
                 .ok_or_else(|| "rollback SAT model validator rejected its shape".to_owned())?;
+            let final_validation_ns = validation_start.elapsed().as_nanos();
+            profile_measurement("cadical_rollback_final_validation", final_validation_ns, 1);
+            profile_measurement(
+                "cadical_rollback_complete_validations",
+                stats
+                    .model_check_time_ns
+                    .saturating_add(final_validation_ns),
+                stats.model_checks.saturating_add(1),
+            );
             if conflicts.is_empty() {
                 Ok((SolveResult::Sat, stats))
             } else {
@@ -4894,6 +4922,18 @@ fn solve_cadical_rollback_euf(
             }
         }
     }
+}
+
+fn profile_cadical_rollback_stats(stats: rollback_propagator::RollbackPropagatorStats) {
+    profile_measurement("cadical_rollback_assignments", 0, stats.assignments);
+    profile_measurement("cadical_rollback_decision_levels", 0, stats.decision_levels);
+    profile_measurement("cadical_rollback_backtracks", 0, stats.backtracks);
+    profile_measurement("cadical_rollback_conflicts", 0, stats.conflicts);
+    profile_measurement(
+        "cadical_rollback_propagator_model_checks",
+        stats.model_check_time_ns,
+        stats.model_checks,
+    );
 }
 
 fn solve_explicit_rollback_backend(
