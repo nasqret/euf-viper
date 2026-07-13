@@ -1,0 +1,140 @@
+{
+  "schema": "euf-viper.component-quotient-ram-census-lock.v1",
+  "campaign_id": "t5-component-quotient-ram-opportunity-census-v1",
+  "status": "preregistered_source_only",
+  "logic": "QF_UF",
+  "interpretation": "structural_projection_only_no_solver_invocation_no_timing_claim",
+  "parser_api": "scripts.cert.independent_qfuf.parse_and_encode",
+  "corpus": {
+    "manifest": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+    "expected_sources": 7503,
+    "families": {
+      "goel": {
+        "source_family": "QF_UF/2018-Goel-hwbench",
+        "expected_population": 773
+      },
+      "qg": {
+        "source_family": "QF_UF/QG-classification",
+        "expected_population": 6396
+      }
+    }
+  },
+  "projection": {
+    "eager": {
+      "functionality": "full_typed_ackermann_over_distinct_non_nullary_applications",
+      "equality_completion": "deterministic_min_degree_chordal_fill_tie_break_term_id",
+      "transitivity": "one_unit_per_reflexive_atom_and_three_ternary_clauses_per_completed_graph_triangle"
+    },
+    "component_quotient_ram": {
+      "component_union": [
+        "source_equality_atom_endpoints",
+        "results_of_each_non_boolean_function_symbol",
+        "terms_in_each_non_boolean_argument_position_of_each_function_symbol"
+      ],
+      "component_width": "max(1,ceil(log2(component_terms)))",
+      "canonicalization": "restricted_growth_q0_zero_qi_le_one_plus_prefix_max",
+      "functionality": "per_symbol_bitonic_sort_with_padding_flag_and_guarded_adjacent_consistency",
+      "boolean_carrier": "one_existing_boolean_atom_bit_with_true_false_units_when_materialized",
+      "decoder_domain_value": "typed_tuple_sort_id_component_id_class_code"
+    },
+    "cnf_templates": {
+      "and2": {
+        "variables": 1,
+        "clauses": 3,
+        "literal_slots": 7,
+        "unit_clauses": 0,
+        "watch_entries": 6
+      },
+      "or2": {
+        "variables": 1,
+        "clauses": 3,
+        "literal_slots": 7,
+        "unit_clauses": 0,
+        "watch_entries": 6
+      },
+      "xnor2": {
+        "variables": 1,
+        "clauses": 4,
+        "literal_slots": 12,
+        "unit_clauses": 0,
+        "watch_entries": 8
+      },
+      "xor2": {
+        "variables": 1,
+        "clauses": 4,
+        "literal_slots": 12,
+        "unit_clauses": 0,
+        "watch_entries": 8
+      },
+      "mux2": {
+        "variables": 1,
+        "clauses": 4,
+        "literal_slots": 12,
+        "unit_clauses": 0,
+        "watch_entries": 8
+      },
+      "increment": "bit0_is_negated_input_alias_then_xor_with_ripple_carry",
+      "unsigned_greater": "msb_to_lsb_equal_prefix_with_muxed_decision",
+      "equality_atom_link": "w_xnor_outputs_plus_e_implies_each_and_all_imply_e"
+    }
+  },
+  "caps": {
+    "max_source_bytes": 33554432,
+    "max_terms": 1000000,
+    "max_applications": 1000000,
+    "max_symbols": 250000,
+    "max_component_terms": 1000000,
+    "max_ackermann_pairs": 1000000000000,
+    "max_equality_edges": 100000000,
+    "max_fill_edges": 100000000,
+    "max_sorter_records": 1048576,
+    "max_sorter_comparators": 1000000000,
+    "max_packed_record_bits": 1000000000000,
+    "max_decoder_operations": 1000000000000,
+    "max_projected_count": 9223372036854775807
+  },
+  "selector": {
+    "kind": "structural_only",
+    "minimum_total_applications": 64,
+    "minimum_max_symbol_applications": 32
+  },
+  "gates": {
+    "validity": {
+      "required_sources": 7503,
+      "allowed_parse_errors": 0,
+      "allowed_unknown_projections": 0,
+      "allowed_cap_events": 0,
+      "require_complete_decoder": true
+    },
+    "broadness": {
+      "minimum_family_fraction": {
+        "numerator": 1,
+        "denominator": 20
+      },
+      "minimum_generator_lineages": 8
+    },
+    "opportunity": {
+      "minimum_reduction": {
+        "numerator": 1,
+        "denominator": 4
+      },
+      "minimum_individual_fraction": {
+        "numerator": 1,
+        "denominator": 2
+      },
+      "metrics": [
+        "clauses",
+        "watch_entries"
+      ],
+      "require_weighted_and_median_and_individual": true
+    },
+    "variable_control": {
+      "maximum_ratio": {
+        "numerator": 5,
+        "denominator": 4
+      },
+      "percentile": 95,
+      "require_weighted_and_percentile": true
+    }
+  }
+}
