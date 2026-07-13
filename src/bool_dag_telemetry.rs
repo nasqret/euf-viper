@@ -1381,19 +1381,50 @@ fn collect_ablation_equalities(
         match expression {
             BoolExpr::And(children) => stack.extend(children.iter().rev()),
             BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
-                facts.push(normalized_pair(*left, *right));
-                if facts.len() > limits.max_unconditional_equalities {
-                    return Err(AblationAbstention::capped(
-                        AblationAbstentionReason::EqualityFactCap,
-                        facts.len(),
-                        limits.max_unconditional_equalities,
-                    ));
+                push_ablation_equality(&mut facts, *left, *right, limits)?;
+            }
+            BoolExpr::Iff(children) => {
+                let terms = children
+                    .iter()
+                    .map(|child| direct_boolean_term(child, bool_problem))
+                    .collect::<Option<Vec<_>>>();
+                if let Some((first, rest)) = terms.as_deref().and_then(|terms| terms.split_first())
+                {
+                    for &term in rest {
+                        push_ablation_equality(&mut facts, *first, term, limits)?;
+                    }
                 }
             }
             _ => {}
         }
     }
     Ok(facts)
+}
+
+fn direct_boolean_term(expression: &BoolExpr, bool_problem: &BoolProblem) -> Option<TermId> {
+    match expression {
+        BoolExpr::Const(true) => Some(bool_problem.true_term),
+        BoolExpr::Const(false) => Some(bool_problem.false_term),
+        BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => Some(*term),
+        _ => None,
+    }
+}
+
+fn push_ablation_equality(
+    facts: &mut Vec<(TermId, TermId)>,
+    left: TermId,
+    right: TermId,
+    limits: AblationLimits,
+) -> Result<(), AblationAbstention> {
+    facts.push(normalized_pair(left, right));
+    if facts.len() > limits.max_unconditional_equalities {
+        return Err(AblationAbstention::capped(
+            AblationAbstentionReason::EqualityFactCap,
+            facts.len(),
+            limits.max_unconditional_equalities,
+        ));
+    }
+    Ok(())
 }
 
 fn checked_union_facts(
@@ -1972,6 +2003,31 @@ mod tests {
     }
 
     #[test]
+    fn boolean_term_equalities_seed_typed_root_and_congruence_unions() {
+        let telemetry = parsed_ablation(
+            "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun c () U)
+            (declare-fun f (Bool) U)
+            (declare-fun guard () Bool)
+            (assert (= p q))
+            (assert (or (= (f p) c) guard))
+            (assert (or (= (f q) c) guard))
+            (check-sat)
+            ",
+        );
+
+        assert_eq!(telemetry.unconditional_equality_facts, 1);
+        assert_eq!(telemetry.root_equality_unions, 1);
+        assert_eq!(telemetry.congruence_unions, 1);
+        assert_eq!(telemetry.root_union_dag.gate_definitions, 3);
+        assert_eq!(telemetry.full_euf_dag.gate_definitions, 2);
+    }
+
+    #[test]
     fn conditional_equalities_never_seed_c_or_d() {
         let telemetry = parsed_ablation(
             "
@@ -1985,6 +2041,31 @@ mod tests {
             (assert (or (= a b) p))
             (assert (or (= (f a) c) p))
             (assert (or (= (f b) c) p))
+            (check-sat)
+            ",
+        );
+
+        assert_eq!(telemetry.unconditional_equality_facts, 0);
+        assert_eq!(telemetry.root_equality_unions, 0);
+        assert_eq!(telemetry.congruence_unions, 0);
+        assert_eq!(telemetry.root_union_dag, telemetry.generic_source_dag);
+        assert_eq!(telemetry.full_euf_dag, telemetry.generic_source_dag);
+    }
+
+    #[test]
+    fn conditional_boolean_term_equalities_do_not_seed_the_quotient() {
+        let telemetry = parsed_ablation(
+            "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun p () Bool)
+            (declare-fun q () Bool)
+            (declare-fun c () U)
+            (declare-fun f (Bool) U)
+            (declare-fun guard () Bool)
+            (assert (or (= p q) guard))
+            (assert (or (= (f p) c) guard))
+            (assert (or (= (f q) c) guard))
             (check-sat)
             ",
         );
