@@ -27,7 +27,9 @@ import csv
 import hashlib
 import json
 import math
+import os
 import random
+import stat
 import sys
 from collections import Counter, defaultdict
 from fractions import Fraction
@@ -206,9 +208,12 @@ PRODUCTION_EVIDENCE_KEYS = {
     "schema",
     "source_sha256",
     "solver_revision",
+    "solver_executable_sha256",
     "solver_configuration",
     "solver_config_sha256",
     "solver_runtime_config_sha256",
+    "solver_build_sha256",
+    "run_nonce",
     "status",
     "backend_status",
 }
@@ -230,6 +235,63 @@ def sha256_file(path: Path) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _read_regular_nofollow(path: Path, context: str) -> bytes:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise CampaignInputError(["O_NOFOLLOW is required for production evidence"])
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise CampaignInputError(
+            [f"{context}: cannot open {path} without following links: {error}"]
+        ) from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise CampaignInputError([f"{context}: artifact is not a regular file"])
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        after = os.fstat(descriptor)
+    except OSError as error:
+        raise CampaignInputError([f"{context}: cannot read artifact: {error}"]) from error
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise CampaignInputError([f"{context}: artifact path changed while reading"]) from error
+    content = b"".join(chunks)
+    before_fingerprint = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    after_fingerprint = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    if before_fingerprint != after_fingerprint or len(content) != after.st_size:
+        raise CampaignInputError([f"{context}: artifact changed while it was read"])
+    if (
+        not stat.S_ISREG(path_after.st_mode)
+        or path_after.st_dev != after.st_dev
+        or path_after.st_ino != after.st_ino
+    ):
+        raise CampaignInputError([f"{context}: artifact path was replaced while reading"])
+    return content
 
 
 def _is_sha256(value: str) -> bool:
@@ -1323,13 +1385,13 @@ def _canonical_json_bytes(value: Any) -> bytes:
         rendered = json.dumps(
             value,
             allow_nan=False,
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
     except (TypeError, ValueError) as error:
         raise CampaignInputError([f"value is not canonical JSON: {error}"]) from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def _same_json(left: Any, right: Any) -> bool:
@@ -1560,7 +1622,7 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
                 solver["evidence"], LOCK_EVIDENCE_KEYS, f"{context}.evidence"
             )
             if evidence != {
-                "schema": "euf-viper.production-evidence.v1",
+                "schema": "euf-viper.production-evidence.v2",
                 "argv_flag": "--evidence-out",
                 "accepted_decisive_statuses": ["sat"],
             }:
@@ -1827,6 +1889,7 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
                         "repetition": repetition,
                         "cpu_id": cpu_id,
                         "environment_sha256": environment_sha256,
+                        "environment": environment,
                         "argv": argv,
                         "evidence_path": evidence_path,
                         "output_directory": output_directory,
@@ -1871,6 +1934,27 @@ def _classify_locked_record(record: Mapping[str, Any]) -> str:
     return token
 
 
+def _expected_runtime_config(environment: Mapping[str, str]) -> dict[str, str]:
+    controls = {
+        "EUF_VIPER_RUN_NONCE",
+        "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+    }
+    config = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("EUF_VIPER_") and key not in controls
+    }
+    for name, default, resolved in (
+        ("EUF_VIPER_DIRECT_ROOT_CNF", "1", "resolved.direct_root_cnf"),
+        ("EUF_VIPER_DIRECT_NEGATED_ROOT", "0", "resolved.direct_negated_root"),
+    ):
+        setting = environment.get(name, default)
+        if setting not in {"0", "1"}:
+            raise CampaignInputError([f"{name} is invalid in the locked environment"])
+        config[resolved] = setting
+    return dict(sorted(config.items()))
+
+
 def _validate_locked_production_evidence(
     value: object,
     record: Mapping[str, Any],
@@ -1896,21 +1980,14 @@ def _validate_locked_production_evidence(
     if binding["path"] != expected_relative:
         raise CampaignInputError([f"{context}: evidence path differs from schedule"])
     try:
-        resolved = expected_path.resolve(strict=True)
-    except OSError as error:
-        raise CampaignInputError(
-            [f"{context}: cannot resolve evidence artifact: {error}"]
-        ) from error
-    if resolved != expected_path:
-        raise CampaignInputError([f"{context}: evidence artifact was redirected"])
-    try:
-        resolved.relative_to(output_directory)
+        expected_path.relative_to(output_directory)
     except ValueError as error:
         raise CampaignInputError([f"{context}: evidence artifact escapes output root"]) from error
-    actual_hash = sha256_file(resolved)
+    artifact_bytes = _read_regular_nofollow(expected_path, context)
+    actual_hash = hashlib.sha256(artifact_bytes).hexdigest()
     if _require_hash_value(binding["sha256"], f"{context}.sha256") != actual_hash:
         raise CampaignInputError([f"{context}: evidence artifact SHA-256 mismatch"])
-    if _require_int_value(binding["bytes"], f"{context}.bytes", 1) != resolved.stat().st_size:
+    if _require_int_value(binding["bytes"], f"{context}.bytes", 1) != len(artifact_bytes):
         raise CampaignInputError([f"{context}: evidence artifact byte count mismatch"])
     if binding["schema"] != contract["schema"]:
         raise CampaignInputError([f"{context}: evidence schema differs from lock"])
@@ -1929,10 +2006,16 @@ def _validate_locked_production_evidence(
         binding["solver_runtime_config_sha256"],
         f"{context}.solver_runtime_config_sha256",
     )
-    if binding["status"] not in {"sat", "unsupported"} or binding[
-        "backend_status"
-    ] not in {"sat", "unsat", "unsupported"}:
-        raise CampaignInputError([f"{context}: invalid evidence statuses"])
+    if binding["solver_executable_sha256"] != solver["sha256"]:
+        raise CampaignInputError([f"{context}: evidence executable hash differs from lock"])
+    _require_hash_value(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    _require_hash_value(binding["run_nonce"], f"{context}.run_nonce")
+    if (binding["status"], binding["backend_status"]) not in {
+        ("sat", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise CampaignInputError([f"{context}: incoherent evidence statuses"])
     if record["result_token"] in DECISIVE_RESULTS and (
         record["result_token"] not in contract["accepted_decisive_statuses"]
         or binding["status"] != record["result_token"]
@@ -1941,19 +2024,24 @@ def _validate_locked_production_evidence(
         raise CampaignInputError([f"{context}: evidence does not certify stdout"])
 
     try:
-        artifact = _parse_json_strict(
-            resolved.read_text(encoding="utf-8"), f"production evidence {resolved}"
-        )
-    except (OSError, UnicodeError) as error:
-        raise CampaignInputError([f"{context}: cannot read evidence artifact: {error}"]) from error
+        artifact_text = artifact_bytes.decode("utf-8")
+    except UnicodeError as error:
+        raise CampaignInputError([f"{context}: evidence artifact is not UTF-8: {error}"]) from error
+    artifact = _parse_json_strict(
+        artifact_text, f"production evidence {expected_path}"
+    )
+    if _canonical_json_bytes(artifact) != artifact_bytes:
+        raise CampaignInputError([f"{context}: evidence artifact is not canonical JSON"])
     artifact = _require_exact_keys(
         artifact,
         {
             "schema",
+            "run_nonce",
             "status",
             "backend_status",
             "source",
             "solver",
+            "backend_cnf",
             "model",
             "limitations",
         },
@@ -1961,6 +2049,7 @@ def _validate_locked_production_evidence(
     )
     if (
         artifact["schema"] != binding["schema"]
+        or artifact["run_nonce"] != binding["run_nonce"]
         or artifact["status"] != binding["status"]
         or artifact["backend_status"] != binding["backend_status"]
     ):
@@ -1981,16 +2070,31 @@ def _validate_locked_production_evidence(
             "package_version",
             "revision",
             "dirty",
+            "executable_sha256",
             "backend",
             "config",
             "config_sha256",
+            "build",
+            "build_sha256",
         },
         f"{context} solver",
     )
     if artifact_solver["revision"] != binding["solver_revision"]:
         raise CampaignInputError([f"{context}: artifact revision mismatch"])
-    if artifact_solver["dirty"] is not False:
+    if type(artifact_solver["dirty"]) is not bool:
+        raise CampaignInputError([f"{context}: artifact dirty flag is not boolean"])
+    if artifact["status"] == "sat" and artifact_solver["dirty"] is not False:
         raise CampaignInputError([f"{context}: artifact came from a dirty build"])
+    if (
+        _require_hash_value(
+            artifact_solver["executable_sha256"],
+            f"{context} solver.executable_sha256",
+        )
+        != binding["solver_executable_sha256"]
+    ):
+        raise CampaignInputError([f"{context}: artifact executable hash mismatch"])
+    _require_string_value(artifact_solver["package_version"], f"{context} package version")
+    _require_string_value(artifact_solver["backend"], f"{context} backend")
     config = artifact_solver["config"]
     if type(config) is not dict or any(
         type(key) is not str or type(setting) is not str
@@ -1998,11 +2102,53 @@ def _validate_locked_production_evidence(
     ):
         raise CampaignInputError([f"{context}: artifact config must map strings"])
     actual_runtime_hash = hashlib.sha256(_canonical_json_bytes(config)).hexdigest()
+    if config != _expected_runtime_config(expected["environment"]):
+        raise CampaignInputError([f"{context}: artifact runtime config differs from lock"])
     if (
         artifact_solver["config_sha256"] != actual_runtime_hash
         or binding["solver_runtime_config_sha256"] != actual_runtime_hash
     ):
         raise CampaignInputError([f"{context}: artifact runtime config hash mismatch"])
+    build = _require_exact_keys(
+        artifact_solver["build"],
+        {"features", "target", "profile", "rustc", "cargo", "source_manifest_sha256"},
+        f"{context} build",
+    )
+    features = build["features"]
+    if (
+        type(features) is not list
+        or any(type(feature) is not str or not feature for feature in features)
+        or features != sorted(set(features))
+    ):
+        raise CampaignInputError([f"{context}: artifact build features are not canonical"])
+    for field in ("target", "profile", "rustc", "cargo"):
+        _require_string_value(build[field], f"{context} build.{field}")
+    _require_hash_value(
+        build["source_manifest_sha256"], f"{context} build.source_manifest_sha256"
+    )
+    actual_build_hash = hashlib.sha256(_canonical_json_bytes(build)).hexdigest()
+    if (
+        _require_hash_value(
+            artifact_solver["build_sha256"], f"{context} solver.build_sha256"
+        )
+        != actual_build_hash
+        or binding["solver_build_sha256"] != actual_build_hash
+    ):
+        raise CampaignInputError([f"{context}: artifact build manifest hash mismatch"])
+    limitations = artifact["limitations"]
+    if type(limitations) is not list or any(
+        type(limitation) is not str or not limitation for limitation in limitations
+    ):
+        raise CampaignInputError([f"{context}: artifact limitations are malformed"])
+    if artifact["status"] == "sat":
+        if type(artifact["model"]) is not dict or limitations:
+            raise CampaignInputError([f"{context}: SAT artifact payload is incoherent"])
+    elif (
+        artifact["backend_cnf"] is not None
+        or artifact["model"] is not None
+        or not limitations
+    ):
+        raise CampaignInputError([f"{context}: unsupported artifact payload is incoherent"])
     return dict(binding)
 
 

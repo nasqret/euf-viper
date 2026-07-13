@@ -4,7 +4,7 @@
 Schema version 1 is the exact schema emitted by ``freeze_campaign.py``.  In
 particular, the lock digest is SHA-256 over canonical JSON with
 ``lock_sha256`` set to the empty string.  Canonical JSON uses sorted keys,
-compact separators, ASCII escaping, and one trailing newline.
+compact separators, UTF-8 without optional ASCII escaping, and one trailing newline.
 
 The runner never inherits the ambient environment into solver children.  The
 effective child environment is ``execution.environment`` updated by the
@@ -22,6 +22,7 @@ import math
 import os
 import platform
 import re
+import secrets
 import shutil
 import signal
 import stat
@@ -45,6 +46,10 @@ HEX40_OR_64 = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 RESULT_TOKENS = {"sat", "unsat", "unknown"}
 PLACEHOLDERS = {"binary", "instance", "budget_s"}
+EVIDENCE_SCHEMA = "euf-viper.production-evidence.v2"
+RUN_NONCE_ENV = "EUF_VIPER_RUN_NONCE"
+TRUSTED_EXECUTABLE_SHA256_ENV = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
+EVIDENCE_CONTROL_ENV = {RUN_NONCE_ENV, TRUSTED_EXECUTABLE_SHA256_ENV}
 
 TOP_LEVEL_KEYS = {
     "schema_version",
@@ -203,9 +208,12 @@ PRODUCTION_EVIDENCE_KEYS = {
     "schema",
     "source_sha256",
     "solver_revision",
+    "solver_executable_sha256",
     "solver_configuration",
     "solver_config_sha256",
     "solver_runtime_config_sha256",
+    "solver_build_sha256",
+    "run_nonce",
     "status",
     "backend_status",
 }
@@ -276,12 +284,12 @@ def canonical_bytes(value: Any) -> bytes:
             value,
             sort_keys=True,
             separators=(",", ":"),
-            ensure_ascii=True,
+            ensure_ascii=False,
             allow_nan=False,
         )
     except (TypeError, ValueError) as error:
         raise CampaignError(f"value is not canonical JSON: {error}") from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -297,6 +305,63 @@ def sha256_file(path: Path) -> str:
     except OSError as error:
         raise CampaignError(f"cannot hash {path}: {error}") from error
     return digest.hexdigest()
+
+
+def read_regular_nofollow(path: Path, context: str) -> bytes:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise CampaignError("O_NOFOLLOW is required for production evidence")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise CampaignError(
+            f"cannot open {context} {path} without following links: {error}"
+        ) from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise CampaignError(f"{context} is not a regular file: {path}")
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        after = os.fstat(descriptor)
+    except OSError as error:
+        raise CampaignError(f"cannot read {context} {path}: {error}") from error
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise CampaignError(f"{context} path changed while it was read: {path}") from error
+    fingerprint_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    fingerprint_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    content = b"".join(chunks)
+    if fingerprint_before != fingerprint_after or len(content) != after.st_size:
+        raise CampaignError(f"{context} changed while it was read: {path}")
+    if (
+        not stat.S_ISREG(path_after.st_mode)
+        or path_after.st_dev != after.st_dev
+        or path_after.st_ino != after.st_ino
+    ):
+        raise CampaignError(f"{context} path was replaced while it was read: {path}")
+    return content
 
 
 def utc_now() -> str:
@@ -433,9 +498,28 @@ def _validate_environment(value: Any, context: str) -> dict[str, str]:
     return result
 
 
+def expected_runtime_config(environment: dict[str, str]) -> dict[str, str]:
+    config = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("EUF_VIPER_") and key not in EVIDENCE_CONTROL_ENV
+    }
+    resolved: dict[str, str] = {}
+    for name, default, output_name in (
+        ("EUF_VIPER_DIRECT_ROOT_CNF", "1", "resolved.direct_root_cnf"),
+        ("EUF_VIPER_DIRECT_NEGATED_ROOT", "0", "resolved.direct_negated_root"),
+    ):
+        value = environment.get(name, default)
+        if value not in {"0", "1"}:
+            raise CampaignError(f"{name} must be 0 or 1 for evidence-enabled jobs")
+        resolved[output_name] = value
+    config.update(resolved)
+    return dict(sorted(config.items()))
+
+
 def _validate_evidence_contract(value: Any, context: str) -> dict[str, Any]:
     contract = require_exact_keys(value, EVIDENCE_CONTRACT_KEYS, context)
-    if contract["schema"] != "euf-viper.production-evidence.v1":
+    if contract["schema"] != EVIDENCE_SCHEMA:
         raise CampaignError(f"{context}.schema is unsupported")
     if contract["argv_flag"] != "--evidence-out":
         raise CampaignError(f"{context}.argv_flag must be --evidence-out")
@@ -556,6 +640,13 @@ def build_jobs(
                 evidence_path = None
                 evidence = solver.get("evidence")
                 if evidence is not None:
+                    forbidden_controls = sorted(EVIDENCE_CONTROL_ENV & environment.keys())
+                    if forbidden_controls:
+                        raise CampaignError(
+                            "locked environment cannot set runner-owned evidence controls: "
+                            f"{forbidden_controls!r}"
+                        )
+                    expected_runtime_config(environment)
                     evidence_path = (
                         output_directory
                         / "production-evidence"
@@ -1470,6 +1561,7 @@ def _production_evidence_binding(
     output_directory: Path,
     repository_revision: str,
     result_token: str | None,
+    expected_run_nonce: str,
 ) -> dict[str, Any] | None:
     contract = job.solver.get("evidence")
     if contract is None:
@@ -1479,29 +1571,36 @@ def _production_evidence_binding(
     if job.evidence_path is None:
         raise CampaignError("evidence-enabled job lacks an output path")
     path = job.evidence_path
-    if not path.exists():
+    if not os.path.lexists(path):
         if result_token in {"sat", "unsat"}:
             raise CampaignError(
                 f"decisive result {result_token!r} omitted production evidence for "
                 f"{job.instance['relative_path']!r}"
             )
         return None
+    if not path.is_absolute():
+        raise CampaignError("production evidence path must be absolute")
+    _path_under(path, output_directory, "production evidence path")
+    evidence_bytes = read_regular_nofollow(path, "production evidence")
     try:
-        resolved = path.resolve(strict=True)
-    except OSError as error:
-        raise CampaignError(f"cannot resolve production evidence {path}: {error}") from error
-    if resolved != path:
-        raise CampaignError(f"production evidence path was redirected: {path}")
-    _path_under(resolved, output_directory, "production evidence path")
-    payload = read_json_strict(resolved, "production evidence")
+        evidence_text = evidence_bytes.decode("utf-8")
+    except UnicodeError as error:
+        raise CampaignError(f"production evidence is not UTF-8: {error}") from error
+    payload = parse_json_strict(evidence_text, f"production evidence {path}")
+    if type(payload) is not dict:
+        raise CampaignError("production evidence root must be an object")
+    if canonical_bytes(payload) != evidence_bytes:
+        raise CampaignError("production evidence is not canonical UTF-8 JSON")
     require_exact_keys(
         payload,
         {
             "schema",
+            "run_nonce",
             "status",
             "backend_status",
             "source",
             "solver",
+            "backend_cnf",
             "model",
             "limitations",
         },
@@ -1509,14 +1608,19 @@ def _production_evidence_binding(
     )
     if payload["schema"] != contract["schema"]:
         raise CampaignError("production evidence schema differs from the solver lock")
+    run_nonce = require_hash(payload["run_nonce"], "production evidence run_nonce")
+    if run_nonce != expected_run_nonce:
+        raise CampaignError("production evidence run nonce differs from the runner nonce")
     status = require_string(payload["status"], "production evidence status")
     backend_status = require_string(
         payload["backend_status"], "production evidence backend_status"
     )
-    if status not in {"sat", "unsupported"}:
-        raise CampaignError("production evidence has invalid status")
-    if backend_status not in {"sat", "unsat", "unsupported"}:
-        raise CampaignError("production evidence has invalid backend_status")
+    if (status, backend_status) not in {
+        ("sat", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise CampaignError("production evidence has an incoherent status pair")
     if result_token in {"sat", "unsat"}:
         if result_token not in contract["accepted_decisive_statuses"]:
             raise CampaignError(
@@ -1546,9 +1650,12 @@ def _production_evidence_binding(
             "package_version",
             "revision",
             "dirty",
+            "executable_sha256",
             "backend",
             "config",
             "config_sha256",
+            "build",
+            "build_sha256",
         },
         "production evidence solver",
     )
@@ -1558,27 +1665,82 @@ def _production_evidence_binding(
             "production evidence revision mismatch: "
             f"expected {repository_revision}, got {revision}"
         )
-    if require_bool(solver["dirty"], "production evidence solver.dirty"):
+    dirty = require_bool(solver["dirty"], "production evidence solver.dirty")
+    if status == "sat" and dirty:
         raise CampaignError("production evidence was emitted by a dirty build")
+    executable_sha256 = require_hash(
+        solver["executable_sha256"],
+        "production evidence solver.executable_sha256",
+    )
+    if executable_sha256 != job.solver["sha256"]:
+        raise CampaignError(
+            "production evidence executable SHA-256 differs from the solver lock"
+        )
     require_string(solver["package_version"], "production evidence package version")
     require_string(solver["backend"], "production evidence backend")
     config = _validate_environment(solver["config"], "production evidence solver.config")
+    locked_runtime_config = expected_runtime_config(job.environment)
+    if config != locked_runtime_config:
+        raise CampaignError(
+            "production evidence runtime config differs from the lock-derived config"
+        )
     runtime_config_sha256 = require_hash(
         solver["config_sha256"], "production evidence solver.config_sha256"
     )
     if runtime_config_sha256 != sha256_bytes(canonical_bytes(config)):
         raise CampaignError("production evidence runtime config hash mismatch")
-    digest, byte_count = _hash_and_size(resolved)
+    build = require_exact_keys(
+        solver["build"],
+        {"features", "target", "profile", "rustc", "cargo", "source_manifest_sha256"},
+        "production evidence solver.build",
+    )
+    features = build["features"]
+    if (
+        type(features) is not list
+        or any(type(feature) is not str or not feature for feature in features)
+        or features != sorted(set(features))
+    ):
+        raise CampaignError("production evidence build features are not canonical")
+    for field in ("target", "profile", "rustc", "cargo"):
+        require_string(build[field], f"production evidence solver.build.{field}")
+    require_hash(
+        build["source_manifest_sha256"],
+        "production evidence solver.build.source_manifest_sha256",
+    )
+    build_sha256 = require_hash(
+        solver["build_sha256"], "production evidence solver.build_sha256"
+    )
+    if build_sha256 != sha256_bytes(canonical_bytes(build)):
+        raise CampaignError("production evidence build manifest hash mismatch")
+    limitations = payload["limitations"]
+    if type(limitations) is not list or any(
+        type(limitation) is not str or not limitation for limitation in limitations
+    ):
+        raise CampaignError("production evidence limitations are malformed")
+    if status == "sat":
+        if type(payload["model"]) is not dict or limitations:
+            raise CampaignError("SAT evidence lacks a model or carries limitations")
+    elif (
+        payload["backend_cnf"] is not None
+        or payload["model"] is not None
+        or not limitations
+    ):
+        raise CampaignError("unsupported evidence carries decisive data or lacks a limitation")
+    digest = sha256_bytes(evidence_bytes)
+    byte_count = len(evidence_bytes)
     return {
-        "path": resolved.relative_to(output_directory).as_posix(),
+        "path": path.relative_to(output_directory).as_posix(),
         "sha256": digest,
         "bytes": byte_count,
         "schema": payload["schema"],
         "source_sha256": source_sha256,
         "solver_revision": revision,
+        "solver_executable_sha256": executable_sha256,
         "solver_configuration": job.solver["configuration"],
         "solver_config_sha256": sha256_bytes(canonical_bytes(job.solver)),
         "solver_runtime_config_sha256": runtime_config_sha256,
+        "solver_build_sha256": build_sha256,
+        "run_nonce": run_nonce,
         "status": status,
         "backend_status": backend_status,
     }
@@ -1618,6 +1780,11 @@ def run_job(
     child_user: float | None = None
     child_system: float | None = None
     max_rss_bytes: int | None = None
+    run_nonce = secrets.token_hex(32) if "evidence" in job.solver else ""
+    child_environment = dict(job.environment)
+    if run_nonce:
+        child_environment[RUN_NONCE_ENV] = run_nonce
+        child_environment[TRUSTED_EXECUTABLE_SHA256_ENV] = job.solver["sha256"]
     try:
         try:
             process = subprocess.Popen(
@@ -1625,7 +1792,7 @@ def run_job(
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
-                env=job.environment,
+                env=child_environment,
                 close_fds=True,
                 start_new_session=True,
                 preexec_fn=_preexec_setup(
@@ -1680,7 +1847,11 @@ def run_job(
             else None
         )
         evidence_binding = _production_evidence_binding(
-            job, output_directory, repository_revision, result_token
+            job,
+            output_directory,
+            repository_revision,
+            result_token,
+            run_nonce,
         )
         record = {
             "record_type": "run",
@@ -1765,24 +1936,34 @@ def _validate_recorded_production_evidence(
     require_hash(binding["sha256"], f"{context}.sha256")
     require_int(binding["bytes"], f"{context}.bytes", minimum=1)
     require_hash(binding["source_sha256"], f"{context}.source_sha256")
+    require_hash(
+        binding["solver_executable_sha256"],
+        f"{context}.solver_executable_sha256",
+    )
     require_hash(binding["solver_config_sha256"], f"{context}.solver_config_sha256")
     require_hash(
         binding["solver_runtime_config_sha256"],
         f"{context}.solver_runtime_config_sha256",
     )
+    require_hash(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    require_hash(binding["run_nonce"], f"{context}.run_nonce")
     if binding["source_sha256"] != job.instance["sha256"]:
         raise CampaignError(f"{context} source hash differs from the job")
     if binding["solver_configuration"] != job.solver["configuration"]:
         raise CampaignError(f"{context} solver configuration differs from the job")
     if binding["solver_config_sha256"] != sha256_bytes(canonical_bytes(job.solver)):
         raise CampaignError(f"{context} solver config hash differs from the job")
+    if binding["solver_executable_sha256"] != job.solver["sha256"]:
+        raise CampaignError(f"{context} executable hash differs from the job")
     contract = job.solver["evidence"]
     if binding["schema"] != contract["schema"]:
         raise CampaignError(f"{context} schema differs from the job")
-    if binding["status"] not in {"sat", "unsupported"}:
-        raise CampaignError(f"{context} has invalid status")
-    if binding["backend_status"] not in {"sat", "unsat", "unsupported"}:
-        raise CampaignError(f"{context} has invalid backend status")
+    if (binding["status"], binding["backend_status"]) not in {
+        ("sat", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise CampaignError(f"{context} has an incoherent status pair")
     if result_token in {"sat", "unsat"} and (
         result_token not in contract["accepted_decisive_statuses"]
         or binding["status"] != result_token
@@ -1860,6 +2041,45 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
         )
 
 
+def rehash_completed_sidecars(
+    campaign: LockedCampaign, runs: list[dict[str, Any]]
+) -> None:
+    for index, record in enumerate(runs):
+        job = campaign.jobs[index]
+        if "evidence" not in job.solver:
+            continue
+        binding = record["production_evidence"]
+        if binding is None:
+            continue
+        try:
+            actual = _production_evidence_binding(
+                job,
+                campaign.output_directory,
+                campaign.payload["repository"]["commit"],
+                record["result_token"],
+                binding["run_nonce"],
+            )
+        except CampaignError as error:
+            raise CampaignError(
+                f"completed production evidence cannot be rehashed at run {job.sequence}: {error}"
+            ) from error
+        if not _same_json(actual, binding):
+            raise CampaignError(
+                f"completed production evidence binding drift at run {job.sequence}"
+            )
+
+
+def _fsync_parent(path: Path) -> None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path.parent, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 class Journal:
     def __init__(self, path: Path, lock_sha256: str, jobs: tuple[Job, ...]):
         self.path = path
@@ -1880,6 +2100,7 @@ class Journal:
         try:
             self.fd = os.open(self.path, flags, 0o600)
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _fsync_parent(self.path)
         except BlockingIOError as error:
             if self.fd is not None:
                 os.close(self.fd)
@@ -1916,12 +2137,14 @@ class Journal:
         raw = self._read_all()
         if not raw:
             return
+        recovery_offset: int | None = None
+        if not raw.endswith(b"\n"):
+            recovery_offset = raw.rfind(b"\n") + 1
+            raw = raw[:recovery_offset]
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as error:
             raise CampaignError(f"journal is not UTF-8: {error}") from error
-        if not text.endswith("\n"):
-            raise CampaignError("journal ends with a partial record; refuse truncation")
         seen_run_keys: set[bytes] = set()
         seen_invocations: set[int] = set()
         last_hash: str | None = None
@@ -1934,6 +2157,10 @@ class Journal:
                     f"journal {self.path}:{line_number} must be an object"
                 )
             record = value
+            if canonical_bytes(record) != (line + "\n").encode("utf-8"):
+                raise CampaignError(
+                    f"journal {self.path}:{line_number} is not canonical immutable JSON"
+                )
             if record.get("record_type") == "run":
                 key_bytes = _run_key_bytes(record)
                 if key_bytes in seen_run_keys:
@@ -1991,6 +2218,11 @@ class Journal:
             self.records.append(record)
             last_hash = record_hash
         self.last_hash = last_hash
+        if recovery_offset is not None:
+            assert self.fd is not None
+            os.ftruncate(self.fd, recovery_offset)
+            os.fsync(self.fd)
+            _fsync_parent(self.path)
 
     def append(self, record: dict[str, Any]) -> dict[str, Any]:
         assert self.fd is not None
@@ -2125,6 +2357,7 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
     enforce_address_space = capabilities["address_space_limit"]["enforced"]
 
     with Journal(campaign.journal_path, lock_sha256, campaign.jobs) as journal:
+        rehash_completed_sidecars(campaign, journal.runs)
         if len(journal.runs) < len(campaign.jobs):
             if campaign.raw_path.exists() or campaign.summary_path.exists():
                 raise CampaignError(
@@ -2169,6 +2402,7 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
 
         if len(journal.runs) != len(campaign.jobs):
             raise CampaignError("journal did not reach the complete schedule")
+        rehash_completed_sidecars(campaign, journal.runs)
         assert_all_unchanged(snapshots)
         raw_bytes = raw_output_bytes(journal.runs)
         raw_hash = sha256_bytes(raw_bytes)

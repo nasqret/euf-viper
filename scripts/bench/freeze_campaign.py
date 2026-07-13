@@ -39,9 +39,15 @@ class FreezeError(ValueError):
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -369,7 +375,7 @@ def load_solvers(
                 "accepted_decisive_statuses",
             }:
                 raise FreezeError(f"solver {identifier!r} has invalid evidence contract")
-            if evidence["schema"] != "euf-viper.production-evidence.v1":
+            if evidence["schema"] != "euf-viper.production-evidence.v2":
                 raise FreezeError(f"solver {identifier!r} has unsupported evidence schema")
             if evidence["argv_flag"] != "--evidence-out":
                 raise FreezeError(f"solver {identifier!r} has invalid evidence argv flag")

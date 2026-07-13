@@ -44,12 +44,30 @@ EVIDENCE_SOLVER = textwrap.dedent(
 
     source = Path(sys.argv[1])
     output = Path(sys.argv[sys.argv.index("--evidence-out") + 1])
-    config = {{}}
+    controls = {{"EUF_VIPER_RUN_NONCE", "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"}}
+    config = {{
+        key: value
+        for key, value in os.environ.items()
+        if key.startswith("EUF_VIPER_") and key not in controls
+    }}
+    config["resolved.direct_root_cnf"] = os.environ.get("EUF_VIPER_DIRECT_ROOT_CNF", "1")
+    config["resolved.direct_negated_root"] = os.environ.get(
+        "EUF_VIPER_DIRECT_NEGATED_ROOT", "0"
+    )
     canonical = lambda value: (
-        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\\n"
-    ).encode("ascii")
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\\n"
+    ).encode("utf-8")
+    build = {{
+        "features": ["production-evidence"],
+        "target": "test-target",
+        "profile": "test",
+        "rustc": "rustc test",
+        "cargo": "cargo test",
+        "source_manifest_sha256": "0" * 64,
+    }}
     payload = {{
-        "schema": "euf-viper.production-evidence.v1",
+        "schema": "euf-viper.production-evidence.v2",
+        "run_nonce": os.environ["EUF_VIPER_RUN_NONCE"],
         "status": "sat",
         "backend_status": "sat",
         "source": {{
@@ -61,10 +79,14 @@ EVIDENCE_SOLVER = textwrap.dedent(
             "package_version": "test",
             "revision": os.environ["REPOSITORY_REVISION"],
             "dirty": False,
+            "executable_sha256": os.environ["EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"],
             "backend": "fake",
             "config": config,
             "config_sha256": hashlib.sha256(canonical(config)).hexdigest(),
+            "build": build,
+            "build_sha256": hashlib.sha256(canonical(build)).hexdigest(),
         }},
+        "backend_cnf": None,
         "model": {{
             "origin": "congruence_closure",
             "assignment": None,
@@ -91,7 +113,12 @@ class LockedProductionEvidenceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def fixture(self, solver_source: str = EVIDENCE_SOLVER) -> CampaignFixture:
+    def fixture(
+        self,
+        solver_source: str = EVIDENCE_SOLVER,
+        *,
+        candidate_environment: dict[str, str] | None = None,
+    ) -> CampaignFixture:
         fixture = CampaignFixture(self.root)
         fixture.add_instance(
             "QF_UF/family/sat.smt2",
@@ -123,10 +150,11 @@ class LockedProductionEvidenceTests(unittest.TestCase):
             solver for solver in payload["solvers"] if solver["id"] == "euf-viper"
         )
         candidate["evidence"] = {
-            "schema": "euf-viper.production-evidence.v1",
+            "schema": "euf-viper.production-evidence.v2",
             "argv_flag": "--evidence-out",
             "accepted_decisive_statuses": ["sat"],
         }
+        candidate["environment"].update(candidate_environment or {})
         candidate["environment"]["REPOSITORY_REVISION"] = payload["repository"]["commit"]
         fixture.solver_config.write_bytes(
             canonical_bytes({"schema_version": 1, "solvers": payload["solvers"]})
@@ -165,7 +193,9 @@ class LockedProductionEvidenceTests(unittest.TestCase):
 
         artifact.write_bytes(original)
         artifact.unlink()
-        with self.assertRaisesRegex(ANALYZER.CampaignInputError, "cannot resolve evidence"):
+        with self.assertRaisesRegex(
+            ANALYZER.CampaignInputError, "cannot open .*production-evidence"
+        ):
             ANALYZER.load_locked_campaign(fixture.lock_path, raw)
 
     def test_shadow_workset_validates_production_model_before_rerun(self) -> None:
@@ -204,6 +234,35 @@ class LockedProductionEvidenceTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("omitted production evidence", completed.stderr)
         self.assertFalse((fixture.output / "raw.jsonl").exists())
+
+    def test_resume_rehashes_and_rejects_a_missing_completed_sidecar(self) -> None:
+        fixture = self.fixture()
+        completed = self.run_campaign(fixture)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        record = fixture.raw_records()[0]
+        binding = record["production_evidence"]
+        (fixture.output / binding["path"]).unlink()
+
+        resumed = self.run_campaign(fixture)
+
+        self.assertEqual(resumed.returncode, 2)
+        self.assertIn("completed production evidence cannot be rehashed", resumed.stderr)
+
+    def test_unicode_locked_runtime_config_uses_canonical_utf8(self) -> None:
+        fixture = self.fixture(
+            candidate_environment={"EUF_VIPER_TEST_UNICODE": "zażółć-α"}
+        )
+        completed = self.run_campaign(fixture)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        record = fixture.raw_records()[0]
+        binding = record["production_evidence"]
+        artifact = json.loads(
+            (fixture.output / binding["path"]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            artifact["solver"]["config"]["EUF_VIPER_TEST_UNICODE"],
+            "zażółć-α",
+        )
 
 
 if __name__ == "__main__":

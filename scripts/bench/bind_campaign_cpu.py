@@ -17,9 +17,15 @@ class BindingError(ValueError):
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def lock_hash(lock: dict[str, Any]) -> str:

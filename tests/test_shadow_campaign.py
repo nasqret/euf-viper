@@ -24,9 +24,9 @@ SPEC.loader.exec_module(SHADOW)
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -622,6 +622,27 @@ class ExecutionTests(unittest.TestCase):
 
             self.assertEqual(resumed.returncode, 2, resumed.stderr)
             self.assertIn("record hash drift", resumed.stderr)
+            self.assertEqual(fixture.call_log.read_text(encoding="utf-8"), calls_before)
+
+    def test_hash_framed_journal_recovers_a_partial_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("family/case.smt2")
+            fixture.finalize()
+            first = fixture.run()
+            self.assertEqual(first.returncode, 0, first.stderr)
+            journal_path = fixture.journal_path()
+            complete = journal_path.read_bytes()
+            calls_before = fixture.call_log.read_text(encoding="utf-8")
+            with journal_path.open("ab") as handle:
+                handle.write(b'{"record_type":"attempt","record_sha256":"partial')
+                handle.flush()
+                os.fsync(handle.fileno())
+
+            resumed = fixture.run()
+
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+            self.assertEqual(journal_path.read_bytes(), complete)
             self.assertEqual(fixture.call_log.read_text(encoding="utf-8"), calls_before)
 
     def test_timeout_kills_descendant_process_group_and_is_not_verified(self) -> None:

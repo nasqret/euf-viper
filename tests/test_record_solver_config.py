@@ -29,7 +29,7 @@ class RecordSolverConfigTests(unittest.TestCase):
             "    previous=''\n"
             "    for argument in \"$@\"; do\n"
             "      if [ \"$previous\" = '--evidence-out' ]; then\n"
-            "        printf '%s\\n' '{\"schema\":\"euf-viper.production-evidence.v1\",\"status\":\"sat\"}' > \"$argument\"\n"
+            "        printf '%s\\n' '{\"schema\":\"euf-viper.production-evidence.v2\",\"status\":\"sat\"}' > \"$argument\"\n"
             "      fi\n"
             "      previous=$argument\n"
             "    done\n"

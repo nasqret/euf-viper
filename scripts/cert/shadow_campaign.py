@@ -29,6 +29,7 @@ import math
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -78,9 +79,12 @@ PRODUCTION_EVIDENCE_BINDING_KEYS = {
     "schema",
     "source_sha256",
     "solver_revision",
+    "solver_executable_sha256",
     "solver_configuration",
     "solver_config_sha256",
     "solver_runtime_config_sha256",
+    "solver_build_sha256",
+    "run_nonce",
     "status",
     "backend_status",
 }
@@ -88,12 +92,18 @@ PRODUCTION_EVIDENCE_VALIDATION_KEYS = {
     "schema",
     "status",
     "backend_status",
+    "run_nonce",
+    "evidence_sha256",
+    "evidence_bytes",
     "source_sha256",
     "solver_revision",
+    "solver_executable_sha256",
     "solver_config_sha256",
+    "solver_build_sha256",
     "terms",
     "atoms",
     "assignment_variables",
+    "backend_clauses",
 }
 PROCESS_KEYS = {
     "status",
@@ -179,9 +189,15 @@ class ShadowInterrupted(Exception):
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -197,6 +213,84 @@ def sha256_file(path: Path) -> str:
     except OSError as error:
         raise ShadowError(f"cannot hash {path}: {error}") from error
     return digest.hexdigest()
+
+
+def _read_regular_nofollow(path: Path, context: str) -> bytes:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ShadowError("O_NOFOLLOW is required for production evidence")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise ShadowError(
+            f"cannot open {context} {path} without following links: {error}"
+        ) from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ShadowError(f"{context} is not a regular file: {path}")
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        after = os.fstat(descriptor)
+    except OSError as error:
+        raise ShadowError(f"cannot read {context} {path}: {error}") from error
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise ShadowError(f"{context} path changed while it was read") from error
+    content = b"".join(chunks)
+    before_fingerprint = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    after_fingerprint = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    if before_fingerprint != after_fingerprint or len(content) != after.st_size:
+        raise ShadowError(f"{context} changed while it was read")
+    if (
+        not stat.S_ISREG(path_after.st_mode)
+        or path_after.st_dev != after.st_dev
+        or path_after.st_ino != after.st_ino
+    ):
+        raise ShadowError(f"{context} path was replaced while it was read")
+    return content
+
+
+def _expected_runtime_config(environment: Mapping[str, str]) -> dict[str, str]:
+    controls = {
+        "EUF_VIPER_RUN_NONCE",
+        "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+    }
+    config = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("EUF_VIPER_") and key not in controls
+    }
+    for name, default, resolved in (
+        ("EUF_VIPER_DIRECT_ROOT_CNF", "1", "resolved.direct_root_cnf"),
+        ("EUF_VIPER_DIRECT_NEGATED_ROOT", "0", "resolved.direct_negated_root"),
+    ):
+        setting = environment.get(name, default)
+        if setting not in {"0", "1"}:
+            raise ShadowError(f"locked {name} is invalid")
+        config[resolved] = setting
+    return dict(sorted(config.items()))
 
 
 def _is_sha256(value: object) -> bool:
@@ -349,6 +443,9 @@ def derive_work_records(
 
     lock = campaign["lock"]
     solver = _candidate_solver(lock)
+    locked_environment = dict(lock["execution"]["environment"])
+    locked_environment.update(solver["environment"])
+    locked_runtime_config = _expected_runtime_config(locked_environment)
     observations = campaign["observations"]
     candidate_budgets: dict[str, list[float]] = collections.defaultdict(list)
     candidate_evidence: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
@@ -427,6 +524,10 @@ def derive_work_records(
                         expected_source_sha256=instance["sha256"],
                         expected_revision=lock["repository"]["commit"],
                         expected_status=instance["status"],
+                        expected_executable_sha256=solver["sha256"],
+                        expected_runtime_config=locked_runtime_config,
+                        expected_evidence_sha256=binding["sha256"],
+                        expected_run_nonce=binding["run_nonce"],
                     )
                 except (OSError, production_checker.ProductionEvidenceError) as error:
                     raise ShadowError(
@@ -440,11 +541,24 @@ def derive_work_records(
                         "production evidence runtime config drift for "
                         f"{instance['relative_path']!r}"
                     )
+                if (
+                    validation["evidence_sha256"] != binding["sha256"]
+                    or validation["evidence_bytes"] != binding["bytes"]
+                    or validation["solver_executable_sha256"]
+                    != binding["solver_executable_sha256"]
+                    or validation["solver_build_sha256"]
+                    != binding["solver_build_sha256"]
+                ):
+                    raise ShadowError(
+                        "production evidence journal binding drift for "
+                        f"{instance['relative_path']!r}"
+                    )
                 validated_production_evidence.append(
                     {
                         "budget_s": production["budget_s"],
                         "repetition": production["repetition"],
                         "binding": binding,
+                        "artifact_path": str(evidence_path),
                         "validation": validation,
                     }
                 )
@@ -605,6 +719,7 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 "budget_s",
                 "repetition",
                 "binding",
+                "artifact_path",
                 "validation",
             }:
                 raise ShadowError(
@@ -627,6 +742,9 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 PRODUCTION_EVIDENCE_BINDING_KEYS,
                 f"{context}.production_evidence[{index}].binding",
             )
+            artifact_value = record["artifact_path"]
+            if type(artifact_value) is not str or not Path(artifact_value).is_absolute():
+                raise ShadowError(f"{context}: invalid production evidence artifact_path")
             path_value = binding["path"]
             if type(path_value) is not str or not path_value:
                 raise ShadowError(f"{context}: invalid production evidence path")
@@ -638,12 +756,15 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 "source_sha256",
                 "solver_config_sha256",
                 "solver_runtime_config_sha256",
+                "solver_executable_sha256",
+                "solver_build_sha256",
+                "run_nonce",
             ):
                 if not _is_sha256(binding[field]):
                     raise ShadowError(f"{context}: invalid production evidence {field}")
             if type(binding["bytes"]) is not int or binding["bytes"] < 1:
                 raise ShadowError(f"{context}: invalid production evidence byte count")
-            if binding["schema"] != "euf-viper.production-evidence.v1":
+            if binding["schema"] != "euf-viper.production-evidence.v2":
                 raise ShadowError(f"{context}: invalid production evidence schema")
             if binding["source_sha256"] != value["source_sha256"]:
                 raise ShadowError(f"{context}: production evidence source hash mismatch")
@@ -666,16 +787,21 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 "schema": binding["schema"],
                 "status": binding["status"],
                 "backend_status": binding["backend_status"],
+                "run_nonce": binding["run_nonce"],
+                "evidence_sha256": binding["sha256"],
+                "evidence_bytes": binding["bytes"],
                 "source_sha256": binding["source_sha256"],
                 "solver_revision": binding["solver_revision"],
+                "solver_executable_sha256": binding["solver_executable_sha256"],
                 "solver_config_sha256": binding["solver_runtime_config_sha256"],
+                "solver_build_sha256": binding["solver_build_sha256"],
             }
             for field, expected in expected_validation.items():
                 if validation[field] != expected:
                     raise ShadowError(
                         f"{context}: production evidence validation {field} mismatch"
                     )
-            for field in ("terms", "atoms", "assignment_variables"):
+            for field in ("terms", "atoms", "assignment_variables", "backend_clauses"):
                 if type(validation[field]) is not int or validation[field] < 0:
                     raise ShadowError(
                         f"{context}: invalid production evidence validation {field}"
@@ -683,6 +809,31 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
         if covered_budgets != set(float(item) for item in budgets):
             raise ShadowError(f"{context}: production evidence does not cover every budget")
     return value
+
+
+def rehash_production_evidence(works: Sequence[Mapping[str, Any]]) -> None:
+    for work in works:
+        for production in work.get("production_evidence", []):
+            binding = production["binding"]
+            artifact_path = Path(production["artifact_path"])
+            content = _read_regular_nofollow(
+                artifact_path,
+                f"production evidence for {work['relative_path']!r}",
+            )
+            actual_hash = hashlib.sha256(content).hexdigest()
+            if actual_hash != binding["sha256"] or len(content) != binding["bytes"]:
+                raise ShadowError(
+                    "production evidence no longer matches its campaign journal binding: "
+                    f"{artifact_path}"
+                )
+            validation = production["validation"]
+            if (
+                validation["evidence_sha256"] != actual_hash
+                or validation["evidence_bytes"] != len(content)
+            ):
+                raise ShadowError(
+                    f"production evidence validation hash drift: {artifact_path}"
+                )
 
 
 def partition_work_records(
@@ -698,6 +849,7 @@ def partition_work_records(
         validate_work_record(work, f"work record {position}")
         if work["global_index"] != position:
             raise ShadowError("work records must have contiguous global indices")
+    rehash_production_evidence(works)
     return [work for work in works if work["global_index"] % shard_count == shard_index]
 
 
@@ -1532,6 +1684,17 @@ def validate_attempt_record(
     return value
 
 
+def _fsync_parent(path: Path) -> None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path.parent, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 class Journal:
     """Locked append-only canonical JSONL journal with an exact hash chain."""
 
@@ -1553,6 +1716,7 @@ class Journal:
         try:
             self.fd = os.open(self.path, flags, 0o600)
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _fsync_parent(self.path)
         except BlockingIOError as error:
             if self.fd is not None:
                 os.close(self.fd)
@@ -1593,12 +1757,14 @@ class Journal:
         raw = self._read_all()
         if not raw:
             return
+        recovery_offset: int | None = None
+        if not raw.endswith(b"\n"):
+            recovery_offset = raw.rfind(b"\n") + 1
+            raw = raw[:recovery_offset]
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as error:
             raise ShadowError(f"journal is not UTF-8: {error}") from error
-        if not text.endswith("\n"):
-            raise ShadowError("journal ends with a partial record; refuse truncation")
         previous: str | None = None
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line:
@@ -1635,6 +1801,11 @@ class Journal:
                 self.attempts.append(value)
             previous = record_hash
         self.last_hash = previous
+        if recovery_offset is not None:
+            assert self.fd is not None
+            os.ftruncate(self.fd, recovery_offset)
+            os.fsync(self.fd)
+            _fsync_parent(self.path)
 
     def _append_complete(self, complete: Mapping[str, Any]) -> dict[str, Any]:
         assert self.fd is not None
@@ -1996,6 +2167,7 @@ def run_shadow_campaign(
     assert_unchanged(snapshots)
 
     with Journal(journal_path, plan) as journal:
+        rehash_production_evidence(shard_works)
         latest, attempt_counts = validate_journal_attempts(
             journal, shard_works, plan, output_directory
         )
@@ -2048,6 +2220,7 @@ def run_shadow_campaign(
                 raise ShadowInterrupted(message)
             raise ShadowError(message)
 
+        rehash_production_evidence(shard_works)
         assert_unchanged(snapshots)
         return _write_summary(summary_path, journal, plan, shard_works)
 

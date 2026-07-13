@@ -4,9 +4,11 @@ import hashlib
 import importlib.util
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -69,6 +71,7 @@ class ProductionEvidenceTests(unittest.TestCase):
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr)
         cls.binary = ROOT / "target" / "debug" / "euf-viper"
+        cls.binary_sha256 = hashlib.sha256(cls.binary.read_bytes()).hexdigest()
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -87,6 +90,12 @@ class ProductionEvidenceTests(unittest.TestCase):
         source = self.root / f"{name}.smt2"
         evidence = self.root / f"{name}.evidence.json"
         source.write_text(source_text, encoding="utf-8")
+        child_environment = {
+            **os.environ,
+            "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
+            "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+            **(environment or {}),
+        }
         completed = subprocess.run(
             [
                 str(self.binary),
@@ -99,15 +108,28 @@ class ProductionEvidenceTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
-            env={**os.environ, **(environment or {})},
+            env=child_environment,
         )
         return completed, source, evidence
+
+    def validate(self, evidence: Path, source: Path, **kwargs: object) -> dict[str, object]:
+        return CHECKER.validate_production_evidence(
+            evidence,
+            source,
+            expected_executable_sha256=self.binary_sha256,
+            allow_dirty=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    def rewrite(evidence: Path, payload: dict[str, object]) -> None:
+        evidence.write_bytes(CHECKER.canonical_bytes(payload))
 
     def test_sat_sidecar_validates_the_literal_assignment_and_model(self) -> None:
         completed, source, evidence = self.solve(SAT_SOURCE, "sat")
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stdout, "sat\n")
-        result = CHECKER.validate_production_evidence(
+        result = self.validate(
             evidence,
             source,
             expected_status="sat",
@@ -116,13 +138,73 @@ class ProductionEvidenceTests(unittest.TestCase):
         self.assertGreater(result["terms"], 0)
         self.assertGreater(result["assignment_variables"], 0)
 
-        payload = json.loads(evidence.read_text(encoding="ascii"))
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
         self.assertEqual(payload["model"]["origin"], "cnf_assignment")
         self.assertIn(
             payload["solver"]["backend"],
             {"kissat", "cadical", "cadical-refine", "varisat", "dpll-t"},
         )
         self.assertTrue(payload["model"]["atoms"])
+        self.assertGreater(result["backend_clauses"], 0)
+
+    def test_cnf_auxiliary_flip_is_rejected_by_clause_replay(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "aux-flip")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        assignment = payload["model"]["assignment"]
+        clauses = payload["backend_cnf"]["clauses"]
+        selected = None
+        for variable in payload["backend_cnf"]["variables"]:
+            if variable["kind"] != "auxiliary":
+                continue
+            candidate = variable["variable"]
+            trial = list(assignment)
+            trial[candidate - 1] = -trial[candidate - 1]
+            values = {abs(literal): literal > 0 for literal in trial}
+            if any(
+                not any(values[abs(literal)] == (literal > 0) for literal in clause)
+                for clause in clauses
+            ):
+                selected = candidate
+                assignment = trial
+                break
+        self.assertIsNotNone(selected, "fixture needs a clause-constrained auxiliary")
+        payload["model"]["assignment"] = assignment
+        payload["model"]["assignment_sha256"] = hashlib.sha256(
+            CHECKER.canonical_bytes(assignment)
+        ).hexdigest()
+        self.rewrite(evidence, payload)
+        with self.assertRaisesRegex(
+            CHECKER.ProductionEvidenceError, "falsifies backend clause"
+        ):
+            self.validate(evidence, source, expected_status="sat")
+
+    def test_atom_omission_is_rejected_by_exact_variable_coverage(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "atom-omission")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        p_term = next(
+            term["id"]
+            for term in payload["model"]["terms"]
+            if term["function"] == "p"
+        )
+        omitted = next(
+            atom
+            for atom in payload["model"]["atoms"]
+            if atom["kind"] == "bool_term" and atom["term"] == p_term
+        )
+        payload["model"]["atoms"].remove(omitted)
+        variable = omitted["variable"]
+        payload["backend_cnf"]["variables"][variable - 1] = {
+            "kind": "auxiliary",
+            "variable": variable,
+        }
+        self.rewrite(evidence, payload)
+        with self.assertRaisesRegex(
+            CHECKER.ProductionEvidenceError,
+            "independently reconstructed atom coverage is incomplete",
+        ):
+            self.validate(evidence, source, expected_status="sat")
 
     def test_utf8_runtime_configuration_has_a_stable_hash(self) -> None:
         completed, source, evidence = self.solve(
@@ -131,7 +213,7 @@ class ProductionEvidenceTests(unittest.TestCase):
             environment={"EUF_VIPER_TEST_UNICODE": "alpha-\u03b1"},
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        result = CHECKER.validate_production_evidence(
+        result = self.validate(
             evidence,
             source,
             expected_status="sat",
@@ -145,11 +227,13 @@ class ProductionEvidenceTests(unittest.TestCase):
             result["solver_config_sha256"],
             payload["solver"]["config_sha256"],
         )
+        self.assertIn("α".encode("utf-8"), evidence.read_bytes())
+        self.assertNotIn(b"\\u03b1", evidence.read_bytes())
 
     def test_direct_closure_sidecar_validates_without_a_cnf_assignment(self) -> None:
         completed, source, evidence = self.solve(CLOSURE_SAT_SOURCE, "closure")
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        result = CHECKER.validate_production_evidence(
+        result = self.validate(
             evidence,
             source,
             expected_status="sat",
@@ -176,7 +260,7 @@ class ProductionEvidenceTests(unittest.TestCase):
                     environment={"EUF_VIPER_BACKEND": selected},
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
-                result = CHECKER.validate_production_evidence(
+                result = self.validate(
                     evidence,
                     source,
                     expected_status="sat",
@@ -195,11 +279,11 @@ class ProductionEvidenceTests(unittest.TestCase):
             encoding="ascii",
         )
         with self.assertRaisesRegex(CHECKER.ProductionEvidenceError, "atom .* disagrees"):
-            CHECKER.validate_production_evidence(evidence, source, expected_status="sat")
+            self.validate(evidence, source, expected_status="sat")
 
         source.write_text(SAT_SOURCE + "; changed\n", encoding="utf-8")
         with self.assertRaisesRegex(CHECKER.ProductionEvidenceError, "source SHA-256 mismatch"):
-            CHECKER.validate_production_evidence(evidence, source, expected_status="sat")
+            self.validate(evidence, source, expected_status="sat")
 
     def test_boolean_model_rejects_a_third_value(self) -> None:
         completed, source, evidence = self.solve(SAT_SOURCE, "third-bool-value")
@@ -220,7 +304,107 @@ class ProductionEvidenceTests(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(CHECKER.ProductionEvidenceError, "third value"):
-            CHECKER.validate_production_evidence(evidence, source, expected_status="sat")
+            self.validate(evidence, source, expected_status="sat")
+
+    def test_dirty_decisive_evidence_is_rejected_by_default(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "dirty")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        payload["solver"]["dirty"] = True
+        self.rewrite(evidence, payload)
+        with self.assertRaisesRegex(CHECKER.ProductionEvidenceError, "dirty build"):
+            CHECKER.validate_production_evidence(
+                evidence,
+                source,
+                expected_status="sat",
+                expected_executable_sha256=self.binary_sha256,
+            )
+
+    def test_decisive_checker_requires_a_trusted_executable_hash(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "trusted-executable")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        payload["solver"]["dirty"] = False
+        self.rewrite(evidence, payload)
+        with self.assertRaisesRegex(
+            CHECKER.ProductionEvidenceError, "trusted executable SHA-256 is required"
+        ):
+            CHECKER.validate_production_evidence(
+                evidence,
+                source,
+                expected_status="sat",
+                allow_dirty=True,
+            )
+
+    def test_emitter_rejects_an_untrusted_executable_hash_before_stdout(self) -> None:
+        completed, _, evidence = self.solve(
+            SAT_SOURCE,
+            "untrusted-emitter",
+            environment={"EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": "0" * 64},
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(completed.stdout, "")
+        self.assertIn("production executable SHA-256 mismatch", completed.stderr)
+        self.assertFalse(evidence.exists())
+
+    def test_incoherent_status_pair_is_rejected(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "status-pair")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(evidence.read_text(encoding="utf-8"))
+        payload["backend_status"] = "unsat"
+        self.rewrite(evidence, payload)
+        with self.assertRaisesRegex(CHECKER.ProductionEvidenceError, "incoherent"):
+            self.validate(evidence, source, expected_status="sat")
+
+    def test_source_path_swap_during_descriptor_read_is_rejected(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "toctou")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        source_inode = source.stat().st_ino
+        original_read = CHECKER.os.read
+        replaced = False
+
+        def racing_read(descriptor: int, count: int) -> bytes:
+            nonlocal replaced
+            block = original_read(descriptor, count)
+            if not replaced and block and os.fstat(descriptor).st_ino == source_inode:
+                replacement = source.with_suffix(".replacement")
+                replacement.write_text(SAT_SOURCE + "; replaced\n", encoding="utf-8")
+                os.replace(replacement, source)
+                replaced = True
+            return block
+
+        with mock.patch.object(CHECKER.os, "read", side_effect=racing_read):
+            with self.assertRaisesRegex(
+                CHECKER.ProductionEvidenceError, "source (changed|path was replaced)"
+            ):
+                self.validate(evidence, source, expected_status="sat")
+        self.assertTrue(replaced)
+
+    def test_sidecar_path_swap_during_descriptor_read_is_rejected(self) -> None:
+        completed, source, evidence = self.solve(SAT_SOURCE, "sidecar-toctou")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        evidence_inode = evidence.stat().st_ino
+        original_bytes = evidence.read_bytes()
+        original_read = CHECKER.os.read
+        replaced = False
+
+        def racing_read(descriptor: int, count: int) -> bytes:
+            nonlocal replaced
+            block = original_read(descriptor, count)
+            if not replaced and block and os.fstat(descriptor).st_ino == evidence_inode:
+                replacement = evidence.with_suffix(".replacement")
+                replacement.write_bytes(original_bytes)
+                os.replace(replacement, evidence)
+                replaced = True
+            return block
+
+        with mock.patch.object(CHECKER.os, "read", side_effect=racing_read):
+            with self.assertRaisesRegex(
+                CHECKER.ProductionEvidenceError,
+                "evidence (changed|path was replaced)",
+            ):
+                self.validate(evidence, source, expected_status="sat")
+        self.assertTrue(replaced)
 
     def test_sidecar_is_immutable_and_never_replaced(self) -> None:
         completed, source, evidence = self.solve(SAT_SOURCE, "immutable")
@@ -238,6 +422,11 @@ class ProductionEvidenceTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env={
+                **os.environ,
+                "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
+                "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+            },
         )
         self.assertEqual(rerun.returncode, 2)
         self.assertNotIn("sat", rerun.stdout.split())
@@ -256,7 +445,7 @@ class ProductionEvidenceTests(unittest.TestCase):
         self.assertEqual(payload["status"], "unsupported")
         self.assertEqual(payload["backend_status"], "unsat")
         self.assertIsNone(payload["model"])
-        result = CHECKER.validate_production_evidence(
+        result = self.validate(
             evidence,
             source,
             expected_status="unsupported",

@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -31,7 +33,7 @@ from independent_qfuf import (  # noqa: E402
 )
 
 
-SCHEMA: Final = "euf-viper.production-evidence.v1"
+SCHEMA: Final = "euf-viper.production-evidence.v2"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 INDEPENDENT_INTERNAL = re.compile(r"@independent_(.+)_[0-9]+\Z")
 
@@ -41,18 +43,75 @@ class ProductionEvidenceError(Exception):
 
 
 def canonical_bytes(value: object) -> bytes:
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        + "\n"
-    ).encode("utf-8")
+    try:
+        rendered = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as error:
+        raise ProductionEvidenceError(f"value is not canonical JSON: {error}") from error
+    return (rendered + "\n").encode("utf-8")
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _read_regular_nofollow(path: Path, context: str) -> tuple[Path, bytes]:
+    absolute = Path(os.path.abspath(path.expanduser()))
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ProductionEvidenceError("O_NOFOLLOW is required for production evidence")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(absolute, flags)
+    except OSError as error:
+        raise ProductionEvidenceError(
+            f"cannot open {context} {absolute} without following links: {error}"
+        ) from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ProductionEvidenceError(f"{context} is not a regular file: {absolute}")
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        after = os.fstat(descriptor)
+    except OSError as error:
+        raise ProductionEvidenceError(f"cannot read {context} {absolute}: {error}") from error
+    finally:
+        os.close(descriptor)
+    try:
+        path_after = os.stat(absolute, follow_symlinks=False)
+    except OSError as error:
+        raise ProductionEvidenceError(f"{context} path changed while it was read: {error}") from error
+    fingerprint_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    fingerprint_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    content = b"".join(chunks)
+    if fingerprint_before != fingerprint_after or len(content) != after.st_size:
+        raise ProductionEvidenceError(f"{context} changed while it was read")
+    if (
+        not stat.S_ISREG(path_after.st_mode)
+        or path_after.st_dev != after.st_dev
+        or path_after.st_ino != after.st_ino
+    ):
+        raise ProductionEvidenceError(f"{context} path was replaced while it was read")
+    return absolute, content
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -64,13 +123,22 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json_bytes(content: bytes, context: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_strict_object)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise ProductionEvidenceError(f"cannot read evidence {path}: {error}") from error
+        text = content.decode("utf-8")
+        value = json.loads(
+            text,
+            object_pairs_hook=_strict_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ProductionEvidenceError(f"non-finite JSON number {value!r}")
+            ),
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ProductionEvidenceError(f"cannot parse {context}: {error}") from error
     if type(value) is not dict:
-        raise ProductionEvidenceError("evidence root must be an object")
+        raise ProductionEvidenceError(f"{context} root must be an object")
+    if canonical_bytes(value) != content:
+        raise ProductionEvidenceError(f"{context} is not canonical UTF-8 JSON")
     return value
 
 
@@ -192,11 +260,12 @@ def _validate_atoms(
     model: Mapping[str, Any],
     terms: Sequence[Mapping[str, Any]],
     assignment: tuple[bool, ...] | None,
-) -> None:
+) -> dict[int, tuple[Any, ...]]:
     atoms = model["atoms"]
     if isinstance(atoms, (str, bytes)) or not isinstance(atoms, Sequence):
         raise ProductionEvidenceError("model.atoms must be a list")
     variables: set[int] = set()
+    atom_map: dict[int, tuple[Any, ...]] = {}
     true_term = model["true_term"]
     false_term = model["false_term"]
     if (true_term is None) != (false_term is None):
@@ -230,6 +299,7 @@ def _validate_atoms(
             if not left < len(terms) or not right < len(terms):
                 raise ProductionEvidenceError(f"atom {index} references an invalid term")
             expected_value = _value(terms[left]) == _value(terms[right])
+            atom_key: tuple[Any, ...] = ("equality", left, right)
         elif kind == "bool_term":
             atom = _exact(raw, {"kind", "variable", "term", "value"}, f"atom {index}")
             term = _integer(atom["term"], f"atom {index}.term")
@@ -239,31 +309,149 @@ def _validate_atoms(
             if term_value not in {true_value, false_value}:
                 raise ProductionEvidenceError(f"atom {index} Boolean term has a third value")
             expected_value = term_value == true_value
+            atom_key = ("bool_term", term)
         else:
             raise ProductionEvidenceError(f"atom {index} has unknown kind {kind!r}")
         variable = _integer(atom["variable"], f"atom {index}.variable", 1)
         if variable in variables:
             raise ProductionEvidenceError(f"duplicate atom variable {variable}")
         variables.add(variable)
+        atom_map[variable] = atom_key
         if type(atom["value"]) is not bool or atom["value"] != expected_value:
             raise ProductionEvidenceError(f"atom {index} disagrees with the production model")
         if assignment is not None:
             if variable >= len(assignment) or assignment[variable] != atom["value"]:
                 raise ProductionEvidenceError(f"atom {index} disagrees with the SAT assignment")
+    return atom_map
+
+
+def _validate_backend_cnf(
+    raw_cnf: object,
+    terms: Sequence[Mapping[str, Any]],
+    assignment: tuple[bool, ...],
+    model_atoms: Mapping[int, tuple[Any, ...]],
+) -> tuple[int, int]:
+    cnf = _exact(
+        raw_cnf,
+        {"format", "var_count", "clause_count", "clauses_sha256", "variables", "clauses"},
+        "backend_cnf",
+    )
+    if cnf["format"] != "dimacs-literal-arrays":
+        raise ProductionEvidenceError("backend_cnf.format is unsupported")
+    var_count = _integer(cnf["var_count"], "backend_cnf.var_count", 1)
+    if var_count != len(assignment) - 1:
+        raise ProductionEvidenceError("backend CNF var_count differs from the assignment")
+
+    raw_variables = cnf["variables"]
+    if type(raw_variables) is not list or len(raw_variables) != var_count:
+        raise ProductionEvidenceError(
+            "backend_cnf.variables must map every variable exactly once"
+        )
+    mapped_atoms: dict[int, tuple[Any, ...]] = {}
+    for offset, raw in enumerate(raw_variables, start=1):
+        if type(raw) is not dict:
+            raise ProductionEvidenceError(f"backend variable {offset} must be an object")
+        kind = raw.get("kind")
+        if kind == "auxiliary":
+            variable = _exact(raw, {"kind", "variable"}, f"backend variable {offset}")
+            atom_key = None
+        elif kind == "equality":
+            variable = _exact(
+                raw,
+                {"kind", "variable", "left", "right"},
+                f"backend variable {offset}",
+            )
+            left = _integer(variable["left"], f"backend variable {offset}.left")
+            right = _integer(variable["right"], f"backend variable {offset}.right")
+            if not left < len(terms) or not right < len(terms):
+                raise ProductionEvidenceError(
+                    f"backend variable {offset} references an invalid term"
+                )
+            atom_key = ("equality", left, right)
+        elif kind == "bool_term":
+            variable = _exact(
+                raw,
+                {"kind", "variable", "term"},
+                f"backend variable {offset}",
+            )
+            term = _integer(variable["term"], f"backend variable {offset}.term")
+            if not term < len(terms) or terms[term]["sort"] != "Bool":
+                raise ProductionEvidenceError(
+                    f"backend variable {offset} references an invalid Boolean term"
+                )
+            atom_key = ("bool_term", term)
+        else:
+            raise ProductionEvidenceError(
+                f"backend variable {offset} has unknown kind {kind!r}"
+            )
+        if _integer(variable["variable"], f"backend variable {offset}.variable", 1) != offset:
+            raise ProductionEvidenceError("backend variable IDs must be contiguous and ordered")
+        if atom_key is not None:
+            mapped_atoms[offset] = atom_key
+    if mapped_atoms != dict(model_atoms):
+        missing = sorted(set(mapped_atoms) - set(model_atoms))
+        extra = sorted(set(model_atoms) - set(mapped_atoms))
+        mismatched = sorted(
+            variable
+            for variable in set(mapped_atoms) & set(model_atoms)
+            if mapped_atoms[variable] != model_atoms[variable]
+        )
+        raise ProductionEvidenceError(
+            "backend/model atom coverage differs: "
+            f"missing={missing!r}, extra={extra!r}, mismatched={mismatched!r}"
+        )
+
+    clauses = cnf["clauses"]
+    if type(clauses) is not list:
+        raise ProductionEvidenceError("backend_cnf.clauses must be a list")
+    clause_count = _integer(cnf["clause_count"], "backend_cnf.clause_count")
+    if clause_count != len(clauses):
+        raise ProductionEvidenceError("backend CNF clause count mismatch")
+    expected_hash = hashlib.sha256(canonical_bytes(clauses)).hexdigest()
+    if _hash(cnf["clauses_sha256"], "backend_cnf.clauses_sha256") != expected_hash:
+        raise ProductionEvidenceError("backend CNF clause SHA-256 mismatch")
+    for index, clause in enumerate(clauses):
+        if type(clause) is not list:
+            raise ProductionEvidenceError(f"backend clause {index} must be a list")
+        satisfied = False
+        for literal in clause:
+            if type(literal) is not int or literal == 0 or abs(literal) > var_count:
+                raise ProductionEvidenceError(
+                    f"backend clause {index} has an invalid DIMACS literal"
+                )
+            value = assignment[abs(literal)]
+            if value == (literal > 0):
+                satisfied = True
+        if not satisfied:
+            raise ProductionEvidenceError(
+                f"SAT assignment falsifies backend clause {index}"
+            )
+    return var_count, clause_count
 
 
 def _evaluate_source_model(
     problem: EncodedProblem, terms: Sequence[Mapping[str, Any]], model: Mapping[str, Any]
-) -> None:
+) -> tuple[int | None, ...]:
     interpretations: dict[
         tuple[str, str, tuple[tuple[str, int], ...]], tuple[str, int]
     ] = {}
-    internal_by_kind: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    production_terms: dict[tuple[str, str, tuple[int, ...]], int] = {}
+    internal_by_kind: dict[str, list[tuple[int, tuple[str, int]]]] = defaultdict(list)
     for term in terms:
         value = _value(term)
         if term["internal"]:
-            internal_by_kind[str(term["internal_kind"])].append(value)
+            internal_by_kind[str(term["internal_kind"])].append((int(term["id"]), value))
             continue
+        syntax = (
+            str(term["sort"]),
+            str(term["function"]),
+            tuple(int(argument) for argument in term["args"]),
+        )
+        if syntax in production_terms:
+            raise ProductionEvidenceError(
+                f"production model repeats ground term {term['function']!r}"
+            )
+        production_terms[syntax] = int(term["id"])
         key = (
             str(term["sort"]),
             str(term["function"]),
@@ -283,14 +471,17 @@ def _evaluate_source_model(
         false_value = _value(terms[int(false_id)])
 
     source_values: list[tuple[str, int]] = []
+    source_term_ids: list[int | None] = []
     internal_positions: dict[str, int] = defaultdict(int)
     for source_term in problem.terms:
         function = problem.functions[source_term.function]
         sort_name = problem.sorts[source_term.sort].name
         if source_term.id == problem.true_term:
             value = true_value
+            production_id = None if true_id is None else int(true_id)
         elif source_term.id == problem.false_term:
             value = false_value
+            production_id = None if false_id is None else int(false_id)
         elif function.internal:
             match = INDEPENDENT_INTERNAL.fullmatch(function.name)
             if match is None:
@@ -305,15 +496,31 @@ def _evaluate_source_model(
                 raise ProductionEvidenceError(
                     f"production model lacks internal {kind!r} term {position}"
                 )
-            value = candidates[position]
+            production_id, value = candidates[position]
         else:
-            args = tuple(source_values[argument] for argument in source_term.args)
-            key = (sort_name, function.name, args)
+            value_args = tuple(source_values[argument] for argument in source_term.args)
+            key = (sort_name, function.name, value_args)
             try:
                 value = interpretations[key]
             except KeyError as error:
                 raise ProductionEvidenceError(
-                    f"production model lacks source term {function.name!r}{args!r}"
+                    f"production model lacks source term {function.name!r}{value_args!r}"
+                ) from error
+            syntax_args = tuple(source_term_ids[argument] for argument in source_term.args)
+            if any(argument is None for argument in syntax_args):
+                raise ProductionEvidenceError(
+                    f"source term {function.name!r} depends on an unmapped internal value"
+                )
+            syntax = (
+                sort_name,
+                function.name,
+                tuple(int(argument) for argument in syntax_args),
+            )
+            try:
+                production_id = production_terms[syntax]
+            except KeyError as error:
+                raise ProductionEvidenceError(
+                    f"production model lacks exact source term {function.name!r}"
                 ) from error
         if value[0] != sort_name:
             raise ProductionEvidenceError(
@@ -321,6 +528,7 @@ def _evaluate_source_model(
                 f"expected {sort_name!r}"
             )
         source_values.append(value)
+        source_term_ids.append(production_id)
 
     def evaluate(expression: BoolExpr) -> bool:
         if expression.op == "const":
@@ -357,6 +565,67 @@ def _evaluate_source_model(
             raise ProductionEvidenceError(
                 f"production model falsifies independently reconstructed assertion {index}"
             )
+    return tuple(source_term_ids)
+
+
+def _validate_source_atom_coverage(
+    problem: EncodedProblem,
+    source_term_ids: Sequence[int | None],
+    model_atoms: Mapping[int, tuple[Any, ...]],
+) -> None:
+    expected: set[tuple[Any, ...]] = set()
+    for atom in problem.atoms:
+        if atom.kind == "auxiliary":
+            continue
+        if atom.kind == "equality":
+            assert atom.left is not None and atom.right is not None
+            left = source_term_ids[atom.left]
+            right = source_term_ids[atom.right]
+            if left is None or right is None:
+                raise ProductionEvidenceError(
+                    "independent source equality lacks production term identity"
+                )
+            expected.add(("equality", *sorted((left, right))))
+        elif atom.kind == "bool_term":
+            assert atom.term is not None
+            term = source_term_ids[atom.term]
+            if term is None:
+                raise ProductionEvidenceError(
+                    "independent source Boolean atom lacks production term identity"
+                )
+            expected.add(("bool_term", term))
+        else:
+            raise ProductionEvidenceError(
+                f"independent source atom has unknown kind {atom.kind!r}"
+            )
+    actual = set(model_atoms.values())
+    missing = sorted(expected - actual)
+    if missing:
+        raise ProductionEvidenceError(
+            f"independently reconstructed atom coverage is incomplete: missing={missing!r}"
+        )
+
+
+def _validate_build(value: object, expected_hash: object) -> str:
+    build = _exact(
+        value,
+        {"features", "target", "profile", "rustc", "cargo", "source_manifest_sha256"},
+        "solver.build",
+    )
+    features = build["features"]
+    if (
+        type(features) is not list
+        or any(type(feature) is not str or not feature for feature in features)
+        or features != sorted(set(features))
+    ):
+        raise ProductionEvidenceError("solver.build.features must be sorted unique strings")
+    for field in ("target", "profile", "rustc", "cargo"):
+        _string(build[field], f"solver.build.{field}")
+    _hash(build["source_manifest_sha256"], "solver.build.source_manifest_sha256")
+    actual = hashlib.sha256(canonical_bytes(build)).hexdigest()
+    if _hash(expected_hash, "solver.build_sha256") != actual:
+        raise ProductionEvidenceError("solver build manifest SHA-256 mismatch")
+    return actual
 
 
 def validate_production_evidence(
@@ -366,16 +635,37 @@ def validate_production_evidence(
     expected_source_sha256: str | None = None,
     expected_revision: str | None = None,
     expected_status: str | None = None,
+    expected_executable_sha256: str | None = None,
+    expected_runtime_config: Mapping[str, str] | None = None,
+    expected_evidence_sha256: str | None = None,
+    expected_run_nonce: str | None = None,
+    allow_dirty: bool = False,
 ) -> dict[str, Any]:
-    evidence_path = evidence_path.expanduser().resolve(strict=True)
-    source_path = source_path.expanduser().resolve(strict=True)
+    evidence_path, evidence_bytes = _read_regular_nofollow(evidence_path, "evidence")
+    source_path, source_bytes = _read_regular_nofollow(source_path, "source")
+    evidence_hash = hashlib.sha256(evidence_bytes).hexdigest()
+    if expected_evidence_sha256 is not None and evidence_hash != expected_evidence_sha256:
+        raise ProductionEvidenceError("bound evidence SHA-256 mismatch")
     payload = _exact(
-        _read_json(evidence_path),
-        {"schema", "status", "backend_status", "source", "solver", "model", "limitations"},
+        _read_json_bytes(evidence_bytes, f"evidence {evidence_path}"),
+        {
+            "schema",
+            "run_nonce",
+            "status",
+            "backend_status",
+            "source",
+            "solver",
+            "backend_cnf",
+            "model",
+            "limitations",
+        },
         "evidence",
     )
     if payload["schema"] != SCHEMA:
         raise ProductionEvidenceError(f"unsupported evidence schema {payload['schema']!r}")
+    run_nonce = _hash(payload["run_nonce"], "run_nonce")
+    if expected_run_nonce is not None and run_nonce != expected_run_nonce:
+        raise ProductionEvidenceError("production evidence run nonce mismatch")
     status = payload["status"]
     if status not in {"sat", "unsupported"}:
         raise ProductionEvidenceError(f"invalid evidence status {status!r}")
@@ -384,22 +674,38 @@ def validate_production_evidence(
             f"evidence status mismatch: expected {expected_status!r}, got {status!r}"
         )
     backend_status = payload["backend_status"]
-    if backend_status not in {"sat", "unsat", "unsupported"}:
-        raise ProductionEvidenceError(f"invalid backend_status {backend_status!r}")
+    if (status, backend_status) not in {
+        ("sat", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise ProductionEvidenceError(
+            f"incoherent evidence status/backend_status pair {(status, backend_status)!r}"
+        )
 
     source = _exact(payload["source"], {"path", "sha256", "bytes"}, "source")
     _string(source["path"], "source.path")
-    source_hash = sha256_file(source_path)
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
     if _hash(source["sha256"], "source.sha256") != source_hash:
         raise ProductionEvidenceError("evidence source SHA-256 mismatch")
     if expected_source_sha256 is not None and source_hash != expected_source_sha256:
         raise ProductionEvidenceError("locked source SHA-256 mismatch")
-    if _integer(source["bytes"], "source.bytes") != source_path.stat().st_size:
+    if _integer(source["bytes"], "source.bytes") != len(source_bytes):
         raise ProductionEvidenceError("evidence source byte count mismatch")
 
     solver = _exact(
         payload["solver"],
-        {"package_version", "revision", "dirty", "backend", "config", "config_sha256"},
+        {
+            "package_version",
+            "revision",
+            "dirty",
+            "executable_sha256",
+            "backend",
+            "config",
+            "config_sha256",
+            "build",
+            "build_sha256",
+        },
         "solver",
     )
     _string(solver["package_version"], "solver.package_version")
@@ -410,6 +716,9 @@ def validate_production_evidence(
         )
     if type(solver["dirty"]) is not bool:
         raise ProductionEvidenceError("solver.dirty must be boolean")
+    executable_sha256 = _hash(
+        solver["executable_sha256"], "solver.executable_sha256"
+    )
     _string(solver["backend"], "solver.backend")
     config = solver["config"]
     if type(config) is not dict or any(
@@ -420,6 +729,9 @@ def validate_production_evidence(
     expected_config_hash = hashlib.sha256(canonical_bytes(config)).hexdigest()
     if _hash(solver["config_sha256"], "solver.config_sha256") != expected_config_hash:
         raise ProductionEvidenceError("solver config SHA-256 mismatch")
+    if expected_runtime_config is not None and dict(config) != dict(expected_runtime_config):
+        raise ProductionEvidenceError("solver runtime config differs from lock-derived config")
+    build_hash = _validate_build(solver["build"], solver["build_sha256"])
 
     limitations = payload["limitations"]
     if isinstance(limitations, (str, bytes)) or not isinstance(limitations, Sequence) or any(
@@ -428,7 +740,7 @@ def validate_production_evidence(
         raise ProductionEvidenceError("limitations must be a list of nonempty strings")
 
     if status == "unsupported":
-        if payload["model"] is not None or not limitations:
+        if payload["backend_cnf"] is not None or payload["model"] is not None or not limitations:
             raise ProductionEvidenceError(
                 "unsupported evidence must omit model and state a limitation"
             )
@@ -436,10 +748,21 @@ def validate_production_evidence(
             "schema": SCHEMA,
             "status": status,
             "backend_status": backend_status,
+            "run_nonce": run_nonce,
+            "evidence_sha256": evidence_hash,
+            "evidence_bytes": len(evidence_bytes),
             "source_sha256": source_hash,
             "solver_revision": revision,
+            "solver_executable_sha256": executable_sha256,
             "solver_config_sha256": solver["config_sha256"],
+            "solver_build_sha256": build_hash,
         }
+    if solver["dirty"] and not allow_dirty:
+        raise ProductionEvidenceError("decisive evidence was emitted by a dirty build")
+    if expected_executable_sha256 is None:
+        raise ProductionEvidenceError("trusted executable SHA-256 is required for decisive evidence")
+    if executable_sha256 != expected_executable_sha256:
+        raise ProductionEvidenceError("trusted executable SHA-256 mismatch")
     if backend_status != "sat" or limitations:
         raise ProductionEvidenceError("SAT evidence has inconsistent status or limitations")
     model = _exact(
@@ -455,24 +778,45 @@ def validate_production_evidence(
     if model["origin"] == "congruence_closure" and assignment is not None:
         raise ProductionEvidenceError("closure evidence unexpectedly carries a CNF assignment")
     terms = _validate_terms(model)
-    _validate_atoms(model, terms, assignment)
+    model_atoms = _validate_atoms(model, terms, assignment)
+    if model["origin"] == "cnf_assignment":
+        assert assignment is not None
+        var_count, clause_count = _validate_backend_cnf(
+            payload["backend_cnf"], terms, assignment, model_atoms
+        )
+    else:
+        if payload["backend_cnf"] is not None or model_atoms:
+            raise ProductionEvidenceError(
+                "congruence-closure evidence cannot carry backend CNF variables"
+            )
+        var_count = 0
+        clause_count = 0
     try:
-        problem = parse_and_encode(source_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, IndependentQfufError) as error:
+        source_text = source_bytes.decode("utf-8")
+        problem = parse_and_encode(source_text)
+    except (UnicodeError, IndependentQfufError) as error:
         raise ProductionEvidenceError(
             f"independent source reconstruction failed: {error}"
         ) from error
-    _evaluate_source_model(problem, terms, model)
+    source_term_ids = _evaluate_source_model(problem, terms, model)
+    if model["origin"] == "cnf_assignment":
+        _validate_source_atom_coverage(problem, source_term_ids, model_atoms)
     return {
         "schema": SCHEMA,
         "status": "sat",
         "backend_status": "sat",
+        "run_nonce": run_nonce,
+        "evidence_sha256": evidence_hash,
+        "evidence_bytes": len(evidence_bytes),
         "source_sha256": source_hash,
         "solver_revision": revision,
+        "solver_executable_sha256": executable_sha256,
         "solver_config_sha256": solver["config_sha256"],
+        "solver_build_sha256": build_hash,
         "terms": len(terms),
         "atoms": len(model["atoms"]),
-        "assignment_variables": 0 if assignment is None else len(assignment) - 1,
+        "assignment_variables": var_count,
+        "backend_clauses": clause_count,
     }
 
 
@@ -483,6 +827,10 @@ def main() -> int:
     parser.add_argument("--source-sha256")
     parser.add_argument("--revision")
     parser.add_argument("--status", choices=("sat", "unsupported"))
+    parser.add_argument("--executable-sha256")
+    parser.add_argument("--evidence-sha256")
+    parser.add_argument("--run-nonce")
+    parser.add_argument("--allow-dirty", action="store_true")
     args = parser.parse_args()
     try:
         result = validate_production_evidence(
@@ -491,6 +839,10 @@ def main() -> int:
             expected_source_sha256=args.source_sha256,
             expected_revision=args.revision,
             expected_status=args.status,
+            expected_executable_sha256=args.executable_sha256,
+            expected_evidence_sha256=args.evidence_sha256,
+            expected_run_nonce=args.run_nonce,
+            allow_dirty=args.allow_dirty,
         )
     except (OSError, ProductionEvidenceError) as error:
         raise SystemExit(f"production evidence rejected: {error}") from error

@@ -47,10 +47,10 @@ use sha2::{Digest, Sha256};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::env;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
 #[cfg(feature = "certificates")]
-use std::io::{BufReader, BufWriter, Read, Write};
-#[cfg(any(feature = "certificates", feature = "production-evidence"))]
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 #[cfg(feature = "certificates")]
 use std::path::PathBuf;
@@ -4325,9 +4325,20 @@ fn canonical_term_classes(arena: &TermArena, uf: &mut UnionFind) -> Vec<usize> {
         .collect()
 }
 
+fn backend_clause_stream(cnf: &CnfProblem, additions: &[&[Vec<i32>]]) -> Vec<Vec<i32>> {
+    let additional_count = additions.iter().map(|clauses| clauses.len()).sum::<usize>();
+    let mut stream = Vec::with_capacity(cnf.clauses.len() + additional_count);
+    stream.extend(cnf.clauses.iter().map(<[i32]>::to_vec));
+    for clauses in additions {
+        stream.extend(clauses.iter().cloned());
+    }
+    stream
+}
+
 fn production_sat_witness_from_cnf(
     backend: &str,
     cnf: &CnfProblem,
+    backend_clauses: &[Vec<i32>],
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
@@ -4339,6 +4350,15 @@ fn production_sat_witness_from_cnf(
             .iter()
             .skip(1)
             .any(|value| !matches!(value, -1 | 1))
+        || backend_clauses.iter().any(|clause| {
+            clause.is_empty()
+                || clause.iter().any(|literal| {
+                    *literal == 0 || literal.unsigned_abs() as usize > cnf.var_count()
+                })
+                || !clause
+                    .iter()
+                    .any(|literal| lit_status(*literal, assignment) == 1)
+        })
     {
         return None;
     }
@@ -4394,6 +4414,8 @@ fn production_sat_witness_from_cnf(
         origin: "cnf_assignment",
         assignment: Some(assignment),
         atoms,
+        variables: cnf.var_atoms.iter().skip(1).cloned().collect(),
+        backend_clauses: backend_clauses.to_vec(),
         term_classes,
         true_term: Some(true_term),
         false_term: Some(false_term),
@@ -4409,6 +4431,8 @@ fn production_sat_witness_from_closure(
         origin: "congruence_closure",
         assignment: None,
         atoms: Vec::new(),
+        variables: Vec::new(),
+        backend_clauses: Vec::new(),
         term_classes: canonical_term_classes(arena, uf),
         true_term: None,
         false_term: None,
@@ -4613,8 +4637,8 @@ fn solve_kissat_euf_once(
     let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        solver.add(&kissat_clause(&clause, &variables));
+    for clause in &transitivity {
+        solver.add(&kissat_clause(clause, &variables));
     }
     profile_phase("kissat_transitivity_load", transitivity_load_start, 0);
 
@@ -4626,8 +4650,8 @@ fn solve_kissat_euf_once(
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        solver.add(&kissat_clause(&clause, &variables));
+    for clause in &congruence {
+        solver.add(&kissat_clause(clause, &variables));
     }
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
@@ -4654,11 +4678,13 @@ fn solve_kissat_euf_once(
         return EagerSolveOutcome::Unavailable;
     };
     if conflicts.is_empty() {
+        let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
         let witness = capture_evidence
             .then(|| {
                 production_sat_witness_from_cnf(
                     "kissat",
                     cnf,
+                    &backend_clauses,
                     arena,
                     true_term,
                     false_term,
@@ -4708,8 +4734,8 @@ fn solve_kissat_euf_once(
     let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+    for clause in &transitivity {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
             return EagerSolveOutcome::Unavailable;
         }
     }
@@ -4723,8 +4749,8 @@ fn solve_kissat_euf_once(
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+    for clause in &congruence {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
             return EagerSolveOutcome::Unavailable;
         }
     }
@@ -4765,11 +4791,13 @@ fn solve_kissat_euf_once(
         return EagerSolveOutcome::Unavailable;
     };
     if conflicts.is_empty() {
+        let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
         let witness = capture_evidence
             .then(|| {
                 production_sat_witness_from_cnf(
                     "kissat",
                     cnf,
+                    &backend_clauses,
                     arena,
                     true_term,
                     false_term,
@@ -4862,14 +4890,14 @@ fn solve_cadical_euf_once(
     profile_phase("cadical_base_load", load_start, cnf.clauses.len());
 
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    for clause in &transitivity {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
     }
     profile_phase("cadical_transitivity_load", transitivity_load_start, 0);
 
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    for clause in &congruence {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
     }
     profile_phase("cadical_congruence_load", congruence_load_start, 0);
 
@@ -4904,11 +4932,13 @@ fn solve_cadical_euf_once(
     if !theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?.is_empty() {
         return None;
     }
+    let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
     let witness = capture_evidence
         .then(|| {
             production_sat_witness_from_cnf(
                 "cadical",
                 cnf,
+                &backend_clauses,
                 arena,
                 true_term,
                 false_term,
@@ -5042,9 +5072,10 @@ fn solve_cadical_euf_refining_with_limit(
         solver.add_clause(rustsat_clause(clause)).ok()?;
     }
     let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
-    for clause in transitivity {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    for clause in &transitivity {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
     }
+    let mut loaded_clauses = backend_clause_stream(cnf, &[&transitivity]);
     profile_phase("cadical_refine_base_load", load_start, cnf.clauses.len());
 
     let mut congruence = Vec::new();
@@ -5126,6 +5157,7 @@ fn solve_cadical_euf_refining_with_limit(
             for &index in &congruence_groups[&group] {
                 if !loaded_congruence[index] {
                     solver.add_clause(rustsat_clause(&congruence[index])).ok()?;
+                    loaded_clauses.push(congruence[index].clone());
                     loaded_congruence[index] = true;
                     lemma_count += 1;
                     added += 1;
@@ -5134,6 +5166,7 @@ fn solve_cadical_euf_refining_with_limit(
         }
         for index in violated_ungrouped {
             solver.add_clause(rustsat_clause(&congruence[index])).ok()?;
+            loaded_clauses.push(congruence[index].clone());
             loaded_congruence[index] = true;
             lemma_count += 1;
             added += 1;
@@ -5149,6 +5182,7 @@ fn solve_cadical_euf_refining_with_limit(
                     production_sat_witness_from_cnf(
                         "cadical-refine",
                         cnf,
+                        &loaded_clauses,
                         arena,
                         true_term,
                         false_term,
@@ -5167,7 +5201,13 @@ fn solve_cadical_euf_refining_with_limit(
             &mut learned_theory,
             cnf.var_count(),
             telemetry,
-            |clause| solver.add_clause(rustsat_clause(clause)).is_ok(),
+            |clause| {
+                if solver.add_clause(rustsat_clause(clause)).is_err() {
+                    return false;
+                }
+                loaded_clauses.push(clause.to_vec());
+                true
+            },
         )?;
         lemma_count += cut_count;
         added += cut_count;
@@ -5201,7 +5241,7 @@ fn solve_varisat_euf(
     let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
+    for clause in &transitivity {
         let lits = clause
             .iter()
             .map(|literal| Lit::from_dimacs(*literal as isize))
@@ -5218,7 +5258,7 @@ fn solve_varisat_euf(
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
+    for clause in &congruence {
         let lits = clause
             .iter()
             .map(|literal| Lit::from_dimacs(*literal as isize))
@@ -5226,6 +5266,7 @@ fn solve_varisat_euf(
         solver.add_clause(&lits);
     }
     profile_phase("varisat_congruence_load", congruence_load_start, 0);
+    let mut loaded_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
 
     let mut learned = HashSet::<Vec<i32>>::default();
     let max_theory_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
@@ -5295,6 +5336,7 @@ fn solve_varisat_euf(
                     production_sat_witness_from_cnf(
                         "varisat",
                         cnf,
+                        &loaded_clauses,
                         arena,
                         true_term,
                         false_term,
@@ -5313,6 +5355,7 @@ fn solve_varisat_euf(
                     .map(|literal| Lit::from_dimacs(*literal as isize))
                     .collect::<Vec<_>>();
                 solver.add_clause(&lits);
+                loaded_clauses.push(clause);
                 added += 1;
             }
         }
@@ -5822,6 +5865,8 @@ struct ProductionSatWitness {
     origin: &'static str,
     assignment: Option<Vec<i32>>,
     atoms: Vec<ProductionAtomWitness>,
+    variables: Vec<Option<BoolAtomKey>>,
+    backend_clauses: Vec<Vec<i32>>,
     term_classes: Vec<usize>,
     true_term: Option<TermId>,
     false_term: Option<TermId>,
@@ -6800,10 +6845,12 @@ fn solve_bool_problem(
     let result = match search_result {
         CnfSearchResult::Sat => {
             let witness = if capture_evidence {
+                let loaded_clauses = backend_clause_stream(&cnf, &[]);
                 solver.model.as_ref().and_then(|assignment| {
                     production_sat_witness_from_cnf(
                         "dpll-t",
                         &cnf,
+                        &loaded_clauses,
                         arena,
                         bool_problem.true_term,
                         bool_problem.false_term,
@@ -7125,13 +7172,73 @@ fn solve_file(path: &str, with_stats: bool, evidence_out: Option<&str>) -> Resul
     solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, evidence_out)
 }
 
+fn read_source_nofollow(path: &Path) -> Result<Vec<u8>, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        format!(
+            "failed to open {} without following links: {error}",
+            path.display()
+        )
+    })?;
+    let before = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if !before.is_file() {
+        return Err(format!("source is not a regular file: {}", path.display()));
+    }
+    let mut bytes = Vec::with_capacity(before.len() as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let after = file
+        .metadata()
+        .map_err(|error| format!("failed to re-inspect {}: {error}", path.display()))?;
+    if before.len() != after.len() || bytes.len() as u64 != after.len() {
+        return Err(format!("source changed while reading: {}", path.display()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != after.dev()
+            || before.ino() != after.ino()
+            || before.mtime() != after.mtime()
+            || before.mtime_nsec() != after.mtime_nsec()
+            || before.ctime() != after.ctime()
+            || before.ctime_nsec() != after.ctime_nsec()
+        {
+            return Err(format!("source changed while reading: {}", path.display()));
+        }
+        let path_after = fs::symlink_metadata(path)
+            .map_err(|error| format!("source path changed while reading: {error}"))?;
+        if !path_after.is_file()
+            || path_after.dev() != after.dev()
+            || path_after.ino() != after.ino()
+        {
+            return Err(format!(
+                "source path was replaced while reading: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(bytes)
+}
+
 fn solve_file_with_root_cnf_options(
     path: &str,
     with_stats: bool,
     root_cnf_options: RootCnfOptions,
     evidence_out: Option<&str>,
 ) -> Result<i32, String> {
-    let source_bytes = fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let source_bytes = if evidence_out.is_some() {
+        read_source_nofollow(Path::new(path))?
+    } else {
+        fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?
+    };
     let input = std::str::from_utf8(&source_bytes)
         .map_err(|error| format!("{path} is not UTF-8: {error}"))?;
     let start = Instant::now();

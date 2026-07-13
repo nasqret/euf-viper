@@ -5,11 +5,14 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v1";
+pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v2";
+
+const RUN_NONCE_ENV: &str = "EUF_VIPER_RUN_NONCE";
+const TRUSTED_EXECUTABLE_SHA256_ENV: &str = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256";
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -31,9 +34,22 @@ struct EvidenceSolver {
     package_version: &'static str,
     revision: &'static str,
     dirty: bool,
+    executable_sha256: String,
     backend: String,
     config: BTreeMap<String, String>,
     config_sha256: String,
+    build: EvidenceBuild,
+    build_sha256: String,
+}
+
+#[derive(Serialize)]
+struct EvidenceBuild {
+    features: Vec<String>,
+    target: &'static str,
+    profile: &'static str,
+    rustc: &'static str,
+    cargo: &'static str,
+    source_manifest_sha256: &'static str,
 }
 
 #[derive(Serialize)]
@@ -64,6 +80,33 @@ enum EvidenceAtom {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EvidenceVariable {
+    Auxiliary {
+        variable: usize,
+    },
+    Equality {
+        variable: usize,
+        left: usize,
+        right: usize,
+    },
+    BoolTerm {
+        variable: usize,
+        term: usize,
+    },
+}
+
+#[derive(Serialize)]
+struct EvidenceBackendCnf {
+    format: &'static str,
+    var_count: usize,
+    clause_count: usize,
+    clauses_sha256: String,
+    variables: Vec<EvidenceVariable>,
+    clauses: Vec<Vec<i32>>,
+}
+
+#[derive(Serialize)]
 struct EvidenceModel {
     origin: &'static str,
     assignment: Option<Vec<i32>>,
@@ -77,10 +120,12 @@ struct EvidenceModel {
 #[derive(Serialize)]
 struct ProductionEvidence {
     schema: &'static str,
+    run_nonce: String,
     status: &'static str,
     backend_status: &'static str,
     source: EvidenceSource,
     solver: EvidenceSolver,
+    backend_cnf: Option<EvidenceBackendCnf>,
     model: Option<EvidenceModel>,
     limitations: Vec<String>,
 }
@@ -113,9 +158,122 @@ fn canonical_value(value: Value) -> Value {
     }
 }
 
+fn required_sha256_environment(name: &str) -> Result<String, String> {
+    let value =
+        env::var(name).map_err(|_| format!("{name} is required for production evidence"))?;
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!("{name} must be a lowercase SHA-256"));
+    }
+    Ok(value)
+}
+
+fn read_regular_nofollow(path: &Path) -> Result<Vec<u8>, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        format!(
+            "failed to open {} without following links: {error}",
+            path.display()
+        )
+    })?;
+    let before = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+    if !before.is_file() {
+        return Err(format!(
+            "production evidence input is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::with_capacity(before.len() as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let after = file
+        .metadata()
+        .map_err(|error| format!("failed to re-inspect {}: {error}", path.display()))?;
+    if before.len() != after.len() || bytes.len() as u64 != after.len() {
+        return Err(format!(
+            "production evidence input changed while reading: {}",
+            path.display()
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != after.dev()
+            || before.ino() != after.ino()
+            || before.mtime() != after.mtime()
+            || before.mtime_nsec() != after.mtime_nsec()
+            || before.ctime() != after.ctime()
+            || before.ctime_nsec() != after.ctime_nsec()
+        {
+            return Err(format!(
+                "production evidence input changed while reading: {}",
+                path.display()
+            ));
+        }
+        let path_after = fs::symlink_metadata(path)
+            .map_err(|error| format!("production evidence input path changed: {error}"))?;
+        if !path_after.is_file()
+            || path_after.dev() != after.dev()
+            || path_after.ino() != after.ino()
+        {
+            return Err(format!(
+                "production evidence input path was replaced while reading: {}",
+                path.display()
+            ));
+        }
+    }
+    Ok(bytes)
+}
+
+fn trusted_executable_sha256() -> Result<String, String> {
+    let trusted = required_sha256_environment(TRUSTED_EXECUTABLE_SHA256_ENV)?;
+    let executable = env::current_exe()
+        .map_err(|error| format!("failed to locate production executable: {error}"))?;
+    let actual = sha256_hex(&read_regular_nofollow(&executable)?);
+    if actual != trusted {
+        return Err(format!(
+            "production executable SHA-256 mismatch: expected {trusted}, got {actual}"
+        ));
+    }
+    Ok(actual)
+}
+
+fn build_manifest() -> Result<(EvidenceBuild, String), String> {
+    let features = env!("EUF_VIPER_BUILD_FEATURES")
+        .split(',')
+        .filter(|feature| !feature.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let build = EvidenceBuild {
+        features,
+        target: env!("EUF_VIPER_BUILD_TARGET"),
+        profile: env!("EUF_VIPER_BUILD_PROFILE"),
+        rustc: env!("EUF_VIPER_BUILD_RUSTC"),
+        cargo: env!("EUF_VIPER_BUILD_CARGO"),
+        source_manifest_sha256: env!("EUF_VIPER_BUILD_SOURCE_MANIFEST_SHA256"),
+    };
+    let digest = sha256_hex(&canonical_bytes(&build)?);
+    Ok((build, digest))
+}
+
 fn runtime_config(root_cnf: RootCnfOptions) -> Result<(BTreeMap<String, String>, String), String> {
     let mut config = env::vars()
-        .filter(|(key, _)| key.starts_with("EUF_VIPER_"))
+        .filter(|(key, _)| {
+            key.starts_with("EUF_VIPER_")
+                && key != RUN_NONCE_ENV
+                && key != TRUSTED_EXECUTABLE_SHA256_ENV
+        })
         .collect::<BTreeMap<_, _>>();
     config.insert(
         "resolved.direct_root_cnf".to_owned(),
@@ -225,6 +383,101 @@ fn build_model(problem: &Problem, witness: &ProductionSatWitness) -> Result<Evid
     })
 }
 
+fn build_backend_cnf(witness: &ProductionSatWitness) -> Result<Option<EvidenceBackendCnf>, String> {
+    let Some(assignment) = witness.assignment.as_ref() else {
+        if !witness.variables.is_empty()
+            || !witness.backend_clauses.is_empty()
+            || !witness.atoms.is_empty()
+        {
+            return Err("non-CNF production witness carries backend CNF metadata".to_owned());
+        }
+        return Ok(None);
+    };
+    let var_count = assignment.len();
+    if witness.variables.len() != var_count {
+        return Err(format!(
+            "production witness has {} variable mappings for {var_count} variables",
+            witness.variables.len()
+        ));
+    }
+    let atoms_by_variable = witness
+        .atoms
+        .iter()
+        .map(|atom| (atom.variable, atom))
+        .collect::<BTreeMap<_, _>>();
+    if atoms_by_variable.len() != witness.atoms.len() {
+        return Err("production witness repeats an atom variable".to_owned());
+    }
+    let mut variables = Vec::with_capacity(var_count);
+    for (offset, atom) in witness.variables.iter().enumerate() {
+        let variable = offset + 1;
+        let mapped = match atom {
+            None => {
+                if atoms_by_variable.contains_key(&variable) {
+                    return Err(format!(
+                        "auxiliary variable {variable} is also listed as an atom"
+                    ));
+                }
+                EvidenceVariable::Auxiliary { variable }
+            }
+            Some(BoolAtomKey::Eq(left, right)) => {
+                let recorded = atoms_by_variable
+                    .get(&variable)
+                    .ok_or_else(|| format!("atom variable {variable} is omitted from the model"))?;
+                if !matches!(
+                    &recorded.atom,
+                    BoolAtomKey::Eq(recorded_left, recorded_right)
+                        if recorded_left == left && recorded_right == right
+                ) {
+                    return Err(format!(
+                        "atom variable {variable} has inconsistent metadata"
+                    ));
+                }
+                EvidenceVariable::Equality {
+                    variable,
+                    left: *left,
+                    right: *right,
+                }
+            }
+            Some(BoolAtomKey::BoolTerm(term)) => {
+                let recorded = atoms_by_variable
+                    .get(&variable)
+                    .ok_or_else(|| format!("atom variable {variable} is omitted from the model"))?;
+                if !matches!(
+                    &recorded.atom,
+                    BoolAtomKey::BoolTerm(recorded_term) if recorded_term == term
+                ) {
+                    return Err(format!(
+                        "atom variable {variable} has inconsistent metadata"
+                    ));
+                }
+                EvidenceVariable::BoolTerm {
+                    variable,
+                    term: *term,
+                }
+            }
+        };
+        variables.push(mapped);
+    }
+    if atoms_by_variable
+        .keys()
+        .any(|variable| *variable == 0 || *variable > var_count)
+    {
+        return Err("production model lists an out-of-range atom variable".to_owned());
+    }
+    let clauses = witness.backend_clauses.clone();
+    let clause_count = clauses.len();
+    let clauses_sha256 = sha256_hex(&canonical_bytes(&clauses)?);
+    Ok(Some(EvidenceBackendCnf {
+        format: "dimacs-literal-arrays",
+        var_count,
+        clause_count,
+        clauses_sha256,
+        variables,
+        clauses,
+    }))
+}
+
 fn evidence_payload(
     source_path: &Path,
     source_bytes: &[u8],
@@ -232,19 +485,25 @@ fn evidence_payload(
     report: &SolveReport,
     root_cnf: RootCnfOptions,
 ) -> Result<(ProductionEvidence, EvidenceDisposition), String> {
+    let run_nonce = required_sha256_environment(RUN_NONCE_ENV)?;
     let source = EvidenceSource {
         path: source_path.display().to_string(),
         sha256: sha256_hex(source_bytes),
         bytes: source_bytes.len(),
     };
     let (config, config_sha256) = runtime_config(root_cnf)?;
+    let executable_sha256 = trusted_executable_sha256()?;
+    let (build, build_sha256) = build_manifest()?;
     let solver = EvidenceSolver {
         package_version: env!("CARGO_PKG_VERSION"),
         revision: env!("EUF_VIPER_GIT_REVISION"),
         dirty: env!("EUF_VIPER_GIT_DIRTY") != "0",
+        executable_sha256,
         backend: report.backend.to_owned(),
         config,
         config_sha256,
+        build,
+        build_sha256,
     };
     match &report.result {
         SolveResult::Sat => {
@@ -256,14 +515,18 @@ fn evidence_payload(
                     "production SAT witness backend does not match solve backend".to_owned(),
                 );
             }
+            let model = build_model(problem, witness)?;
+            let backend_cnf = build_backend_cnf(witness)?;
             Ok((
                 ProductionEvidence {
                     schema: SCHEMA,
+                    run_nonce,
                     status: "sat",
                     backend_status: "sat",
                     source,
                     solver,
-                    model: Some(build_model(problem, witness)?),
+                    backend_cnf,
+                    model: Some(model),
                     limitations: Vec::new(),
                 },
                 EvidenceDisposition::DecisiveSat,
@@ -272,10 +535,12 @@ fn evidence_payload(
         SolveResult::Unsat => Ok((
             ProductionEvidence {
                 schema: SCHEMA,
+                run_nonce,
                 status: "unsupported",
                 backend_status: "unsat",
                 source,
                 solver,
+                backend_cnf: None,
                 model: None,
                 limitations: vec![format!(
                     "backend {} returned UNSAT without a same-run independently replayable proof",
@@ -287,10 +552,12 @@ fn evidence_payload(
         SolveResult::Unsupported(reasons) => Ok((
             ProductionEvidence {
                 schema: SCHEMA,
+                run_nonce,
                 status: "unsupported",
                 backend_status: "unsupported",
                 source,
                 solver,
+                backend_cnf: None,
                 model: None,
                 limitations: reasons.clone(),
             },

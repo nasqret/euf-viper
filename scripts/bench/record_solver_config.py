@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
 import subprocess
 import tempfile
 from pathlib import Path
@@ -109,6 +110,8 @@ def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
             evidence_path = Path(directory) / "production-evidence.json"
             evidence = record.get("evidence")
             if evidence is not None:
+                environment["EUF_VIPER_RUN_NONCE"] = secrets.token_hex(32)
+                environment["EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"] = record["sha256"]
                 command.extend([evidence["argv_flag"], str(evidence_path)])
             completed = subprocess.run(
                 command,
@@ -172,7 +175,7 @@ def make_records(
             "binary": paths["euf-viper"],
             "argv_template": ["{binary}", "solve", "{instance}"],
             "evidence": {
-                "schema": "euf-viper.production-evidence.v1",
+                "schema": "euf-viper.production-evidence.v2",
                 "argv_flag": "--evidence-out",
                 "accepted_decisive_statuses": ["sat"],
             },
