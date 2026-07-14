@@ -148,6 +148,13 @@ result cache can satisfy V1-V4.
   SAT configuration while all UNSAT results remain nondecisive. Reconstruct it
   on current main as an opt-in feature, then require a full 7,503-source locked
   shadow and paired off-mode timing before any promotion.
+  Current-main reconstruction `d47e1c6` correctly makes the feature opt-in and
+  preserves the semantic checker, but review remains NO-GO: locked prepare
+  builds certificates without the separately required evidence feature;
+  ordinary solves still allocate evidence transcripts and duplicate clauses;
+  and solve-CLI compatibility changed. Require a real feature-combination smoke,
+  zero evidence-only off-mode work, and legacy ordinary-CLI parity before branch
+  publication or hosted validation.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke

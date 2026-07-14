@@ -1255,6 +1255,14 @@
   behavior is correct. No push or WMI submission occurred. The next revision
   must reject unsupported publication and prefer a leaked owned temporary over
   deletion of any path whose inode ownership is no longer descriptor-proven.
+- Current-main production-evidence reconstruction `d47e1c6` is review NO-GO.
+  The semantic v3 checker and opt-in Cargo boundary pass, but locked WMI prepare
+  compiles certificates without the separately required evidence feature while
+  its recorder always requests a sidecar. More importantly, ordinary solver
+  paths still build transcript vectors and duplicate backend clauses with
+  evidence disabled, violating the zero off-mode performance requirement.
+  Ordinary solve argument compatibility also changed without approval. No branch
+  push, hosted matrix, or corpus job occurred; all three issues are under repair.
 
 ## Next Entry Template
 

@@ -892,3 +892,8 @@
   replacement after a prior identity check, and a source-swap test incorrectly
   requires relinking instead of fail-closed behavior. Reject unsupported
   publication and never delete staging paths without atomic inode ownership.
+- Current-main production-evidence `d47e1c6` remains no-go. Locked prepare omits
+  the separate evidence feature while invoking `--evidence-out`; ordinary solves
+  still allocate transcripts and duplicate clause streams with evidence off;
+  and solve CLI compatibility drifted. Require real feature-combination tests,
+  zero evidence-only off-mode work, and ordinary CLI parity before publication.
