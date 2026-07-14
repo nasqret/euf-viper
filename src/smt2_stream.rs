@@ -325,7 +325,7 @@ fn symbol_to_sexp(symbol: Symbol<'_>) -> Sexp {
     }
 }
 
-fn parse_stream_problem(
+pub(super) fn parse_stream_problem(
     input: &str,
     scoped_let_mode: ScopedLetMode,
 ) -> Result<(Problem, Vec<String>), String> {
@@ -341,6 +341,10 @@ fn parse_stream_problem(
         ctx.parse_command(&sexp)?;
     }
     Ok(ctx.finish_with_symbol_names())
+}
+
+pub(super) fn typed_problem_fingerprint(problem: &Problem, symbol_names: &[String]) -> u64 {
+    TypedSemanticSnapshot::from_problem(problem, symbol_names).fingerprint()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

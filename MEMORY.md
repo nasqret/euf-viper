@@ -875,3 +875,11 @@
   error, or other status. Descriptor execution, canonical Python, strict JSON,
   and hashes passed independent review. This is parity only; 98 rows contain
   4,851 unsupported diagnostics, and timing/completeness still require gates.
+- T1 timing is isolated on `research-typed-parser-timing` from main `afeeb5e`.
+  `campaigns/t1-typed-parser-timing-v1.json` freezes a same-binary, fresh-process
+  tree/stream/stream/tree gate for parse and parser-inclusive solve timing. It
+  requires aggregate and paired improvement in both phases, p95 miss overhead
+  below 1%, exact completed results, zero incorrect results, and no solved-count
+  regression. Source bytes are opened once and replayed; binary execution is
+  descriptor-bound on Linux; Cargo/rustc/Python and all artifacts are hash-bound.
+  The WMI chain is implemented but deliberately unsubmitted and unpushed.

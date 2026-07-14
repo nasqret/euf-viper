@@ -6960,6 +6960,175 @@ fn parse_check_file(path: &str) -> Result<i32, String> {
     Ok(0)
 }
 
+const PARSER_TIMING_SCHEMA: &str = "euf-viper.typed-parser-timing-observation.v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParserTimingParser {
+    Tree,
+    Stream,
+}
+
+impl ParserTimingParser {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Tree => "tree",
+            Self::Stream => "stream",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParserTimingPhase {
+    Parse,
+    EndToEnd,
+}
+
+impl ParserTimingPhase {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Parse => "parse",
+            Self::EndToEnd => "end_to_end",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParserTimingArgs {
+    parser: ParserTimingParser,
+    phase: ParserTimingPhase,
+}
+
+fn parse_parser_timing_args(args: &[String]) -> Result<ParserTimingArgs, String> {
+    let mut parser = None;
+    let mut phase = None;
+    let mut source = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--parser" => {
+                if parser.is_some() {
+                    return Err("--parser may be supplied exactly once".to_owned());
+                }
+                parser = Some(match args.get(index + 1).map(String::as_str) {
+                    Some("tree") => ParserTimingParser::Tree,
+                    Some("stream") => ParserTimingParser::Stream,
+                    Some(value) => return Err(format!("invalid research parser `{value}`")),
+                    None => return Err("--parser requires tree or stream".to_owned()),
+                });
+                index += 2;
+            }
+            "--phase" => {
+                if phase.is_some() {
+                    return Err("--phase may be supplied exactly once".to_owned());
+                }
+                phase = Some(match args.get(index + 1).map(String::as_str) {
+                    Some("parse") => ParserTimingPhase::Parse,
+                    Some("end-to-end") => ParserTimingPhase::EndToEnd,
+                    Some(value) => return Err(format!("invalid research phase `{value}`")),
+                    None => return Err("--phase requires parse or end-to-end".to_owned()),
+                });
+                index += 2;
+            }
+            option if option.starts_with('-') && option != "-" => {
+                return Err(format!("unknown research timing option `{option}`"));
+            }
+            value => {
+                if source.replace(value).is_some() {
+                    return Err("research timing accepts exactly one source".to_owned());
+                }
+                index += 1;
+            }
+        }
+    }
+    if source != Some("-") {
+        return Err("research timing source must be stdin (`-`)".to_owned());
+    }
+    Ok(ParserTimingArgs {
+        parser: parser.ok_or_else(|| "--parser is required".to_owned())?,
+        phase: phase.ok_or_else(|| "--phase is required".to_owned())?,
+    })
+}
+
+fn parse_for_timing(
+    input: &str,
+    parser: ParserTimingParser,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<(Problem, Vec<String>), String> {
+    match parser {
+        ParserTimingParser::Tree => {
+            parse_problem_with_scoped_let_mode_and_symbols(input, scoped_let_mode)
+        }
+        ParserTimingParser::Stream => smt2_stream::parse_stream_problem(input, scoped_let_mode),
+    }
+}
+
+fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
+    for &byte in bytes {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn solve_result_fingerprint(result: &SolveResult) -> u64 {
+    let mut hash = 0xcbf29ce484222325;
+    match result {
+        SolveResult::Sat => fnv1a64_update(hash, b"sat\0"),
+        SolveResult::Unsat => fnv1a64_update(hash, b"unsat\0"),
+        SolveResult::Unsupported(items) => {
+            hash = fnv1a64_update(hash, b"unsupported\0");
+            for item in items {
+                hash = fnv1a64_update(hash, item.as_bytes());
+                hash = fnv1a64_update(hash, b"\0");
+            }
+            hash
+        }
+    }
+}
+
+fn parser_timing_command(args: &[String]) -> Result<i32, String> {
+    let settings = parse_parser_timing_args(args)?;
+    let scoped_let_mode = selected_scoped_let_mode()?;
+    let root_cnf_options = selected_root_cnf_options()?;
+    let mut input = String::new();
+    io::stdin()
+        .lock()
+        .read_to_string(&mut input)
+        .map_err(|error| format!("failed to read research timing stdin: {error}"))?;
+
+    match settings.phase {
+        ParserTimingPhase::Parse => {
+            let started = Instant::now();
+            let (problem, symbol_names) =
+                parse_for_timing(&input, settings.parser, scoped_let_mode)?;
+            let elapsed_ns = started.elapsed().as_nanos().max(1);
+            let semantic_fingerprint =
+                smt2_stream::typed_problem_fingerprint(&problem, &symbol_names);
+            std::hint::black_box(&problem);
+            println!(
+                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"parsed\",\"result_fnv1a64\":null,\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"semantic_fnv1a64\":\"{semantic_fingerprint:016x}\",\"source_bytes\":{}}}",
+                settings.parser.name(),
+                settings.phase.name(),
+                input.len(),
+            );
+        }
+        ParserTimingPhase::EndToEnd => {
+            let started = Instant::now();
+            let (problem, _) = parse_for_timing(&input, settings.parser, scoped_let_mode)?;
+            let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+            let elapsed_ns = started.elapsed().as_nanos().max(1);
+            let result_fingerprint = solve_result_fingerprint(&report.result);
+            println!(
+                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"{}\",\"result_fnv1a64\":\"{result_fingerprint:016x}\",\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"semantic_fnv1a64\":null,\"source_bytes\":{}}}",
+                settings.parser.name(),
+                settings.phase.name(),
+                status_text(&report.result),
+                input.len(),
+            );
+        }
+    }
+    Ok(0)
+}
+
 fn gen_chain(n: usize, unsat: bool) -> String {
     let mut out = String::new();
     out.push_str("(set-logic QF_UF)\n");
@@ -7273,6 +7442,7 @@ fn run() -> Result<i32, String> {
             }
             parse_check_file(file)
         }
+        "research-parser-timing" => parser_timing_command(&args[2..]),
         #[cfg(feature = "certificates")]
         "dump-eager-cnf" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -10375,6 +10545,100 @@ mod tests {
             source
         );
         assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    fn timing_args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn research_parser_timing_cli_is_strict_and_stdin_only() {
+        assert_eq!(
+            parse_parser_timing_args(&timing_args(
+                &["--parser", "tree", "--phase", "parse", "-",]
+            )),
+            Ok(ParserTimingArgs {
+                parser: ParserTimingParser::Tree,
+                phase: ParserTimingPhase::Parse,
+            })
+        );
+        assert_eq!(
+            parse_parser_timing_args(&timing_args(&[
+                "--phase",
+                "end-to-end",
+                "--parser",
+                "stream",
+                "-",
+            ])),
+            Ok(ParserTimingArgs {
+                parser: ParserTimingParser::Stream,
+                phase: ParserTimingPhase::EndToEnd,
+            })
+        );
+        for invalid in [
+            timing_args(&["--parser", "tree", "--phase", "parse", "input.smt2"]),
+            timing_args(&["--parser", "tree", "--phase", "parse"]),
+            timing_args(&["--parser", "other", "--phase", "parse", "-"]),
+            timing_args(&["--parser", "tree", "--phase", "solve", "-"]),
+            timing_args(&[
+                "--parser", "tree", "--parser", "stream", "--phase", "parse", "-",
+            ]),
+            timing_args(&["--parser", "tree", "--phase", "parse", "--rounds", "1", "-"]),
+        ] {
+            assert!(parse_parser_timing_args(&invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn research_parser_timing_arms_have_identical_semantics() {
+        let input = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun f (U) U)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        "#;
+        let (tree, tree_symbols) =
+            parse_for_timing(input, ParserTimingParser::Tree, ScopedLetMode::Auto).unwrap();
+        let (stream, stream_symbols) =
+            parse_for_timing(input, ParserTimingParser::Stream, ScopedLetMode::Auto).unwrap();
+        assert_eq!(
+            smt2_stream::typed_problem_fingerprint(&tree, &tree_symbols),
+            smt2_stream::typed_problem_fingerprint(&stream, &stream_symbols)
+        );
+        let options = RootCnfOptions {
+            direct_root_cnf: true,
+            direct_negated_root: true,
+        };
+        let tree_result = solve_problem_with_root_cnf_options(tree, options).result;
+        let stream_result = solve_problem_with_root_cnf_options(stream, options).result;
+        assert_eq!(tree_result, stream_result);
+        assert_eq!(
+            solve_result_fingerprint(&tree_result),
+            solve_result_fingerprint(&stream_result)
+        );
+    }
+
+    #[test]
+    fn research_result_fingerprint_binds_unsupported_order_and_content() {
+        let first = SolveResult::Unsupported(vec!["alpha".to_owned(), "beta".to_owned()]);
+        let reordered = SolveResult::Unsupported(vec!["beta".to_owned(), "alpha".to_owned()]);
+        let changed = SolveResult::Unsupported(vec!["alpha".to_owned(), "gamma".to_owned()]);
+        assert_ne!(
+            solve_result_fingerprint(&first),
+            solve_result_fingerprint(&reordered)
+        );
+        assert_ne!(
+            solve_result_fingerprint(&first),
+            solve_result_fingerprint(&changed)
+        );
+        assert_ne!(
+            solve_result_fingerprint(&SolveResult::Sat),
+            solve_result_fingerprint(&SolveResult::Unsat)
+        );
     }
 
     #[test]

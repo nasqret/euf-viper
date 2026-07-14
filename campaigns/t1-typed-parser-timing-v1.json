@@ -1,0 +1,56 @@
+{
+  "arms": {
+    "baseline": "tree",
+    "candidate": "stream"
+  },
+  "campaign": {
+    "expected_sources": 7503,
+    "max_parallel": 32,
+    "shards": 128
+  },
+  "execution": {
+    "binary_command": "research-parser-timing",
+    "byte_binding": "single-open-descriptor-buffer-replay.v1",
+    "executable_binding_linux": "inherited-descriptor.v1",
+    "measured_rounds": 5,
+    "order": [
+      "tree",
+      "stream",
+      "stream",
+      "tree"
+    ],
+    "per_observation_timeout_seconds": 2,
+    "phases": [
+      "parse",
+      "end_to_end"
+    ],
+    "process_isolation": "fresh-process-per-observation.v1",
+    "source_argument": "-",
+    "warmup_rounds": 1
+  },
+  "gates": {
+    "aggregate_ratio_max_exclusive": 1.0,
+    "exact_result_parity": true,
+    "no_solved_count_regression": true,
+    "p95_miss_overhead_max_exclusive": 0.01,
+    "paired_geomean_ratio_max_exclusive": 1.0,
+    "phases_requiring_speedup": [
+      "parse",
+      "end_to_end"
+    ],
+    "zero_incorrect_results": true
+  },
+  "measurement": {
+    "aggregate_unit": "sum-of-per-source-arm-medians",
+    "miss_definition": "candidate-median-greater-than-or-equal-to-baseline-median",
+    "p95_definition": "nearest-rank-ceiling",
+    "paired_unit": "within-round-abba-neighbor-log-ratio",
+    "reported_strata": [
+      "expected_status",
+      "family"
+    ],
+    "rss_unit_linux": "KiB"
+  },
+  "name": "T1 typed stream parser causal timing gate",
+  "schema": "euf-viper.typed-parser-timing-contract.v1"
+}

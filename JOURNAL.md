@@ -1226,6 +1226,16 @@
   blob-identity checks, both Rust feature matrices, release build, and file/stdin
   CLI smoke tests. The result authorizes parity only: 98 matching rows carry 4,851
   unsupported diagnostics, and no timing or parser-completeness claim exists.
+- On 2026-07-13, created isolated branch `research-typed-parser-timing` from
+  source-complete main `afeeb5e`. Added a same-binary stdin-only tree/stream
+  research command for parse and parser-inclusive solve timing, with telemetry
+  outside the measured region and no production parser selector. Preregistered
+  five measured ABBA rounds plus one warmup, strict aggregate/paired gains,
+  sub-1% p95 miss overhead, exact outputs, and no solved-count regression.
+  Added descriptor-bound source replay, direct Cargo/rustc/Python/binary hashes,
+  singleton WMI CPU affinity, wait4 RSS, no-replace artifacts, SAT/UNSAT/family
+  strata, and an unsubmitted prepare-array-audit chain. A two-source miniature
+  campaign completed and accepted locally; no WMI evidence or speed claim yet.
 
 ## Next Entry Template
 

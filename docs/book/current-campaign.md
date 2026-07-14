@@ -199,6 +199,14 @@ not authorize timing or parser
 completeness: 98 matching rows contain 4,851 unsupported diagnostics, and the
 production tree-parser solve path is unchanged.
 
+The next T1 step is now preregistered, not measured. The isolated
+[`T1 parser timing gate`](t1-parser-timing.md) uses one binary, immutable
+tree/stream/stream/tree source-local order, fresh processes, internal parse and
+parse-plus-solve clocks, singleton CPU affinity, and per-process RSS. Both
+phases must improve aggregate and paired metrics, preserve solved count and
+exact results, and keep p95 overhead on miss rows below 1%. No WMI job has been
+submitted and the production tree-parser route remains unchanged.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle

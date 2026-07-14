@@ -4,10 +4,12 @@
 
 T1 is isolated from production solving. `solve`, `stats`, certification, and
 portfolio execution continue to use the existing tree parser. The streaming
-front end is reachable only through:
+front end is reachable outside production only through:
 
 ```text
 euf-viper parse-check FILE|-
+euf-viper research-parser-timing --parser tree|stream \
+  --phase parse|end-to-end -
 ```
 
 The old checkpoint `58f015b` is not merged. Its event-scanner idea is reused,
@@ -82,6 +84,9 @@ the analogous Cargo evidence.
 The submitter accepts only a clean revision published at
 `origin/research-typed-stream-parity`.
 
-Passing this gate permits a separate parser-inclusive ABBA timing experiment.
-It does not promote the stream parser into `solve` and does not establish a
-speed claim.
+Passing this gate permits the separate parser-inclusive ABBA timing experiment
+frozen in `campaigns/t1-typed-parser-timing-v1.json` and documented in
+`2026-07-13-t1-typed-parser-timing-gate.md`. The research timing command is
+stdin-only and does not affect parser selection in `solve`. Neither parity nor
+the unexecuted timing harness promotes the stream parser or establishes a speed
+claim.

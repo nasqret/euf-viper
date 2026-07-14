@@ -247,8 +247,16 @@ independent evidence checks, and a frozen family holdout.
   on main at `00c11a5`.
   Ninety-eight matching rows contain 4,851 unsupported diagnostics, so this is
   not parser-completeness, timing, or solver evidence.
-- [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
-  1%; otherwise stop T1.
+- [x] Implement and preregister the isolated T1 timing gate on the source-complete
+  main baseline. The same binary exposes stdin-only tree/stream research modes
+  for parse-only and parser-inclusive solving; the production default remains
+  tree. A descriptor-bound, singleton-CPU WMI prepare/ABBA-array/audit chain
+  freezes one warmup plus five measured rounds and rejects ambiguous/non-finite
+  evidence, identity drift, observation loss/reordering, semantic mismatch, and
+  solved-count regression. No WMI job has been submitted from this branch.
+- [ ] Execute the fixed WMI contract. Require parse and end-to-end aggregate and
+  paired improvement plus p95 miss overhead strictly below 1%; otherwise stop
+  T1. Passing authorizes review, not automatic production promotion.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 
