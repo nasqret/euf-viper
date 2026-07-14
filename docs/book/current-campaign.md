@@ -75,9 +75,11 @@ nonzero because 17 deeply nested NEQ `let` chains exceeded the independent
 Python parser's expression recursion limit. Its certificate dependents were
 cancelled. Commits `6b51b39` and `8f78543` replace recursive `let` expansion
 with an iterative, simultaneous-scope-preserving machine and pin a four-hour
-wall limit. Corrected census `146071` runs at exact revision `8f78543`; no T4
-decision or certificate evidence follows until its zero-error aggregate
-returns.
+wall limit. Corrected census `146071` completed at exact revision `8f78543`
+with all 7,503 rows and zero parser errors. Certificate prepares
+`146076`/`146079` completed; arrays `146077`/`146080` are priority-pending and
+audits `146078`/`146081` remain dependency-held. No partial certificate output
+is interpreted.
 
 These replacement campaigns can establish that each reported source result has
 an independently checked canonical witness or refutation. They do **not** yet
@@ -104,6 +106,16 @@ preceded rehash, parent symlinks escaped containment, incomplete journal tails
 were truncated, and preparation JSON accepted ambiguity. Schema v3 must
 independently reconstruct source/config CNF and namespace, replay dynamic API
 clauses, require exact maps, and run the checker before SAT classification.
+
+Schema v3 revision `578deb8` closes those semantic gaps and passes the local
+checker boundaries, but it predates current main, puts evidence into the
+default feature set, and certifies only a restricted SAT configuration. Its
+current-main opt-in reconstruction at `d47e1c6` is also review NO-GO: the WMI
+prepare builds `certificates` without the separately required evidence feature,
+ordinary solves still allocate transcripts and duplicate clause streams while
+evidence is disabled, and the ordinary solve CLI changed. A real combined-
+feature smoke, instrumented zero-work off mode, and legacy CLI parity are
+required before branch publication. No production-evidence corpus run exists.
 
 ## Causal Controls
 
@@ -162,8 +174,9 @@ Audits `145786`/`145788` and finalizer `145789` depend on their completion. Each
 task requests one CPU and 10 GiB in `cpu_idle`; the current wait is scheduler
 availability/priority, not an impossible resource shape. The graph is preserved
 without cancellation or resubmission so physical-origin evidence remains
-intact. Two full shards are complete and a third is active at this checkpoint;
-the remaining full shards and official array are scheduler-bound.
+intact. Two full work items are complete; full range `[2-63]` is pending on
+nodes/priority, with no shard currently active. The official array is also
+priority-pending. No partial rows have been interpreted.
 
 ## Opportunity Gates
 
@@ -199,6 +212,16 @@ not authorize timing or parser
 completeness: 98 matching rows contain 4,851 unsupported diagnostics, and the
 production tree-parser solve path is unchanged.
 
+Initial T1 timing revision `a99d9bf` was rejected before publication or WMI.
+Its empty miss set passed as zero overhead; timeout censoring could select a
+favorable common population; ambient contract/manifest overrides were not
+bound to the submitter's hashes; metrics preceded semantic parity; a
+telemetry-only symbol clone polluted the timed path; and untracked remote
+inputs escaped the provenance guard. The repair must require all 7,503 common
+sources, zero timeouts/errors, exact per-source result and semantic parity, a
+nonempty full-population p95 overhead metric, production-equivalent timed code,
+and a fresh hash-bound execution root.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle
@@ -212,7 +235,17 @@ Revision `ea8dee5` closed the semantic replay and Python-identity defects but
 also failed independent review: skip-worktree hid modified tracked imports, the
 final digest still preceded pathname publication, and a failed same-job rerun
 left an older completed bundle visible. Exact Git-blob checks, publication of
-the checked inode, and attempt-scoped current markers are required before WMI.
+the checked inode, and attempt-scoped current markers were repaired at
+`64770d8`, but its destination became visible before it was complete and cleanup
+could remove a racing publisher's artifact. Revision `2080b26` added Linux
+same-inode/no-replace publication; review still rejected a non-Linux fallback,
+check-then-unlink cleanup, and a source-swap test that preferred relinking to a
+fail-closed stop. Revision `55c0101` removed that fallback but still trusted a
+stage pathname after checking descriptor identity, could unlink a replacement
+`.current`, and reused revision-keyed remote work/results across concurrent
+submissions. Descriptor-authoritative publication, no fallible pathname
+cleanup after final validation, and unique receipt-bound remote roots are
+required before WMI.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit.
