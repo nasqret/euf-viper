@@ -1,159 +1,260 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #SBATCH --job-name=euf-p0-prepare
 #SBATCH --partition=cpu_idle
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=16G
 #SBATCH --time=02:00:00
-#SBATCH --output=results/p0-prepare-%j.out
-#SBATCH --error=results/p0-prepare-%j.err
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 set -euo pipefail
+umask 077
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
-export PATH="$PWD/third_party/solvers/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-export LANG=C
-export LC_ALL=C
-export TZ=UTC
-
+ATTEMPT_ID="${EUF_VIPER_ATTEMPT_ID:?set EUF_VIPER_ATTEMPT_ID}"
+ATTEMPT_ROOT="${EUF_VIPER_ATTEMPT_ROOT:?set EUF_VIPER_ATTEMPT_ROOT}"
+CHECKOUT="${EUF_VIPER_CHECKOUT:?set EUF_VIPER_CHECKOUT}"
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
-SHARDS="${EUF_VIPER_LOCKED_SHARDS:-64}"
-RUN_ROOT="$PWD/results/p0-${SLURM_JOB_ID}"
+PYTHON_BIN="${EUF_VIPER_PYTHON:?set EUF_VIPER_PYTHON}"
+PYTHON_SHA256="${EUF_VIPER_PYTHON_SHA256:?set EUF_VIPER_PYTHON_SHA256}"
+SHA256SUM_BIN="${EUF_VIPER_SHA256SUM:?set EUF_VIPER_SHA256SUM}"
+PROVENANCE_HELPER_SHA256="${EUF_VIPER_PROVENANCE_HELPER_SHA256:?set EUF_VIPER_PROVENANCE_HELPER_SHA256}"
+SUBMISSION_MANIFEST="${EUF_VIPER_SUBMISSION_MANIFEST:?set EUF_VIPER_SUBMISSION_MANIFEST}"
+SUBMISSION_MANIFEST_SHA256="${EUF_VIPER_SUBMISSION_MANIFEST_SHA256:?set EUF_VIPER_SUBMISSION_MANIFEST_SHA256}"
+SHARDS="${EUF_VIPER_LOCKED_SHARDS:?set EUF_VIPER_LOCKED_SHARDS}"
+SHARED_CORPUS="${EUF_VIPER_SHARED_CORPUS:?set EUF_VIPER_SHARED_CORPUS}"
+PROVENANCE_HELPER="$CHECKOUT/scripts/wmi/hermetic_provenance.py"
+
+hash_file() {
+  local OUTPUT
+  OUTPUT="$("$SHA256SUM_BIN" "$1")"
+  printf '%s' "${OUTPUT%% *}"
+}
+
+if [ "$(hash_file "$PYTHON_BIN")" != "$PYTHON_SHA256" ]; then
+  echo "receipt-bound Python SHA-256 mismatch" >&2
+  exit 2
+fi
+if [ "$(hash_file "$PROVENANCE_HELPER")" != "$PROVENANCE_HELPER_SHA256" ]; then
+  echo "receipt-bound provenance helper SHA-256 mismatch" >&2
+  exit 2
+fi
+if [ "$(hash_file "$SUBMISSION_MANIFEST")" != "$SUBMISSION_MANIFEST_SHA256" ]; then
+  echo "receipt-bound submission manifest SHA-256 mismatch" >&2
+  exit 2
+fi
+
+VERIFIED_PROVENANCE="$("$PYTHON_BIN" -B -I -S "$PROVENANCE_HELPER" verify \
+  --manifest "$SUBMISSION_MANIFEST" \
+  --expected-sha256 "$SUBMISSION_MANIFEST_SHA256" \
+  --stage prepare)"
+
+EXECUTION_FIELDS="$("$PYTHON_BIN" -B -I -S -c '
+import json, sys
+value = json.loads(sys.argv[1])
+environment = value["execution_environment"]
+tools = value["runtime_tools"]
+fields = [
+    environment["HOME"], environment["PATH"], environment["RUSTUP_HOME"],
+    environment["CARGO_TARGET_DIR"], environment["TMPDIR"],
+    environment["XDG_CACHE_HOME"], environment["XDG_CONFIG_HOME"],
+    tools["bash"]["realpath"], tools["cargo"]["realpath"], tools["git"]["realpath"],
+    tools["chmod"]["realpath"], tools["env"]["realpath"], tools["mkdir"]["realpath"],
+]
+if any("\t" in item or "\n" in item for item in fields):
+    raise SystemExit("unsafe execution-environment field")
+print("\t".join(fields))
+' "$VERIFIED_PROVENANCE")"
+IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_TARGET_DIR \
+  PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME BASH_BIN CARGO_BIN GIT_BIN \
+  CHMOD_BIN ENV_BIN MKDIR_BIN \
+  <<<"$EXECUTION_FIELDS"
+
+"$MKDIR_BIN" -p "$PRIVATE_HOME" "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" \
+  "$CARGO_TARGET_DIR" "$ATTEMPT_ROOT/results" "$ATTEMPT_ROOT/solvers" \
+  "$ATTEMPT_ROOT/corpus"
+"$CHMOD_BIN" 0700 "$PRIVATE_HOME" "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" \
+  "$ATTEMPT_ROOT/results" "$ATTEMPT_ROOT/solvers" "$ATTEMPT_ROOT/corpus"
+
+clean_env() {
+  "$ENV_BIN" -i \
+    HOME="$PRIVATE_HOME" \
+    LANG=C \
+    LC_ALL=C \
+    PATH="$RUNTIME_PATH" \
+    RUSTUP_HOME="$RUSTUP_HOME" \
+    CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
+    TMPDIR="$PRIVATE_TMP" \
+    TZ=UTC \
+    XDG_CACHE_HOME="$XDG_CACHE_HOME" \
+    XDG_CONFIG_HOME="$XDG_CONFIG_HOME" \
+    "$@"
+}
+python_clean() {
+  clean_env "$PYTHON_BIN" -B -I -S "$@"
+}
+
+cd "$CHECKOUT"
+RUN_ROOT="$ATTEMPT_ROOT/results/p0-${SLURM_JOB_ID}"
 OFFICIAL_CACHE="$RUN_ROOT/source/results-sq-2025.json.gz"
-mkdir -p "$RUN_ROOT/source" "$RUN_ROOT/taxonomy" "$RUN_ROOT/locks"
+"$MKDIR_BIN" -p "$RUN_ROOT/source" "$RUN_ROOT/taxonomy" "$RUN_ROOT/locks"
 
-ACTUAL_REVISION="$(git rev-parse HEAD)"
-if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
-  echo "revision mismatch: expected $EXPECTED_REVISION, got $ACTUAL_REVISION" >&2
-  exit 2
-fi
-if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
-  echo "tracked repository state is dirty before preparation" >&2
-  exit 2
-fi
-
-python3 scripts/bench/validate_campaign_spec.py \
+python_clean scripts/bench/validate_campaign_spec.py \
   campaigns/best-overall-qf-uf-2026-07.json \
   --out "$RUN_ROOT/validated-campaign.json"
 
-cargo build --release --features certificates,production-evidence
-VIPER_BUILD_FEATURES="$(target/release/euf-viper --build-features)"
-for REQUIRED_FEATURE in certificates production-evidence; do
-  case ",$VIPER_BUILD_FEATURES," in
-    *",$REQUIRED_FEATURE,"*) ;;
-    *)
-      echo "locked binary lacks required feature: $REQUIRED_FEATURE" >&2
-      exit 2
-      ;;
-  esac
-done
-scripts/bench/install_solvers.sh "$PWD/third_party/solvers" \
-  > "$RUN_ROOT/install-solvers.log" 2>&1
-SHARED_CORPUS="${EUF_VIPER_SHARED_CORPUS:-$HOME/euf-viper/benchmarks/smtlib-2025}"
-if [ ! -e "$PWD/benchmarks/smtlib-2025" ] && \
-   [ -s "$SHARED_CORPUS/qf_uf_manifest.jsonl" ]; then
-  ln -s "$SHARED_CORPUS" "$PWD/benchmarks/smtlib-2025"
+clean_env "$CARGO_BIN" build --release --features certificates,production-evidence
+VIPER_BINARY="$CARGO_TARGET_DIR/release/euf-viper"
+VIPER_FEATURE_REPORT="$CARGO_TARGET_DIR/release/euf-viper-build-features"
+if [ ! -x "$VIPER_FEATURE_REPORT" ]; then
+  echo "locked build omitted the production-evidence feature report" >&2
+  exit 2
 fi
-if [ ! -s "$PWD/benchmarks/smtlib-2025/qf_uf_manifest.jsonl" ]; then
-  scripts/bench/fetch_smtlib_qf_uf.sh "$PWD/benchmarks/smtlib-2025" \
-    > "$RUN_ROOT/fetch-corpus.log" 2>&1
-else
-  printf 'shared_corpus=%s\n' "$(readlink -f "$PWD/benchmarks/smtlib-2025")" \
-    > "$RUN_ROOT/fetch-corpus.log"
+VIPER_BUILD_FEATURES="$(clean_env "$VIPER_FEATURE_REPORT")"
+EXPECTED_BUILD_FEATURES="certificates,default,finite-symmetry,production-evidence"
+if [ "$VIPER_BUILD_FEATURES" != "$EXPECTED_BUILD_FEATURES" ]; then
+  echo "locked binary feature report differs: expected $EXPECTED_BUILD_FEATURES, got $VIPER_BUILD_FEATURES" >&2
+  exit 2
 fi
 
-FULL_MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
-OFFICIAL_MANIFEST="$PWD/benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
+SOLVER_ROOT="$ATTEMPT_ROOT/solvers"
+clean_env "$BASH_BIN" scripts/bench/install_solvers.sh "$SOLVER_ROOT" \
+  >"$RUN_ROOT/install-solvers.log" 2>&1
+
+CORPUS_ROOT="$SHARED_CORPUS"
+if [ ! -s "$CORPUS_ROOT/qf_uf_manifest.jsonl" ]; then
+  CORPUS_ROOT="$ATTEMPT_ROOT/corpus/smtlib-2025"
+  clean_env "$BASH_BIN" scripts/bench/fetch_smtlib_qf_uf.sh "$CORPUS_ROOT" \
+    >"$RUN_ROOT/fetch-corpus.log" 2>&1
+else
+  printf 'shared_corpus=%s\n' "$("$PYTHON_BIN" -B -I -S -c \
+    'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True))' \
+    "$CORPUS_ROOT")" >"$RUN_ROOT/fetch-corpus.log"
+fi
+
+FULL_MANIFEST="$CORPUS_ROOT/qf_uf_manifest.jsonl"
+OFFICIAL_MANIFEST="$CHECKOUT/benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
 RECONSTRUCTED_OFFICIAL="$RUN_ROOT/reconstructed-official.jsonl"
-python3 scripts/bench/ingest_smtcomp_2025_qf_uf.py \
+python_clean scripts/bench/ingest_smtcomp_2025_qf_uf.py \
   --full-manifest "$FULL_MANIFEST" \
   --official-results "$OFFICIAL_CACHE" \
   --download \
   --out "$RECONSTRUCTED_OFFICIAL" \
   --metadata "$RUN_ROOT/reconstructed-official-metadata.json"
-cmp "$OFFICIAL_MANIFEST" "$RECONSTRUCTED_OFFICIAL"
+clean_env "$("$PYTHON_BIN" -B -I -S -c \
+  'import json,sys; print(json.loads(sys.argv[1])["runtime_tools"]["cmp"]["realpath"])' \
+  "$VERIFIED_PROVENANCE")" "$OFFICIAL_MANIFEST" "$RECONSTRUCTED_OFFICIAL"
 
-python3 scripts/bench/build_family_manifest.py "$FULL_MANIFEST" \
+python_clean scripts/bench/build_family_manifest.py "$FULL_MANIFEST" \
   --taxonomy-out "$RUN_ROOT/taxonomy/full.jsonl" \
   --split-out "$RUN_ROOT/taxonomy/full-split.json"
-python3 scripts/bench/build_family_manifest.py "$OFFICIAL_MANIFEST" \
+python_clean scripts/bench/build_family_manifest.py "$OFFICIAL_MANIFEST" \
   --taxonomy-out "$RUN_ROOT/taxonomy/official.jsonl" \
   --split-out "$RUN_ROOT/taxonomy/official-split.json"
 
-VIPER_VERSION="0.1.0+$ACTUAL_REVISION.certificates-production-evidence"
-python3 scripts/bench/record_solver_config.py \
+VIPER_VERSION="0.1.0+$EXPECTED_REVISION.certificates-production-evidence"
+python_clean scripts/bench/record_solver_config.py \
   --campaign campaigns/best-overall-qf-uf-2026-07.json \
-  --viper target/release/euf-viper \
+  --viper "$VIPER_BINARY" \
+  --viper-feature-report "$VIPER_FEATURE_REPORT" \
   --viper-version "$VIPER_VERSION" \
-  --z3 third_party/solvers/bin/z3 \
-  --cvc5 third_party/solvers/bin/cvc5 \
-  --yices2 third_party/solvers/bin/yices-smt2 \
-  --opensmt third_party/solvers/bin/opensmt \
+  --z3 "$SOLVER_ROOT/bin/z3" \
+  --cvc5 "$SOLVER_ROOT/bin/cvc5" \
+  --yices2 "$SOLVER_ROOT/bin/yices-smt2" \
+  --opensmt "$SOLVER_ROOT/bin/opensmt" \
   --smoke-instance generated/synthetic/chain1000_sat.smt2 \
   --smoke-expected sat \
   --out "$RUN_ROOT/solver-config.json" \
-  > "$RUN_ROOT/solver-config-summary.json"
+  >"$RUN_ROOT/solver-config-summary.json"
 
-CORPUS_ROOT="$PWD/benchmarks/smtlib-2025/QF_UF"
-python3 scripts/bench/freeze_campaign.py \
+CORPUS_INSTANCES="$CORPUS_ROOT/QF_UF"
+python_clean scripts/bench/freeze_campaign.py \
   campaigns/best-overall-qf-uf-2026-07.json \
   --manifest "$FULL_MANIFEST" \
   --taxonomy "$RUN_ROOT/taxonomy/full.jsonl" \
   --solver-config "$RUN_ROOT/solver-config.json" \
-  --repository "$PWD" \
-  --corpus-root "$CORPUS_ROOT" \
+  --repository "$CHECKOUT" \
+  --corpus-root "$CORPUS_INSTANCES" \
   --cpu-id 0 \
   --memory-bytes 8589934592 \
   --order balanced_latin_square \
   --budget 2 \
   --output-directory "$RUN_ROOT/full-2s" \
   --out "$RUN_ROOT/locks/full-parent.json" \
-  > "$RUN_ROOT/locks/full-parent-summary.json"
+  >"$RUN_ROOT/locks/full-parent-summary.json"
 
-python3 scripts/bench/freeze_campaign.py \
+python_clean scripts/bench/freeze_campaign.py \
   campaigns/best-overall-qf-uf-2026-07.json \
   --manifest "$OFFICIAL_MANIFEST" \
   --taxonomy "$RUN_ROOT/taxonomy/official.jsonl" \
   --solver-config "$RUN_ROOT/solver-config.json" \
-  --repository "$PWD" \
-  --corpus-root "$CORPUS_ROOT" \
+  --repository "$CHECKOUT" \
+  --corpus-root "$CORPUS_INSTANCES" \
   --cpu-id 0 \
   --memory-bytes 8589934592 \
   --order balanced_latin_square \
   --budget 2 \
   --output-directory "$RUN_ROOT/official-2s" \
   --out "$RUN_ROOT/locks/official-parent.json" \
-  > "$RUN_ROOT/locks/official-parent-summary.json"
+  >"$RUN_ROOT/locks/official-parent-summary.json"
 
-python3 scripts/bench/shard_campaign_lock.py \
+python_clean scripts/bench/shard_campaign_lock.py \
   "$RUN_ROOT/locks/full-parent.json" \
   --count "$SHARDS" \
   --out-dir "$RUN_ROOT/locks/full" \
-  > "$RUN_ROOT/locks/full-shards-summary.json"
-python3 scripts/bench/shard_campaign_lock.py \
+  >"$RUN_ROOT/locks/full-shards-summary.json"
+python_clean scripts/bench/shard_campaign_lock.py \
   "$RUN_ROOT/locks/official-parent.json" \
   --count "$SHARDS" \
   --out-dir "$RUN_ROOT/locks/official" \
-  > "$RUN_ROOT/locks/official-shards-summary.json"
+  >"$RUN_ROOT/locks/official-shards-summary.json"
 
-python3 - "$RUN_ROOT/prepare.json" <<'PY'
+FINAL_PROVENANCE="$("$PYTHON_BIN" -B -I -S "$PROVENANCE_HELPER" verify \
+  --manifest "$SUBMISSION_MANIFEST" \
+  --expected-sha256 "$SUBMISSION_MANIFEST_SHA256" \
+  --stage prepare)"
+if [ "$FINAL_PROVENANCE" != "$VERIFIED_PROVENANCE" ]; then
+  echo "provenance changed during preparation" >&2
+  exit 2
+fi
+
+python_clean - "$RUN_ROOT/prepare.json" "$VERIFIED_PROVENANCE" \
+  "$RUN_ROOT" "$CORPUS_ROOT" "$FULL_MANIFEST" "$OFFICIAL_MANIFEST" \
+  "$VIPER_BINARY" "$VIPER_BUILD_FEATURES" "$VIPER_FEATURE_REPORT" "$SLURM_JOB_ID" \
+  "${SLURM_SUBMIT_DIR:-}" "$SHARDS" <<'PY'
 import hashlib
 import json
 import os
 import platform
+import stat
 import sys
 from pathlib import Path
 
-out = Path(sys.argv[1])
-root = out.parent
-payload = {
-    "schema_version": 1,
-    "status": "prepared",
-    "job_id": int(os.environ["SLURM_JOB_ID"]),
-    "revision": os.environ["EUF_VIPER_EXPECTED_REVISION"],
-    "hostname": platform.node(),
-    "shards": int(os.environ.get("EUF_VIPER_LOCKED_SHARDS", "64")),
-    "artifacts": {},
-}
+(
+    raw_out, raw_provenance, raw_root, raw_corpus, raw_full_manifest,
+    raw_official_manifest, raw_viper, build_features, raw_feature_report, job_id,
+    submit_directory, shards,
+) = sys.argv[1:]
+out = Path(raw_out)
+root = Path(raw_root).resolve(strict=True)
+provenance = json.loads(raw_provenance)
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+def executable(path):
+    value = Path(path)
+    resolved = value.resolve(strict=True)
+    metadata = resolved.stat()
+    if not stat.S_ISREG(metadata.st_mode) or not os.access(resolved, os.X_OK):
+        raise SystemExit(f"runtime is not an executable regular file: {path}")
+    return {
+        "path": str(value.absolute()),
+        "realpath": str(resolved),
+        "sha256": digest(resolved),
+        "bytes": metadata.st_size,
+    }
+
+artifacts = {}
 for name in (
     "solver-config.json",
     "taxonomy/full.jsonl",
@@ -164,12 +265,71 @@ for name in (
     "locks/official-parent.json",
 ):
     path = root / name
-    payload["artifacts"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
-temporary = out.with_name(f".{out.name}.tmp")
-temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-temporary.replace(out)
+    artifacts[name] = {"path": str(path.resolve(strict=True)), "sha256": digest(path)}
+
+solver_config = json.loads((root / "solver-config.json").read_text(encoding="utf-8"))
+payload = {
+    "schema": "euf-viper.locked-p0-preparation.v2",
+    "status": "prepared",
+    "attempt": provenance["attempt"],
+    "artifacts": artifacts,
+    "build_features": build_features.split(",") if build_features else [],
+    "corpus": {
+        "full_manifest": {
+            "path": str(Path(raw_full_manifest).resolve(strict=True)),
+            "sha256": digest(raw_full_manifest),
+        },
+        "official_manifest": {
+            "path": str(Path(raw_official_manifest).resolve(strict=True)),
+            "sha256": digest(raw_official_manifest),
+        },
+        "root": str(Path(raw_corpus).resolve(strict=True)),
+    },
+    "environment": provenance["environment"],
+    "execution_environment": provenance["execution_environment"],
+    "feature_report": executable(raw_feature_report),
+    "hostname": platform.node(),
+    "job": {
+        "id": int(job_id),
+        "submit_directory": submit_directory or None,
+    },
+    "paths": {
+        "checkout": provenance["attempt"]["checkout"],
+        "run_root": str(root),
+        "submission_manifest": provenance["manifest"],
+    },
+    "revision": provenance["revision"],
+    "runtime_tools": provenance["runtime_tools"],
+    "shards": int(shards),
+    "solver_executables": {
+        record["id"]: executable(record["binary"])
+        for record in solver_config["solvers"]
+    },
+    "source": {
+        "blob_count": provenance["source_blob_count"],
+        "blobs_sha256": provenance["source_blobs_sha256"],
+        "tree": provenance["source_tree"],
+    },
+    "submission_manifest_sha256": provenance["manifest_sha256"],
+    "viper": executable(raw_viper),
+}
+encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+try:
+    with os.fdopen(descriptor, "wb", closefd=False) as handle:
+        handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
+finally:
+    os.close(descriptor)
+directory = os.open(out.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
 PY
 
+printf 'attempt_id=%s\n' "$ATTEMPT_ID"
 printf 'run_root=%s\n' "$RUN_ROOT"
-printf 'revision=%s\n' "$ACTUAL_REVISION"
+printf 'revision=%s\n' "$EXPECTED_REVISION"
 printf 'shards=%s\n' "$SHARDS"

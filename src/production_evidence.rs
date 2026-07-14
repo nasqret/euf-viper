@@ -155,11 +155,15 @@ struct ProductionEvidence {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::Hash);
     let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::Serialization);
     let value = serde_json::to_value(value)
         .map_err(|error| format!("failed to serialize production evidence: {error}"))?;
     let mut bytes = serde_json::to_vec(&canonical_value(value))
@@ -293,6 +297,8 @@ fn internal_kind(name: &str) -> Option<String> {
 }
 
 fn build_model(problem: &Problem, witness: &ProductionSatWitness) -> Result<EvidenceModel, String> {
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::PayloadBuild);
     if witness.term_classes.len() != problem.arena.terms.len() {
         return Err(format!(
             "production witness has {} term classes for {} terms",
@@ -353,6 +359,8 @@ fn build_model(problem: &Problem, witness: &ProductionSatWitness) -> Result<Evid
 }
 
 fn build_backend_cnf(witness: &ProductionSatWitness) -> Result<EvidenceBackendCnf, String> {
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::PayloadBuild);
     let var_count = witness.assignment.len();
     if witness.variables.len() != var_count {
         return Err(format!(
@@ -482,6 +490,8 @@ fn evidence_payload(
     report: &SolveReport,
     root_cnf: RootCnfOptions,
 ) -> Result<(ProductionEvidence, EvidenceDisposition), String> {
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::PayloadBuild);
     let run_nonce = required_sha256_environment(RUN_NONCE_ENV)?;
     let source = EvidenceSource {
         path: source_path.display().to_string(),
@@ -595,13 +605,22 @@ pub(crate) fn write(
 ) -> Result<EvidenceDisposition, String> {
     let (payload, disposition) =
         evidence_payload(source_path, source_bytes, problem, report, root_cnf)?;
-    crate::nofollow_io::atomic_write_immutable(output, &canonical_bytes(&payload)?)?;
+    write_canonical_immutable(output, &payload)?;
     Ok(disposition)
+}
+
+fn write_canonical_immutable<T: Serialize>(output: &Path, payload: &T) -> Result<(), String> {
+    let encoded = canonical_bytes(payload)?;
+    #[cfg(test)]
+    crate::record_evidence_work_for_test(crate::EvidenceWorkKind::ArtifactWrite);
+    crate::nofollow_io::atomic_write_immutable(output, &encoded)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn canonical_config_hash_is_stable() {
@@ -615,5 +634,58 @@ mod tests {
             canonical_bytes(&left).unwrap(),
             canonical_bytes(&right).unwrap()
         );
+    }
+
+    #[test]
+    fn hash_serialization_and_immutable_write_are_instrumented() {
+        crate::reset_evidence_work_telemetry();
+        assert_eq!(sha256_hex(b"bound").len(), 64);
+        let mut payload = BTreeMap::new();
+        payload.insert("status", "sat");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temporary_root = if cfg!(target_os = "macos") {
+            std::path::PathBuf::from("/private/tmp")
+        } else {
+            std::env::temp_dir()
+        };
+        let directory = temporary_root.join(format!(
+            "euf-viper-evidence-instrumentation-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let output = directory.join("evidence.json");
+        write_canonical_immutable(&output, &payload).unwrap();
+        let work = crate::evidence_work_telemetry();
+        assert!(work.hashes > 0, "{work:?}");
+        assert!(work.serializations > 0, "{work:?}");
+        assert!(work.artifact_writes > 0, "{work:?}");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn model_and_backend_payload_construction_are_instrumented() {
+        let problem = crate::parse_problem_with_options(
+            "(set-logic QF_UF)\n(declare-fun p () Bool)\n(assert p)\n(check-sat)\n",
+            crate::ScopedLetMode::Auto,
+            true,
+        )
+        .unwrap();
+        crate::reset_evidence_work_telemetry();
+        let report = crate::solve_problem_ref_with_options_and_eq_abstraction(
+            &problem,
+            crate::RootCnfOptions::existing_behavior(true),
+            crate::EqAbstractionMode::Off,
+            true,
+        );
+        let witness = report.sat_witness.as_ref().unwrap();
+        build_model(&problem, witness).unwrap();
+        build_backend_cnf(witness).unwrap();
+        let work = crate::evidence_work_telemetry();
+        assert!(work.payload_builds >= 2, "{work:?}");
+        assert!(work.hashes > 0, "{work:?}");
+        assert!(work.serializations > 0, "{work:?}");
     }
 }

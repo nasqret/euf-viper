@@ -68,10 +68,19 @@ timed solve. This mode does not certify the normal default solver, establish
 coverage, or change the ordinary off-mode solve contract. See
 [Production Evidence](docs/book/production-evidence.md).
 
+When the exact `--evidence-out` flag is absent, argument handling and byte-level
+stdout, stderr, and exit status remain compatible with baseline `f8d9205`,
+including legacy unknown and extra solve arguments. Evidence-specific strict
+argument parsing applies only to invocations containing that flag. The ordinary
+help text is therefore unchanged; evidence mode is documented separately here.
+
 The locked evidence campaign builds its binary with
 `--features certificates,production-evidence` and rejects a binary whose
-compile-time feature report omits either feature before solver installation or
-campaign freezing. Ordinary solves do not allocate evidence transcripts,
+opt-in `euf-viper-build-features` companion report omits either feature before
+solver installation or campaign freezing. Each WMI submission uses a fresh
+mode-0700 attempt root and checkout, an explicit environment allowlist, and
+source/runtime/receipt hashes; reused revision directories and `--export=ALL`
+are forbidden. Ordinary solves do not allocate evidence transcripts,
 duplicate backend clause streams, retain DPLL models, or perform canonical
 evidence sorting.
 

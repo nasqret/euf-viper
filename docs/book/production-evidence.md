@@ -6,7 +6,11 @@ Production evidence v3 is a **restricted SAT-only certifying mode**. It is
 available only through the explicit `production-evidence` Cargo feature and is
 not enabled by the default Cargo features or by the existing `certificates`
 feature. With `--evidence-out` absent, the ordinary parser, solver configuration,
-routes, result, and output contract remain unchanged.
+routes, result, and output contract remain unchanged. This includes byte-exact
+`f8d9205` stdout, stderr, and exit status for no arguments, help, unknown and
+extra legacy arguments, file and stdin parsing, successful solves, parse errors,
+and missing files. Strict evidence argument parsing is activated only when the
+exact `--evidence-out` flag occurs; ordinary help remains baseline-compatible.
 
 Evidence mode forces deterministic canonical routes for the supported Boolean
 CNF path. It disables result-affecting finite-domain, full-Ackermann,
@@ -87,11 +91,33 @@ python3 scripts/cert/check_production_evidence.py \
 ## Locked campaigns
 
 The locked WMI preparation builds one campaign binary with
-`--features certificates,production-evidence`. It queries that executable's
-compile-time feature report immediately after the build and fails before solver
-installation or campaign freezing if either feature is absent. The
+`--features certificates,production-evidence`. The same Cargo build emits the
+opt-in `euf-viper-build-features` companion executable. Preparation queries that
+report immediately and fails before solver installation or campaign freezing if
+either feature is absent; the real solver must then pass an evidence-emitting
+smoke. The
 solver-configuration recorder repeats the production-evidence check against the
-real executable before it can exercise `--evidence-out` or publish a lock.
+compiled companion report, then exercises the real solver with `--evidence-out`,
+before it can publish a lock.
+
+Every submission creates a private, attempt-specific mode-0700 remote root and
+a fresh no-hardlink detached checkout. The revision is never used as a reusable
+checkout or results directory. Preparation binds the attempt identity and
+canonical paths, every tracked source blob and mode, Git tree, exact execution
+environment, runtime realpaths and hashes, solver binaries, feature report,
+corpus manifests, and generated lock artifacts into immutable receipts. Any
+tracked mutation, skip-worktree or assume-unchanged index flag, untracked file,
+or ignored file in the execution checkout aborts the chain.
+
+SLURM stages receive only an explicit receipt-bound `EUF_VIPER_*` allowlist,
+never `--export=ALL`, and execute tools through a clean environment. Ambient
+Rust/Cargo wrappers and flags, Cargo configuration overrides, Python path/home
+and startup hooks, shell startup files, build helpers, Git object/config
+overrides, and unlisted solver controls are rejected before source execution.
+Python runs with `-B -I -S`; build, cache, home, temporary, solver, corpus, log,
+and result paths created by the attempt live outside the checkout but inside its
+private root. A pre-existing shared corpus may remain outside that root; its
+canonical manifest paths and hashes are receipt-bound before shard execution.
 
 New solver configurations opt in with an exact evidence schema, CLI flag, and
 accepted decisive statuses. The locked runner derives a unique path from the
@@ -167,5 +193,10 @@ retains the fallback solver's trust boundary.
 With evidence capture off, backend assignments still exist long enough for the
 ordinary EUF model check, but no evidence transcript vector, duplicate backend
 clause stream, retained DPLL model, evidence-only assignment copy, or canonical
-evidence sort is constructed. Unit instrumentation covers Kissat, CaDiCaL,
-CaDiCaL refinement, Varisat, and DPLL and checks exact ordinary result parity.
+evidence sort is constructed. Test-only instrumentation, absent from production
+code generation, also covers symbol retention, source capture, hashing,
+serialization, payload construction, and immutable publication. It checks SAT
+and UNSAT for every backend, parser contradiction, congruence-closure SAT/UNSAT,
+invalid-model refinement cuts, unsupported and unavailable backends,
+interruption, limits, errors, and early returns, while asserting exact ordinary
+result parity.

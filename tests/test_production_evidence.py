@@ -7,6 +7,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -61,13 +62,14 @@ BACKEND_SAT_SOURCE = """\
 DYNAMIC_SAT_SOURCE = (ROOT / "tests" / "fixtures" / "production_dynamic_sat.smt2").read_text(
     encoding="utf-8"
 )
+TEMPORARY_DIRECTORY = "/private/tmp" if sys.platform == "darwin" else None
 
 
 class ProductionEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.clean_build = tempfile.TemporaryDirectory(
-            prefix="euf-viper-evidence-build-", dir="/private/tmp"
+            prefix="euf-viper-evidence-build-", dir=TEMPORARY_DIRECTORY
         )
         cls.clean_root = Path(cls.clean_build.name) / "repository"
         shutil.copytree(
@@ -113,11 +115,16 @@ class ProductionEvidenceTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
-            env={**os.environ, "CARGO_TARGET_DIR": str(ROOT / "target")},
+            env={
+                **os.environ,
+                "CARGO_TARGET_DIR": str(ROOT / "target"),
+                "EUF_VIPER_BUILD_CONTEXT": "clean-production-evidence-test",
+            },
         )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr)
         cls.binary = ROOT / "target" / "debug" / "euf-viper"
+        cls.feature_report = ROOT / "target" / "debug" / "euf-viper-build-features"
         cls.binary_sha256 = hashlib.sha256(cls.binary.read_bytes()).hexdigest()
 
     @classmethod
@@ -126,7 +133,7 @@ class ProductionEvidenceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
-            prefix="euf-viper-evidence-test-", dir="/private/tmp"
+            prefix="euf-viper-evidence-test-", dir=TEMPORARY_DIRECTORY
         )
         self.root = Path(self.temporary.name)
 
@@ -164,6 +171,61 @@ class ProductionEvidenceTests(unittest.TestCase):
             env=child_environment,
         )
         return completed, source, evidence
+
+    def test_real_clean_binary_records_and_smokes_production_evidence(self) -> None:
+        comparator = self.root / "comparator"
+        comparator.write_text(
+            "#!/bin/sh\n"
+            'case "$*" in\n'
+            "  *version*) echo '4.16.0 1.3.4 2.7.0 2.9.2' ;;\n"
+            "  *) echo sat ;;\n"
+            "esac\n",
+            encoding="ascii",
+        )
+        comparator.chmod(0o755)
+        source = ROOT / "generated" / "synthetic" / "chain1000_sat.smt2"
+        output = self.root / "solver-config.json"
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "bench" / "record_solver_config.py"),
+                "--campaign",
+                str(ROOT / "campaigns" / "best-overall-qf-uf-2026-07.json"),
+                "--viper",
+                str(self.binary),
+                "--viper-feature-report",
+                str(self.feature_report),
+                "--viper-version",
+                "clean-production-evidence-test",
+                "--z3",
+                str(comparator),
+                "--cvc5",
+                str(comparator),
+                "--yices2",
+                str(comparator),
+                "--opensmt",
+                str(comparator),
+                "--smoke-instance",
+                str(source),
+                "--smoke-expected",
+                "sat",
+                "--out",
+                str(output),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        candidate = next(
+            record for record in payload["solvers"] if record["id"] == "euf-viper"
+        )
+        self.assertEqual(candidate["binary"], str(self.binary.resolve()))
+        self.assertEqual(
+            candidate["evidence"]["accepted_decisive_statuses"], ["sat"]
+        )
 
     def validate(self, evidence: Path, source: Path, **kwargs: object) -> dict[str, object]:
         return CHECKER.validate_production_evidence(

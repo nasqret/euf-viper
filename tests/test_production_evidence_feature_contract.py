@@ -20,6 +20,12 @@ class ProductionEvidenceFeatureContractTests(unittest.TestCase):
             set(features["production-evidence"]),
             {"dep:libc", "dep:serde", "dep:serde_json", "dep:sha2"},
         )
+        feature_report = next(
+            binary
+            for binary in manifest["bin"]
+            if binary["name"] == "euf-viper-build-features"
+        )
+        self.assertEqual(feature_report["required-features"], ["production-evidence"])
 
     def test_documentation_scopes_the_mode_and_denies_default_claims(self) -> None:
         text = (ROOT / "docs" / "book" / "production-evidence.md").read_text(
@@ -31,6 +37,8 @@ class ProductionEvidenceFeatureContractTests(unittest.TestCase):
             "deterministic canonical routes",
             "Congruence-closure SAT and UNSAT",
             "does not establish a coverage result",
+            "byte-exact",
+            "Strict evidence argument parsing",
         ):
             self.assertIn(required, text)
 

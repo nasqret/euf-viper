@@ -64,6 +64,18 @@ use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
 type SymId = u32;
 type TermId = usize;
 
+#[cfg(test)]
+macro_rules! evidence_work {
+    ($kind:expr) => {
+        record_evidence_work_for_test($kind)
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! evidence_work {
+    ($kind:expr) => {};
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct SortId(u32);
 
@@ -378,6 +390,9 @@ impl ParseCtx {
     }
 
     fn finish_retaining_symbols(self, retain_symbols: bool) -> Problem {
+        if retain_symbols {
+            evidence_work!(EvidenceWorkKind::ParserRetention);
+        }
         let mut bool_data_terms = self.bool_data_terms.into_iter().collect::<Vec<_>>();
         bool_data_terms.sort_unstable();
         let bool_problem = (!self.bool_assertions.is_empty()
@@ -1706,6 +1721,7 @@ impl ParseCtx {
             );
             if self.retain_evidence_symbols {
                 self.internal_functions.push(sym);
+                evidence_work!(EvidenceWorkKind::ParserRetention);
             }
             return self.arena.intern_typed(sym, Vec::new(), sort);
         }
@@ -3871,7 +3887,7 @@ fn congruence_axiom_clauses_with_contract(
     }
     let mut clauses = clauses.into_iter().collect::<Vec<_>>();
     if deterministic_contract {
-        record_evidence_work(EvidenceWorkKind::DeterministicSort);
+        evidence_work!(EvidenceWorkKind::DeterministicSort);
         clauses.sort();
     } else {
         order_axiom_clauses(&mut clauses);
@@ -4062,7 +4078,7 @@ impl<'a> DpllSolver<'a> {
             && result == CnfSearchResult::Sat
             && complete_cnf_assignment(self.cnf, &mut assignment)
         {
-            record_evidence_work(EvidenceWorkKind::ModelCapture);
+            evidence_work!(EvidenceWorkKind::ModelCapture);
             self.model = Some(assignment);
         }
         result
@@ -4093,7 +4109,7 @@ impl<'a> DpllSolver<'a> {
             match self.search(&mut branch, vec![var], theory_dirty) {
                 CnfSearchResult::Sat => {
                     if self.capture_evidence {
-                        record_evidence_work(EvidenceWorkKind::AssignmentCopy);
+                        evidence_work!(EvidenceWorkKind::AssignmentCopy);
                         assignment.copy_from_slice(&branch);
                     }
                     return CnfSearchResult::Sat;
@@ -4359,8 +4375,16 @@ struct EvidenceWorkTelemetry {
     assignment_copies: usize,
     model_captures: usize,
     deterministic_sorts: usize,
+    parser_retentions: usize,
+    source_captures: usize,
+    hashes: usize,
+    serializations: usize,
+    payload_builds: usize,
+    artifact_writes: usize,
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum EvidenceWorkKind {
     TranscriptVector,
@@ -4370,6 +4394,12 @@ enum EvidenceWorkKind {
     AssignmentCopy,
     ModelCapture,
     DeterministicSort,
+    ParserRetention,
+    SourceCapture,
+    Hash,
+    Serialization,
+    PayloadBuild,
+    ArtifactWrite,
 }
 
 #[cfg(test)]
@@ -4383,11 +4413,17 @@ std::thread_local! {
             assignment_copies: 0,
             model_captures: 0,
             deterministic_sorts: 0,
+            parser_retentions: 0,
+            source_captures: 0,
+            hashes: 0,
+            serializations: 0,
+            payload_builds: 0,
+            artifact_writes: 0,
         }) };
 }
 
 #[cfg(test)]
-fn record_evidence_work(kind: EvidenceWorkKind) {
+pub(crate) fn record_evidence_work_for_test(kind: EvidenceWorkKind) {
     EVIDENCE_WORK_TELEMETRY.with(|telemetry| {
         let mut value = telemetry.get();
         match kind {
@@ -4398,14 +4434,47 @@ fn record_evidence_work(kind: EvidenceWorkKind) {
             EvidenceWorkKind::AssignmentCopy => value.assignment_copies += 1,
             EvidenceWorkKind::ModelCapture => value.model_captures += 1,
             EvidenceWorkKind::DeterministicSort => value.deterministic_sorts += 1,
+            EvidenceWorkKind::ParserRetention => value.parser_retentions += 1,
+            EvidenceWorkKind::SourceCapture => value.source_captures += 1,
+            EvidenceWorkKind::Hash => value.hashes += 1,
+            EvidenceWorkKind::Serialization => value.serializations += 1,
+            EvidenceWorkKind::PayloadBuild => value.payload_builds += 1,
+            EvidenceWorkKind::ArtifactWrite => value.artifact_writes += 1,
         }
         telemetry.set(value);
     });
 }
 
-#[cfg(not(test))]
-#[inline(always)]
-fn record_evidence_work(_kind: EvidenceWorkKind) {}
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackendFailpoint {
+    KissatUnavailable,
+    CadicalInterrupted,
+    VarisatError,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static BACKEND_FAILPOINT: std::cell::Cell<Option<BackendFailpoint>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+fn set_backend_failpoint(value: BackendFailpoint) {
+    BACKEND_FAILPOINT.with(|failpoint| failpoint.set(Some(value)));
+}
+
+#[cfg(test)]
+fn take_backend_failpoint(value: BackendFailpoint) -> bool {
+    BACKEND_FAILPOINT.with(|failpoint| {
+        if failpoint.get() == Some(value) {
+            failpoint.set(None);
+            true
+        } else {
+            false
+        }
+    })
+}
 
 #[cfg(test)]
 fn reset_evidence_work_telemetry() {
@@ -4420,7 +4489,7 @@ fn evidence_work_telemetry() -> EvidenceWorkTelemetry {
 #[inline]
 fn sort_for_evidence<T: Ord>(capture_evidence: bool, values: &mut [T]) {
     if capture_evidence {
-        record_evidence_work(EvidenceWorkKind::DeterministicSort);
+        evidence_work!(EvidenceWorkKind::DeterministicSort);
         values.sort();
     }
 }
@@ -4430,7 +4499,7 @@ fn new_evidence_transcript(capture_evidence: bool) -> Option<Vec<ProductionTrans
     if !capture_evidence {
         return None;
     }
-    record_evidence_work(EvidenceWorkKind::TranscriptVector);
+    evidence_work!(EvidenceWorkKind::TranscriptVector);
     Some(Vec::new())
 }
 
@@ -4465,8 +4534,8 @@ fn backend_clause_stream(
     for clauses in additions {
         stream.extend(clauses.iter().cloned());
     }
-    record_evidence_work(EvidenceWorkKind::BackendClauseVector);
-    record_evidence_work(EvidenceWorkKind::ClauseCopies(stream.len()));
+    evidence_work!(EvidenceWorkKind::BackendClauseVector);
+    evidence_work!(EvidenceWorkKind::ClauseCopies(stream.len()));
     Some(stream)
 }
 
@@ -4476,7 +4545,7 @@ fn push_backend_clause(stream: &mut Option<Vec<Vec<i32>>>, clause: &[i32]) {
         return;
     };
     stream.push(clause.to_vec());
-    record_evidence_work(EvidenceWorkKind::ClauseCopies(1));
+    evidence_work!(EvidenceWorkKind::ClauseCopies(1));
 }
 
 fn assignment_literals(assignment: &[i8]) -> Option<Vec<i32>> {
@@ -4519,8 +4588,8 @@ fn append_clause_events(
             .cloned()
             .map(|clause| ProductionTranscriptEvent::Clause { phase, clause }),
     );
-    record_evidence_work(EvidenceWorkKind::TranscriptEvents(clauses.len()));
-    record_evidence_work(EvidenceWorkKind::ClauseCopies(clauses.len()));
+    evidence_work!(EvidenceWorkKind::TranscriptEvents(clauses.len()));
+    evidence_work!(EvidenceWorkKind::ClauseCopies(clauses.len()));
 }
 
 fn append_clause_event(
@@ -4535,8 +4604,8 @@ fn append_clause_event(
         phase,
         clause: clause.to_vec(),
     });
-    record_evidence_work(EvidenceWorkKind::TranscriptEvents(1));
-    record_evidence_work(EvidenceWorkKind::ClauseCopies(1));
+    evidence_work!(EvidenceWorkKind::TranscriptEvents(1));
+    evidence_work!(EvidenceWorkKind::ClauseCopies(1));
 }
 
 fn append_validation_events(
@@ -4549,15 +4618,15 @@ fn append_validation_events(
         return Some(());
     };
     let assignment = assignment_literals(assignment)?;
-    record_evidence_work(EvidenceWorkKind::AssignmentCopy);
+    evidence_work!(EvidenceWorkKind::AssignmentCopy);
     events.push(ProductionTranscriptEvent::Solve { call });
     events.push(ProductionTranscriptEvent::Assignment { call, assignment });
     events.push(ProductionTranscriptEvent::Validation {
         call,
         conflicts: conflicts.to_vec(),
     });
-    record_evidence_work(EvidenceWorkKind::TranscriptEvents(3));
-    record_evidence_work(EvidenceWorkKind::ClauseCopies(conflicts.len()));
+    evidence_work!(EvidenceWorkKind::TranscriptEvents(3));
+    evidence_work!(EvidenceWorkKind::ClauseCopies(conflicts.len()));
     Some(())
 }
 
@@ -4578,7 +4647,7 @@ fn deterministic_theory_conflict_clause(cnf: &CnfProblem, assignment: &[i8]) -> 
             return None;
         });
     }
-    record_evidence_work(EvidenceWorkKind::DeterministicSort);
+    evidence_work!(EvidenceWorkKind::DeterministicSort);
     clause.sort_unstable();
     clause.dedup();
     Some(clause)
@@ -4610,7 +4679,7 @@ fn production_sat_witness_from_cnf(
     false_term: TermId,
     assignment: &[i8],
 ) -> Option<ProductionSatWitness> {
-    record_evidence_work(EvidenceWorkKind::ModelCapture);
+    evidence_work!(EvidenceWorkKind::ModelCapture);
     if assignment.len() != cnf.var_count() + 1
         || assignment.first() != Some(&0)
         || assignment
@@ -4870,6 +4939,10 @@ fn solve_kissat_euf_once(
     eager_congruence: bool,
     capture_evidence: bool,
 ) -> EagerSolveOutcome {
+    #[cfg(test)]
+    if take_backend_failpoint(BackendFailpoint::KissatUnavailable) {
+        return EagerSolveOutcome::Unavailable;
+    }
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
     let variables = (0..cnf.var_count())
@@ -4986,6 +5059,10 @@ fn solve_kissat_euf_once(
     eager_congruence: bool,
     capture_evidence: bool,
 ) -> EagerSolveOutcome {
+    #[cfg(test)]
+    if take_backend_failpoint(BackendFailpoint::KissatUnavailable) {
+        return EagerSolveOutcome::Unavailable;
+    }
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
     if configure_kissat(&mut solver).is_none() {
@@ -5193,6 +5270,11 @@ fn solve_cadical_euf_once(
 
     if let Some(limit) = conflict_limit {
         solver.limit_conflicts(Some(limit)).ok()?;
+    }
+
+    #[cfg(test)]
+    if take_backend_failpoint(BackendFailpoint::CadicalInterrupted) {
+        return None;
     }
 
     let sat_start = Instant::now();
@@ -5601,6 +5683,18 @@ fn solve_varisat_euf(
     let mut transcript = new_evidence_transcript(capture_evidence);
     append_clause_events(&mut transcript, "transitivity", &transitivity);
     append_clause_events(&mut transcript, "congruence", &congruence);
+
+    #[cfg(test)]
+    if take_backend_failpoint(BackendFailpoint::VarisatError) {
+        return (
+            SolverOutcome::unsupported(
+                "varisat",
+                vec!["test-only Varisat backend error".to_owned()],
+            ),
+            0,
+            0,
+        );
+    }
 
     let mut learned = HashSet::<Vec<i32>>::default();
     let max_theory_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
@@ -7631,7 +7725,9 @@ fn solve_file(path: &str, with_stats: bool, evidence_out: Option<&str>) -> Resul
 fn read_source_nofollow(path: &Path) -> Result<Vec<u8>, String> {
     #[cfg(feature = "production-evidence")]
     {
-        nofollow_io::read_regular(path)
+        let source = nofollow_io::read_regular(path)?;
+        evidence_work!(EvidenceWorkKind::SourceCapture);
+        Ok(source)
     }
     #[cfg(not(feature = "production-evidence"))]
     {
@@ -7751,7 +7847,7 @@ fn parse_solve_args(args: &[String]) -> Result<(&str, bool, Option<&str>), Strin
         }
     }
     Ok((
-        file.ok_or_else(|| "solve input file is required".to_owned())?,
+        file.ok_or_else(|| evidence_usage().to_owned())?,
         with_stats,
         evidence_out,
     ))
@@ -8150,10 +8246,7 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
 #[cfg(not(feature = "certificates"))]
 fn usage() -> &'static str {
     "usage:
-  euf-viper solve [--stats] [--evidence-out PATH] FILE
-    --evidence-out: restricted SAT-only certifying mode; requires the opt-in
-      production-evidence feature, forces deterministic canonical routes, and
-      reports congruence-closure SAT/UNSAT as unsupported
+  euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper parse-check FILE|-
@@ -8168,10 +8261,7 @@ fn usage() -> &'static str {
 #[cfg(feature = "certificates")]
 fn usage() -> &'static str {
     "usage:
-  euf-viper solve [--stats] [--evidence-out PATH] FILE
-    --evidence-out: restricted SAT-only certifying mode; requires the opt-in
-      production-evidence feature, forces deterministic canonical routes, and
-      reports congruence-closure SAT/UNSAT as unsupported
+  euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper parse-check FILE|-
@@ -8184,6 +8274,13 @@ fn usage() -> &'static str {
   euf-viper gen pruned-or BRANCHES
   euf-viper bench [--cases N] [--size N]
   euf-viper bench-or [--cases N] [--branches N] [--depth N]"
+}
+
+fn evidence_usage() -> &'static str {
+    "usage: euf-viper solve [--stats] --evidence-out PATH FILE
+  --evidence-out enables a restricted SAT-only certifying mode through the
+  opt-in production-evidence feature. It forces deterministic canonical routes;
+  congruence-closure SAT/UNSAT is nondecisive unsupported evidence."
 }
 
 fn run() -> Result<i32, String> {
@@ -8234,10 +8331,6 @@ fn run() -> Result<i32, String> {
         "bench-or" => bench_or_cmd(&args[1..]),
         "--version" | "-V" => {
             println!("euf-viper {}", env!("CARGO_PKG_VERSION"));
-            Ok(0)
-        }
-        "--build-features" => {
-            println!("{}", env!("EUF_VIPER_BUILD_FEATURES"));
             Ok(0)
         }
         "--help" | "-h" | "help" => {
@@ -8765,6 +8858,438 @@ mod tests {
         .result;
         assert_eq!(ordinary_dpll, evidence_dpll);
         assert_capture_work(false);
+    }
+
+    #[test]
+    fn parser_and_congruence_early_returns_do_zero_off_mode_evidence_work() {
+        let cases = [
+            (
+                "(set-logic QF_UF)\n(declare-sort U 0)\n\
+                 (declare-fun a () U)\n(check-sat)\n",
+                "congruence-closure",
+                SolveResult::Sat,
+            ),
+            (
+                "(set-logic QF_UF)\n(define-fun-rec)\n(check-sat)\n",
+                "congruence-closure",
+                SolveResult::Unsupported(vec![
+                    "define-fun-rec is not expanded in this verifier yet".to_owned(),
+                ]),
+            ),
+        ];
+        let options = RootCnfOptions::existing_behavior(true);
+        for (input, backend, expected) in cases {
+            reset_evidence_work_telemetry();
+            let ordinary = parse_problem_with_options(input, ScopedLetMode::Auto, false).unwrap();
+            let report = solve_problem_ref_with_options_and_eq_abstraction(
+                &ordinary,
+                options,
+                EqAbstractionMode::Off,
+                false,
+            );
+            assert_eq!(report.result, expected);
+            assert_eq!(report.backend, backend);
+            assert!(report.sat_witness.is_none());
+            assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+            reset_evidence_work_telemetry();
+            let retained = parse_problem_with_options(input, ScopedLetMode::Auto, true).unwrap();
+            let report = solve_problem_ref_with_options_and_eq_abstraction(
+                &retained,
+                options,
+                EqAbstractionMode::Off,
+                true,
+            );
+            assert_eq!(report.backend, backend);
+            assert!(report.sat_witness.is_none());
+            let work = evidence_work_telemetry();
+            assert!(work.parser_retentions > 0, "{work:?}");
+            assert_eq!(work.transcript_vectors, 0, "{work:?}");
+            assert_eq!(work.backend_clause_vectors, 0, "{work:?}");
+        }
+
+        let early_input = "(set-logic QF_UF)\n(declare-sort U 0)\n\
+                           (declare-const a U)\n(check-sat)\n";
+        for (backend, configure) in [
+            (
+                "parser-contradiction",
+                (|problem: &mut Problem| problem.contradiction = true) as fn(&mut Problem),
+            ),
+            (
+                "congruence-closure",
+                (|problem: &mut Problem| problem.diseqs.push((0, 0))) as fn(&mut Problem),
+            ),
+        ] {
+            reset_evidence_work_telemetry();
+            let mut ordinary =
+                parse_problem_with_options(early_input, ScopedLetMode::Auto, false).unwrap();
+            configure(&mut ordinary);
+            let report = solve_problem_ref_with_options_and_eq_abstraction(
+                &ordinary,
+                options,
+                EqAbstractionMode::Off,
+                false,
+            );
+            assert_eq!(report.result, SolveResult::Unsat);
+            assert_eq!(report.backend, backend);
+            assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+            reset_evidence_work_telemetry();
+            let mut retained =
+                parse_problem_with_options(early_input, ScopedLetMode::Auto, true).unwrap();
+            configure(&mut retained);
+            let report = solve_problem_ref_with_options_and_eq_abstraction(
+                &retained,
+                options,
+                EqAbstractionMode::Off,
+                true,
+            );
+            assert_eq!(report.result, SolveResult::Unsat);
+            assert_eq!(report.backend, backend);
+            let work = evidence_work_telemetry();
+            assert!(work.parser_retentions > 0, "{work:?}");
+            assert_eq!(work.transcript_vectors, 0, "{work:?}");
+        }
+
+        for retain in [false, true] {
+            reset_evidence_work_telemetry();
+            let error =
+                parse_problem_with_options("(assert (=", ScopedLetMode::Auto, retain).unwrap_err();
+            assert_eq!(error, "unclosed '('");
+            assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+        }
+    }
+
+    #[test]
+    fn unsat_backend_and_dpll_limit_exits_do_zero_off_mode_evidence_work() {
+        let problem = parse_problem(
+            "(set-logic QF_UF)\n(declare-fun p () Bool)\n\
+             (assert p)\n(check-sat)\n",
+        )
+        .unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        cnf.clauses.push(Vec::new());
+
+        reset_evidence_work_telemetry();
+        let kissat = solve_kissat_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+            false,
+        );
+        assert!(matches!(
+            kissat,
+            EagerSolveOutcome::Solved(SolverOutcome {
+                result: SolveResult::Unsat,
+                ..
+            })
+        ));
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+        reset_evidence_work_telemetry();
+        let captured_kissat = solve_kissat_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+            true,
+        );
+        assert!(matches!(
+            captured_kissat,
+            EagerSolveOutcome::Solved(SolverOutcome {
+                result: SolveResult::Unsat,
+                ..
+            })
+        ));
+        assert!(evidence_work_telemetry().deterministic_sorts > 0);
+
+        reset_evidence_work_telemetry();
+        let cadical = solve_cadical_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(cadical.result, SolveResult::Unsat);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+        reset_evidence_work_telemetry();
+        let captured_cadical = solve_cadical_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(captured_cadical.result, SolveResult::Unsat);
+        assert!(evidence_work_telemetry().deterministic_sorts > 0);
+
+        reset_evidence_work_telemetry();
+        let varisat = solve_varisat_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+        )
+        .0;
+        assert_eq!(varisat.result, SolveResult::Unsat);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+        reset_evidence_work_telemetry();
+        let captured_varisat = solve_varisat_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+        )
+        .0;
+        assert_eq!(captured_varisat.result, SolveResult::Unsat);
+        let captured_varisat_work = evidence_work_telemetry();
+        assert!(captured_varisat_work.transcript_vectors > 0);
+        assert!(captured_varisat_work.backend_clause_vectors > 0);
+
+        reset_evidence_work_telemetry();
+        let dpll = solve_dpll_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+        )
+        .0;
+        assert_eq!(dpll.result, SolveResult::Unsat);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+        reset_evidence_work_telemetry();
+        let captured_dpll = solve_dpll_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+        )
+        .0;
+        assert_eq!(captured_dpll.result, SolveResult::Unsat);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        let mut satisfiable_cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut satisfiable_cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            satisfiable_cnf.add_assertion(assertion);
+        }
+        reset_evidence_work_telemetry();
+        let mut limited = DpllSolver::new(
+            &satisfiable_cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+        );
+        limited.node_limit = 0;
+        assert_eq!(limited.solve(), CnfSearchResult::Limit);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+    }
+
+    #[test]
+    fn invalid_models_refinement_cuts_and_round_caps_do_zero_off_mode_evidence_work() {
+        let problem = parse_problem(
+            "(set-logic QF_UF)\n(declare-sort U 0)\n\
+             (declare-fun a () U)\n(declare-fun b () U)\n\
+             (declare-fun f (U) U)\n(assert (= a b))\n\
+             (assert (distinct (f a) (f b)))\n(check-sat)\n",
+        )
+        .unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+
+        reset_evidence_work_telemetry();
+        let ordinary_invalid = solve_kissat_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+            false,
+        );
+        assert!(matches!(
+            ordinary_invalid,
+            EagerSolveOutcome::InvalidTheoryModel(count) if count > 0
+        ));
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        let captured_invalid = solve_kissat_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+            true,
+        );
+        assert!(matches!(
+            captured_invalid,
+            EagerSolveOutcome::InvalidTheoryModel(count) if count > 0
+        ));
+        let invalid_work = evidence_work_telemetry();
+        assert!(invalid_work.transcript_vectors > 0, "{invalid_work:?}");
+        assert!(invalid_work.transcript_events > 0, "{invalid_work:?}");
+
+        reset_evidence_work_telemetry();
+        let mut telemetry = CadicalRefinementTelemetry::default();
+        let ordinary = solve_cadical_euf_refining_with_limit(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            RefinementMode::ModelCuts,
+            8,
+            false,
+            &mut telemetry,
+        )
+        .unwrap();
+        assert_eq!(ordinary.0.result, SolveResult::Unsat);
+        assert!(telemetry.cuts_added > 0);
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        let mut evidence_telemetry = CadicalRefinementTelemetry::default();
+        let captured = solve_cadical_euf_refining_with_limit(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            RefinementMode::ModelCuts,
+            8,
+            true,
+            &mut evidence_telemetry,
+        )
+        .unwrap();
+        assert_eq!(captured.0.result, SolveResult::Unsat);
+        let captured_work = evidence_work_telemetry();
+        assert!(
+            captured_work.backend_clause_vectors > 0,
+            "{captured_work:?}"
+        );
+        assert!(captured_work.transcript_events > 0, "{captured_work:?}");
+        assert!(captured_work.clause_copies > 0, "{captured_work:?}");
+
+        reset_evidence_work_telemetry();
+        let mut capped_telemetry = CadicalRefinementTelemetry::default();
+        assert!(
+            solve_cadical_euf_refining_with_limit(
+                &cnf,
+                &problem.arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+                RefinementMode::ModelCuts,
+                0,
+                false,
+                &mut capped_telemetry,
+            )
+            .is_none()
+        );
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+    }
+
+    #[test]
+    fn unavailable_interrupted_and_backend_error_exits_do_zero_off_mode_work() {
+        let problem = parse_problem(
+            "(set-logic QF_UF)\n(declare-fun p () Bool)\n\
+             (assert p)\n(check-sat)\n",
+        )
+        .unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+
+        reset_evidence_work_telemetry();
+        set_backend_failpoint(BackendFailpoint::KissatUnavailable);
+        assert!(matches!(
+            solve_kissat_euf_once(
+                &cnf,
+                &problem.arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+                true,
+                false,
+            ),
+            EagerSolveOutcome::Unavailable
+        ));
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        set_backend_failpoint(BackendFailpoint::CadicalInterrupted);
+        assert!(
+            solve_cadical_euf_once(
+                &cnf,
+                &problem.arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+                true,
+                false,
+            )
+            .is_none()
+        );
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        set_backend_failpoint(BackendFailpoint::VarisatError);
+        let error = solve_varisat_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+        )
+        .0;
+        assert!(matches!(error.result, SolveResult::Unsupported(_)));
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        set_backend_failpoint(BackendFailpoint::VarisatError);
+        let error = solve_varisat_euf(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            true,
+        )
+        .0;
+        assert!(matches!(error.result, SolveResult::Unsupported(_)));
+        let work = evidence_work_telemetry();
+        assert!(work.transcript_vectors > 0, "{work:?}");
+        assert!(work.backend_clause_vectors > 0, "{work:?}");
+    }
+
+    #[cfg(feature = "production-evidence")]
+    #[test]
+    fn source_capture_is_absent_from_ordinary_reads_and_positive_in_evidence_reads() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/basic_sat.smt2");
+        reset_evidence_work_telemetry();
+        let ordinary = fs::read(&path).unwrap();
+        assert!(!ordinary.is_empty());
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        reset_evidence_work_telemetry();
+        let captured = read_source_nofollow(&path).unwrap();
+        assert_eq!(captured, ordinary);
+        let work = evidence_work_telemetry();
+        assert_eq!(work.source_captures, 1, "{work:?}");
     }
 
     #[test]

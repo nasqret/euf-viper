@@ -24,7 +24,6 @@ class RecordSolverConfigTests(unittest.TestCase):
         self.binary.write_text(
             "#!/bin/sh\n"
             "case \"${1:-}\" in\n"
-            "  --build-features) echo 'certificates,production-evidence' ;;\n"
             "  --version|-version) echo 'euf-viper 4.16.0 1.3.4 2.7.0 2.9.2' ;;\n"
             "  *)\n"
             "    previous=''\n"
@@ -40,6 +39,12 @@ class RecordSolverConfigTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.binary.chmod(0o755)
+        self.feature_report = self.root / "euf-viper-build-features"
+        self.feature_report.write_text(
+            "#!/bin/sh\necho 'certificates,production-evidence'\n",
+            encoding="ascii",
+        )
+        self.feature_report.chmod(0o755)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -54,6 +59,7 @@ class RecordSolverConfigTests(unittest.TestCase):
             yices2=self.binary,
             opensmt=self.binary,
             viper_version="test-build",
+            viper_feature_report=self.feature_report,
         )
 
         self.assertEqual(len(records), 6)
@@ -85,6 +91,7 @@ class RecordSolverConfigTests(unittest.TestCase):
                 yices2=self.binary,
                 opensmt=self.binary,
                 viper_version="test-build",
+                viper_feature_report=self.feature_report,
             )
 
     def test_campaign_must_have_exact_comparator_set(self) -> None:
@@ -109,19 +116,35 @@ class RecordSolverConfigTests(unittest.TestCase):
             RECORDER.smoke_solver(record, smoke, "unsat")
 
     def test_feature_probe_rejects_a_binary_without_evidence(self) -> None:
-        self.binary.write_text(
-            "#!/bin/sh\n"
-            "case \"${1:-}\" in\n"
-            "  --build-features) echo 'certificates,finite-symmetry' ;;\n"
-            "  *) echo 'euf-viper test' ;;\n"
-            "esac\n",
-            encoding="utf-8",
+        self.feature_report.write_text(
+            "#!/bin/sh\necho 'certificates,finite-symmetry'\n",
+            encoding="ascii",
         )
         with self.assertRaisesRegex(
             RECORDER.SolverConfigError,
             "lacks required locked evidence features: production-evidence",
         ):
-            RECORDER.require_viper_evidence_features(self.binary)
+            RECORDER.require_viper_evidence_features(self.feature_report)
+
+    def test_configuration_publication_is_immutable_and_no_follow(self) -> None:
+        existing = self.root / "existing.json"
+        existing.write_bytes(b"preserve\n")
+        with self.assertRaisesRegex(
+            RECORDER.SolverConfigError, "already exists|immutable artifact drift"
+        ):
+            RECORDER.atomic_write(existing, {"schema_version": 1})
+        self.assertEqual(existing.read_bytes(), b"preserve\n")
+
+        victim = self.root / "victim.json"
+        victim.write_bytes(b"victim\n")
+        link = self.root / "link.json"
+        link.symlink_to(victim)
+        with self.assertRaisesRegex(
+            RECORDER.SolverConfigError,
+            "already exists|symlink|immutable artifact drift|not a regular file",
+        ):
+            RECORDER.atomic_write(link, {"schema_version": 1})
+        self.assertEqual(victim.read_bytes(), b"victim\n")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,11 @@ name = "euf-viper"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "euf-viper-build-features"
+path = "src/bin/build_features.rs"
+required-features = ["production-evidence"]
+
 [features]
 default = ["finite-symmetry"]
 certificates = ["dep:serde", "dep:serde_json", "dep:sha2"]

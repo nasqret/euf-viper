@@ -66,6 +66,7 @@ fn source_manifest_sha256(inputs: &[&str]) -> String {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=EUF_VIPER_BUILD_CONTEXT");
     let solver_inputs = [
         "Cargo.toml",
         "Cargo.lock",

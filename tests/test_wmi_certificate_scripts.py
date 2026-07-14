@@ -9,6 +9,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WMI = ROOT / "scripts" / "wmi"
 P0_PREPARE = WMI / "euf_viper_locked_prepare.sbatch"
+P0_SHARD = WMI / "euf_viper_locked_shard.sbatch"
+P0_AUDIT = WMI / "euf_viper_locked_audit.sbatch"
 SBATCH_FILES = [
     WMI / "euf_viper_certificate_prepare.sbatch",
     WMI / "euf_viper_certificate_shard.sbatch",
@@ -36,14 +38,25 @@ class WmiCertificateScriptTests(unittest.TestCase):
 
     def test_p0_times_the_same_binary_that_emits_certificates(self) -> None:
         text = self.text(P0_PREPARE)
-        build = "cargo build --release --features certificates,production-evidence"
+        build = "build --release --features certificates,production-evidence"
         self.assertIn(build, text)
-        self.assertIn("target/release/euf-viper", text)
+        self.assertIn('VIPER_BINARY="$CARGO_TARGET_DIR/release/euf-viper"', text)
         self.assertLess(text.index(build), text.index("record_solver_config.py"))
-        self.assertIn("--build-features", text)
-        self.assertIn("for REQUIRED_FEATURE in certificates production-evidence", text)
-        self.assertLess(text.index("--build-features"), text.index("install_solvers.sh"))
+        self.assertIn("euf-viper-build-features", text)
+        self.assertIn(
+            'EXPECTED_BUILD_FEATURES="certificates,default,finite-symmetry,production-evidence"',
+            text,
+        )
+        self.assertLess(text.index("euf-viper-build-features"), text.index("install_solvers.sh"))
         self.assertIn(".certificates-production-evidence", text)
+
+    def test_p0_dependents_strictly_revalidate_the_preparation_receipt(self) -> None:
+        for path in (P0_SHARD, P0_AUDIT):
+            text = self.text(path)
+            self.assertIn("verify-preparation-receipt", text)
+            self.assertIn('--provenance "$VERIFIED_PROVENANCE"', text)
+            self.assertIn('--prepare-job "$PREPARE_JOB_ID"', text)
+            self.assertNotIn("Path(path).read_text", text)
 
     def test_embedded_python_blocks_compile(self) -> None:
         pattern = re.compile(

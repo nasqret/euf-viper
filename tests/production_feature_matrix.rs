@@ -1,9 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+#[cfg(all(unix, feature = "production-evidence"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_euf-viper")
+}
+
+#[cfg(feature = "production-evidence")]
+fn feature_report_binary() -> &'static str {
+    env!("CARGO_BIN_EXE_euf-viper-build-features")
 }
 
 fn fixture(relative: &str) -> PathBuf {
@@ -18,6 +24,7 @@ fn run(arguments: &[&str]) -> Output {
         .expect("euf-viper integration command should run")
 }
 
+#[cfg(all(unix, feature = "production-evidence"))]
 fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -102,15 +109,18 @@ fn ordinary_solve_preserves_legacy_unknown_and_extra_argument_compatibility() {
     assert!(matches!(output.stdout.as_slice(), b"sat\n" | b"unsat\n"));
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "production-evidence"))]
 #[test]
 fn recorder_checks_the_real_compiled_viper_feature_contract() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = temporary_directory("real-recorder");
     let comparator = root.join("comparator");
-    std::fs::write(&comparator, "#!/bin/sh\necho '4.16.0 1.3.4 2.7.0 2.9.2'\n")
-        .expect("fake comparator should be writable");
+    std::fs::write(
+        &comparator,
+        "#!/bin/sh\ncase \"$*\" in *version*) echo '4.16.0 1.3.4 2.7.0 2.9.2' ;; *) echo sat ;; esac\n",
+    )
+    .expect("fake comparator should be writable");
     let mut permissions = comparator
         .metadata()
         .expect("fake comparator metadata should exist")
@@ -125,6 +135,8 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
         .args(["--campaign"])
         .arg(repository.join("campaigns/best-overall-qf-uf-2026-07.json"))
         .args(["--viper", binary(), "--viper-version", "real-test-build"])
+        .arg("--viper-feature-report")
+        .arg(feature_report_binary())
         .arg("--z3")
         .arg(&comparator)
         .arg("--cvc5")
@@ -139,23 +151,14 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
         .output()
         .expect("real-binary recorder command should run");
 
-    if cfg!(feature = "production-evidence") {
-        assert!(
-            completed.status.success(),
-            "recorder rejected a production-evidence binary: {}",
-            String::from_utf8_lossy(&completed.stderr)
-        );
-        let config = std::fs::read_to_string(&output_path)
-            .expect("successful recorder should publish a configuration");
-        assert!(config.contains("euf-viper.production-evidence.v3"));
-        assert!(config.contains(binary()));
-    } else {
-        assert_eq!(completed.status.code(), Some(2));
-        assert!(
-            String::from_utf8_lossy(&completed.stderr)
-                .contains("lacks required locked evidence features: production-evidence")
-        );
-        assert!(!output_path.exists());
-    }
+    assert!(
+        completed.status.success(),
+        "recorder rejected a production-evidence binary: {}",
+        String::from_utf8_lossy(&completed.stderr)
+    );
+    let config = std::fs::read_to_string(&output_path)
+        .expect("successful recorder should publish a configuration");
+    assert!(config.contains("euf-viper.production-evidence.v3"));
+    assert!(config.contains(binary()));
     std::fs::remove_dir_all(root).expect("temporary recorder directory should be removable");
 }

@@ -23,7 +23,12 @@ CERT_DIR = SCRIPT_DIR.parent / "cert"
 if str(CERT_DIR) not in sys.path:
     sys.path.insert(0, str(CERT_DIR))
 
-from strict_artifacts import StrictArtifactError, strict_json_loads  # noqa: E402
+from strict_artifacts import (  # noqa: E402
+    StrictArtifactError,
+    atomic_write_nofollow,
+    canonical_json_bytes,
+    strict_json_loads,
+)
 from validate_campaign_spec import CampaignSpecError, validate_spec  # noqa: E402
 
 
@@ -108,10 +113,11 @@ def capture_version(binary: Path, argv: list[str], expected: str) -> str:
     return output[:4096]
 
 
-def require_viper_evidence_features(binary: Path) -> frozenset[str]:
+def require_viper_evidence_features(feature_report: Path) -> frozenset[str]:
+    binary = executable(feature_report, "euf-viper feature report")
     try:
         completed = subprocess.run(
-            [str(binary), "--build-features"],
+            [str(binary)],
             check=False,
             capture_output=True,
             text=True,
@@ -120,12 +126,12 @@ def require_viper_evidence_features(binary: Path) -> frozenset[str]:
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SolverConfigError(
-            f"cannot query euf-viper build features: {error}"
+            f"cannot query euf-viper build feature report: {error}"
         ) from error
     output = completed.stdout.strip()
     if completed.returncode != 0:
         raise SolverConfigError(
-            "euf-viper cannot report build features; "
+            "euf-viper feature report failed; "
             "the locked evidence binary must include production-evidence"
         )
     values = output.split(",") if output else []
@@ -165,7 +171,10 @@ def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
         **record.get("environment", {}),
     }
     try:
-        with tempfile.TemporaryDirectory(prefix="euf-viper-config-smoke-") as directory:
+        temporary_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        with tempfile.TemporaryDirectory(
+            prefix="euf-viper-config-smoke-", dir=temporary_root
+        ) as directory:
             evidence_path = Path(directory) / "production-evidence.json"
             evidence = record.get("evidence")
             if evidence is not None:
@@ -233,6 +242,7 @@ def make_records(
     yices2: Path,
     opensmt: Path,
     viper_version: str,
+    viper_feature_report: Path,
 ) -> list[dict[str, Any]]:
     paths = {
         "euf-viper": executable(viper, "euf-viper"),
@@ -241,7 +251,7 @@ def make_records(
         "yices2": executable(yices2, "yices2"),
         "opensmt": executable(opensmt, "opensmt"),
     }
-    require_viper_evidence_features(paths["euf-viper"])
+    require_viper_evidence_features(viper_feature_report)
     definitions = [
         {
             "id": "euf-viper",
@@ -313,7 +323,7 @@ def make_records(
     for definition in definitions:
         binary = definition.pop("binary")
         assert isinstance(binary, Path)
-        version_output = capture_version(
+        capture_version(
             binary,
             definition["version_argv"],
             definition["version_output_contains"],
@@ -323,28 +333,28 @@ def make_records(
                 **definition,
                 "binary": str(binary),
                 "sha256": sha256_file(binary),
-                "observed_version_output": version_output,
-                "observed_version_output_sha256": hashlib.sha256(
-                    version_output.encode("utf-8")
-                ).hexdigest(),
             }
         )
     return records
 
 
 def atomic_write(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    temporary.replace(path)
+    try:
+        atomic_write_nofollow(
+            path,
+            canonical_json_bytes(payload),
+            "solver configuration",
+            immutable=True,
+        )
+    except StrictArtifactError as error:
+        raise SolverConfigError(f"cannot publish solver configuration: {error}") from error
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign", type=Path, required=True)
     parser.add_argument("--viper", type=Path, required=True)
+    parser.add_argument("--viper-feature-report", type=Path, required=True)
     parser.add_argument("--viper-version", required=True)
     parser.add_argument("--z3", type=Path, required=True)
     parser.add_argument("--cvc5", type=Path, required=True)
@@ -365,6 +375,7 @@ def main() -> int:
             yices2=args.yices2,
             opensmt=args.opensmt,
             viper_version=args.viper_version,
+            viper_feature_report=args.viper_feature_report,
         )
         if args.smoke_instance:
             if not args.smoke_instance.is_file():
@@ -381,7 +392,10 @@ def main() -> int:
         "campaign_sha256": sha256_file(args.campaign),
         "solvers": records,
     }
-    atomic_write(args.out, payload)
+    try:
+        atomic_write(args.out, payload)
+    except SolverConfigError as error:
+        parser.exit(2, f"record failed: {error}\n")
     print(json.dumps({
         "solvers": [record["id"] for record in records],
         "hashes": {record["id"]: record["sha256"] for record in records},
