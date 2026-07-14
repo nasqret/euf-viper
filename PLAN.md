@@ -265,7 +265,13 @@ independent evidence checks, and a frozen family holdout.
   Ninety-eight matching rows contain 4,851 unsupported diagnostics, so this is
   not parser-completeness, timing, or solver evidence.
 - [ ] Require parse and end-to-end ABBA improvement with p95 miss overhead below
-  1%; otherwise stop T1.
+  1%; otherwise stop T1. Initial timing revision `a99d9bf` was independently
+  rejected before submission: empty miss populations passed, timeout censoring
+  selected the common set, ambient contract/manifest overrides were not bound
+  to submission hashes, metrics preceded semantic parity, telemetry-only symbol
+  cloning polluted the timed path, and untracked remote inputs escaped the
+  provenance guard. A fail-closed full-population repair is active; no WMI
+  timing row exists.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 
@@ -405,9 +411,14 @@ independent evidence checks, and a frozen family holdout.
   invalidation were repaired at `2080b26`, but the next review found an unsafe
   non-Linux pathname fallback, pathname check-then-unlink cleanup, and a test
   that required relinking after source replacement instead of accepting a
-  fail-closed stop. Unsupported publication must now reject outright and
-  cleanup must never unlink an unproven replacement. No WMI submission is
-  allowed before another independent review.
+  fail-closed stop. Revision `55c0101` removed that fallback but the fifth
+  review still rejected publication: it trusted a stage pathname after checking
+  descriptor identity, cleanup could unlink a replacement `.current`, and
+  revision-keyed remote work/results allowed concurrent same-revision campaigns
+  to erase each other. Generated Python caches also violated the post-test
+  checkout guard. Descriptor-authoritative publication, cleanup-free final
+  validation, and unique receipt-bound remote roots are under repair. No WMI
+  submission is allowed before another independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 

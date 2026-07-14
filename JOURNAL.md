@@ -1272,6 +1272,19 @@
   priority-pending, and their audits are dependency-held. Full 1,200-second
   range `[2-63]` and the official array are pending, with no continuation shard
   currently active. No partial benchmark or certificate output was inspected.
+- Independent T5 review rejected revision `55c0101` before publication or WMI.
+  The opened stage descriptor was not the sole publication authority; pathname
+  cleanup could remove a concurrent replacement; same-revision submissions
+  reused a checkout/result root; and generated Python caches violated the
+  provenance guard. The worker's 75 focused and 356 Python passes do not
+  override these evidence-boundary defects.
+- Independent T1 timing review rejected revision `a99d9bf` before publication
+  or WMI. Empty miss populations passed, timeout censoring could arm-select the
+  common timing set, ambient contract/manifest replacements were not hash-bound
+  to submission, semantic parity followed metric admission, telemetry-only
+  symbol cloning polluted the timed path, and untracked remote inputs escaped
+  provenance checks. The repaired campaign must fail closed over all 7,503
+  sources before producing any timing decision.
 
 ## Next Entry Template
 
