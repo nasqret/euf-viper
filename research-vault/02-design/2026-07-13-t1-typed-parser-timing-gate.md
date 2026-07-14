@@ -16,10 +16,12 @@ euf-viper research-parser-timing --parser tree|stream \
 ```
 
 It accepts standard input only. It reads that input before starting the clock,
-selects one parser explicitly, and emits one canonical JSON observation. The
-parse clock stops before semantic-fingerprint construction. The end-to-end
-clock includes parsing and the unchanged solver, but excludes result telemetry.
-There is no environment selector and no fallback.
+selects one parser explicitly, and emits one canonical JSON observation. Both
+timed arms call the production `Problem`-producing parser path and never clone
+symbol telemetry. Before timing, a separate `research-parser-semantics` process
+attests each arm with exact structural counters and SHA-256 over an explicit
+length-prefixed canonical encoding of the complete typed snapshot. There is no
+environment selector and no fallback.
 
 ## Frozen Experiment
 
@@ -31,7 +33,8 @@ The machine contract is
 - order `tree, stream, stream, tree` for every source and round;
 - one warmup and five measured rounds;
 - a fresh process and two-second timeout for every observation;
-- 7,503 sources, 128 shards, and at most 32 concurrent shards; and
+- exact `source_count=7503`, `repetitions=128` deterministic shards, at most 32
+  concurrent shards, and no contract-dimension override; and
 - strict promotion thresholds before any measurement exists.
 
 The array harness opens each source once with `O_NOFOLLOW`, verifies its inode,
@@ -66,9 +69,15 @@ R_{\mathrm{agg}}=
 \frac{\sum_s m_{s,B}}{\sum_s m_{s,A}}.
 \]
 
-A miss is a source with (m_{s,B}\ge m_{s,A}). Its overhead is
-(m_{s,B}/m_{s,A}-1), and p95 is the ceiling nearest-rank quantile over misses.
-Warmups never enter these statistics.
+Every source contributes the nonnegative overhead
+
+\[
+o_s=\max(m_{s,B}/m_{s,A}-1,0).
+\]
+
+The tail statistic is the ceiling nearest-rank p95 over all 7,503 values
+(o_s), including zero-overhead wins. Its population therefore cannot be empty
+or selected after observing results. Warmups never enter these statistics.
 
 ## Acceptance Contract
 
@@ -76,17 +85,20 @@ Both phases must satisfy all of the following simultaneously:
 
 1. (R_{\mathrm{agg}} < 1).
 2. (R_{\mathrm{pair}} < 1).
-3. Miss-row p95 overhead is strictly below (0.01).
+3. All-source p95 nonnegative overhead is strictly below (0.01).
 
 In addition:
 
-- every measured parse observation must complete and all semantic fingerprints
-  must be identical;
-- every completed solve result must agree exactly, including the stable result
-  fingerprint, and every decisive result must match the manifest;
+- both phases have exactly 7,503 common sources and every observation completes
+  without timeout or error;
+- exact semantic counters and canonical SHA-256 match before timing for each
+  source;
+- every solve result and its canonical SHA-256 agree exactly and every result
+  matches the manifest;
 - a source is counted solved by an arm only when all ten measured observations
   for that arm return the expected decisive result;
-- stream solved count must not regress from tree solved count; and
+- no source may be solved only by tree; a candidate solve elsewhere cannot
+  compensate for a source-level loss; and
 - malformed output, duplicate/missing/reordered observations, identity drift,
   or non-finite JSON rejects the campaign.
 
@@ -105,20 +117,27 @@ replaces an existing artifact.
 The WMI wrappers independently verify:
 
 - the exact 40-hex HEAD and its published origin ref;
-- a clean index tree and no skip-worktree/assume-unchanged flags;
+- a fresh unique checkout with a clean index and no tracked, untracked, or
+  ignored state, hidden index flags, Cargo configuration, Python path injection,
+  compiler wrappers, or ambient contract/manifest selectors; prepare also uses
+  a fresh per-run Cargo home and target under an exact allowlisted environment;
 - raw Git blob and executable-mode equality for every T1 runtime file;
 - direct Rust toolchain binaries selected by `rustup which`, including path,
   bytes, SHA-256, and version;
 - canonical Python path, bytes, SHA-256, and version; and
-- the final release binary and campaign tool/contract hashes.
+- caller-supplied contract, manifest, and clean-checkout receipt hashes in every
+  job, plus the final release binary and exact runtime blobs.
 
 The submitter forms an `afterok` prepare-array-audit chain. This research branch
-does not push or submit it.
+does not push or submit it. `.github/workflows/campaign-contract.yml` runs the
+focused timing/receipt Python tests, syntax-checks every T1 WMI/submit/common
+script, and retains the repository's all-feature Rust test job on Linux.
 
 ## Remaining Validity Limits
 
-- Two-second per-observation censoring targets the current fast-head claim. It
-  cannot establish long-timeout coverage or superiority over another solver.
+- The two-second limit is now a hard acceptance condition: any timeout rejects
+  the campaign rather than censoring a row. It still does not establish
+  long-timeout superiority over another solver.
 - Process startup is outside the Rust internal clock but maximum RSS includes
   the full process. Kernel, allocator, frequency, and shared-node noise remain;
   ABBA and same-source pairing reduce but do not erase them.

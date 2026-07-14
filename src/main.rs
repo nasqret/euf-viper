@@ -41,8 +41,9 @@ use rustsat_cadical::{CaDiCaL as CadicalSolver, Config as CadicalConfig};
 use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver};
 #[cfg(feature = "certificates")]
 use serde::Serialize;
-#[cfg(feature = "certificates")]
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::cell::Cell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::env;
@@ -63,6 +64,11 @@ type TermId = usize;
 struct SortId(u32);
 
 const BOOL_SORT: SortId = SortId(0);
+
+#[cfg(test)]
+thread_local! {
+    static SYMBOL_CLONE_TELEMETRY_CALLS: Cell<usize> = const { Cell::new(0) };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Tok {
@@ -393,6 +399,8 @@ impl ParseCtx {
     }
 
     fn finish_with_symbol_names(self) -> (Problem, Vec<String>) {
+        #[cfg(test)]
+        SYMBOL_CLONE_TELEMETRY_CALLS.with(|calls| calls.set(calls.get() + 1));
         let symbol_names = self.symbols.ordered_names();
         (self.finish(), symbol_names)
     }
@@ -7053,36 +7061,48 @@ fn parse_for_timing(
     input: &str,
     parser: ParserTimingParser,
     scoped_let_mode: ScopedLetMode,
+) -> Result<Problem, String> {
+    match parser {
+        ParserTimingParser::Tree => parse_problem_with_scoped_let_mode(input, scoped_let_mode),
+        ParserTimingParser::Stream => smt2_stream::parse_stream_problem(input, scoped_let_mode),
+    }
+}
+
+fn parse_for_semantics(
+    input: &str,
+    parser: ParserTimingParser,
+    scoped_let_mode: ScopedLetMode,
 ) -> Result<(Problem, Vec<String>), String> {
     match parser {
         ParserTimingParser::Tree => {
             parse_problem_with_scoped_let_mode_and_symbols(input, scoped_let_mode)
         }
-        ParserTimingParser::Stream => smt2_stream::parse_stream_problem(input, scoped_let_mode),
-    }
-}
-
-fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
-    for &byte in bytes {
-        hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
-    }
-    hash
-}
-
-fn solve_result_fingerprint(result: &SolveResult) -> u64 {
-    let mut hash = 0xcbf29ce484222325;
-    match result {
-        SolveResult::Sat => fnv1a64_update(hash, b"sat\0"),
-        SolveResult::Unsat => fnv1a64_update(hash, b"unsat\0"),
-        SolveResult::Unsupported(items) => {
-            hash = fnv1a64_update(hash, b"unsupported\0");
-            for item in items {
-                hash = fnv1a64_update(hash, item.as_bytes());
-                hash = fnv1a64_update(hash, b"\0");
-            }
-            hash
+        ParserTimingParser::Stream => {
+            smt2_stream::parse_stream_problem_with_symbols(input, scoped_let_mode)
         }
     }
+}
+
+fn solve_result_sha256(result: &SolveResult) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"euf-viper.solve-result.canonical.v1\0");
+    match result {
+        SolveResult::Sat => digest.update(b"sat"),
+        SolveResult::Unsat => digest.update(b"unsat"),
+        SolveResult::Unsupported(items) => {
+            digest.update(b"unsupported");
+            digest.update((items.len() as u64).to_le_bytes());
+            for item in items {
+                digest.update((item.len() as u64).to_le_bytes());
+                digest.update(item.as_bytes());
+            }
+        }
+    }
+    digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn parser_timing_command(args: &[String]) -> Result<i32, String> {
@@ -7098,14 +7118,11 @@ fn parser_timing_command(args: &[String]) -> Result<i32, String> {
     match settings.phase {
         ParserTimingPhase::Parse => {
             let started = Instant::now();
-            let (problem, symbol_names) =
-                parse_for_timing(&input, settings.parser, scoped_let_mode)?;
+            let problem = parse_for_timing(&input, settings.parser, scoped_let_mode)?;
             let elapsed_ns = started.elapsed().as_nanos().max(1);
-            let semantic_fingerprint =
-                smt2_stream::typed_problem_fingerprint(&problem, &symbol_names);
             std::hint::black_box(&problem);
             println!(
-                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"parsed\",\"result_fnv1a64\":null,\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"semantic_fnv1a64\":\"{semantic_fingerprint:016x}\",\"source_bytes\":{}}}",
+                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"parsed\",\"result_sha256\":null,\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"source_bytes\":{}}}",
                 settings.parser.name(),
                 settings.phase.name(),
                 input.len(),
@@ -7113,12 +7130,12 @@ fn parser_timing_command(args: &[String]) -> Result<i32, String> {
         }
         ParserTimingPhase::EndToEnd => {
             let started = Instant::now();
-            let (problem, _) = parse_for_timing(&input, settings.parser, scoped_let_mode)?;
+            let problem = parse_for_timing(&input, settings.parser, scoped_let_mode)?;
             let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
             let elapsed_ns = started.elapsed().as_nanos().max(1);
-            let result_fingerprint = solve_result_fingerprint(&report.result);
+            let result_sha256 = solve_result_sha256(&report.result);
             println!(
-                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"{}\",\"result_fnv1a64\":\"{result_fingerprint:016x}\",\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"semantic_fnv1a64\":null,\"source_bytes\":{}}}",
+                "{{\"elapsed_ns\":{elapsed_ns},\"parser\":\"{}\",\"phase\":\"{}\",\"result\":\"{}\",\"result_sha256\":\"{result_sha256}\",\"schema\":\"{PARSER_TIMING_SCHEMA}\",\"source_bytes\":{}}}",
                 settings.parser.name(),
                 settings.phase.name(),
                 status_text(&report.result),
@@ -7127,6 +7144,37 @@ fn parser_timing_command(args: &[String]) -> Result<i32, String> {
         }
     }
     Ok(0)
+}
+
+fn parser_semantics_command(args: &[String]) -> Result<i32, String> {
+    let parser = parse_parser_semantics_args(args)?;
+    let mut input = String::new();
+    io::stdin()
+        .lock()
+        .read_to_string(&mut input)
+        .map_err(|error| format!("failed to read research semantics stdin: {error}"))?;
+    let (problem, symbol_names) = parse_for_semantics(&input, parser, selected_scoped_let_mode()?)?;
+    println!(
+        "{}",
+        smt2_stream::typed_semantic_report_json(
+            &problem,
+            &symbol_names,
+            parser.name(),
+            input.len(),
+        )
+    );
+    Ok(0)
+}
+
+fn parse_parser_semantics_args(args: &[String]) -> Result<ParserTimingParser, String> {
+    if args.len() != 3 || args[0] != "--parser" || args[2] != "-" {
+        return Err("research-parser-semantics requires --parser tree|stream -".to_owned());
+    }
+    Ok(match args[1].as_str() {
+        "tree" => ParserTimingParser::Tree,
+        "stream" => ParserTimingParser::Stream,
+        value => return Err(format!("invalid research parser `{value}`")),
+    })
 }
 
 fn gen_chain(n: usize, unsat: bool) -> String {
@@ -7443,6 +7491,7 @@ fn run() -> Result<i32, String> {
             parse_check_file(file)
         }
         "research-parser-timing" => parser_timing_command(&args[2..]),
+        "research-parser-semantics" => parser_semantics_command(&args[2..]),
         #[cfg(feature = "certificates")]
         "dump-eager-cnf" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -10587,6 +10636,20 @@ mod tests {
         ] {
             assert!(parse_parser_timing_args(&invalid).is_err(), "{invalid:?}");
         }
+        assert_eq!(
+            parse_parser_semantics_args(&timing_args(&["--parser", "tree", "-"])),
+            Ok(ParserTimingParser::Tree)
+        );
+        for invalid in [
+            timing_args(&["--parser", "tree", "input.smt2"]),
+            timing_args(&["--parser", "stream", "--phase", "parse", "-"]),
+            timing_args(&["--parser", "other", "-"]),
+        ] {
+            assert!(
+                parse_parser_semantics_args(&invalid).is_err(),
+                "{invalid:?}"
+            );
+        }
     }
 
     #[test]
@@ -10602,9 +10665,9 @@ mod tests {
             (check-sat)
         "#;
         let (tree, tree_symbols) =
-            parse_for_timing(input, ParserTimingParser::Tree, ScopedLetMode::Auto).unwrap();
+            parse_for_semantics(input, ParserTimingParser::Tree, ScopedLetMode::Auto).unwrap();
         let (stream, stream_symbols) =
-            parse_for_timing(input, ParserTimingParser::Stream, ScopedLetMode::Auto).unwrap();
+            parse_for_semantics(input, ParserTimingParser::Stream, ScopedLetMode::Auto).unwrap();
         assert_eq!(
             smt2_stream::typed_problem_fingerprint(&tree, &tree_symbols),
             smt2_stream::typed_problem_fingerprint(&stream, &stream_symbols)
@@ -10617,28 +10680,34 @@ mod tests {
         let stream_result = solve_problem_with_root_cnf_options(stream, options).result;
         assert_eq!(tree_result, stream_result);
         assert_eq!(
-            solve_result_fingerprint(&tree_result),
-            solve_result_fingerprint(&stream_result)
+            solve_result_sha256(&tree_result),
+            solve_result_sha256(&stream_result)
         );
     }
 
     #[test]
-    fn research_result_fingerprint_binds_unsupported_order_and_content() {
+    fn research_result_digest_binds_unsupported_order_and_content() {
         let first = SolveResult::Unsupported(vec!["alpha".to_owned(), "beta".to_owned()]);
         let reordered = SolveResult::Unsupported(vec!["beta".to_owned(), "alpha".to_owned()]);
         let changed = SolveResult::Unsupported(vec!["alpha".to_owned(), "gamma".to_owned()]);
+        assert_ne!(solve_result_sha256(&first), solve_result_sha256(&reordered));
+        assert_ne!(solve_result_sha256(&first), solve_result_sha256(&changed));
         assert_ne!(
-            solve_result_fingerprint(&first),
-            solve_result_fingerprint(&reordered)
+            solve_result_sha256(&SolveResult::Sat),
+            solve_result_sha256(&SolveResult::Unsat)
         );
-        assert_ne!(
-            solve_result_fingerprint(&first),
-            solve_result_fingerprint(&changed)
-        );
-        assert_ne!(
-            solve_result_fingerprint(&SolveResult::Sat),
-            solve_result_fingerprint(&SolveResult::Unsat)
-        );
+    }
+
+    #[test]
+    fn timed_parser_path_never_clones_symbol_telemetry() {
+        let input = "(set-logic QF_UF)\n(declare-sort U 0)\n(declare-fun a () U)\n(check-sat)\n";
+        SYMBOL_CLONE_TELEMETRY_CALLS.with(|calls| calls.set(0));
+        for parser in [ParserTimingParser::Tree, ParserTimingParser::Stream] {
+            parse_for_timing(input, parser, ScopedLetMode::Auto).unwrap();
+        }
+        SYMBOL_CLONE_TELEMETRY_CALLS.with(|calls| assert_eq!(calls.get(), 0));
+        parse_for_semantics(input, ParserTimingParser::Tree, ScopedLetMode::Auto).unwrap();
+        SYMBOL_CLONE_TELEMETRY_CALLS.with(|calls| assert_eq!(calls.get(), 1));
     }
 
     #[test]

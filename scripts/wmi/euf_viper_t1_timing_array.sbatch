@@ -12,6 +12,7 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$PWD}"
 source scripts/wmi/t1_timing_common.sh
+t1_reject_ambient_influence
 export LANG=C LC_ALL=C TZ=UTC OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1
 export EUF_VIPER_SCOPED_LET=auto
 export EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT=1024
@@ -19,7 +20,10 @@ unset EUF_VIPER_PROFILE
 
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
 PUBLISHED_REF="${EUF_VIPER_T1_PUBLISHED_REF:?set EUF_VIPER_T1_PUBLISHED_REF}"
-CAMPAIGN_ROOT="${EUF_VIPER_T1_TIMING_ROOT:?set EUF_VIPER_T1_TIMING_ROOT}"
+EXPECTED_CONTRACT_SHA256="${EUF_VIPER_T1_EXPECTED_CONTRACT_SHA256:?set expected contract hash}"
+EXPECTED_MANIFEST_SHA256="${EUF_VIPER_T1_EXPECTED_MANIFEST_SHA256:?set expected manifest hash}"
+EXPECTED_RECEIPT_SHA256="${EUF_VIPER_T1_EXPECTED_CHECKOUT_RECEIPT_SHA256:?set expected checkout receipt hash}"
+CAMPAIGN_ROOT="$(dirname "$PWD")/artifacts"
 SHARD="${SLURM_ARRAY_TASK_ID:?T1 timing requires an array task id}"
 case "$SHARD" in
   0|[1-9]|[1-9][0-9]|[1-9][0-9][0-9]) ;;
@@ -30,8 +34,11 @@ t1_verify_checkout "$EXPECTED_REVISION" "$PUBLISHED_REF"
 t1_verify_pinned_tool Python EUF_VIPER_PYTHON EUF_VIPER_PYTHON_SHA256 EUF_VIPER_PYTHON_VERSION
 t1_verify_pinned_tool Cargo EUF_VIPER_CARGO EUF_VIPER_CARGO_SHA256 EUF_VIPER_CARGO_VERSION
 t1_verify_pinned_tool Rustc EUF_VIPER_RUSTC EUF_VIPER_RUSTC_SHA256 EUF_VIPER_RUSTC_VERSION
-"$EUF_VIPER_PYTHON" scripts/bench/typed_parser_timing.py run-shard \
+"$EUF_VIPER_PYTHON" -I -B scripts/bench/typed_parser_timing.py run-shard \
   --root "$CAMPAIGN_ROOT" \
   --revision "$EXPECTED_REVISION" \
   --shard "$SHARD" \
+  --expected-checkout-receipt-sha256 "$EXPECTED_RECEIPT_SHA256" \
+  --expected-contract-sha256 "$EXPECTED_CONTRACT_SHA256" \
+  --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
   --require-linux-affinity

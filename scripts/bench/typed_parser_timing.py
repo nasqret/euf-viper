@@ -29,6 +29,7 @@ CONTRACT_SCHEMA = "euf-viper.typed-parser-timing-contract.v1"
 PREPARE_SCHEMA = "euf-viper.typed-parser-timing-prepare.v1"
 WORK_SCHEMA = "euf-viper.typed-parser-timing-work.v1"
 BINARY_OBSERVATION_SCHEMA = "euf-viper.typed-parser-timing-observation.v1"
+SEMANTIC_ATTESTATION_SCHEMA = "euf-viper.typed-parser-semantics.v1"
 PREFLIGHT_SCHEMA = "euf-viper.typed-parser-timing-preflight.v1"
 RECORD_SCHEMA = "euf-viper.typed-parser-timing-record.v1"
 AUDIT_SCHEMA = "euf-viper.typed-parser-timing-audit.v1"
@@ -38,10 +39,16 @@ PRIVATE_COPY_BINDING = "private-byte-copy.v1"
 PROCESS_ISOLATION = "fresh-process-per-observation.v1"
 ABBA_ORDER = ("tree", "stream", "stream", "tree")
 PHASES = ("parse", "end_to_end")
+LOCKED_SOURCE_COUNT = 7503
+LOCKED_REPETITIONS = 128
+LOCKED_MAX_PARALLEL = 32
+LOCKED_WARMUP_ROUNDS = 1
+LOCKED_MEASURED_ROUNDS = 5
+LOCKED_TIMEOUT_SECONDS = 2
 DECISIVE_RESULTS = frozenset({"sat", "unsat"})
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 REVISION_RE = re.compile(r"[0-9a-f]{40}")
-FINGERPRINT_RE = re.compile(r"[0-9a-f]{16}")
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 PYTHON_VERSION_RE = re.compile(
     r"Python [0-9]+\.[0-9]+\.[0-9]+(?:[A-Za-z0-9.+-]*)?"
 )
@@ -63,6 +70,9 @@ RUNTIME_ENVIRONMENT: dict[str, str | None] = {
     "LANG": "C",
     "LC_ALL": "C",
     "TZ": "UTC",
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/nonexistent",
+    "TMPDIR": "/tmp",
 }
 
 MANIFEST_KEYS = frozenset(
@@ -104,8 +114,28 @@ BINARY_OBSERVATION_KEYS = frozenset(
         "elapsed_ns",
         "source_bytes",
         "result",
-        "semantic_fnv1a64",
-        "result_fnv1a64",
+        "result_sha256",
+    }
+)
+SEMANTIC_ATTESTATION_KEYS = frozenset(
+    {
+        "schema",
+        "parser",
+        "source_bytes",
+        "canonical_sha256",
+        "symbols",
+        "sorts",
+        "sort_bindings",
+        "functions",
+        "terms",
+        "applications",
+        "interned_terms",
+        "equalities",
+        "disequalities",
+        "assertions",
+        "bool_data_terms",
+        "unsupported_diagnostics",
+        "contradiction",
     }
 )
 OBSERVATION_KEYS = frozenset(
@@ -146,6 +176,7 @@ RECORD_KEYS = frozenset(
         "source_sha256",
         "opened_source_sha256",
         "opened_source_bytes",
+        "semantic_attestations",
         "observations",
     }
 )
@@ -166,6 +197,9 @@ PREPARE_KEYS = frozenset(
         "contract",
         "preflight",
         "workset",
+        "expected_contract_sha256",
+        "expected_manifest_sha256",
+        "checkout_receipt",
     }
 )
 AUDIT_KEYS = frozenset(
@@ -189,7 +223,14 @@ AUDIT_KEYS = frozenset(
     }
 )
 PREFLIGHT_KEYS = frozenset(
-    {"schema", "source", "measured_rounds", "warmup_rounds", "observations"}
+    {
+        "schema",
+        "source",
+        "measured_rounds",
+        "warmup_rounds",
+        "semantic_attestations",
+        "observations",
+    }
 )
 
 
@@ -505,11 +546,7 @@ def assert_path_names_opened_inode(executable: OpenedExecutable) -> None:
 
 
 def child_environment() -> dict[str, str]:
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("EUF_VIPER_")
-    }
+    environment: dict[str, str] = {}
     for name, value in RUNTIME_ENVIRONMENT.items():
         if value is None:
             environment.pop(name, None)
@@ -525,12 +562,11 @@ def _close_quietly(descriptor: int) -> None:
         pass
 
 
-def execute_observation(
+def execute_binary(
     executable: OpenedExecutable,
     source: bytes,
     *,
-    parser: str,
-    phase: str,
+    arguments: list[str],
     timeout_seconds: int,
 ) -> Execution:
     """Execute one fresh process and collect its own wait4 RSS."""
@@ -552,15 +588,7 @@ def execute_observation(
                 if descriptor > 2:
                     _close_quietly(descriptor)
             os.set_inheritable(executable.descriptor, True)
-            argv = [
-                executable.execution_path,
-                "research-parser-timing",
-                "--parser",
-                parser,
-                "--phase",
-                "end-to-end" if phase == "end_to_end" else "parse",
-                "-",
-            ]
+            argv = [executable.execution_path, *arguments]
             os.execve(executable.execution_path, argv, child_environment())
         except BaseException as error:
             message = f"timing exec failed: {error}\n".encode("utf-8", errors="replace")
@@ -670,6 +698,29 @@ def execute_observation(
     )
 
 
+def execute_observation(
+    executable: OpenedExecutable,
+    source: bytes,
+    *,
+    parser: str,
+    phase: str,
+    timeout_seconds: int,
+) -> Execution:
+    return execute_binary(
+        executable,
+        source,
+        arguments=[
+            "research-parser-timing",
+            "--parser",
+            parser,
+            "--phase",
+            "end-to-end" if phase == "end_to_end" else "parse",
+            "-",
+        ],
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def require_exact_keys(value: Any, expected: frozenset[str], *, where: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CampaignError(f"{where}: expected an object")
@@ -729,6 +780,56 @@ def file_binding(artifact: CapturedArtifact) -> dict[str, Any]:
         "sha256": artifact.sha256,
         "bytes": len(artifact.content),
     }
+
+
+def validate_checkout_receipt(
+    artifact: CapturedArtifact, *, repository_root: Path, revision: str, where: str
+) -> None:
+    try:
+        text = artifact.content.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise CampaignError(f"{where}: checkout receipt is not ASCII") from error
+    if not text.endswith("\n") or text.count("\n") != 1:
+        raise CampaignError(f"{where}: checkout receipt is not one line")
+    value = require_exact_keys(
+        strict_json(text[:-1], where=where),
+        frozenset(
+            {
+                "schema",
+                "cargo_configs",
+                "ignored_sha256",
+                "published_ref",
+                "repository",
+                "revision",
+                "runtime_blobs",
+                "status_sha256",
+                "tree",
+            }
+        ),
+        where=where,
+    )
+    if canonical_bytes(value) != artifact.content:
+        raise CampaignError(f"{where}: checkout receipt is not canonical JSON")
+    if value["schema"] != "euf-viper.t1-clean-checkout-receipt.v1":
+        raise CampaignError(f"{where}: checkout receipt schema drift")
+    if value["repository"] != str(repository_root) or value["revision"] != revision:
+        raise CampaignError(f"{where}: checkout receipt identity mismatch")
+    if value["cargo_configs"] != []:
+        raise CampaignError(f"{where}: checkout receipt admits Cargo configuration")
+    if value["status_sha256"] != EMPTY_SHA256 or value["ignored_sha256"] != EMPTY_SHA256:
+        raise CampaignError(f"{where}: checkout receipt admits mutable state")
+    require_revision(value["tree"])
+    require_string(value["published_ref"], where=f"{where}.published_ref")
+    if not isinstance(value["runtime_blobs"], dict) or not value["runtime_blobs"]:
+        raise CampaignError(f"{where}: checkout receipt has no runtime blobs")
+    for path, binding in value["runtime_blobs"].items():
+        require_string(path, where=f"{where}.runtime_blobs path")
+        binding = require_exact_keys(
+            binding, frozenset({"blob", "mode"}), where=f"{where}.runtime_blobs.{path}"
+        )
+        require_revision(binding["blob"])
+        if binding["mode"] not in {"100644", "100755"}:
+            raise CampaignError(f"{where}: unsupported runtime blob mode")
 
 
 def validate_binary_binding(value: Any, *, where: str) -> None:
@@ -900,7 +1001,8 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
     value = require_exact_keys(value, CONTRACT_KEYS, where=where)
     if value["schema"] != CONTRACT_SCHEMA:
         raise CampaignError(f"{where}: wrong schema")
-    require_string(value["name"], where=f"{where}.name")
+    if value["name"] != "T1 typed stream parser causal timing gate":
+        raise CampaignError(f"{where}: contract name drifted")
 
     arms = require_exact_keys(
         value["arms"], frozenset({"baseline", "candidate"}), where=f"{where}.arms"
@@ -910,16 +1012,20 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
 
     campaign = require_exact_keys(
         value["campaign"],
-        frozenset({"expected_sources", "shards", "max_parallel"}),
+        frozenset(
+            {"expected_sources", "source_count", "shards", "repetitions", "max_parallel"}
+        ),
         where=f"{where}.campaign",
     )
-    require_integer(campaign["expected_sources"], where=f"{where}.expected_sources", minimum=1)
-    shards = require_integer(campaign["shards"], where=f"{where}.shards", minimum=1)
-    maximum = require_integer(
-        campaign["max_parallel"], where=f"{where}.max_parallel", minimum=1
-    )
-    if maximum > shards:
-        raise CampaignError(f"{where}: max_parallel exceeds shards")
+    locked_campaign = {
+        "expected_sources": LOCKED_SOURCE_COUNT,
+        "source_count": LOCKED_SOURCE_COUNT,
+        "shards": LOCKED_REPETITIONS,
+        "repetitions": LOCKED_REPETITIONS,
+        "max_parallel": LOCKED_MAX_PARALLEL,
+    }
+    if campaign != locked_campaign:
+        raise CampaignError(f"{where}: immutable campaign dimensions drifted")
 
     execution = require_exact_keys(
         value["execution"],
@@ -933,7 +1039,11 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
                 "per_observation_timeout_seconds",
                 "phases",
                 "process_isolation",
+                "semantic_command",
+                "semantic_digest",
+                "semantic_timing",
                 "source_argument",
+                "timed_path",
                 "warmup_rounds",
             }
         ),
@@ -946,45 +1056,55 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
         "order": list(ABBA_ORDER),
         "phases": list(PHASES),
         "process_isolation": PROCESS_ISOLATION,
+        "semantic_command": "research-parser-semantics",
+        "semantic_digest": "sha256-canonical-typed-snapshot-v1",
+        "semantic_timing": "outside-timed-region-before-observations",
         "source_argument": "-",
+        "timed_path": "production-problem-path-no-symbol-telemetry-v1",
     }
     for key, expected in expected_execution.items():
         if execution[key] != expected:
             raise CampaignError(f"{where}.execution.{key} drifted")
-    require_integer(
-        execution["measured_rounds"], where=f"{where}.measured_rounds", minimum=1
-    )
-    require_integer(
-        execution["warmup_rounds"], where=f"{where}.warmup_rounds", minimum=1
-    )
-    require_integer(
-        execution["per_observation_timeout_seconds"],
-        where=f"{where}.per_observation_timeout_seconds",
-        minimum=1,
-    )
+    if execution["measured_rounds"] != LOCKED_MEASURED_ROUNDS:
+        raise CampaignError(f"{where}: measured rounds drifted")
+    if execution["warmup_rounds"] != LOCKED_WARMUP_ROUNDS:
+        raise CampaignError(f"{where}: warmup rounds drifted")
+    if execution["per_observation_timeout_seconds"] != LOCKED_TIMEOUT_SECONDS:
+        raise CampaignError(f"{where}: observation timeout drifted")
 
     gates = require_exact_keys(
         value["gates"],
         frozenset(
             {
                 "aggregate_ratio_max_exclusive",
+                "common_sources_required_per_phase",
                 "exact_result_parity",
+                "no_baseline_only_solve",
                 "no_solved_count_regression",
-                "p95_miss_overhead_max_exclusive",
+                "p95_all_source_overhead_max_exclusive",
                 "paired_geomean_ratio_max_exclusive",
                 "phases_requiring_speedup",
+                "semantic_parity_before_metrics",
+                "zero_error_observations",
                 "zero_incorrect_results",
+                "zero_timeout_observations",
             }
         ),
         where=f"{where}.gates",
     )
     for key in (
         "exact_result_parity",
+        "no_baseline_only_solve",
         "no_solved_count_regression",
+        "semantic_parity_before_metrics",
+        "zero_error_observations",
         "zero_incorrect_results",
+        "zero_timeout_observations",
     ):
         if gates[key] is not True:
             raise CampaignError(f"{where}.gates.{key} must be true")
+    if gates["common_sources_required_per_phase"] != LOCKED_SOURCE_COUNT:
+        raise CampaignError(f"{where}: common-source gate drifted")
     if gates["phases_requiring_speedup"] != list(PHASES):
         raise CampaignError(f"{where}: both timing phases must require speedup")
     for key in ("aggregate_ratio_max_exclusive", "paired_geomean_ratio_max_exclusive"):
@@ -992,18 +1112,18 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
         if threshold != 1.0:
             raise CampaignError(f"{where}.gates.{key} must be exactly 1.0")
     p95 = require_number(
-        gates["p95_miss_overhead_max_exclusive"],
-        where=f"{where}.gates.p95_miss_overhead_max_exclusive",
+        gates["p95_all_source_overhead_max_exclusive"],
+        where=f"{where}.gates.p95_all_source_overhead_max_exclusive",
     )
     if p95 != 0.01:
-        raise CampaignError(f"{where}: p95 miss overhead cap must be exactly 0.01")
+        raise CampaignError(f"{where}: p95 all-source overhead cap must be exactly 0.01")
 
     measurement = require_exact_keys(
         value["measurement"],
         frozenset(
             {
                 "aggregate_unit",
-                "miss_definition",
+                "overhead_definition",
                 "p95_definition",
                 "paired_unit",
                 "reported_strata",
@@ -1014,7 +1134,7 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
     )
     expected_measurement = {
         "aggregate_unit": "sum-of-per-source-arm-medians",
-        "miss_definition": "candidate-median-greater-than-or-equal-to-baseline-median",
+        "overhead_definition": "max(candidate-median/baseline-median-minus-one,zero)-over-all-7503-sources",
         "p95_definition": "nearest-rank-ceiling",
         "paired_unit": "within-round-abba-neighbor-log-ratio",
         "reported_strata": ["expected_status", "family"],
@@ -1220,22 +1340,39 @@ def validate_binary_observation(
     if phase == "parse":
         if result != "parsed":
             raise CampaignError(f"{where}: parse observation did not report parsed")
-        if not isinstance(value["semantic_fnv1a64"], str) or FINGERPRINT_RE.fullmatch(
-            value["semantic_fnv1a64"]
-        ) is None:
-            raise CampaignError(f"{where}: malformed semantic fingerprint")
-        if value["result_fnv1a64"] is not None:
-            raise CampaignError(f"{where}: parse observation has result fingerprint")
+        if value["result_sha256"] is not None:
+            raise CampaignError(f"{where}: parse observation has result digest")
     else:
         if result not in DECISIVE_RESULTS | {"unsupported"}:
             raise CampaignError(f"{where}: malformed solve result")
-        if value["semantic_fnv1a64"] is not None:
-            raise CampaignError(f"{where}: solve observation has semantic fingerprint")
-        if not isinstance(value["result_fnv1a64"], str) or FINGERPRINT_RE.fullmatch(
-            value["result_fnv1a64"]
-        ) is None:
-            raise CampaignError(f"{where}: malformed result fingerprint")
+        require_sha256(value["result_sha256"], where=f"{where}.result_sha256")
     return value
+
+
+def validate_semantic_attestation(
+    value: Any, *, parser: str, source_bytes: int, where: str
+) -> dict[str, Any]:
+    value = require_exact_keys(value, SEMANTIC_ATTESTATION_KEYS, where=where)
+    if value["schema"] != SEMANTIC_ATTESTATION_SCHEMA or value["parser"] != parser:
+        raise CampaignError(f"{where}: semantic schema or parser mismatch")
+    if value["source_bytes"] != source_bytes:
+        raise CampaignError(f"{where}: semantic source byte count mismatch")
+    require_sha256(value["canonical_sha256"], where=f"{where}.canonical_sha256")
+    for key in SEMANTIC_ATTESTATION_KEYS - {
+        "schema",
+        "parser",
+        "source_bytes",
+        "canonical_sha256",
+        "contradiction",
+    }:
+        require_integer(value[key], where=f"{where}.{key}")
+    if type(value["contradiction"]) is not bool:
+        raise CampaignError(f"{where}.contradiction must be Boolean")
+    return value
+
+
+def semantic_signature(value: dict[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if key != "parser"}
 
 
 def parse_binary_stdout(
@@ -1257,6 +1394,66 @@ def parse_binary_stdout(
     if canonical_bytes(value) != stdout:
         raise CampaignError("binary stdout is not canonical JSON")
     return value
+
+
+def parse_semantic_stdout(
+    stdout: bytes, *, parser: str, source_bytes: int
+) -> dict[str, Any]:
+    try:
+        text = stdout.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise CampaignError(f"semantic stdout is not ASCII: {error}") from error
+    if not text.endswith("\n") or text.count("\n") != 1 or "\r" in text:
+        raise CampaignError("semantic stdout is not exactly one LF-terminated line")
+    value = validate_semantic_attestation(
+        strict_json(text[:-1], where="semantic stdout"),
+        parser=parser,
+        source_bytes=source_bytes,
+        where="semantic stdout",
+    )
+    if canonical_bytes(value) != stdout:
+        raise CampaignError("semantic stdout is not canonical JSON")
+    return value
+
+
+def execute_semantic_attestation(
+    executable: OpenedExecutable,
+    source: bytes,
+    *,
+    parser: str,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    execution = execute_binary(
+        executable,
+        source,
+        arguments=["research-parser-semantics", "--parser", parser, "-"],
+        timeout_seconds=timeout_seconds,
+    )
+    if execution.timed_out:
+        raise CampaignError(f"{parser} semantic attestation timed out")
+    if execution.exit_code != 0 or execution.stderr:
+        diagnostic = diagnostic_excerpt(execution.stderr) or f"exit {execution.exit_code}"
+        raise CampaignError(f"{parser} semantic attestation failed: {diagnostic}")
+    return parse_semantic_stdout(
+        execution.stdout, parser=parser, source_bytes=len(source)
+    )
+
+
+def collect_semantic_attestations(
+    executable: OpenedExecutable, source: bytes, *, timeout_seconds: int
+) -> dict[str, dict[str, Any]]:
+    values = {
+        parser: execute_semantic_attestation(
+            executable,
+            source,
+            parser=parser,
+            timeout_seconds=timeout_seconds,
+        )
+        for parser in ("tree", "stream")
+    }
+    if semantic_signature(values["tree"]) != semantic_signature(values["stream"]):
+        raise CampaignError("tree and stream semantic attestations differ")
+    return values
 
 
 def diagnostic_excerpt(value: bytes) -> str | None:
@@ -1409,6 +1606,11 @@ def validate_preflight(value: Any, *, contract: dict[str, Any], where: str) -> N
     validate_file_binding(value["source"], where=f"{where}.source")
     if value["measured_rounds"] != 1 or value["warmup_rounds"] != 0:
         raise CampaignError(f"{where}: preflight schedule drift")
+    validate_semantic_pair(
+        value["semantic_attestations"],
+        source_bytes=value["source"]["bytes"],
+        where=f"{where}.semantic_attestations",
+    )
     validate_schedule(
         value["observations"],
         contract=contract,
@@ -1444,11 +1646,30 @@ def validate_prepare(value: Any, *, contract: dict[str, Any], where: str) -> Non
         raise CampaignError(f"{where}: source cardinality violates contract")
     if value["shard_count"] != contract["campaign"]["shards"]:
         raise CampaignError(f"{where}: shard count violates contract")
+    if value["expected_contract_sha256"] != value["contract"]["sha256"]:
+        raise CampaignError(f"{where}: expected contract hash binding differs")
+    if value["expected_manifest_sha256"] != value["manifest"]["sha256"]:
+        raise CampaignError(f"{where}: expected manifest hash binding differs")
+    require_sha256(
+        value["expected_contract_sha256"],
+        where=f"{where}.expected_contract_sha256",
+    )
+    require_sha256(
+        value["expected_manifest_sha256"],
+        where=f"{where}.expected_manifest_sha256",
+    )
     validate_runtime_environment(value["runtime_environment"], where=f"{where}.runtime_environment")
     validate_python_binding(value["python"], where=f"{where}.python")
     validate_build_tools(value["build_tools"], where=f"{where}.build_tools")
     validate_binary_binding(value["binary"], where=f"{where}.binary")
-    for key in ("manifest", "tool", "contract", "preflight", "workset"):
+    for key in (
+        "manifest",
+        "tool",
+        "contract",
+        "preflight",
+        "workset",
+        "checkout_receipt",
+    ):
         validate_file_binding(value[key], where=f"{where}.{key}")
 
 
@@ -1474,6 +1695,11 @@ def validate_record(value: Any, *, contract: dict[str, Any], where: str) -> None
     require_sha256(value["source_sha256"], where=f"{where}.source_sha256")
     require_sha256(value["opened_source_sha256"], where=f"{where}.opened_source_sha256")
     source_bytes = require_integer(value["opened_source_bytes"], where=f"{where}.opened_source_bytes")
+    validate_semantic_pair(
+        value["semantic_attestations"],
+        source_bytes=source_bytes,
+        where=f"{where}.semantic_attestations",
+    )
     validate_schedule(
         value["observations"],
         contract=contract,
@@ -1537,15 +1763,12 @@ def assert_exact_observation_parity(
         if observation["stage"] != "measure" or observation["outcome"] != "ok":
             continue
         by_phase[observation["phase"]].append(observation)
-    parse_fingerprints = {
-        observation["payload"]["semantic_fnv1a64"] for observation in by_phase["parse"]
-    }
-    if len(parse_fingerprints) != 1:
-        raise CampaignError(f"{where}: tree and stream semantic fingerprints differ")
+    if len(by_phase["parse"]) == 0:
+        raise CampaignError(f"{where}: no successful parse observations")
     solve_signatures = {
         (
             observation["payload"]["result"],
-            observation["payload"]["result_fnv1a64"],
+            observation["payload"]["result_sha256"],
         )
         for observation in by_phase["end_to_end"]
     }
@@ -1557,6 +1780,19 @@ def assert_exact_observation_parity(
             raise CampaignError(f"{where}: solve result differs from manifest status")
 
 
+def validate_semantic_pair(value: Any, *, source_bytes: int, where: str) -> None:
+    value = require_exact_keys(value, frozenset({"tree", "stream"}), where=where)
+    for parser in ("tree", "stream"):
+        validate_semantic_attestation(
+            value[parser],
+            parser=parser,
+            source_bytes=source_bytes,
+            where=f"{where}.{parser}",
+        )
+    if semantic_signature(value["tree"]) != semantic_signature(value["stream"]):
+        raise CampaignError(f"{where}: exact semantic attestations differ")
+
+
 def prepare_campaign(args: argparse.Namespace) -> None:
     revision = require_revision(args.revision)
     python_identity = validate_python_identity()
@@ -1566,8 +1802,32 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     }
     repository_root = args.repository_root.resolve(strict=True)
     contract, contract_artifact = load_contract(args.contract)
+    expected_contract_sha256 = require_sha256(
+        args.expected_contract_sha256, where="expected contract SHA-256"
+    )
+    if contract_artifact.sha256 != expected_contract_sha256:
+        raise CampaignError("contract hash differs from submitted expectation")
     expected_sources = contract["campaign"]["expected_sources"]
-    rows, manifest_artifact = load_manifest(args.manifest, repository_root)
+    source_root = args.source_root.resolve(strict=True)
+    rows, manifest_artifact = load_manifest(args.manifest, source_root)
+    expected_manifest_sha256 = require_sha256(
+        args.expected_manifest_sha256, where="expected manifest SHA-256"
+    )
+    if manifest_artifact.sha256 != expected_manifest_sha256:
+        raise CampaignError("manifest hash differs from submitted expectation")
+    checkout_receipt = open_regular_artifact(args.checkout_receipt)
+    expected_checkout_receipt_sha256 = require_sha256(
+        args.expected_checkout_receipt_sha256,
+        where="expected checkout receipt SHA-256",
+    )
+    if checkout_receipt.sha256 != expected_checkout_receipt_sha256:
+        raise CampaignError("checkout receipt hash differs from submitted expectation")
+    validate_checkout_receipt(
+        checkout_receipt,
+        repository_root=repository_root,
+        revision=revision,
+        where="checkout receipt",
+    )
     if len(rows) != expected_sources:
         raise CampaignError(
             f"source cardinality mismatch: expected {expected_sources}, got {len(rows)}"
@@ -1598,6 +1858,11 @@ def prepare_campaign(args: argparse.Namespace) -> None:
         raise CampaignError(f"preflight source is not UTF-8: {error}") from error
     tool_artifact = open_regular_artifact(Path(__file__))
     with open_verified_executable(args.binary) as executable:
+        semantic_attestations = collect_semantic_attestations(
+            executable,
+            preflight_source.content,
+            timeout_seconds=contract["execution"]["per_observation_timeout_seconds"],
+        )
         observations = [
             execute_scheduled_observation(
                 executable,
@@ -1612,6 +1877,7 @@ def prepare_campaign(args: argparse.Namespace) -> None:
             "source": file_binding(preflight_source),
             "measured_rounds": 1,
             "warmup_rounds": 0,
+            "semantic_attestations": semantic_attestations,
             "observations": observations,
         }
         validate_preflight(preflight, contract=contract, where="generated preflight")
@@ -1632,12 +1898,22 @@ def prepare_campaign(args: argparse.Namespace) -> None:
             "contract": file_binding(contract_artifact),
             "preflight": file_binding(preflight_artifact),
             "workset": file_binding(workset_artifact),
+            "expected_contract_sha256": expected_contract_sha256,
+            "expected_manifest_sha256": expected_manifest_sha256,
+            "checkout_receipt": file_binding(checkout_receipt),
         }
         validate_prepare(prepare, contract=contract, where="generated prepare")
         publish_json(args.output_root / "prepare.json", prepare)
 
 
-def load_prepared(root: Path, revision: str) -> PreparedCampaign:
+def load_prepared(
+    root: Path,
+    revision: str,
+    *,
+    expected_contract_sha256: str,
+    expected_manifest_sha256: str,
+    expected_checkout_receipt_sha256: str,
+) -> PreparedCampaign:
     revision = require_revision(revision)
     root = root.resolve(strict=True)
     prepare, prepare_artifact = load_object(root / "prepare.json")
@@ -1653,6 +1929,17 @@ def load_prepared(root: Path, revision: str) -> PreparedCampaign:
         strict_json(contract_text, where="prepared contract"), where="prepared contract"
     )
     validate_prepare(prepare, contract=contract, where="prepare")
+    for label, supplied, recorded in (
+        ("contract", expected_contract_sha256, prepare["expected_contract_sha256"]),
+        ("manifest", expected_manifest_sha256, prepare["expected_manifest_sha256"]),
+        (
+            "checkout receipt",
+            expected_checkout_receipt_sha256,
+            prepare["checkout_receipt"]["sha256"],
+        ),
+    ):
+        if require_sha256(supplied, where=f"expected {label} SHA-256") != recorded:
+            raise CampaignError(f"prepared {label} hash differs from submitted expectation")
     if prepare["revision"] != revision:
         raise CampaignError("prepare revision differs from executing revision")
     if prepare["python"] != validate_python_identity():
@@ -1663,6 +1950,15 @@ def load_prepared(root: Path, revision: str) -> PreparedCampaign:
         raise CampaignError("prepared runtime environment drift")
     for name in ("manifest", "tool"):
         verify_file_binding(prepare[name], where=f"prepared {name}")
+    checkout_receipt = verify_file_binding(
+        prepare["checkout_receipt"], where="prepared checkout receipt"
+    )
+    validate_checkout_receipt(
+        checkout_receipt,
+        repository_root=Path(prepare["repository_root"]),
+        revision=revision,
+        where="prepared checkout receipt",
+    )
     preflight, preflight_artifact = load_object(Path(prepare["preflight"]["path"]))
     if file_binding(preflight_artifact) != prepare["preflight"]:
         raise CampaignError("prepared preflight identity mismatch")
@@ -1695,6 +1991,9 @@ def run_work_item(
     except UnicodeDecodeError as error:
         raise CampaignError(f"source is no longer UTF-8: {work['relative_path']}") from error
     timeout_seconds = prepared.contract["execution"]["per_observation_timeout_seconds"]
+    semantic_attestations = collect_semantic_attestations(
+        executable, source.content, timeout_seconds=timeout_seconds
+    )
     observations = [
         execute_scheduled_observation(
             executable,
@@ -1723,6 +2022,7 @@ def run_work_item(
         "source_sha256": work["source_sha256"],
         "opened_source_sha256": source.sha256,
         "opened_source_bytes": len(source.content),
+        "semantic_attestations": semantic_attestations,
         "observations": observations,
     }
     validate_record(
@@ -1735,7 +2035,13 @@ def run_work_item(
 
 def run_shard(args: argparse.Namespace) -> None:
     root = args.root.resolve(strict=True)
-    prepared = load_prepared(root, args.revision)
+    prepared = load_prepared(
+        root,
+        args.revision,
+        expected_contract_sha256=args.expected_contract_sha256,
+        expected_manifest_sha256=args.expected_manifest_sha256,
+        expected_checkout_receipt_sha256=args.expected_checkout_receipt_sha256,
+    )
     shard_count = prepared.metadata["shard_count"]
     if args.shard >= shard_count:
         raise CampaignError(f"shard {args.shard} is outside [0, {shard_count})")
@@ -1769,7 +2075,7 @@ def run_shard(args: argparse.Namespace) -> None:
 
 def nearest_rank_p95(values: list[float]) -> float:
     if not values:
-        return 0.0
+        raise CampaignError("p95 population must not be empty")
     ordered = sorted(values)
     return ordered[math.ceil(0.95 * len(ordered)) - 1]
 
@@ -1787,16 +2093,18 @@ def analyze_source(record: dict[str, Any], contract: dict[str, Any]) -> dict[str
     expected_per_arm = rounds * 2
     parse_observations = _measured_observations(record, "parse")
     solve_observations = _measured_observations(record, "end_to_end")
+    all_solve_observations = [
+        item for item in record["observations"] if item["phase"] == "end_to_end"
+    ]
 
-    parse_ok = [item for item in parse_observations if item["outcome"] == "ok"]
-    parse_fingerprints = {
-        item["payload"]["semantic_fnv1a64"] for item in parse_ok
-    }
-    parse_parity = len(parse_ok) == expected_per_arm * 2 and len(parse_fingerprints) == 1
+    semantic_values = record["semantic_attestations"]
+    parse_parity = semantic_signature(semantic_values["tree"]) == semantic_signature(
+        semantic_values["stream"]
+    )
 
-    solve_ok = [item for item in solve_observations if item["outcome"] == "ok"]
+    solve_ok = [item for item in all_solve_observations if item["outcome"] == "ok"]
     solve_signatures = {
-        (item["payload"]["result"], item["payload"]["result_fnv1a64"])
+        (item["payload"]["result"], item["payload"]["result_sha256"])
         for item in solve_ok
     }
     incorrect = sum(
@@ -1804,7 +2112,12 @@ def analyze_source(record: dict[str, Any], contract: dict[str, Any]) -> dict[str
         and item["payload"]["result"] != record["expected_status"]
         for item in solve_ok
     )
-    result_parity = incorrect == 0 and len(solve_signatures) <= 1
+    result_parity = (
+        len(solve_ok)
+        == (contract["execution"]["warmup_rounds"] + rounds) * len(ABBA_ORDER)
+        and incorrect == 0
+        and len(solve_signatures) == 1
+    )
     solved: dict[str, bool] = {}
     for parser in ("tree", "stream"):
         arm = [item for item in solve_observations if item["parser"] == parser]
@@ -1816,11 +2129,11 @@ def analyze_source(record: dict[str, Any], contract: dict[str, Any]) -> dict[str
 
     phase_metrics: dict[str, dict[str, Any] | None] = {}
     for phase, observations in (("parse", parse_observations), ("end_to_end", solve_observations)):
-        complete = len(observations) == expected_per_arm * 2 and all(
+        complete = parse_parity and len(observations) == expected_per_arm * 2 and all(
             item["outcome"] == "ok" for item in observations
         )
         if phase == "end_to_end":
-            complete = complete and all(
+            complete = complete and result_parity and all(
                 item["payload"]["result"] == record["expected_status"]
                 for item in observations
             )
@@ -1867,6 +2180,7 @@ def analyze_source(record: dict[str, Any], contract: dict[str, Any]) -> dict[str
         "result_parity": result_parity,
         "incorrect_results": incorrect,
         "solved": solved,
+        "baseline_only_solve": solved["tree"] and not solved["stream"],
         "outcomes": outcome_counts,
         "phase_metrics": phase_metrics,
     }
@@ -1885,8 +2199,8 @@ def summarize_phase(rows: list[dict[str, Any]], phase: str) -> dict[str, Any]:
             "wins": 0,
             "ties": 0,
             "losses": 0,
-            "miss_sources": 0,
-            "p95_miss_overhead": 0.0,
+            "overhead_population_sources": 0,
+            "p95_all_source_overhead": None,
             "baseline_aggregate_rss_kb": 0.0,
             "candidate_aggregate_rss_kb": 0.0,
             "rss_aggregate_ratio": None,
@@ -1897,10 +2211,9 @@ def summarize_phase(rows: list[dict[str, Any]], phase: str) -> dict[str, Any]:
     candidate_sum = math.fsum(candidate)
     paired = [ratio for item in complete for ratio in item["paired_ratios"]]
     geomean = math.exp(math.fsum(math.log(ratio) for ratio in paired) / len(paired))
-    misses = [
-        candidate_time / baseline_time - 1.0
+    overheads = [
+        max(candidate_time / baseline_time - 1.0, 0.0)
         for baseline_time, candidate_time in zip(baseline, candidate, strict=True)
-        if candidate_time >= baseline_time
     ]
     baseline_rss = math.fsum(float(item["baseline_median_rss_kb"]) for item in complete)
     candidate_rss = math.fsum(float(item["candidate_median_rss_kb"]) for item in complete)
@@ -1914,8 +2227,8 @@ def summarize_phase(rows: list[dict[str, Any]], phase: str) -> dict[str, Any]:
         "wins": sum(candidate_time < baseline_time for baseline_time, candidate_time in zip(baseline, candidate, strict=True)),
         "ties": sum(candidate_time == baseline_time for baseline_time, candidate_time in zip(baseline, candidate, strict=True)),
         "losses": sum(candidate_time > baseline_time for baseline_time, candidate_time in zip(baseline, candidate, strict=True)),
-        "miss_sources": len(misses),
-        "p95_miss_overhead": nearest_rank_p95(misses),
+        "overhead_population_sources": len(overheads),
+        "p95_all_source_overhead": nearest_rank_p95(overheads),
         "baseline_aggregate_rss_kb": baseline_rss,
         "candidate_aggregate_rss_kb": candidate_rss,
         "rss_aggregate_ratio": candidate_rss / baseline_rss if baseline_rss > 0 else None,
@@ -1959,14 +2272,22 @@ def evaluate_gates(
     solved_stream = sum(row["solved"]["stream"] for row in rows)
     gates: dict[str, bool] = {
         "all_sources_accounted": len(rows) == contract["campaign"]["expected_sources"],
-        "all_parse_observations_valid": all(row["parse_parity"] for row in rows),
+        "exact_semantic_parity": all(row["parse_parity"] for row in rows),
         "exact_result_parity": all(row["result_parity"] for row in rows),
         "zero_incorrect_results": sum(row["incorrect_results"] for row in rows) == 0,
-        "no_solved_count_regression": solved_stream >= solved_tree,
+        "no_solved_count_regression": solved_stream == solved_tree,
+        "no_baseline_only_solve": not any(row["baseline_only_solve"] for row in rows),
         "zero_observation_errors": sum(row["outcomes"]["error"] for row in rows) == 0,
+        "zero_observation_timeouts": sum(row["outcomes"]["timeout"] for row in rows) == 0,
     }
     for phase in PHASES:
         phase_metrics = metrics[phase]
+        gates[f"{phase}_full_common_population"] = (
+            phase_metrics["common_sources"]
+            == thresholds["common_sources_required_per_phase"]
+            and phase_metrics["overhead_population_sources"]
+            == thresholds["common_sources_required_per_phase"]
+        )
         gates[f"{phase}_aggregate_improved"] = (
             phase_metrics["aggregate_ratio"] is not None
             and phase_metrics["aggregate_ratio"]
@@ -1977,9 +2298,10 @@ def evaluate_gates(
             and phase_metrics["paired_geomean_ratio"]
             < thresholds["paired_geomean_ratio_max_exclusive"]
         )
-        gates[f"{phase}_p95_miss_overhead_below_one_percent"] = (
-            phase_metrics["p95_miss_overhead"]
-            < thresholds["p95_miss_overhead_max_exclusive"]
+        gates[f"{phase}_p95_all_source_overhead_below_one_percent"] = (
+            phase_metrics["p95_all_source_overhead"] is not None
+            and phase_metrics["p95_all_source_overhead"]
+            < thresholds["p95_all_source_overhead_max_exclusive"]
         )
     gates["passed"] = all(gates.values())
     return gates
@@ -2010,7 +2332,13 @@ def validate_audit(value: Any, *, where: str) -> None:
 
 def audit_campaign(args: argparse.Namespace) -> bool:
     root = args.root.resolve(strict=True)
-    prepared = load_prepared(root, args.revision)
+    prepared = load_prepared(
+        root,
+        args.revision,
+        expected_contract_sha256=args.expected_contract_sha256,
+        expected_manifest_sha256=args.expected_manifest_sha256,
+        expected_checkout_receipt_sha256=args.expected_checkout_receipt_sha256,
+    )
     prepare = prepared.metadata
     shard_count = prepare["shard_count"]
     records: list[dict[str, Any]] = []
@@ -2096,6 +2424,8 @@ def audit_campaign(args: argparse.Namespace) -> bool:
         "artifacts": {
             "prepare_sha256": prepared.prepare_artifact.sha256,
             "contract_sha256": prepare["contract"]["sha256"],
+            "manifest_sha256": prepare["manifest"]["sha256"],
+            "checkout_receipt_sha256": prepare["checkout_receipt"]["sha256"],
             "workset_sha256": prepared.workset_artifact.sha256,
             "records_sha256": records_artifact.sha256,
             "shard_sha256": shard_hashes,
@@ -2132,21 +2462,32 @@ def argument_parser() -> argparse.ArgumentParser:
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--manifest", type=Path, required=True)
     prepare.add_argument("--repository-root", type=Path, required=True)
+    prepare.add_argument("--source-root", type=Path, required=True)
     prepare.add_argument("--binary", type=Path, required=True)
     prepare.add_argument("--preflight-source", type=Path, required=True)
     prepare.add_argument("--contract", type=Path, required=True)
     prepare.add_argument("--revision", required=True)
     prepare.add_argument("--output-root", type=Path, required=True)
+    prepare.add_argument("--checkout-receipt", type=Path, required=True)
+    prepare.add_argument("--expected-checkout-receipt-sha256", required=True)
+    prepare.add_argument("--expected-contract-sha256", required=True)
+    prepare.add_argument("--expected-manifest-sha256", required=True)
 
     shard = commands.add_parser("run-shard")
     shard.add_argument("--root", type=Path, required=True)
     shard.add_argument("--revision", required=True)
     shard.add_argument("--shard", type=nonnegative_integer, required=True)
     shard.add_argument("--require-linux-affinity", action="store_true")
+    shard.add_argument("--expected-checkout-receipt-sha256", required=True)
+    shard.add_argument("--expected-contract-sha256", required=True)
+    shard.add_argument("--expected-manifest-sha256", required=True)
 
     audit = commands.add_parser("audit")
     audit.add_argument("--root", type=Path, required=True)
     audit.add_argument("--revision", required=True)
+    audit.add_argument("--expected-checkout-receipt-sha256", required=True)
+    audit.add_argument("--expected-contract-sha256", required=True)
+    audit.add_argument("--expected-manifest-sha256", required=True)
     return parser
 
 

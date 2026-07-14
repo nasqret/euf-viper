@@ -15,11 +15,12 @@ euf-viper research-parser-timing \
   --parser tree|stream --phase parse|end-to-end -
 ```
 
-It accepts only stdin. Source reading finishes before the internal timer. A
-parse observation times only construction of `Problem`; its semantic snapshot
-fingerprint is computed afterward. An end-to-end observation times parser plus
-the unchanged solver and computes telemetry afterward. Thus the causal arm is
-the parser implementation, not file I/O, solver options, or result formatting.
+It accepts only stdin. Source reading finishes before the internal timer. Both
+arms time the production `Problem`-producing parser path, and the timed code
+cannot call symbol-cloning telemetry. A separate untimed command attests exact
+semantic counters and SHA-256 over a canonical complete typed snapshot before
+any row is admitted. Thus the causal arm is the parser implementation, not file
+I/O, telemetry, solver options, or result formatting.
 
 The harness opens a source once, verifies the prepared SHA-256 and byte count,
 and replays that immutable buffer to fresh processes. Each source uses one
@@ -53,36 +54,52 @@ R_{\mathrm{agg}}
 ## Gates
 
 Both parse and end-to-end phases must have
-(R_{\mathrm{pair}}<1) and (R_{\mathrm{agg}}<1). A nonbenefiting source has
-(m_{s,B}\ge m_{s,A}); the ceiling nearest-rank p95 of
-(m_{s,B}/m_{s,A}-1) over those sources must be strictly below (1\%\).
+(R_{\mathrm{pair}}<1) and (R_{\mathrm{agg}}<1). The ceiling nearest-rank p95
+of
+
+\[
+\max(m_{s,B}/m_{s,A}-1,0)
+\]
+
+over all 7,503 preregistered sources must be strictly below (1\%\). The tail
+population is fixed and cannot be empty.
 
 The performance tests are conjunctive with semantic tests:
 
-- all measured parse observations complete with one exact semantic fingerprint;
-- completed solver output and its stable fingerprint agree between arms;
+- exact `source_count=7503`, 128 deterministic shards, one warmup, five measured
+  rounds, two-second timeout, and `tree,stream,stream,tree` order are immutable;
+- every observation completes, so both phases have exactly 7,503 common rows;
+- exact semantic counters and canonical SHA-256 agree before timing;
+- solver output and its canonical SHA-256 agree between arms;
 - every decisive result matches the manifest;
-- stream solved count does not regress; and
+- no baseline-only solve exists at any source; and
 - no malformed, duplicate, missing, reordered, non-finite, or identity-drifted
   evidence is accepted.
 
 A source counts as solved by an arm only if every measured end-to-end
-observation for that arm returns the expected SAT or UNSAT answer. Timed-out
-sources do not enter common-source speed metrics. The audit reports SAT/UNSAT
-and family strata, timeout counts, paired wins/ties/losses, and maximum RSS.
+observation for that arm returns the expected SAT or UNSAT answer. One timeout
+or error rejects the campaign; no source is censored from speed metrics. The
+audit reports SAT/UNSAT and family strata, paired wins/ties/losses, and maximum
+RSS.
 
 ## Reproducibility
 
-Prepare binds the published Git revision, contract, manifest, workset, source
-bytes, Python harness, direct Cargo and Rust compiler binaries, and final solver
-binary. Linux observations execute the already-hashed solver descriptor. Each
-array worker uses singleton CPU affinity and records its host, machine, CPU, and
-affinity mechanism.
+The submitter creates a unique fresh checkout. Prepare rejects tracked,
+untracked, ignored, hidden-index, Cargo-config, Python-shadow, compiler-wrapper,
+and ambient-selector influences. Prepare fetches into a fresh per-run Cargo
+home and target under an exact allowlisted environment. Every job receives and
+verifies the expected contract, manifest, and checkout-receipt SHA-256. Prepare
+then binds the exact revision/tree/runtime blobs, workset, source bytes, Python,
+Cargo, Rust compiler,
+and final solver binary. Linux observations execute the already-hashed solver
+descriptor. Each worker uses singleton CPU affinity and records its identity.
 
 All JSON is duplicate-key rejecting and finite. A value such as `1e999` is
 rejected after parsing even though its syntax is standard JSON. Generated
 artifacts use checked-inode, fsynced, atomic no-replace publication. WMI jobs
-form a prepare-array-audit `afterok` chain.
+form a prepare-array-audit `afterok` chain. The campaign-contract workflow runs
+the focused Python tests, all T1 shell syntax checks, and the existing
+all-feature Rust test on Linux.
 
 No WMI measurement belongs to this implementation commit. Passing the future
 campaign would authorize review of production routing, not automatic promotion

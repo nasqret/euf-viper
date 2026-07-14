@@ -28,6 +28,9 @@ jobs:
             results/wmi/guarded-range-census-146071/p12-range-summary.json \
             --receipt \
             results/wmi/guarded-range-census-146071/receipt.json
+          python3 -m py_compile \
+            scripts/bench/typed_parser_timing.py \
+            scripts/wmi/t1_timing_checkout_receipt.py
       - name: Test campaign validator
         run: |
           python3 -m unittest \
@@ -37,6 +40,7 @@ jobs:
             tests.test_typed_parser_parity \
             tests.test_wmi_typed_parser_parity \
             tests.test_t1_parity_receipt \
+            tests.test_typed_parser_timing \
             tests.test_ingest_smtcomp_2025_qf_uf \
             tests.test_record_solver_config \
             tests.test_freeze_campaign \
@@ -75,5 +79,10 @@ jobs:
           bash -n scripts/wmi/euf_viper_typed_parser_parity_array.sbatch
           bash -n scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch
           bash -n scripts/wmi/submit_typed_parser_parity.sh
+          bash -n scripts/wmi/t1_timing_common.sh
+          bash -n scripts/wmi/euf_viper_t1_timing_prepare.sbatch
+          bash -n scripts/wmi/euf_viper_t1_timing_array.sbatch
+          bash -n scripts/wmi/euf_viper_t1_timing_audit.sbatch
+          bash -n scripts/wmi/submit_t1_timing.sh
       - name: Test Rust solver
         run: cargo test --all-features

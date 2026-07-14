@@ -1,6 +1,7 @@
 use super::{
     BOOL_SORT, BoolAtomKey, BoolExpr, ParseCtx, Problem, ScopedLetMode, Sexp, SortId, SymId, TermId,
 };
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 
 // The frozen 7,503-source QF_UF corpus reaches 4,244 levels. Keep a bounded,
@@ -325,10 +326,7 @@ fn symbol_to_sexp(symbol: Symbol<'_>) -> Sexp {
     }
 }
 
-pub(super) fn parse_stream_problem(
-    input: &str,
-    scoped_let_mode: ScopedLetMode,
-) -> Result<(Problem, Vec<String>), String> {
+fn parse_stream_context(input: &str, scoped_let_mode: ScopedLetMode) -> Result<ParseCtx, String> {
     let prepass = structural_prepass(input)?;
     let bounded_let_count = super::bounded_lexical_let_count(input);
     let scoped_let_selected = super::scoped_let_selected(scoped_let_mode, bounded_let_count);
@@ -340,9 +338,24 @@ pub(super) fn parse_stream_problem(
     while let Some(sexp) = parser.next_sexp()? {
         ctx.parse_command(&sexp)?;
     }
-    Ok(ctx.finish_with_symbol_names())
+    Ok(ctx)
 }
 
+pub(super) fn parse_stream_problem(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<Problem, String> {
+    parse_stream_context(input, scoped_let_mode).map(ParseCtx::finish)
+}
+
+pub(super) fn parse_stream_problem_with_symbols(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<(Problem, Vec<String>), String> {
+    parse_stream_context(input, scoped_let_mode).map(ParseCtx::finish_with_symbol_names)
+}
+
+#[cfg(test)]
 pub(super) fn typed_problem_fingerprint(problem: &Problem, symbol_names: &[String]) -> u64 {
     TypedSemanticSnapshot::from_problem(problem, symbol_names).fingerprint()
 }
@@ -378,6 +391,99 @@ struct TypedSemanticSnapshot {
     unsupported: Vec<String>,
     bool_problem: Option<BoolProblemSnapshot>,
     contradiction: bool,
+}
+
+struct CanonicalSnapshotHasher(Sha256);
+
+impl CanonicalSnapshotHasher {
+    fn new() -> Self {
+        let mut digest = Sha256::new();
+        digest.update(b"euf-viper.typed-semantic-snapshot.canonical.v1\0");
+        Self(digest)
+    }
+
+    fn byte(&mut self, value: u8) {
+        self.0.update([value]);
+    }
+
+    fn usize(&mut self, value: usize) {
+        self.0.update((value as u64).to_le_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.0.update(value.to_le_bytes());
+    }
+
+    fn sort(&mut self, value: SortId) {
+        self.u32(value.0);
+    }
+
+    fn string(&mut self, value: &str) {
+        self.usize(value.len());
+        self.0.update(value.as_bytes());
+    }
+
+    fn term_vec(&mut self, values: &[TermId]) {
+        self.usize(values.len());
+        for &value in values {
+            self.usize(value);
+        }
+    }
+
+    fn sort_vec(&mut self, values: &[SortId]) {
+        self.usize(values.len());
+        for &value in values {
+            self.sort(value);
+        }
+    }
+
+    fn bool_expr(&mut self, expression: &BoolExpr) {
+        match expression {
+            BoolExpr::Const(value) => {
+                self.byte(0);
+                self.byte(u8::from(*value));
+            }
+            BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+                self.byte(1);
+                self.usize(*left);
+                self.usize(*right);
+            }
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => {
+                self.byte(2);
+                self.usize(*term);
+            }
+            BoolExpr::Not(child) => {
+                self.byte(3);
+                self.bool_expr(child);
+            }
+            BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => {
+                self.byte(match expression {
+                    BoolExpr::And(_) => 4,
+                    BoolExpr::Or(_) => 5,
+                    BoolExpr::Iff(_) => 6,
+                    _ => unreachable!(),
+                });
+                self.usize(children.len());
+                for child in children {
+                    self.bool_expr(child);
+                }
+            }
+            BoolExpr::Ite(condition, then_expression, else_expression) => {
+                self.byte(7);
+                self.bool_expr(condition);
+                self.bool_expr(then_expression);
+                self.bool_expr(else_expression);
+            }
+        }
+    }
+
+    fn finish(self) -> String {
+        self.0
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
 }
 
 impl TypedSemanticSnapshot {
@@ -449,6 +555,76 @@ impl TypedSemanticSnapshot {
             (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
         })
     }
+
+    fn canonical_sha256(&self) -> String {
+        let mut out = CanonicalSnapshotHasher::new();
+        out.u32(self.schema_version);
+        out.usize(self.symbol_names.len());
+        for value in &self.symbol_names {
+            out.string(value);
+        }
+        out.usize(self.sort_names.len());
+        for value in &self.sort_names {
+            out.string(value);
+        }
+        out.usize(self.sort_bindings.len());
+        for &(symbol, sort) in &self.sort_bindings {
+            out.u32(symbol);
+            out.sort(sort);
+        }
+        out.usize(self.functions.len());
+        for function in &self.functions {
+            out.u32(function.symbol);
+            out.sort_vec(&function.arg_sorts);
+            out.sort(function.result_sort);
+        }
+        out.usize(self.terms.len());
+        for (symbol, arguments, sort) in &self.terms {
+            out.u32(*symbol);
+            out.term_vec(arguments);
+            out.sort(*sort);
+        }
+        out.usize(self.applications.len());
+        for &term in &self.applications {
+            out.usize(term);
+        }
+        out.usize(self.interned.len());
+        for (symbol, arguments, term) in &self.interned {
+            out.u32(*symbol);
+            out.term_vec(arguments);
+            out.usize(*term);
+        }
+        for pairs in [&self.equalities, &self.disequalities] {
+            out.usize(pairs.len());
+            for &(left, right) in pairs {
+                out.usize(left);
+                out.usize(right);
+            }
+        }
+        out.usize(self.unsupported.len());
+        for value in &self.unsupported {
+            out.string(value);
+        }
+        match &self.bool_problem {
+            None => out.byte(0),
+            Some(problem) => {
+                out.byte(1);
+                out.usize(problem.assertions.len());
+                for assertion in &problem.assertions {
+                    out.bool_expr(assertion);
+                }
+                out.usize(problem.unsupported.len());
+                for value in &problem.unsupported {
+                    out.string(value);
+                }
+                out.usize(problem.true_term);
+                out.usize(problem.false_term);
+                out.term_vec(&problem.data_terms);
+            }
+        }
+        out.byte(u8::from(self.contradiction));
+        out.finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -503,6 +679,42 @@ impl ParityReport {
     }
 }
 
+pub(super) fn typed_semantic_report_json(
+    problem: &Problem,
+    symbol_names: &[String],
+    parser: &str,
+    source_bytes: usize,
+) -> String {
+    let snapshot = TypedSemanticSnapshot::from_problem(problem, symbol_names);
+    let (assertions, bool_data_terms, bool_unsupported) =
+        snapshot.bool_problem.as_ref().map_or((0, 0, 0), |value| {
+            (
+                value.assertions.len(),
+                value.data_terms.len(),
+                value.unsupported.len(),
+            )
+        });
+    format!(
+        "{{\"applications\":{},\"assertions\":{},\"bool_data_terms\":{},\"canonical_sha256\":\"{}\",\"contradiction\":{},\"disequalities\":{},\"equalities\":{},\"functions\":{},\"interned_terms\":{},\"parser\":\"{}\",\"schema\":\"euf-viper.typed-parser-semantics.v1\",\"sort_bindings\":{},\"sorts\":{},\"source_bytes\":{},\"symbols\":{},\"terms\":{},\"unsupported_diagnostics\":{}}}",
+        snapshot.applications.len(),
+        assertions,
+        bool_data_terms,
+        snapshot.canonical_sha256(),
+        snapshot.contradiction,
+        snapshot.disequalities.len(),
+        snapshot.equalities.len(),
+        snapshot.functions.len(),
+        snapshot.interned.len(),
+        parser,
+        snapshot.sort_bindings.len(),
+        snapshot.sort_names.len(),
+        source_bytes,
+        snapshot.symbol_names.len(),
+        snapshot.terms.len(),
+        snapshot.unsupported.len() + bool_unsupported,
+    )
+}
+
 pub(super) fn check_typed_parity(
     input: &str,
     scoped_let_mode: ScopedLetMode,
@@ -523,8 +735,9 @@ fn typed_parity_report(
         return Err("tree parser produced a non-well-sorted typed problem".to_owned());
     }
 
-    let (stream, stream_symbol_names) = parse_stream_problem(input, scoped_let_mode)
-        .map_err(|error| format!("stream parser rejected tree-accepted input: {error}"))?;
+    let (stream, stream_symbol_names) =
+        parse_stream_problem_with_symbols(input, scoped_let_mode)
+            .map_err(|error| format!("stream parser rejected tree-accepted input: {error}"))?;
     if !problem_is_well_sorted(&stream, &stream_symbol_names) {
         return Err("stream parser produced a non-well-sorted typed problem".to_owned());
     }
@@ -663,9 +876,30 @@ mod tests {
     fn assert_matching_error(input: &str) {
         for mode in [ScopedLetMode::Off, ScopedLetMode::On] {
             let tree = super::super::parse_problem_with_scoped_let_mode(input, mode).unwrap_err();
-            let stream = parse_stream_problem(input, mode).unwrap_err();
+            let stream = parse_stream_problem_with_symbols(input, mode).unwrap_err();
             assert_eq!(stream, tree, "input: {input:?}");
         }
+    }
+
+    #[test]
+    fn canonical_semantic_digest_matches_arms_and_binds_full_snapshot() {
+        let input = include_str!("../tests/fixtures/parser_parity/bool_data_mixed_sorts.smt2");
+        let (tree, tree_names) = super::super::parse_problem_with_scoped_let_mode_and_symbols(
+            input,
+            ScopedLetMode::Auto,
+        )
+        .unwrap();
+        let (stream, stream_names) =
+            parse_stream_problem_with_symbols(input, ScopedLetMode::Auto).unwrap();
+        let tree_snapshot = TypedSemanticSnapshot::from_problem(&tree, &tree_names);
+        let stream_snapshot = TypedSemanticSnapshot::from_problem(&stream, &stream_names);
+        assert_eq!(tree_snapshot, stream_snapshot);
+        let digest = tree_snapshot.canonical_sha256();
+        assert_eq!(digest.len(), 64);
+        assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let mut changed = tree_snapshot.clone();
+        changed.contradiction = !changed.contradiction;
+        assert_ne!(digest, changed.canonical_sha256());
     }
 
     #[test]
@@ -694,7 +928,8 @@ mod tests {
     #[test]
     fn snapshot_binds_sort_and_function_signatures() {
         let input = include_str!("../tests/fixtures/parser_parity/declarations_signatures.smt2");
-        let (problem, symbol_names) = parse_stream_problem(input, ScopedLetMode::Off).unwrap();
+        let (problem, symbol_names) =
+            parse_stream_problem_with_symbols(input, ScopedLetMode::Off).unwrap();
         let snapshot = TypedSemanticSnapshot::from_problem(&problem, &symbol_names);
         assert_eq!(snapshot.sort_names, ["Bool", "A", "B"]);
         let g = snapshot
@@ -803,7 +1038,7 @@ mod tests {
         }
         input.push(')');
         assert_eq!(
-            parse_stream_problem(&input, ScopedLetMode::Off).unwrap_err(),
+            parse_stream_problem_with_symbols(&input, ScopedLetMode::Off).unwrap_err(),
             nesting_limit_error()
         );
     }

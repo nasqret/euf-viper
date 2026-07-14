@@ -6,6 +6,8 @@
   "campaign": {
     "expected_sources": 7503,
     "max_parallel": 32,
+    "repetitions": 128,
+    "source_count": 7503,
     "shards": 128
   },
   "execution": {
@@ -25,24 +27,33 @@
       "end_to_end"
     ],
     "process_isolation": "fresh-process-per-observation.v1",
+    "semantic_command": "research-parser-semantics",
+    "semantic_digest": "sha256-canonical-typed-snapshot-v1",
+    "semantic_timing": "outside-timed-region-before-observations",
     "source_argument": "-",
+    "timed_path": "production-problem-path-no-symbol-telemetry-v1",
     "warmup_rounds": 1
   },
   "gates": {
     "aggregate_ratio_max_exclusive": 1.0,
+    "common_sources_required_per_phase": 7503,
     "exact_result_parity": true,
+    "no_baseline_only_solve": true,
     "no_solved_count_regression": true,
-    "p95_miss_overhead_max_exclusive": 0.01,
+    "p95_all_source_overhead_max_exclusive": 0.01,
     "paired_geomean_ratio_max_exclusive": 1.0,
     "phases_requiring_speedup": [
       "parse",
       "end_to_end"
     ],
-    "zero_incorrect_results": true
+    "semantic_parity_before_metrics": true,
+    "zero_error_observations": true,
+    "zero_incorrect_results": true,
+    "zero_timeout_observations": true
   },
   "measurement": {
     "aggregate_unit": "sum-of-per-source-arm-medians",
-    "miss_definition": "candidate-median-greater-than-or-equal-to-baseline-median",
+    "overhead_definition": "max(candidate-median/baseline-median-minus-one,zero)-over-all-7503-sources",
     "p95_definition": "nearest-rank-ceiling",
     "paired_unit": "within-round-abba-neighbor-log-ratio",
     "reported_strata": [
