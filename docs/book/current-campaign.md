@@ -232,6 +232,18 @@ sources, zero timeouts/errors, exact per-source result and semantic parity, a
 nonempty full-population p95 overhead metric, production-equivalent timed code,
 and a fresh hash-bound execution root.
 
+Revision `20be404` repaired those formulas and timed paths but failed the second
+review. Parsed timing and semantic payloads were not rebound to their captured
+stdout, so changing every candidate time to one nanosecond produced a forged
+all-7,503 pass. The submitter also adopted the current remote manifest hash as
+expected, `repetitions=128` incorrectly duplicated the 128-shard dimension,
+Cargo had a transient source-mutation window, machine/toolchain identity was
+too weak for a sub-1% threshold, and CI did not execute the exact release path.
+The next revision must seal raw command bytes and shard receipts, require the
+accepted corpus digest, separate shard and ABBA-round constants, monitor the
+build snapshot, lock a homogeneous timing lane, and run the real release on
+Linux before WMI.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle

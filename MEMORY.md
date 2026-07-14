@@ -914,11 +914,13 @@
 - Initial T1 timing revision `a99d9bf` was rejected for empty-tail acceptance,
   timeout censoring, replaceable contract/manifest inputs, metrics before
   semantic parity, telemetry inside the timed path, and untracked remote
-  influence. Repair `20be404` is clean and under fresh independent review; it
-  claims all-7,503 uncensored parity, all-source p95 overhead, untimed SHA-256
-  semantics, production-equivalent clocks, fresh checkout/Cargo roots, and
-  Linux CI. It has no timing result and must not be pushed or submitted before
-  review.
+  influence. Repair `20be404` also remains no-go: exact payloads were not bound
+  to captured stdout, enabling a demonstrated forged all-7,503 timing pass; the
+  corpus digest self-certified from mutable remote state; 128 shards were
+  mislabeled as repetitions; Cargo had a transient source race; and machine/CI
+  identity was below the sub-1% contract. Require raw-output and shard sealing,
+  the accepted manifest hash, distinct shard/round constants, monitored builds,
+  homogeneous controls, and real-release Linux CI before publication or WMI.
 - Live WMI graph remains unchanged: certificate prepares `146076`/`146079` are
   complete; arrays `146077`/`146080` and T6 `146075` are priority-pending;
   certificate audits are dependency-held; full 1,200-second range `[2-63]` and

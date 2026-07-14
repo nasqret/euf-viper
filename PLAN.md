@@ -276,8 +276,15 @@ independent evidence checks, and a frozen family holdout.
   selected the common set, ambient contract/manifest overrides were not bound
   to submission hashes, metrics preceded semantic parity, telemetry-only symbol
   cloning polluted the timed path, and untracked remote inputs escaped the
-  provenance guard. A fail-closed full-population repair is active; no WMI
-  timing row exists.
+  provenance guard. Revision `20be404` repaired those acceptance formulas but
+  failed the second review: stored payloads were not rebound to captured stdout,
+  allowing a concrete all-7,503 forged timing win; the expected corpus digest
+  was adopted from mutable remote state; `repetitions=128` falsely named the 128
+  shards; source could change transiently during Cargo; sub-1% machine identity
+  was underbound; and CI did not run the exact release path. Raw-output sealing,
+  the accepted manifest digest, a shards/rounds schema split, mutation-monitored
+  builds, homogeneous timing controls, and real-release CI are under repair. No
+  WMI timing row exists.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 

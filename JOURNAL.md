@@ -1301,6 +1301,16 @@
   push or WMI submission occurred despite 32 focused and 83 semantic test
   passes. The replacement design uses an unnamed one-link Linux inode and an
   independently checked content-bearing completion receipt.
+- Second independent T1 timing review rejected `20be404`. The reviewer changed
+  every candidate elapsed time to one nanosecond while retaining unbound hashes;
+  all 7,503 rows and every speed gate passed. Semantic counters were similarly
+  forgeable. The submitter also adopted the mutable remote manifest hash, the
+  contract mislabeled 128 shards as repetitions, transient source changes could
+  influence Cargo, the sub-1% machine identity was incomplete, and CI never ran
+  the exact release path. No branch push or WMI submission occurred despite 20
+  focused test passes. Exact raw stdout, the accepted corpus digest, sealed
+  shard receipts, mutation-monitored builds, and real Linux execution are under
+  repair.
 
 ## Next Entry Template
 
