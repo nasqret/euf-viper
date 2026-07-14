@@ -391,8 +391,12 @@ independent evidence checks, and a frozen family holdout.
   semantic replay, but review still found a visible partial destination, stale
   `.current` on early preflight failure, and cleanup ownership inferred from a
   racy absence check. Checked-inode atomic publication and entry-first marker
-  invalidation are active repairs. No WMI submission is allowed before another
-  independent review.
+  invalidation were repaired at `2080b26`, but the next review found an unsafe
+  non-Linux pathname fallback, pathname check-then-unlink cleanup, and a test
+  that required relinking after source replacement instead of accepting a
+  fail-closed stop. Unsupported publication must now reject outright and
+  cleanup must never unlink an unproven replacement. No WMI submission is
+  allowed before another independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 

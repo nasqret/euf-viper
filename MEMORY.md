@@ -887,3 +887,8 @@
   changes the default feature binary without timing, disables several normal
   fast routes in evidence mode, and makes UNSAT nondecisive. Reconstruct it on
   current main as opt-in, then require a 7,503-source shadow and off-mode timing.
+- T5 `2080b26` remains no-go despite passing Linux FD-bound publication probes.
+  Its non-Linux fallback can link a replacement path, cleanup can unlink a
+  replacement after a prior identity check, and a source-swap test incorrectly
+  requires relinking instead of fail-closed behavior. Reject unsupported
+  publication and never delete staging paths without atomic inode ownership.

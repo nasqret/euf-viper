@@ -1248,6 +1248,13 @@
   reconstructed on current main as opt-in and pass full-corpus shadow plus
   paired off-mode timing. Two attempted independent agent reviews were blocked
   by a platform content filter and were not counted as technical decisions.
+- Independent T5 review rejected `2080b26` after its Linux same-inode/no-replace
+  probe and 74 focused tests passed. A non-Linux pathname fallback could still
+  publish a replacement inode; staging cleanup retained a check-then-unlink
+  race; and one Linux source-swap test demanded relinking where fail-closed
+  behavior is correct. No push or WMI submission occurred. The next revision
+  must reject unsupported publication and prefer a leaked owned temporary over
+  deletion of any path whose inode ownership is no longer descriptor-proven.
 
 ## Next Entry Template
 
