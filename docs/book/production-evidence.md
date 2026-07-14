@@ -86,6 +86,13 @@ python3 scripts/cert/check_production_evidence.py \
 
 ## Locked campaigns
 
+The locked WMI preparation builds one campaign binary with
+`--features certificates,production-evidence`. It queries that executable's
+compile-time feature report immediately after the build and fails before solver
+installation or campaign freezing if either feature is absent. The
+solver-configuration recorder repeats the production-evidence check against the
+real executable before it can exercise `--evidence-out` or publish a lock.
+
 New solver configurations opt in with an exact evidence schema, CLI flag, and
 accepted decisive statuses. The locked runner derives a unique path from the
 run sequence and binds the path, artifact hash, source hash, solver revision,
@@ -156,3 +163,9 @@ run is nondecisive. The SAT model is a total model for the ground query, not a
 general-purpose SMT-LIB `get-model` response for terms absent from the query.
 Portfolio fallback execution is outside this standalone evidence contract and
 retains the fallback solver's trust boundary.
+
+With evidence capture off, backend assignments still exist long enough for the
+ordinary EUF model check, but no evidence transcript vector, duplicate backend
+clause stream, retained DPLL model, evidence-only assignment copy, or canonical
+evidence sort is constructed. Unit instrumentation covers Kissat, CaDiCaL,
+CaDiCaL refinement, Varisat, and DPLL and checks exact ordinary result parity.

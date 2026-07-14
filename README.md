@@ -68,6 +68,13 @@ timed solve. This mode does not certify the normal default solver, establish
 coverage, or change the ordinary off-mode solve contract. See
 [Production Evidence](docs/book/production-evidence.md).
 
+The locked evidence campaign builds its binary with
+`--features certificates,production-evidence` and rejects a binary whose
+compile-time feature report omits either feature before solver installation or
+campaign freezing. Ordinary solves do not allocate evidence transcripts,
+duplicate backend clause streams, retain DPLL models, or perform canonical
+evidence sorting.
+
 ## Historical Benchmark Checkpoints
 
 The results below remain useful as exact-corpus opportunity evidence. They are

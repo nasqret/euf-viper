@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_euf-viper")
@@ -15,6 +16,17 @@ fn run(arguments: &[&str]) -> Output {
         .stdin(Stdio::null())
         .output()
         .expect("euf-viper integration command should run")
+}
+
+fn temporary_directory(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock follows the Unix epoch")
+        .as_nanos();
+    let path =
+        std::env::temp_dir().join(format!("euf-viper-{label}-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&path).expect("temporary test directory should be creatable");
+    path
 }
 
 #[test]
@@ -69,4 +81,81 @@ fn ordinary_solve_does_not_create_or_require_evidence() {
     );
     assert!(matches!(output.stdout.as_slice(), b"sat\n" | b"unsat\n"));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("production-evidence"));
+}
+
+#[test]
+fn ordinary_solve_preserves_legacy_unknown_and_extra_argument_compatibility() {
+    let input = fixture("tests/fixtures/parser_parity/deterministic.smt2");
+    let ignored = fixture("tests/fixtures/does-not-exist.smt2");
+    let output = run(&[
+        "solve",
+        "--legacy-option",
+        input.to_str().expect("UTF-8 fixture path"),
+        ignored.to_str().expect("UTF-8 ignored path"),
+        "--another-legacy-option",
+    ]);
+    assert!(
+        output.status.success(),
+        "legacy-compatible solve failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(matches!(output.stdout.as_slice(), b"sat\n" | b"unsat\n"));
+}
+
+#[cfg(unix)]
+#[test]
+fn recorder_checks_the_real_compiled_viper_feature_contract() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temporary_directory("real-recorder");
+    let comparator = root.join("comparator");
+    std::fs::write(&comparator, "#!/bin/sh\necho '4.16.0 1.3.4 2.7.0 2.9.2'\n")
+        .expect("fake comparator should be writable");
+    let mut permissions = comparator
+        .metadata()
+        .expect("fake comparator metadata should exist")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&comparator, permissions)
+        .expect("fake comparator should be executable");
+    let output_path = root.join("solver-config.json");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let completed = Command::new("python3")
+        .arg(repository.join("scripts/bench/record_solver_config.py"))
+        .args(["--campaign"])
+        .arg(repository.join("campaigns/best-overall-qf-uf-2026-07.json"))
+        .args(["--viper", binary(), "--viper-version", "real-test-build"])
+        .arg("--z3")
+        .arg(&comparator)
+        .arg("--cvc5")
+        .arg(&comparator)
+        .arg("--yices2")
+        .arg(&comparator)
+        .arg("--opensmt")
+        .arg(&comparator)
+        .arg("--out")
+        .arg(&output_path)
+        .current_dir(repository)
+        .output()
+        .expect("real-binary recorder command should run");
+
+    if cfg!(feature = "production-evidence") {
+        assert!(
+            completed.status.success(),
+            "recorder rejected a production-evidence binary: {}",
+            String::from_utf8_lossy(&completed.stderr)
+        );
+        let config = std::fs::read_to_string(&output_path)
+            .expect("successful recorder should publish a configuration");
+        assert!(config.contains("euf-viper.production-evidence.v3"));
+        assert!(config.contains(binary()));
+    } else {
+        assert_eq!(completed.status.code(), Some(2));
+        assert!(
+            String::from_utf8_lossy(&completed.stderr)
+                .contains("lacks required locked evidence features: production-evidence")
+        );
+        assert!(!output_path.exists());
+    }
+    std::fs::remove_dir_all(root).expect("temporary recorder directory should be removable");
 }

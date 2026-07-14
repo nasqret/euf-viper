@@ -17,7 +17,7 @@ SBATCH_FILES = [
 ]
 SUBMIT = WMI / "submit_certificate_shadow.sh"
 STAGED_SUBMIT = WMI / "submit_staged_certificate_audit.sh"
-ALL_SCRIPTS = [*SBATCH_FILES, SUBMIT, STAGED_SUBMIT]
+ALL_SCRIPTS = [P0_PREPARE, *SBATCH_FILES, SUBMIT, STAGED_SUBMIT]
 
 
 class WmiCertificateScriptTests(unittest.TestCase):
@@ -36,11 +36,14 @@ class WmiCertificateScriptTests(unittest.TestCase):
 
     def test_p0_times_the_same_binary_that_emits_certificates(self) -> None:
         text = self.text(P0_PREPARE)
-        build = "cargo build --release --features certificates"
+        build = "cargo build --release --features certificates,production-evidence"
         self.assertIn(build, text)
         self.assertIn("target/release/euf-viper", text)
         self.assertLess(text.index(build), text.index("record_solver_config.py"))
-        self.assertIn(".certificates", text)
+        self.assertIn("--build-features", text)
+        self.assertIn("for REQUIRED_FEATURE in certificates production-evidence", text)
+        self.assertLess(text.index("--build-features"), text.index("install_solvers.sh"))
+        self.assertIn(".certificates-production-evidence", text)
 
     def test_embedded_python_blocks_compile(self) -> None:
         pattern = re.compile(

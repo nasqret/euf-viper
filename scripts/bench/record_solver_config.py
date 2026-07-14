@@ -31,6 +31,9 @@ class SolverConfigError(ValueError):
     """Raised when an installed solver cannot be pinned or smoke checked."""
 
 
+REQUIRED_VIPER_EVIDENCE_FEATURES = frozenset({"production-evidence"})
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -103,6 +106,41 @@ def capture_version(binary: Path, argv: list[str], expected: str) -> str:
             f"version output for {binary} does not contain {expected!r}: {output!r}"
         )
     return output[:4096]
+
+
+def require_viper_evidence_features(binary: Path) -> frozenset[str]:
+    try:
+        completed = subprocess.run(
+            [str(binary), "--build-features"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={"LANG": "C", "LC_ALL": "C", "PATH": os.environ.get("PATH", "")},
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SolverConfigError(
+            f"cannot query euf-viper build features: {error}"
+        ) from error
+    output = completed.stdout.strip()
+    if completed.returncode != 0:
+        raise SolverConfigError(
+            "euf-viper cannot report build features; "
+            "the locked evidence binary must include production-evidence"
+        )
+    values = output.split(",") if output else []
+    if any(not value or value.strip() != value for value in values):
+        raise SolverConfigError("euf-viper reported malformed build features")
+    features = frozenset(values)
+    if len(features) != len(values):
+        raise SolverConfigError("euf-viper reported duplicate build features")
+    missing = REQUIRED_VIPER_EVIDENCE_FEATURES - features
+    if missing:
+        raise SolverConfigError(
+            "euf-viper binary lacks required locked evidence features: "
+            + ", ".join(sorted(missing))
+        )
+    return features
 
 
 def result_token(output: str) -> str | None:
@@ -203,6 +241,7 @@ def make_records(
         "yices2": executable(yices2, "yices2"),
         "opensmt": executable(opensmt, "opensmt"),
     }
+    require_viper_evidence_features(paths["euf-viper"])
     definitions = [
         {
             "id": "euf-viper",

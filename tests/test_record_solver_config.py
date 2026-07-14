@@ -24,6 +24,7 @@ class RecordSolverConfigTests(unittest.TestCase):
         self.binary.write_text(
             "#!/bin/sh\n"
             "case \"${1:-}\" in\n"
+            "  --build-features) echo 'certificates,production-evidence' ;;\n"
             "  --version|-version) echo 'euf-viper 4.16.0 1.3.4 2.7.0 2.9.2' ;;\n"
             "  *)\n"
             "    previous=''\n"
@@ -106,6 +107,21 @@ class RecordSolverConfigTests(unittest.TestCase):
         smoke.write_text("(check-sat)\n", encoding="utf-8")
         with self.assertRaisesRegex(RECORDER.SolverConfigError, "result='sat'"):
             RECORDER.smoke_solver(record, smoke, "unsat")
+
+    def test_feature_probe_rejects_a_binary_without_evidence(self) -> None:
+        self.binary.write_text(
+            "#!/bin/sh\n"
+            "case \"${1:-}\" in\n"
+            "  --build-features) echo 'certificates,finite-symmetry' ;;\n"
+            "  *) echo 'euf-viper test' ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            RECORDER.SolverConfigError,
+            "lacks required locked evidence features: production-evidence",
+        ):
+            RECORDER.require_viper_evidence_features(self.binary)
 
 
 if __name__ == "__main__":
