@@ -36,10 +36,11 @@ UNSAT), one UNSAT PEQ, and twelve UNSAT QG `qg7` cases. With no regressions,
 euf-viper needs ten added solves to lead
 Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
 `2.04x` geometric and `4.89x` aggregate improvement. Full 1,200-second array
-`145785` has started on WMI: two shards are complete, one is active, and the
-remaining shards are scheduler-bound. Official array `145787` remains
-priority-bound, with audits/finalizer `145786`/`145788`/`145789`
-dependency-held. The graph is unchanged. Rollback control audit `145929`
+`145785` has started on WMI: two dispatched work items are complete and the
+remaining range `[2-63]` is pending on nodes/priority, with no shard currently
+active. Official array `145787` remains priority-bound, with audits/finalizer
+`145786`/`145788`/`145789` dependency-held. The graph is unchanged. Rollback
+control audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
 overheads were `11.17x`-`32.75x` against a `1.10x` cap.
@@ -165,8 +166,10 @@ result cache can satisfy V1-V4.
   certificate dependents were cancelled. Replacement full chain
   `146076`/`146077`/`146078` and official chain
   `146079`/`146080`/`146081` are held behind corrected census `146071` at exact
-  revision `8f78543`. Returned complete corpus evidence remains before this
-  item closes.
+  revision `8f78543`. Both prepares completed successfully; arrays
+  `146077`/`146080` remain priority-pending and audits `146078`/`146081` remain
+  dependency-held. Returned complete corpus evidence remains before this item
+  closes.
 - [x] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
@@ -193,8 +196,9 @@ result cache can satisfy V1-V4.
   at 1,200 seconds. Both 60-second continuations and audits completed and
   rejected promotion. Dispatcher `145397` generated full/official 1,200-second
   arrays `145785`/`145787`, audits `145786`/`145788`, and finalizer `145789`;
-  two full shards are complete, one is active, and remaining full plus official
-  work is pending on node availability, priority, and dependencies.
+  two full work items are complete, full range `[2-63]` and the official array
+  are pending on node availability/priority, and the audits/finalizer remain
+  dependency-held. No partial rows have been interpreted.
 - [x] Publish a new current-main opportunity atlas before tuning a route.
   Commit `d948993` binds the exact post-parser-fix full 60-second audit and the
   22-source shared Z3/Yices deficit. A bounded unresolved-track refresh is in

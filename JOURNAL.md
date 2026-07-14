@@ -1263,6 +1263,15 @@
   evidence disabled, violating the zero off-mode performance requirement.
   Ordinary solve argument compatibility also changed without approval. No branch
   push, hosted matrix, or corpus job occurred; all three issues are under repair.
+- Hosted campaign-contract run `29296046483` passed on current main
+  `403b6b7`. A fresh WMI control-plane audit preserved every fixed graph and
+  command lineage: continuation jobs still execute from the immutable
+  `30828a4f0c1e` checkout; T6 still executes from `9833ec3a9219`; certificate
+  arrays still execute from `8f785437830e`. Certificate prepares
+  `146076`/`146079` are complete, arrays `146077`/`146080` and T6 `146075` are
+  priority-pending, and their audits are dependency-held. Full 1,200-second
+  range `[2-63]` and the official array are pending, with no continuation shard
+  currently active. No partial benchmark or certificate output was inspected.
 
 ## Next Entry Template
 
