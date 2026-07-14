@@ -1164,12 +1164,104 @@ class _Encoder:
             return variable
         raise IndependentQfufError(f"unknown internal Boolean operator `{expression.op}`")
 
-    def finish(self) -> EncodedProblem:
+    def _add_direct_assertion(
+        self, expression: BoolExpr, direct_negated_root: bool
+    ) -> None:
+        if expression.op == "const":
+            if expression.arguments[0] is False:
+                self.clauses.append(())
+            return
+        if expression.op == "atom":
+            self.clauses.append((self._encode(expression),))
+            return
+        children = tuple(
+            child for child in expression.arguments if isinstance(child, BoolExpr)
+        )
+        if len(children) != len(expression.arguments):
+            raise IndependentQfufError("direct assertion has malformed children")
+        if expression.op == "not":
+            if len(children) != 1:
+                raise IndependentQfufError("direct not assertion has invalid arity")
+            if direct_negated_root:
+                self._add_direct_negated_assertion(children[0])
+            else:
+                self.clauses.append((-self._encode(children[0]),))
+            return
+        if expression.op == "and":
+            for child in children:
+                self._add_direct_assertion(child, direct_negated_root)
+            return
+        if expression.op == "or":
+            self.clauses.append(tuple(self._encode(child) for child in children))
+            return
+        if expression.op == "iff":
+            if not children:
+                return
+            first = self._encode(children[0])
+            for child in children[1:]:
+                literal = self._encode(child)
+                self.clauses.append((-first, literal))
+                self.clauses.append((first, -literal))
+            return
+        if expression.op == "ite":
+            if len(children) != 3:
+                raise IndependentQfufError("direct ite assertion has invalid arity")
+            condition = self._encode(children[0])
+            then_lit = self._encode(children[1])
+            else_lit = self._encode(children[2])
+            self.clauses.append((-condition, then_lit))
+            self.clauses.append((condition, else_lit))
+            return
+        raise IndependentQfufError(
+            f"unknown direct assertion operator `{expression.op}`"
+        )
+
+    def _add_direct_negated_assertion(self, expression: BoolExpr) -> None:
+        if expression.op == "const":
+            if expression.arguments[0] is True:
+                self.clauses.append(())
+            return
+        if expression.op == "atom":
+            self.clauses.append((-self._encode(expression),))
+            return
+        children = tuple(
+            child for child in expression.arguments if isinstance(child, BoolExpr)
+        )
+        if len(children) != len(expression.arguments):
+            raise IndependentQfufError("direct negated assertion has malformed children")
+        if expression.op == "not":
+            if len(children) != 1:
+                raise IndependentQfufError("direct negated not has invalid arity")
+            self._add_direct_assertion(children[0], True)
+            return
+        if expression.op == "and":
+            self.clauses.append(tuple(-self._encode(child) for child in children))
+            return
+        if expression.op == "or":
+            for child in children:
+                self._add_direct_negated_assertion(child)
+            return
+        if expression.op in {"iff", "ite"}:
+            self.clauses.append((-self._encode(expression),))
+            return
+        raise IndependentQfufError(
+            f"unknown direct negated assertion operator `{expression.op}`"
+        )
+
+    def finish(
+        self,
+        *,
+        direct_root_cnf: bool = False,
+        direct_negated_root: bool = False,
+    ) -> EncodedProblem:
         for term in sorted(self.builder.bool_data_terms):
             self._atom_lit(_AtomKey("bool_term", term=term))
         for assertion in self.builder.assertions:
-            root = self._encode(assertion)
-            self.clauses.append((root,))
+            if direct_root_cnf:
+                self._add_direct_assertion(assertion, direct_negated_root)
+            else:
+                root = self._encode(assertion)
+                self.clauses.append((root,))
 
         atoms: list[Atom] = []
         for variable, key in enumerate(self.var_atoms[1:], start=1):
@@ -1209,6 +1301,148 @@ def parse_and_encode(source: str) -> EncodedProblem:
         raise
     except RecursionError as error:
         raise IndependentQfufError("SMT-LIB expression nesting is too deep") from error
+
+
+def parse_and_encode_production(
+    source: str,
+    *,
+    direct_root_cnf: bool,
+    direct_negated_root: bool,
+) -> EncodedProblem:
+    """Reconstruct the deterministic production-evidence base CNF contract."""
+
+    if type(direct_root_cnf) is not bool or type(direct_negated_root) is not bool:
+        raise IndependentQfufError("production root-CNF options must be booleans")
+    if not isinstance(source, str):
+        raise IndependentQfufError("SMT-LIB source must be text")
+    try:
+        builder = _Builder()
+        builder.parse(_parse_sexps(source))
+        return _Encoder(builder).finish(
+            direct_root_cnf=direct_root_cnf,
+            direct_negated_root=direct_negated_root,
+        )
+    except IndependentQfufError:
+        raise
+    except RecursionError as error:
+        raise IndependentQfufError("SMT-LIB expression nesting is too deep") from error
+
+
+def equality_transitivity_clauses(
+    problem: EncodedProblem,
+) -> tuple[tuple[int, ...], ...]:
+    """Reconstruct the lexically ordered equality transitivity API clauses."""
+
+    _validate_problem(problem)
+    equality_vars: dict[tuple[int, int], int] = {}
+    adjacency: list[list[tuple[int, int]]] = [
+        [] for _ in range(len(problem.terms))
+    ]
+    clauses: set[tuple[int, ...]] = set()
+    for atom in problem.atoms:
+        if atom.kind != "equality":
+            continue
+        assert atom.left is not None and atom.right is not None
+        if atom.left == atom.right:
+            clauses.add((atom.variable,))
+            continue
+        pair = tuple(sorted((atom.left, atom.right)))
+        equality_vars[pair] = atom.variable
+        adjacency[atom.left].append((atom.right, atom.variable))
+        adjacency[atom.right].append((atom.left, atom.variable))
+
+    for (left, right), left_right_var in equality_vars.items():
+        incident = adjacency[left] if len(adjacency[left]) <= len(adjacency[right]) else adjacency[right]
+        for third, _ in incident:
+            if third <= right:
+                continue
+            left_third_var = equality_vars.get(tuple(sorted((left, third))))
+            right_third_var = equality_vars.get(tuple(sorted((right, third))))
+            if left_third_var is None or right_third_var is None:
+                continue
+            clauses.add((-left_right_var, -left_third_var, right_third_var))
+            clauses.add((-left_right_var, -right_third_var, left_third_var))
+            clauses.add((-left_third_var, -right_third_var, left_right_var))
+    return tuple(sorted(clauses))
+
+
+def _insert_nontautological_clause(
+    clauses: set[tuple[int, ...]], clause: Sequence[int]
+) -> None:
+    normalized = tuple(sorted(set(clause)))
+    literals = set(normalized)
+    if any(-literal in literals for literal in normalized):
+        return
+    clauses.add(normalized)
+
+
+def congruence_axiom_clauses(
+    problem: EncodedProblem,
+) -> tuple[tuple[int, ...], ...]:
+    """Reconstruct deterministic all-candidate congruence API clauses."""
+
+    _validate_problem(problem)
+    equality_vars: dict[tuple[int, int], int] = {}
+    bool_vars: dict[int, int] = {}
+    neighbors: list[list[tuple[int, int]]] = [
+        [] for _ in range(len(problem.terms))
+    ]
+    for atom in problem.atoms:
+        if atom.kind == "equality":
+            assert atom.left is not None and atom.right is not None
+            equality_vars[tuple(sorted((atom.left, atom.right)))] = atom.variable
+            if atom.left != atom.right:
+                neighbors[atom.left].append((atom.right, atom.variable))
+                neighbors[atom.right].append((atom.left, atom.variable))
+        elif atom.kind == "bool_term":
+            assert atom.term is not None
+            bool_vars[atom.term] = atom.variable
+    for index, values in enumerate(neighbors):
+        neighbors[index] = sorted(dict(values).items())
+
+    interned = {(term.function, term.args): term.id for term in problem.terms}
+    clauses: set[tuple[int, ...]] = set()
+    maximum_candidates = 4096
+    for left in problem.terms:
+        if not left.args:
+            continue
+        candidate_count = 1
+        for argument in left.args:
+            candidate_count *= len(neighbors[argument]) + 1
+            if candidate_count > maximum_candidates:
+                break
+        if candidate_count > maximum_candidates:
+            continue
+        candidates: list[tuple[tuple[int, ...], tuple[int, ...]]] = [((), ())]
+        for argument in left.args:
+            next_candidates: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+            for arguments, conditions in candidates:
+                next_candidates.append(((*arguments, argument), conditions))
+                for neighbor, variable in neighbors[argument]:
+                    next_candidates.append(
+                        ((*arguments, neighbor), (*conditions, -variable))
+                    )
+            candidates = next_candidates
+        for arguments, conditions in candidates:
+            if arguments == left.args:
+                continue
+            right_id = interned.get((left.function, arguments))
+            if right_id is None or right_id == left.id:
+                continue
+            result_var = equality_vars.get(tuple(sorted((left.id, right_id))))
+            if result_var is not None:
+                _insert_nontautological_clause(clauses, (*conditions, result_var))
+            left_bool = bool_vars.get(left.id)
+            right_bool = bool_vars.get(right_id)
+            if left_bool is None or right_bool is None:
+                continue
+            _insert_nontautological_clause(
+                clauses, (*conditions, -left_bool, right_bool)
+            )
+            _insert_nontautological_clause(
+                clauses, (*conditions, left_bool, -right_bool)
+            )
+    return tuple(sorted(clauses))
 
 
 class _UnionFind:
@@ -1663,8 +1897,11 @@ __all__ = [
     "Sort",
     "Term",
     "V2_FORMAT",
+    "congruence_axiom_clauses",
+    "equality_transitivity_clauses",
     "euf_lemma_is_valid",
     "parse_and_encode",
+    "parse_and_encode_production",
     "parse_dimacs",
     "theory_clause_is_valid",
     "validate_euf_lemma",

@@ -7,9 +7,24 @@ import argparse
 import hashlib
 import json
 import os
+import secrets
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+CERT_DIR = SCRIPT_DIR.parent / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from strict_artifacts import StrictArtifactError, strict_json_loads  # noqa: E402
+from validate_campaign_spec import CampaignSpecError, validate_spec  # noqa: E402
 
 
 class SolverConfigError(ValueError):
@@ -26,9 +41,17 @@ def sha256_file(path: Path) -> str:
 
 def load_versions(spec_path: Path) -> dict[str, str]:
     try:
-        spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        spec = strict_json_loads(
+            spec_path.read_text(encoding="utf-8"), "campaign specification"
+        )
+    except (OSError, UnicodeError, StrictArtifactError) as error:
         raise SolverConfigError(f"cannot read campaign specification: {error}") from error
+    try:
+        validate_spec(spec)
+    except CampaignSpecError as error:
+        raise SolverConfigError(
+            f"invalid campaign specification: {'; '.join(error.errors)}"
+        ) from error
     comparators = spec.get("comparators") if isinstance(spec, dict) else None
     if not isinstance(comparators, list):
         raise SolverConfigError("campaign specification lacks comparators")
@@ -104,14 +127,55 @@ def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
         **record.get("environment", {}),
     }
     try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            env=environment,
-        )
+        with tempfile.TemporaryDirectory(prefix="euf-viper-config-smoke-") as directory:
+            evidence_path = Path(directory) / "production-evidence.json"
+            evidence = record.get("evidence")
+            if evidence is not None:
+                environment["EUF_VIPER_RUN_NONCE"] = secrets.token_hex(32)
+                environment["EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"] = record["sha256"]
+                command.extend([evidence["argv_flag"], str(evidence_path)])
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=environment,
+            )
+            if expected in {"sat", "unsat"} and evidence is not None:
+                if expected not in evidence["accepted_decisive_statuses"]:
+                    raise SolverConfigError(
+                        f"evidence contract does not accept smoke status {expected!r}"
+                    )
+                if not evidence_path.is_file():
+                    raise SolverConfigError("euf-viper smoke run omitted production evidence")
+                try:
+                    payload = strict_json_loads(
+                        evidence_path.read_text(encoding="utf-8"),
+                        "euf-viper smoke evidence",
+                    )
+                except (OSError, UnicodeError, StrictArtifactError) as error:
+                    raise SolverConfigError(
+                        f"cannot read euf-viper smoke evidence: {error}"
+                    ) from error
+                expected_keys = {
+                    "schema",
+                    "run_nonce",
+                    "status",
+                    "backend_status",
+                    "source",
+                    "solver",
+                    "backend_cnf",
+                    "model",
+                    "limitations",
+                }
+                if (
+                    type(payload) is not dict
+                    or set(payload) != expected_keys
+                    or payload.get("schema") != evidence["schema"]
+                    or payload.get("status") != expected
+                ):
+                    raise SolverConfigError("euf-viper smoke evidence schema/status mismatch")
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SolverConfigError(f"smoke run failed for {record['id']}: {error}") from error
     observed = result_token(completed.stdout)
@@ -147,6 +211,11 @@ def make_records(
             "version": viper_version,
             "binary": paths["euf-viper"],
             "argv_template": ["{binary}", "solve", "{instance}"],
+            "evidence": {
+                "schema": "euf-viper.production-evidence.v3",
+                "argv_flag": "--evidence-out",
+                "accepted_decisive_statuses": ["sat"],
+            },
             "version_argv": ["--version"],
             "version_output_contains": "euf-viper",
         },

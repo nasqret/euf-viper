@@ -4,7 +4,7 @@
 Schema version 1 is the exact schema emitted by ``freeze_campaign.py``.  In
 particular, the lock digest is SHA-256 over canonical JSON with
 ``lock_sha256`` set to the empty string.  Canonical JSON uses sorted keys,
-compact separators, ASCII escaping, and one trailing newline.
+compact separators, UTF-8 without optional ASCII escaping, and one trailing newline.
 
 The runner never inherits the ambient environment into solver children.  The
 effective child environment is ``execution.environment`` updated by the
@@ -22,6 +22,7 @@ import math
 import os
 import platform
 import re
+import secrets
 import shutil
 import signal
 import stat
@@ -35,6 +36,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+
+CERT_DIR = Path(__file__).resolve().parents[1] / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from check_production_evidence import (  # noqa: E402
+    ProductionEvidenceError,
+    validate_production_evidence,
+)
+from strict_artifacts import (  # noqa: E402
+    StrictArtifactError,
+    assert_descriptor_path_nofollow,
+    atomic_write_nofollow,
+    canonical_nofollow_path,
+    ensure_directory_nofollow,
+    ensure_parent_directory_nofollow,
+    fsync_parent_nofollow,
+    open_append_nofollow,
+    read_regular_nofollow as strict_read_regular_nofollow,
+)
+
 try:
     import resource
 except ImportError:  # pragma: no cover - the runner rejects such platforms.
@@ -43,8 +65,12 @@ except ImportError:  # pragma: no cover - the runner rejects such platforms.
 
 HEX40_OR_64 = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
-RESULT_TOKENS = {"sat", "unsat", "unknown"}
+RESULT_TOKENS = {"sat", "unsat", "unknown", "unsupported"}
 PLACEHOLDERS = {"binary", "instance", "budget_s"}
+EVIDENCE_SCHEMA = "euf-viper.production-evidence.v3"
+RUN_NONCE_ENV = "EUF_VIPER_RUN_NONCE"
+TRUSTED_EXECUTABLE_SHA256_ENV = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
+EVIDENCE_CONTROL_ENV = {RUN_NONCE_ENV, TRUSTED_EXECUTABLE_SHA256_ENV}
 
 TOP_LEVEL_KEYS = {
     "schema_version",
@@ -127,6 +153,11 @@ SOLVER_KEYS = {
     "version_output_sha256",
     "environment",
 }
+EVIDENCE_CONTRACT_KEYS = {
+    "schema",
+    "argv_flag",
+    "accepted_decisive_statuses",
+}
 EXECUTION_KEYS = {
     "resource_model",
     "cpu_ids",
@@ -191,6 +222,22 @@ RUN_RECORD_KEYS = {
     "previous_record_sha256",
     "record_sha256",
 }
+PRODUCTION_EVIDENCE_KEYS = {
+    "path",
+    "sha256",
+    "bytes",
+    "schema",
+    "source_sha256",
+    "solver_revision",
+    "solver_executable_sha256",
+    "solver_configuration",
+    "solver_config_sha256",
+    "solver_runtime_config_sha256",
+    "solver_build_sha256",
+    "run_nonce",
+    "status",
+    "backend_status",
+}
 
 
 class CampaignError(RuntimeError):
@@ -216,6 +263,7 @@ class Job:
     argv: list[str]
     environment: dict[str, str]
     environment_sha256: str
+    evidence_path: Path | None
 
     @property
     def key(self) -> dict[str, Any]:
@@ -257,12 +305,12 @@ def canonical_bytes(value: Any) -> bytes:
             value,
             sort_keys=True,
             separators=(",", ":"),
-            ensure_ascii=True,
+            ensure_ascii=False,
             allow_nan=False,
         )
     except (TypeError, ValueError) as error:
         raise CampaignError(f"value is not canonical JSON: {error}") from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -270,14 +318,19 @@ def sha256_bytes(value: bytes) -> str:
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
     try:
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
-    except OSError as error:
+        _, content = strict_read_regular_nofollow(path, f"hash input {path}")
+    except StrictArtifactError as error:
         raise CampaignError(f"cannot hash {path}: {error}") from error
-    return digest.hexdigest()
+    return sha256_bytes(content)
+
+
+def read_regular_nofollow(path: Path, context: str) -> bytes:
+    try:
+        _, content = strict_read_regular_nofollow(path, context)
+        return content
+    except StrictArtifactError as error:
+        raise CampaignError(str(error)) from error
 
 
 def utc_now() -> str:
@@ -312,8 +365,8 @@ def parse_json_strict(text: str, context: str) -> Any:
 
 def read_json_strict(path: Path, context: str) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
+        text = read_regular_nofollow(path, context).decode("utf-8")
+    except (OSError, UnicodeError, CampaignError) as error:
         raise CampaignError(f"cannot read {context} {path}: {error}") from error
     value = parse_json_strict(text, f"{context} {path}")
     if type(value) is not dict:
@@ -381,7 +434,7 @@ def require_absolute_path(value: Any, context: str) -> Path:
     path = Path(require_string(value, context))
     if not path.is_absolute():
         raise CampaignError(f"{context} must be an absolute path")
-    return Path(os.path.abspath(path))
+    return canonical_nofollow_path(path)
 
 
 def _path_under(path: Path, root: Path, context: str) -> None:
@@ -394,7 +447,7 @@ def _path_under(path: Path, root: Path, context: str) -> None:
 def _output_path(directory: Path, value: Any, context: str) -> Path:
     configured = Path(require_string(value, context))
     path = configured if configured.is_absolute() else directory / configured
-    path = Path(os.path.abspath(path))
+    path = canonical_nofollow_path(path)
     _path_under(path, directory, context)
     if path == directory:
         raise CampaignError(f"{context} must name a file below output.directory")
@@ -412,6 +465,49 @@ def _validate_environment(value: Any, context: str) -> dict[str, str]:
             raise CampaignError(f"{context} key {key!r} cannot contain '='")
         result[key] = setting
     return result
+
+
+def expected_runtime_config(environment: dict[str, str]) -> dict[str, str]:
+    config = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("EUF_VIPER_") and key not in EVIDENCE_CONTROL_ENV
+    }
+    resolved: dict[str, str] = {}
+    for name, default, output_name in (
+        ("EUF_VIPER_DIRECT_ROOT_CNF", "1", "resolved.direct_root_cnf"),
+        ("EUF_VIPER_DIRECT_NEGATED_ROOT", "0", "resolved.direct_negated_root"),
+    ):
+        value = environment.get(name, default)
+        if value not in {"0", "1"}:
+            raise CampaignError(f"{name} must be 0 or 1 for evidence-enabled jobs")
+        resolved[output_name] = value
+    config.update(resolved)
+    config.update(
+        {
+            "resolved.production_evidence_contract": "deterministic-cnf-transcript-v1",
+            "resolved.production_evidence_mode": "cnf-assignment-transcript",
+            "resolved.eq_abstraction": "off",
+            "resolved.finite_domain": "off",
+            "resolved.full_ackermann": "off",
+            "resolved.chordal_transitivity": "off",
+            "resolved.refinement_mode": "model-cuts",
+        }
+    )
+    return dict(sorted(config.items()))
+
+
+def _validate_evidence_contract(value: Any, context: str) -> dict[str, Any]:
+    contract = require_exact_keys(value, EVIDENCE_CONTRACT_KEYS, context)
+    if contract["schema"] != EVIDENCE_SCHEMA:
+        raise CampaignError(f"{context}.schema is unsupported")
+    if contract["argv_flag"] != "--evidence-out":
+        raise CampaignError(f"{context}.argv_flag must be --evidence-out")
+    if contract["accepted_decisive_statuses"] != ["sat"]:
+        raise CampaignError(
+            f"{context} must accept SAT and fail closed on production UNSAT"
+        )
+    return contract
 
 
 def _validate_template(value: Any, context: str) -> list[str]:
@@ -484,6 +580,7 @@ def build_jobs(
     solver_paths: tuple[Path, ...],
     budgets: list[int | float],
     execution: dict[str, Any],
+    output_directory: Path,
     run_selection: list[dict[str, str]] | None = None,
 ) -> tuple[Job, ...]:
     jobs: list[Job] = []
@@ -520,6 +617,22 @@ def build_jobs(
                     instance_paths[instance_index],
                     budget_s,
                 )
+                evidence_path = None
+                evidence = solver.get("evidence")
+                if evidence is not None:
+                    forbidden_controls = sorted(EVIDENCE_CONTROL_ENV & environment.keys())
+                    if forbidden_controls:
+                        raise CampaignError(
+                            "locked environment cannot set runner-owned evidence controls: "
+                            f"{forbidden_controls!r}"
+                        )
+                    expected_runtime_config(environment)
+                    evidence_path = (
+                        output_directory
+                        / "production-evidence"
+                        / f"run-{sequence:08d}.json"
+                    )
+                    argv.extend([evidence["argv_flag"], str(evidence_path)])
                 jobs.append(
                     Job(
                         sequence=sequence,
@@ -533,6 +646,7 @@ def build_jobs(
                         argv=argv,
                         environment=environment,
                         environment_sha256=sha256_bytes(canonical_bytes(environment)),
+                        evidence_path=evidence_path,
                     )
                 )
                 repetitions[solver_index] += 1
@@ -735,7 +849,12 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
     seen_solver_ids: set[str] = set()
     for index, raw_solver in enumerate(raw_solvers):
         context = f"solvers[{index}]"
-        solver = require_exact_keys(raw_solver, SOLVER_KEYS, context)
+        solver_keys = SOLVER_KEYS | (
+            {"evidence"}
+            if type(raw_solver) is dict and "evidence" in raw_solver
+            else set()
+        )
+        solver = require_exact_keys(raw_solver, solver_keys, context)
         identifier = require_string(solver["id"], f"{context}.id")
         if identifier in seen_solver_ids:
             raise CampaignError(f"duplicate solver id {identifier!r}")
@@ -769,6 +888,10 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         solver["environment"] = _validate_environment(
             solver["environment"], f"{context}.environment"
         )
+        if "evidence" in solver:
+            solver["evidence"] = _validate_evidence_contract(
+                solver["evidence"], f"{context}.evidence"
+            )
         solvers.append(solver)
         solver_paths.append(solver_path)
         seen_solver_ids.add(identifier)
@@ -970,6 +1093,7 @@ def load_and_validate_lock(path: Path) -> LockedCampaign:
         tuple(solver_paths),
         budgets,
         execution,
+        output_directory,
         run_selection,
     )
     return LockedCampaign(
@@ -1412,16 +1536,92 @@ def _hash_and_size(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), byte_count
 
 
+def _production_evidence_binding(
+    job: Job,
+    output_directory: Path,
+    repository_revision: str,
+    result_token: str | None,
+    expected_run_nonce: str,
+) -> dict[str, Any] | None:
+    contract = job.solver.get("evidence")
+    if contract is None:
+        if job.evidence_path is not None:
+            raise CampaignError("job has an evidence path without a locked contract")
+        return None
+    if job.evidence_path is None:
+        raise CampaignError("evidence-enabled job lacks an output path")
+    path = job.evidence_path
+    if not os.path.lexists(path):
+        if result_token in {"sat", "unsat"}:
+            raise CampaignError(
+                f"decisive result {result_token!r} omitted production evidence for "
+                f"{job.instance['relative_path']!r}"
+            )
+        return None
+    if not path.is_absolute():
+        raise CampaignError("production evidence path must be absolute")
+    _path_under(path, output_directory, "production evidence path")
+    locked_runtime_config = expected_runtime_config(job.environment)
+    if result_token == "unsat":
+        raise CampaignError("production evidence contract never accepts UNSAT")
+    try:
+        checked = validate_production_evidence(
+            path,
+            Path(job.instance["path"]),
+            expected_source_sha256=job.instance["sha256"],
+            expected_revision=repository_revision,
+            expected_status=("sat" if result_token == "sat" else None),
+            expected_executable_sha256=job.solver["sha256"],
+            expected_runtime_config=locked_runtime_config,
+            expected_run_nonce=expected_run_nonce,
+        )
+    except (OSError, ProductionEvidenceError) as error:
+        raise CampaignError(
+            f"independent production-evidence check failed: {error}"
+        ) from error
+    if checked["schema"] != contract["schema"]:
+        raise CampaignError("production evidence schema differs from the solver lock")
+    if checked["solver_executable_sha256"] != job.solver["sha256"]:
+        raise CampaignError(
+            "production evidence executable SHA-256 differs from the solver lock"
+        )
+    status = checked["status"]
+    backend_status = checked["backend_status"]
+    if result_token == "sat" and (status, backend_status) != ("sat", "sat"):
+        raise CampaignError("production evidence status differs from stdout")
+    return {
+        "path": path.relative_to(output_directory).as_posix(),
+        "sha256": checked["evidence_sha256"],
+        "bytes": checked["evidence_bytes"],
+        "schema": checked["schema"],
+        "source_sha256": checked["source_sha256"],
+        "solver_revision": checked["solver_revision"],
+        "solver_executable_sha256": checked["solver_executable_sha256"],
+        "solver_configuration": job.solver["configuration"],
+        "solver_config_sha256": sha256_bytes(canonical_bytes(job.solver)),
+        "solver_runtime_config_sha256": checked["solver_config_sha256"],
+        "solver_build_sha256": checked["solver_build_sha256"],
+        "run_nonce": checked["run_nonce"],
+        "status": status,
+        "backend_status": backend_status,
+    }
+
+
 def run_job(
     job: Job,
     invocation: int,
     lock_sha256: str,
     output_directory: Path,
+    repository_revision: str,
     memory_bytes: int,
     grace_s: float,
     enforce_affinity: bool,
     enforce_address_space: bool,
 ) -> dict[str, Any]:
+    if job.evidence_path is not None and job.evidence_path.exists():
+        raise CampaignError(
+            f"refusing to reuse production evidence path {job.evidence_path}"
+        )
     stdout_fd, stdout_name = tempfile.mkstemp(
         prefix=".locked-stdout-", dir=output_directory
     )
@@ -1441,6 +1641,11 @@ def run_job(
     child_user: float | None = None
     child_system: float | None = None
     max_rss_bytes: int | None = None
+    run_nonce = secrets.token_hex(32) if "evidence" in job.solver else ""
+    child_environment = dict(job.environment)
+    if run_nonce:
+        child_environment[RUN_NONCE_ENV] = run_nonce
+        child_environment[TRUSTED_EXECUTABLE_SHA256_ENV] = job.solver["sha256"]
     try:
         try:
             process = subprocess.Popen(
@@ -1448,7 +1653,7 @@ def run_job(
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
-                env=job.environment,
+                env=child_environment,
                 close_fds=True,
                 start_new_session=True,
                 preexec_fn=_preexec_setup(
@@ -1502,7 +1707,14 @@ def run_job(
             if child_user is not None and child_system is not None
             else None
         )
-        return {
+        evidence_binding = _production_evidence_binding(
+            job,
+            output_directory,
+            repository_revision,
+            result_token,
+            run_nonce,
+        )
+        record = {
             "record_type": "run",
             "schema_version": 1,
             "lock_sha256": lock_sha256,
@@ -1542,6 +1754,9 @@ def run_job(
             "result_token": result_token,
             "result_token_status": result_status,
         }
+        if "evidence" in job.solver:
+            record["production_evidence"] = evidence_binding
+        return record
     finally:
         for temporary in (stdout_path, stderr_path):
             try:
@@ -1570,8 +1785,60 @@ def _same_json(left: Any, right: Any) -> bool:
     return canonical_bytes(left) == canonical_bytes(right)
 
 
+def _validate_recorded_production_evidence(
+    value: Any, job: Job, result_token: str | None, context: str
+) -> None:
+    if value is None:
+        if result_token in {"sat", "unsat"}:
+            raise CampaignError(f"{context} is missing for a decisive result")
+        return
+    binding = require_exact_keys(value, PRODUCTION_EVIDENCE_KEYS, context)
+    require_string(binding["path"], f"{context}.path")
+    require_hash(binding["sha256"], f"{context}.sha256")
+    require_int(binding["bytes"], f"{context}.bytes", minimum=1)
+    require_hash(binding["source_sha256"], f"{context}.source_sha256")
+    require_hash(
+        binding["solver_executable_sha256"],
+        f"{context}.solver_executable_sha256",
+    )
+    require_hash(binding["solver_config_sha256"], f"{context}.solver_config_sha256")
+    require_hash(
+        binding["solver_runtime_config_sha256"],
+        f"{context}.solver_runtime_config_sha256",
+    )
+    require_hash(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    require_hash(binding["run_nonce"], f"{context}.run_nonce")
+    if binding["source_sha256"] != job.instance["sha256"]:
+        raise CampaignError(f"{context} source hash differs from the job")
+    if binding["solver_configuration"] != job.solver["configuration"]:
+        raise CampaignError(f"{context} solver configuration differs from the job")
+    if binding["solver_config_sha256"] != sha256_bytes(canonical_bytes(job.solver)):
+        raise CampaignError(f"{context} solver config hash differs from the job")
+    if binding["solver_executable_sha256"] != job.solver["sha256"]:
+        raise CampaignError(f"{context} executable hash differs from the job")
+    contract = job.solver["evidence"]
+    if binding["schema"] != contract["schema"]:
+        raise CampaignError(f"{context} schema differs from the job")
+    if (binding["status"], binding["backend_status"]) not in {
+        ("sat", "sat"),
+        ("unsupported", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise CampaignError(f"{context} has an incoherent status pair")
+    if result_token in {"sat", "unsat"} and (
+        result_token not in contract["accepted_decisive_statuses"]
+        or binding["status"] != result_token
+        or binding["backend_status"] != result_token
+    ):
+        raise CampaignError(f"{context} does not certify the decisive result")
+
+
 def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int]) -> None:
-    require_exact_keys(record, RUN_RECORD_KEYS, "journal run record")
+    expected_keys = RUN_RECORD_KEYS | (
+        {"production_evidence"} if "evidence" in job.solver else set()
+    )
+    require_exact_keys(record, expected_keys, "journal run record")
     invocation = require_int(record["invocation"], "journal run invocation", minimum=0)
     if invocation not in invocations:
         raise CampaignError("journal run references an unknown invocation")
@@ -1627,6 +1894,48 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
         raise CampaignError("journal run has invalid result_token_status")
     if (record["result_token"] is None) == (record["result_token_status"] == "valid"):
         raise CampaignError("journal run result token and status disagree")
+    if "evidence" in job.solver:
+        _validate_recorded_production_evidence(
+            record["production_evidence"],
+            job,
+            record["result_token"],
+            "journal run production_evidence",
+        )
+
+
+def rehash_completed_sidecars(
+    campaign: LockedCampaign, runs: list[dict[str, Any]]
+) -> None:
+    for index, record in enumerate(runs):
+        job = campaign.jobs[index]
+        if "evidence" not in job.solver:
+            continue
+        binding = record["production_evidence"]
+        if binding is None:
+            continue
+        try:
+            actual = _production_evidence_binding(
+                job,
+                campaign.output_directory,
+                campaign.payload["repository"]["commit"],
+                record["result_token"],
+                binding["run_nonce"],
+            )
+        except CampaignError as error:
+            raise CampaignError(
+                f"completed production evidence cannot be rehashed at run {job.sequence}: {error}"
+            ) from error
+        if not _same_json(actual, binding):
+            raise CampaignError(
+                f"completed production evidence binding drift at run {job.sequence}"
+            )
+
+
+def _fsync_parent(path: Path) -> None:
+    try:
+        fsync_parent_nofollow(path, f"journal {path}")
+    except StrictArtifactError as error:
+        raise CampaignError(str(error)) from error
 
 
 class Journal:
@@ -1641,20 +1950,18 @@ class Journal:
         self.runs: list[dict[str, Any]] = []
 
     def __enter__(self) -> "Journal":
-        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
-        if hasattr(os, "O_CLOEXEC"):
-            flags |= os.O_CLOEXEC
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
         try:
-            self.fd = os.open(self.path, flags, 0o600)
+            self.path, self.fd = open_append_nofollow(
+                self.path, f"campaign journal {self.path}"
+            )
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _fsync_parent(self.path)
         except BlockingIOError as error:
             if self.fd is not None:
                 os.close(self.fd)
                 self.fd = None
             raise CampaignError(f"journal is locked by another runner: {self.path}") from error
-        except OSError as error:
+        except (OSError, StrictArtifactError) as error:
             if self.fd is not None:
                 os.close(self.fd)
                 self.fd = None
@@ -1681,16 +1988,32 @@ class Journal:
             chunks.append(block)
         return b"".join(chunks)
 
+    def sha256(self) -> str:
+        assert self.fd is not None
+        try:
+            assert_descriptor_path_nofollow(
+                self.path, self.fd, f"campaign journal {self.path}"
+            )
+            content = self._read_all()
+            assert_descriptor_path_nofollow(
+                self.path, self.fd, f"campaign journal {self.path}"
+            )
+        except StrictArtifactError as error:
+            raise CampaignError(str(error)) from error
+        return sha256_bytes(content)
+
     def _load(self) -> None:
         raw = self._read_all()
         if not raw:
             return
+        if not raw.endswith(b"\n"):
+            raise CampaignError(
+                f"journal {self.path} ends with an incomplete frame; ordinary resume refuses recovery"
+            )
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as error:
             raise CampaignError(f"journal is not UTF-8: {error}") from error
-        if not text.endswith("\n"):
-            raise CampaignError("journal ends with a partial record; refuse truncation")
         seen_run_keys: set[bytes] = set()
         seen_invocations: set[int] = set()
         last_hash: str | None = None
@@ -1703,6 +2026,10 @@ class Journal:
                     f"journal {self.path}:{line_number} must be an object"
                 )
             record = value
+            if canonical_bytes(record) != (line + "\n").encode("utf-8"):
+                raise CampaignError(
+                    f"journal {self.path}:{line_number} is not canonical immutable JSON"
+                )
             if record.get("record_type") == "run":
                 key_bytes = _run_key_bytes(record)
                 if key_bytes in seen_run_keys:
@@ -1721,7 +2048,7 @@ class Journal:
                 raise CampaignError(
                     f"journal {self.path}:{line_number} record hash drift"
                 )
-            if record.get("schema_version") != 1:
+            if type(record.get("schema_version")) is not int or record["schema_version"] != 1:
                 raise CampaignError(
                     f"journal {self.path}:{line_number} has incompatible schema"
                 )
@@ -1783,43 +2110,22 @@ class Journal:
         return complete
 
 
-def atomic_write_immutable(path: Path, content: bytes) -> None:
-    if path.exists() or path.is_symlink():
-        try:
-            existing = path.read_bytes()
-        except OSError as error:
-            raise CampaignError(f"cannot read existing final output {path}: {error}") from error
-        if existing != content:
-            raise CampaignError(f"existing final output drift: {path}")
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(temporary_name)
+def atomic_write_immutable(
+    path: Path,
+    content: bytes,
+    *,
+    pre_publish: Callable[[], None] | None = None,
+) -> None:
     try:
-        offset = 0
-        while offset < len(content):
-            written = os.write(descriptor, content[offset:])
-            if written <= 0:
-                raise CampaignError(f"short write to temporary output {temporary}")
-            offset += written
-        os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = -1
-        os.replace(temporary, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        atomic_write_nofollow(
+            path,
+            content,
+            f"final output {path}",
+            immutable=True,
+            pre_publish=pre_publish,
+        )
+    except StrictArtifactError as error:
+        raise CampaignError(str(error)) from error
 
 
 def raw_output_bytes(runs: list[dict[str, Any]]) -> bytes:
@@ -1877,9 +2183,17 @@ def build_summary(
 
 
 def _ensure_output_paths(campaign: LockedCampaign) -> None:
-    campaign.output_directory.mkdir(parents=True, exist_ok=True)
-    for path in (campaign.journal_path, campaign.raw_path, campaign.summary_path):
-        path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        ensure_directory_nofollow(campaign.output_directory, "campaign output")
+        for path in (campaign.journal_path, campaign.raw_path, campaign.summary_path):
+            ensure_parent_directory_nofollow(path, f"campaign output {path}")
+        if any(job.evidence_path is not None for job in campaign.jobs):
+            ensure_directory_nofollow(
+                campaign.output_directory / "production-evidence",
+                "production evidence directory",
+            )
+    except StrictArtifactError as error:
+        raise CampaignError(str(error)) from error
 
 
 def run_campaign(lock_path: Path) -> dict[str, Any]:
@@ -1894,6 +2208,7 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
     enforce_address_space = capabilities["address_space_limit"]["enforced"]
 
     with Journal(campaign.journal_path, lock_sha256, campaign.jobs) as journal:
+        rehash_completed_sidecars(campaign, journal.runs)
         if len(journal.runs) < len(campaign.jobs):
             if campaign.raw_path.exists() or campaign.summary_path.exists():
                 raise CampaignError(
@@ -1921,6 +2236,7 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
                     invocation_index,
                     lock_sha256,
                     campaign.output_directory,
+                    campaign.payload["repository"]["commit"],
                     memory_bytes,
                     grace_s,
                     enforce_affinity,
@@ -1937,13 +2253,23 @@ def run_campaign(lock_path: Path) -> dict[str, Any]:
 
         if len(journal.runs) != len(campaign.jobs):
             raise CampaignError("journal did not reach the complete schedule")
+        rehash_completed_sidecars(campaign, journal.runs)
         assert_all_unchanged(snapshots)
         raw_bytes = raw_output_bytes(journal.runs)
         raw_hash = sha256_bytes(raw_bytes)
         atomic_write_immutable(campaign.raw_path, raw_bytes)
-        journal_hash = sha256_file(campaign.journal_path)
+        journal_hash = journal.sha256()
         summary = build_summary(campaign, journal, raw_hash, journal_hash)
-        atomic_write_immutable(campaign.summary_path, canonical_bytes(summary))
+
+        def final_validation() -> None:
+            rehash_completed_sidecars(campaign, journal.runs)
+            assert_all_unchanged(snapshots)
+
+        atomic_write_immutable(
+            campaign.summary_path,
+            canonical_bytes(summary),
+            pre_publish=final_validation,
+        )
         return summary
 
 

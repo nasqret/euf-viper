@@ -18,9 +18,9 @@ SPEC.loader.exec_module(AUDIT)
 
 def canonical(value: object) -> bytes:
     return (
-        json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 class StagedShadowAuditTests(unittest.TestCase):

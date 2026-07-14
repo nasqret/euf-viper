@@ -159,6 +159,23 @@ class FreezeCampaignTests(unittest.TestCase):
         with self.assertRaisesRegex(FREEZER.FreezeError, "missing"):
             self._freeze(self.taxonomy)
 
+    def test_duplicate_solver_configuration_keys_are_rejected(self) -> None:
+        payload = self.solver_config.read_text(encoding="utf-8").rstrip()
+        self.solver_config.write_text(
+            payload[:-1] + ',"schema_version":1}\n', encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(FREEZER.FreezeError, "duplicate"):
+            self._freeze(self.taxonomy)
+
+    def test_boolean_solver_configuration_schema_is_rejected(self) -> None:
+        payload = json.loads(self.solver_config.read_text(encoding="utf-8"))
+        payload["schema_version"] = True
+        self.solver_config.write_text(json.dumps(payload), encoding="utf-8")
+
+        with self.assertRaisesRegex(FREEZER.FreezeError, "schema_version"):
+            self._freeze(self.taxonomy)
+
     def test_duplicate_manifest_path_is_rejected(self) -> None:
         original = self.manifest.read_text(encoding="utf-8")
         self.manifest.write_text(original + original, encoding="utf-8")

@@ -11,6 +11,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 
@@ -24,9 +25,9 @@ SPEC.loader.exec_module(SHADOW)
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -623,6 +624,104 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(resumed.returncode, 2, resumed.stderr)
             self.assertIn("record hash drift", resumed.stderr)
             self.assertEqual(fixture.call_log.read_text(encoding="utf-8"), calls_before)
+
+    def test_hash_framed_journal_rejects_an_incomplete_tail_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("family/case.smt2")
+            fixture.finalize()
+            first = fixture.run()
+            self.assertEqual(first.returncode, 0, first.stderr)
+            journal_path = fixture.journal_path()
+            calls_before = fixture.call_log.read_text(encoding="utf-8")
+            with journal_path.open("ab") as handle:
+                handle.write(b'{"record_type":"attempt","record_sha256":"partial')
+                handle.flush()
+                os.fsync(handle.fileno())
+            incomplete = journal_path.read_bytes()
+
+            resumed = fixture.run()
+
+            self.assertEqual(resumed.returncode, 2, resumed.stderr)
+            self.assertIn("incomplete frame", resumed.stderr)
+            self.assertEqual(journal_path.read_bytes(), incomplete)
+            self.assertEqual(fixture.call_log.read_text(encoding="utf-8"), calls_before)
+
+    def test_final_sidecar_mutation_cannot_publish_a_complete_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sidecar = root / "production-evidence" / "case.json"
+            sidecar.parent.mkdir()
+            sidecar.write_bytes(b"bound-sidecar\n")
+            sidecar_hash = sha256_file(sidecar)
+            work = {
+                "global_index": 0,
+                "relative_path": "family/case.smt2",
+                "expected_result": "sat",
+                "work_sha256": "1" * 64,
+                "production_evidence": [
+                    {
+                        "artifact_path": str(sidecar),
+                        "binding": {
+                            "sha256": sidecar_hash,
+                            "bytes": sidecar.stat().st_size,
+                        },
+                        "validation": {
+                            "evidence_sha256": sidecar_hash,
+                            "evidence_bytes": sidecar.stat().st_size,
+                        },
+                    }
+                ],
+            }
+            journal_path = root / "journal.jsonl"
+            journal_path.write_bytes(b"{}\n")
+            journal = SimpleNamespace(
+                path=journal_path,
+                last_hash="2" * 64,
+                sha256=lambda: sha256_file(journal_path),
+                attempts=[
+                    {
+                        "work_sha256": work["work_sha256"],
+                        "verified": True,
+                        "attempt": 1,
+                        "artifacts": {},
+                        "failure_kind": None,
+                    }
+                ],
+            )
+            plan = {
+                "campaign_id": "final-rehash-test",
+                "parent_lock_sha256": "3" * 64,
+                "parent_lock_file_sha256": "4" * 64,
+                "parent_raw_sha256": "5" * 64,
+                "record_sha256": "6" * 64,
+                "solver": {},
+                "checker": {},
+                "drat_trim": None,
+                "selection": {},
+            }
+            summary_path = root / "summary.json"
+            summary_path.write_bytes(canonical_bytes({"status": "in_progress"}))
+
+            def mutate_then_rehash() -> None:
+                sidecar.write_bytes(b"mutated-after-summary-render\n")
+                SHADOW.rehash_production_evidence([work])
+
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError, "no longer matches its campaign journal binding"
+            ):
+                SHADOW._write_summary(
+                    summary_path,
+                    journal,
+                    plan,
+                    [work],
+                    pre_publish=mutate_then_rehash,
+                )
+
+            self.assertEqual(
+                json.loads(summary_path.read_text(encoding="utf-8"))["status"],
+                "in_progress",
+            )
 
     def test_timeout_kills_descendant_process_group_and_is_not_verified(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

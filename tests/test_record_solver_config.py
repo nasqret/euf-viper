@@ -25,7 +25,16 @@ class RecordSolverConfigTests(unittest.TestCase):
             "#!/bin/sh\n"
             "case \"${1:-}\" in\n"
             "  --version|-version) echo 'euf-viper 4.16.0 1.3.4 2.7.0 2.9.2' ;;\n"
-            "  *) echo sat ;;\n"
+            "  *)\n"
+            "    previous=''\n"
+            "    for argument in \"$@\"; do\n"
+            "      if [ \"$previous\" = '--evidence-out' ]; then\n"
+            "        printf '%s\\n' '{\"backend_cnf\":{},\"backend_status\":\"sat\",\"limitations\":[],\"model\":{},\"run_nonce\":\"test\",\"schema\":\"euf-viper.production-evidence.v3\",\"solver\":{},\"source\":{},\"status\":\"sat\"}' > \"$argument\"\n"
+            "      fi\n"
+            "      previous=$argument\n"
+            "    done\n"
+            "    echo sat\n"
+            "    ;;\n"
             "esac\n",
             encoding="utf-8",
         )
@@ -82,7 +91,9 @@ class RecordSolverConfigTests(unittest.TestCase):
         spec["comparators"] = spec["comparators"][:-1]
         path = self.root / "campaign.json"
         path.write_text(json.dumps(spec), encoding="utf-8")
-        with self.assertRaisesRegex(RECORDER.SolverConfigError, "comparators must equal"):
+        with self.assertRaisesRegex(
+            RECORDER.SolverConfigError, "missing required comparators|comparators must equal"
+        ):
             RECORDER.load_versions(path)
 
     def test_smoke_rejects_wrong_result(self) -> None:

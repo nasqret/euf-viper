@@ -20,9 +20,9 @@ RUNNER = ROOT / "scripts" / "bench" / "run_locked_campaign.py"
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -694,6 +694,28 @@ class LockedCampaignRunnerTests(unittest.TestCase):
 
             self.assertEqual(resumed.returncode, 2, resumed.stderr)
             self.assertIn("duplicate run key", resumed.stderr)
+            self.assertEqual((fixture.root / "calls.log").read_text().count("\n"), 1)
+
+    def test_hash_framed_journal_rejects_an_incomplete_tail_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("case.smt2")
+            fixture.add_solver("solver-a")
+            fixture.finalize()
+            first = fixture.run()
+            self.assertEqual(first.returncode, 0, first.stderr)
+            journal_path = fixture.output / "journal.jsonl"
+            with journal_path.open("ab") as handle:
+                handle.write(b'{"record_type":"run","record_sha256":"partial')
+                handle.flush()
+                os.fsync(handle.fileno())
+            incomplete = journal_path.read_bytes()
+
+            resumed = fixture.run()
+
+            self.assertEqual(resumed.returncode, 2, resumed.stderr)
+            self.assertIn("incomplete frame", resumed.stderr)
+            self.assertEqual(journal_path.read_bytes(), incomplete)
             self.assertEqual((fixture.root / "calls.log").read_text().count("\n"), 1)
 
     @staticmethod

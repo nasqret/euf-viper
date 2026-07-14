@@ -1,0 +1,619 @@
+use super::{
+    BoolAtomKey, Problem, ProductionSatWitness, ProductionTranscriptEvent, RootCnfOptions,
+    SolveReport, SolveResult,
+};
+use serde::Serialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::env;
+use std::path::Path;
+
+pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v3";
+
+const RUN_NONCE_ENV: &str = "EUF_VIPER_RUN_NONCE";
+const TRUSTED_EXECUTABLE_SHA256_ENV: &str = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EvidenceDisposition {
+    DecisiveSat,
+    Unsupported,
+}
+
+#[derive(Serialize)]
+struct EvidenceSource {
+    path: String,
+    sha256: String,
+    bytes: usize,
+}
+
+#[derive(Serialize)]
+struct EvidenceSolver {
+    package_version: &'static str,
+    revision: &'static str,
+    dirty: bool,
+    executable_sha256: String,
+    backend: String,
+    config: BTreeMap<String, String>,
+    config_sha256: String,
+    build: EvidenceBuild,
+    build_sha256: String,
+}
+
+#[derive(Serialize)]
+struct EvidenceBuild {
+    features: Vec<String>,
+    target: &'static str,
+    profile: &'static str,
+    rustc: &'static str,
+    cargo: &'static str,
+    source_manifest_sha256: &'static str,
+}
+
+#[derive(Serialize)]
+struct EvidenceTerm {
+    id: usize,
+    function: String,
+    args: Vec<usize>,
+    sort: String,
+    class: usize,
+    internal: bool,
+    internal_kind: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EvidenceAtom {
+    Equality {
+        variable: usize,
+        left: usize,
+        right: usize,
+        value: bool,
+    },
+    BoolTerm {
+        variable: usize,
+        term: usize,
+        value: bool,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EvidenceVariable {
+    Auxiliary {
+        variable: usize,
+    },
+    Equality {
+        variable: usize,
+        left: usize,
+        right: usize,
+    },
+    BoolTerm {
+        variable: usize,
+        term: usize,
+    },
+}
+
+#[derive(Serialize)]
+struct EvidenceBackendCnf {
+    format: &'static str,
+    claim: &'static str,
+    var_count: usize,
+    variables: Vec<EvidenceVariable>,
+    initial_clause_count: usize,
+    initial_clauses_sha256: String,
+    initial_clauses: Vec<Vec<i32>>,
+    final_clause_count: usize,
+    final_clauses_sha256: String,
+    final_clauses: Vec<Vec<i32>>,
+    transcript_event_count: usize,
+    transcript_sha256: String,
+    transcript: Vec<EvidenceTranscriptEvent>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EvidenceTranscriptEvent {
+    Clause {
+        phase: &'static str,
+        clause: Vec<i32>,
+    },
+    Solve {
+        call: usize,
+    },
+    Assignment {
+        call: usize,
+        assignment: Vec<i32>,
+    },
+    Validation {
+        call: usize,
+        conflicts: Vec<Vec<i32>>,
+    },
+}
+
+#[derive(Serialize)]
+struct EvidenceModel {
+    assignment: Vec<i32>,
+    assignment_sha256: String,
+    terms: Vec<EvidenceTerm>,
+    atoms: Vec<EvidenceAtom>,
+    true_term: usize,
+    false_term: usize,
+}
+
+#[derive(Serialize)]
+struct ProductionEvidence {
+    schema: &'static str,
+    run_nonce: String,
+    status: &'static str,
+    backend_status: &'static str,
+    source: EvidenceSource,
+    solver: EvidenceSolver,
+    backend_cnf: Option<EvidenceBackendCnf>,
+    model: Option<EvidenceModel>,
+    limitations: Vec<String>,
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    let value = serde_json::to_value(value)
+        .map_err(|error| format!("failed to serialize production evidence: {error}"))?;
+    let mut bytes = serde_json::to_vec(&canonical_value(value))
+        .map_err(|error| format!("failed to encode production evidence: {error}"))?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn canonical_value(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.into_iter().map(canonical_value).collect()),
+        Value::Object(values) => {
+            let ordered = values
+                .into_iter()
+                .map(|(key, value)| (key, canonical_value(value)))
+                .collect();
+            Value::Object(ordered)
+        }
+        scalar => scalar,
+    }
+}
+
+fn required_sha256_environment(name: &str) -> Result<String, String> {
+    let value =
+        env::var(name).map_err(|_| format!("{name} is required for production evidence"))?;
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!("{name} must be a lowercase SHA-256"));
+    }
+    Ok(value)
+}
+
+fn trusted_executable_sha256() -> Result<String, String> {
+    let trusted = required_sha256_environment(TRUSTED_EXECUTABLE_SHA256_ENV)?;
+    let executable = env::current_exe()
+        .map_err(|error| format!("failed to locate production executable: {error}"))?;
+    let actual = sha256_hex(&crate::nofollow_io::read_regular(&executable)?);
+    if actual != trusted {
+        return Err(format!(
+            "production executable SHA-256 mismatch: expected {trusted}, got {actual}"
+        ));
+    }
+    Ok(actual)
+}
+
+fn build_manifest() -> Result<(EvidenceBuild, String), String> {
+    let features = env!("EUF_VIPER_BUILD_FEATURES")
+        .split(',')
+        .filter(|feature| !feature.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let build = EvidenceBuild {
+        features,
+        target: env!("EUF_VIPER_BUILD_TARGET"),
+        profile: env!("EUF_VIPER_BUILD_PROFILE"),
+        rustc: env!("EUF_VIPER_BUILD_RUSTC"),
+        cargo: env!("EUF_VIPER_BUILD_CARGO"),
+        source_manifest_sha256: env!("EUF_VIPER_BUILD_SOURCE_MANIFEST_SHA256"),
+    };
+    let digest = sha256_hex(&canonical_bytes(&build)?);
+    Ok((build, digest))
+}
+
+fn runtime_config(root_cnf: RootCnfOptions) -> Result<(BTreeMap<String, String>, String), String> {
+    let mut config = env::vars()
+        .filter(|(key, _)| {
+            key.starts_with("EUF_VIPER_")
+                && key != RUN_NONCE_ENV
+                && key != TRUSTED_EXECUTABLE_SHA256_ENV
+        })
+        .collect::<BTreeMap<_, _>>();
+    config.insert(
+        "resolved.direct_root_cnf".to_owned(),
+        u8::from(root_cnf.direct_root_cnf).to_string(),
+    );
+    config.insert(
+        "resolved.direct_negated_root".to_owned(),
+        u8::from(root_cnf.direct_negated_root).to_string(),
+    );
+    config.insert(
+        "resolved.production_evidence_contract".to_owned(),
+        "deterministic-cnf-transcript-v1".to_owned(),
+    );
+    config.insert(
+        "resolved.production_evidence_mode".to_owned(),
+        "cnf-assignment-transcript".to_owned(),
+    );
+    config.insert("resolved.eq_abstraction".to_owned(), "off".to_owned());
+    config.insert("resolved.finite_domain".to_owned(), "off".to_owned());
+    config.insert("resolved.full_ackermann".to_owned(), "off".to_owned());
+    config.insert("resolved.chordal_transitivity".to_owned(), "off".to_owned());
+    config.insert(
+        "resolved.refinement_mode".to_owned(),
+        "model-cuts".to_owned(),
+    );
+    let encoded = canonical_bytes(&config)?;
+    Ok((config, sha256_hex(&encoded)))
+}
+
+fn symbol_names(problem: &Problem) -> Result<Vec<String>, String> {
+    let symbols = problem
+        .symbols
+        .as_ref()
+        .ok_or_else(|| "production evidence parse did not retain symbol identity".to_owned())?;
+    let mut names = vec![None; symbols.ids.len()];
+    for (name, &id) in &symbols.ids {
+        let slot = names
+            .get_mut(id as usize)
+            .ok_or_else(|| format!("symbol ID {id} is out of range"))?;
+        if slot.replace(name.clone()).is_some() {
+            return Err(format!("duplicate symbol ID {id}"));
+        }
+    }
+    names
+        .into_iter()
+        .enumerate()
+        .map(|(id, name)| name.ok_or_else(|| format!("missing symbol name for ID {id}")))
+        .collect()
+}
+
+fn internal_kind(name: &str) -> Option<String> {
+    let body = name.strip_prefix("@euf_viper_")?;
+    let (kind, ordinal) = body.rsplit_once('_')?;
+    ordinal
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| kind.to_owned())
+}
+
+fn build_model(problem: &Problem, witness: &ProductionSatWitness) -> Result<EvidenceModel, String> {
+    if witness.term_classes.len() != problem.arena.terms.len() {
+        return Err(format!(
+            "production witness has {} term classes for {} terms",
+            witness.term_classes.len(),
+            problem.arena.terms.len()
+        ));
+    }
+    let names = symbol_names(problem)?;
+    let mut terms = Vec::with_capacity(problem.arena.terms.len());
+    for (id, term) in problem.arena.terms.iter().enumerate() {
+        let function = names
+            .get(term.fun as usize)
+            .ok_or_else(|| format!("term {id} has unknown function ID {}", term.fun))?
+            .clone();
+        let internal = problem.internal_functions.contains(&term.fun);
+        let kind = internal.then(|| internal_kind(&function)).flatten();
+        if internal && kind.is_none() {
+            return Err(format!(
+                "internal function {function:?} lacks a stable evidence kind"
+            ));
+        }
+        terms.push(EvidenceTerm {
+            id,
+            function,
+            args: term.args.clone(),
+            sort: problem.sorts.name(term.sort).to_owned(),
+            class: witness.term_classes[id],
+            internal,
+            internal_kind: kind,
+        });
+    }
+    let atoms = witness
+        .atoms
+        .iter()
+        .map(|atom| match atom.atom {
+            BoolAtomKey::Eq(left, right) => EvidenceAtom::Equality {
+                variable: atom.variable,
+                left,
+                right,
+                value: atom.value,
+            },
+            BoolAtomKey::BoolTerm(term) => EvidenceAtom::BoolTerm {
+                variable: atom.variable,
+                term,
+                value: atom.value,
+            },
+        })
+        .collect();
+    let assignment_sha256 = sha256_hex(&canonical_bytes(&witness.assignment)?);
+    Ok(EvidenceModel {
+        assignment: witness.assignment.clone(),
+        assignment_sha256,
+        terms,
+        atoms,
+        true_term: witness.true_term,
+        false_term: witness.false_term,
+    })
+}
+
+fn build_backend_cnf(witness: &ProductionSatWitness) -> Result<EvidenceBackendCnf, String> {
+    let var_count = witness.assignment.len();
+    if witness.variables.len() != var_count {
+        return Err(format!(
+            "production witness has {} variable mappings for {var_count} variables",
+            witness.variables.len()
+        ));
+    }
+    let atoms_by_variable = witness
+        .atoms
+        .iter()
+        .map(|atom| (atom.variable, atom))
+        .collect::<BTreeMap<_, _>>();
+    if atoms_by_variable.len() != witness.atoms.len() {
+        return Err("production witness repeats an atom variable".to_owned());
+    }
+    let mut variables = Vec::with_capacity(var_count);
+    for (offset, atom) in witness.variables.iter().enumerate() {
+        let variable = offset + 1;
+        let mapped = match atom {
+            None => {
+                if atoms_by_variable.contains_key(&variable) {
+                    return Err(format!(
+                        "auxiliary variable {variable} is also listed as an atom"
+                    ));
+                }
+                EvidenceVariable::Auxiliary { variable }
+            }
+            Some(BoolAtomKey::Eq(left, right)) => {
+                let recorded = atoms_by_variable
+                    .get(&variable)
+                    .ok_or_else(|| format!("atom variable {variable} is omitted from the model"))?;
+                if !matches!(
+                    &recorded.atom,
+                    BoolAtomKey::Eq(recorded_left, recorded_right)
+                        if recorded_left == left && recorded_right == right
+                ) {
+                    return Err(format!(
+                        "atom variable {variable} has inconsistent metadata"
+                    ));
+                }
+                EvidenceVariable::Equality {
+                    variable,
+                    left: *left,
+                    right: *right,
+                }
+            }
+            Some(BoolAtomKey::BoolTerm(term)) => {
+                let recorded = atoms_by_variable
+                    .get(&variable)
+                    .ok_or_else(|| format!("atom variable {variable} is omitted from the model"))?;
+                if !matches!(
+                    &recorded.atom,
+                    BoolAtomKey::BoolTerm(recorded_term) if recorded_term == term
+                ) {
+                    return Err(format!(
+                        "atom variable {variable} has inconsistent metadata"
+                    ));
+                }
+                EvidenceVariable::BoolTerm {
+                    variable,
+                    term: *term,
+                }
+            }
+        };
+        variables.push(mapped);
+    }
+    if atoms_by_variable
+        .keys()
+        .any(|variable| *variable == 0 || *variable > var_count)
+    {
+        return Err("production model lists an out-of-range atom variable".to_owned());
+    }
+    let transcript = witness
+        .transcript
+        .iter()
+        .map(|event| match event {
+            ProductionTranscriptEvent::Clause { phase, clause } => {
+                EvidenceTranscriptEvent::Clause {
+                    phase,
+                    clause: clause.clone(),
+                }
+            }
+            ProductionTranscriptEvent::Solve { call } => {
+                EvidenceTranscriptEvent::Solve { call: *call }
+            }
+            ProductionTranscriptEvent::Assignment { call, assignment } => {
+                EvidenceTranscriptEvent::Assignment {
+                    call: *call,
+                    assignment: assignment.clone(),
+                }
+            }
+            ProductionTranscriptEvent::Validation { call, conflicts } => {
+                EvidenceTranscriptEvent::Validation {
+                    call: *call,
+                    conflicts: conflicts.clone(),
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    let initial_clause_count = witness.initial_clauses.len();
+    let initial_clauses_sha256 = sha256_hex(&canonical_bytes(&witness.initial_clauses)?);
+    let final_clause_count = witness.backend_clauses.len();
+    let final_clauses_sha256 = sha256_hex(&canonical_bytes(&witness.backend_clauses)?);
+    let transcript_event_count = transcript.len();
+    let transcript_sha256 = sha256_hex(&canonical_bytes(&transcript)?);
+    Ok(EvidenceBackendCnf {
+        format: "dimacs-literal-arrays",
+        claim: "clauses-supplied-through-backend-api",
+        var_count,
+        variables,
+        initial_clause_count,
+        initial_clauses_sha256,
+        initial_clauses: witness.initial_clauses.clone(),
+        final_clause_count,
+        final_clauses_sha256,
+        final_clauses: witness.backend_clauses.clone(),
+        transcript_event_count,
+        transcript_sha256,
+        transcript,
+    })
+}
+
+fn evidence_payload(
+    source_path: &Path,
+    source_bytes: &[u8],
+    problem: &Problem,
+    report: &SolveReport,
+    root_cnf: RootCnfOptions,
+) -> Result<(ProductionEvidence, EvidenceDisposition), String> {
+    let run_nonce = required_sha256_environment(RUN_NONCE_ENV)?;
+    let source = EvidenceSource {
+        path: source_path.display().to_string(),
+        sha256: sha256_hex(source_bytes),
+        bytes: source_bytes.len(),
+    };
+    let (config, config_sha256) = runtime_config(root_cnf)?;
+    let executable_sha256 = trusted_executable_sha256()?;
+    let (build, build_sha256) = build_manifest()?;
+    let solver = EvidenceSolver {
+        package_version: env!("CARGO_PKG_VERSION"),
+        revision: env!("EUF_VIPER_GIT_REVISION"),
+        dirty: env!("EUF_VIPER_GIT_DIRTY") != "0",
+        executable_sha256,
+        backend: report.backend.to_owned(),
+        config,
+        config_sha256,
+        build,
+        build_sha256,
+    };
+    match &report.result {
+        SolveResult::Sat => {
+            if report.backend == "congruence-closure" || solver.dirty {
+                let limitation = if solver.dirty {
+                    "dirty builds cannot emit decisive production evidence".to_owned()
+                } else {
+                    "congruence-closure SAT lacks a complete independent production-evidence contract"
+                        .to_owned()
+                };
+                return Ok((
+                    ProductionEvidence {
+                        schema: SCHEMA,
+                        run_nonce,
+                        status: "unsupported",
+                        backend_status: "sat",
+                        source,
+                        solver,
+                        backend_cnf: None,
+                        model: None,
+                        limitations: vec![limitation],
+                    },
+                    EvidenceDisposition::Unsupported,
+                ));
+            }
+            let witness = report.sat_witness.as_ref().ok_or_else(|| {
+                "production SAT result did not retain its same-run assignment/model".to_owned()
+            })?;
+            if witness.backend != report.backend {
+                return Err(
+                    "production SAT witness backend does not match solve backend".to_owned(),
+                );
+            }
+            let model = build_model(problem, witness)?;
+            let backend_cnf = build_backend_cnf(witness)?;
+            Ok((
+                ProductionEvidence {
+                    schema: SCHEMA,
+                    run_nonce,
+                    status: "sat",
+                    backend_status: "sat",
+                    source,
+                    solver,
+                    backend_cnf: Some(backend_cnf),
+                    model: Some(model),
+                    limitations: Vec::new(),
+                },
+                EvidenceDisposition::DecisiveSat,
+            ))
+        }
+        SolveResult::Unsat => Ok((
+            ProductionEvidence {
+                schema: SCHEMA,
+                run_nonce,
+                status: "unsupported",
+                backend_status: "unsat",
+                source,
+                solver,
+                backend_cnf: None,
+                model: None,
+                limitations: vec![format!(
+                    "backend {} returned UNSAT without a same-run independently replayable proof",
+                    report.backend
+                )],
+            },
+            EvidenceDisposition::Unsupported,
+        )),
+        SolveResult::Unsupported(reasons) => Ok((
+            ProductionEvidence {
+                schema: SCHEMA,
+                run_nonce,
+                status: "unsupported",
+                backend_status: "unsupported",
+                source,
+                solver,
+                backend_cnf: None,
+                model: None,
+                limitations: reasons.clone(),
+            },
+            EvidenceDisposition::Unsupported,
+        )),
+    }
+}
+
+pub(crate) fn write(
+    output: &Path,
+    source_path: &Path,
+    source_bytes: &[u8],
+    problem: &Problem,
+    report: &SolveReport,
+    root_cnf: RootCnfOptions,
+) -> Result<EvidenceDisposition, String> {
+    let (payload, disposition) =
+        evidence_payload(source_path, source_bytes, problem, report, root_cnf)?;
+    crate::nofollow_io::atomic_write_immutable(output, &canonical_bytes(&payload)?)?;
+    Ok(disposition)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_config_hash_is_stable() {
+        let mut left = BTreeMap::new();
+        left.insert("b".to_owned(), "2".to_owned());
+        left.insert("a".to_owned(), "1".to_owned());
+        let mut right = BTreeMap::new();
+        right.insert("a".to_owned(), "1".to_owned());
+        right.insert("b".to_owned(), "2".to_owned());
+        assert_eq!(
+            canonical_bytes(&left).unwrap(),
+            canonical_bytes(&right).unwrap()
+        );
+    }
+}

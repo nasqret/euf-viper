@@ -6,10 +6,22 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import sys
 from pathlib import Path
 from typing import Any
+
+
+CERT_DIR = Path(__file__).resolve().parents[1] / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from strict_artifacts import (  # noqa: E402
+    StrictArtifactError,
+    read_regular_nofollow,
+    strict_json_loads,
+)
 
 
 REQUIRED_COMPARATORS = {"z3", "cvc5", "yices2", "opensmt"}
@@ -30,12 +42,48 @@ REQUIRED_TRACKS = {
 }
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+TOP_LEVEL_KEYS = {
+    "schema_version",
+    "campaign_id",
+    "status",
+    "scope",
+    "baseline",
+    "release_lock",
+    "comparators",
+    "corpora",
+    "budgets_s",
+    "objectives",
+    "promotion_policy",
+    "tracks",
+    "stages",
+    "unresolved_plan_disposition",
+    "required_artifacts",
+}
 
 
 class CampaignSpecError(ValueError):
     def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__(errors[0] if errors else "invalid campaign specification")
+
+
+def _keys(
+    value: dict[str, Any],
+    required: set[str],
+    allowed: set[str],
+    field: str,
+    errors: list[str],
+) -> None:
+    missing = sorted(required - set(value))
+    unknown = sorted(set(value) - allowed)
+    if missing or unknown:
+        errors.append(
+            f"{field} has incompatible keys: missing={missing!r}, unknown={unknown!r}"
+        )
+
+
+def _finite_number(value: Any) -> bool:
+    return type(value) in {int, float} and math.isfinite(value)
 
 
 def _objects(value: Any, field: str, errors: list[str]) -> list[dict[str, Any]]:
@@ -71,7 +119,9 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if not isinstance(spec, dict):
         raise CampaignSpecError(["campaign root must be an object"])
 
-    if spec.get("schema_version") != 1:
+    _keys(spec, TOP_LEVEL_KEYS, TOP_LEVEL_KEYS, "campaign root", errors)
+
+    if type(spec.get("schema_version")) is not int or spec["schema_version"] != 1:
         errors.append("schema_version must be 1")
     if not isinstance(spec.get("campaign_id"), str) or not spec["campaign_id"]:
         errors.append("campaign_id must be a non-empty string")
@@ -82,6 +132,14 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if not isinstance(scope, dict):
         errors.append("scope must be an object")
     else:
+        scope_keys = {
+            "logic",
+            "standalone_solver",
+            "primary_resource_model",
+            "heavy_compute_site",
+            "cas_site",
+        }
+        _keys(scope, scope_keys, scope_keys, "scope", errors)
         if scope.get("logic") != "QF_UF":
             errors.append("scope.logic must be QF_UF")
         if scope.get("standalone_solver") is not True:
@@ -93,6 +151,16 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if not isinstance(baseline, dict):
         errors.append("baseline must be an object")
     else:
+        baseline_keys = {
+            "repository_head",
+            "solver_revision",
+            "binary_sha256",
+            "reference_campaign",
+            "reference_corpus",
+            "reference_timeout_s",
+            "sat_backend",
+        }
+        _keys(baseline, baseline_keys, baseline_keys, "baseline", errors)
         if not HEX40.fullmatch(str(baseline.get("repository_head", ""))):
             errors.append("baseline.repository_head must be a 40-digit Git hash")
         if not HEX40.fullmatch(str(baseline.get("solver_revision", ""))):
@@ -104,6 +172,13 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if not isinstance(release_lock, dict):
         errors.append("release_lock must be an object")
     else:
+        _keys(
+            release_lock,
+            {"path", "sha256"},
+            {"path", "sha256"},
+            "release_lock",
+            errors,
+        )
         if not isinstance(release_lock.get("path"), str) or not release_lock["path"]:
             errors.append("release_lock.path must be a non-empty string")
         if not HEX64.fullmatch(str(release_lock.get("sha256", ""))):
@@ -116,6 +191,13 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         errors.append(f"missing required comparators: {missing_comparators!r}")
     for comparator in comparators:
         identifier = comparator.get("id", "<unknown>")
+        _keys(
+            comparator,
+            {"id", "version", "pin_status", "source"},
+            {"id", "version", "pin_status", "source", "configurations"},
+            f"comparator {identifier!r}",
+            errors,
+        )
         for field in ("version", "pin_status", "source"):
             if not isinstance(comparator.get(field), str) or not comparator[field]:
                 errors.append(f"comparator {identifier!r} requires {field}")
@@ -130,8 +212,27 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         if required not in corpus_ids:
             errors.append(f"missing required corpus {required!r}")
     for corpus in corpora:
+        identifier = corpus.get("id", "<unknown>")
+        _keys(
+            corpus,
+            {"id", "instances", "role", "status"},
+            {
+                "id",
+                "instances",
+                "role",
+                "status",
+                "manifest",
+                "manifest_sha256",
+                "source",
+                "source_commit",
+                "source_sha256",
+                "split_rule",
+            },
+            f"corpus {identifier!r}",
+            errors,
+        )
         count = corpus.get("instances")
-        if count is not None and (not isinstance(count, int) or count <= 0):
+        if count is not None and (type(count) is not int or count <= 0):
             errors.append(f"corpus {corpus.get('id')!r} has invalid instances")
 
     budgets = spec.get("budgets_s")
@@ -143,6 +244,13 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if objective_ids != REQUIRED_OBJECTIVES:
         errors.append(f"objective ids must equal {sorted(REQUIRED_OBJECTIVES)!r}")
     for objective in objectives:
+        _keys(
+            objective,
+            {"id", "title", "gate"},
+            {"id", "title", "gate"},
+            f"objective {objective.get('id')!r}",
+            errors,
+        )
         if not objective.get("title") or not objective.get("gate"):
             errors.append(f"objective {objective.get('id')!r} requires title and gate")
 
@@ -150,17 +258,56 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if not isinstance(policy, dict):
         errors.append("promotion_policy must be an object")
     else:
+        policy_keys = {
+            "wrong_answers_allowed",
+            "execution_errors_allowed",
+            "coverage_loss_allowed",
+            "minimum_speedup",
+            "confidence_level",
+            "superiority_confidence_level",
+            "family_cluster_bootstrap",
+            "coverage_test",
+            "multiplicity_correction",
+            "primary_ranking",
+            "paired_order",
+            "required_cpu_classes",
+            "required_independent_full_runs",
+            "required_primary_speedups",
+            "full_corpus_gate_before_default",
+            "held_out_gate_before_superiority_claim",
+            "family_identity_as_runtime_feature",
+            "path_or_content_hash_as_runtime_feature",
+        }
+        _keys(policy, policy_keys, policy_keys, "promotion_policy", errors)
         for field in (
             "wrong_answers_allowed",
             "execution_errors_allowed",
             "coverage_loss_allowed",
         ):
-            if policy.get(field) != 0:
+            if type(policy.get(field)) is not int or policy[field] != 0:
                 errors.append(f"promotion_policy.{field} must be 0")
-        if policy.get("minimum_speedup", 0) < 1.0:
+        if not _finite_number(policy.get("minimum_speedup")) or policy["minimum_speedup"] < 1.0:
             errors.append("promotion_policy.minimum_speedup must be at least 1.0")
-        if policy.get("superiority_confidence_level", 0) < 0.99:
+        if (
+            not _finite_number(policy.get("superiority_confidence_level"))
+            or policy["superiority_confidence_level"] < 0.99
+        ):
             errors.append("superiority confidence level must be at least 0.99")
+        if (
+            not _finite_number(policy.get("confidence_level"))
+            or not 0.0 < policy["confidence_level"] < 1.0
+        ):
+            errors.append("confidence_level must be a finite probability")
+        speedups = policy.get("required_primary_speedups")
+        if (
+            type(speedups) is not list
+            or not speedups
+            or any(type(item) is not str or not item for item in speedups)
+            or len(speedups) != len(set(speedups))
+        ):
+            errors.append("required_primary_speedups must be unique strings")
+        if type(policy.get("paired_order")) is not str or not policy["paired_order"]:
+            errors.append("paired_order must be a non-empty string")
         if policy.get("family_cluster_bootstrap") is not True:
             errors.append("final analysis must use family-cluster bootstrap")
         if policy.get("coverage_test") != "exact_McNemar":
@@ -172,9 +319,15 @@ def validate_spec(spec: Any) -> dict[str, Any]:
             != "zero_invalid_then_solved_then_PAR2_then_CPU"
         ):
             errors.append("primary_ranking is not the preregistered lexicographic rule")
-        if policy.get("required_cpu_classes", 0) < 2:
+        if (
+            type(policy.get("required_cpu_classes")) is not int
+            or policy["required_cpu_classes"] < 2
+        ):
             errors.append("promotion requires at least two CPU classes")
-        if policy.get("required_independent_full_runs", 0) < 2:
+        if (
+            type(policy.get("required_independent_full_runs")) is not int
+            or policy["required_independent_full_runs"] < 2
+        ):
             errors.append("promotion requires at least two independent full runs")
         for field in (
             "full_corpus_gate_before_default",
@@ -194,12 +347,22 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if track_ids != REQUIRED_TRACKS:
         errors.append(f"track ids must equal {sorted(REQUIRED_TRACKS)!r}")
     ranks = [track.get("rank") for track in tracks]
-    if any(not isinstance(rank, int) or rank < 0 for rank in ranks):
+    if any(type(rank) is not int or rank < 0 for rank in ranks):
         errors.append("every track rank must be a non-negative integer")
     elif len(set(ranks)) != len(ranks):
         errors.append("track ranks must be unique")
     for track in tracks:
         identifier = track.get("id", "<unknown>")
+        track_keys = {
+            "id",
+            "rank",
+            "title",
+            "status",
+            "prerequisites",
+            "first_gate",
+            "kill_condition",
+        }
+        _keys(track, track_keys, track_keys, f"track {identifier!r}", errors)
         prerequisites = track.get("prerequisites")
         if not isinstance(prerequisites, list) or any(
             not isinstance(item, str) for item in prerequisites
@@ -222,6 +385,14 @@ def validate_spec(spec: Any) -> dict[str, Any]:
     if stage_ids != REQUIRED_STAGES:
         errors.append(f"stage ids must equal {sorted(REQUIRED_STAGES)!r}")
     for stage in stages:
+        stage_keys = {"id", "title", "tracks", "exit"}
+        _keys(
+            stage,
+            stage_keys,
+            stage_keys,
+            f"stage {stage.get('id')!r}",
+            errors,
+        )
         stage_tracks = stage.get("tracks")
         if not isinstance(stage_tracks, list) or any(
             not isinstance(item, str) for item in stage_tracks
@@ -242,6 +413,14 @@ def validate_spec(spec: Any) -> dict[str, Any]:
         errors,
     )
     for index, disposition in enumerate(dispositions):
+        disposition_keys = {"item", "owner", "disposition"}
+        _keys(
+            disposition,
+            disposition_keys,
+            disposition_keys,
+            f"unresolved_plan_disposition[{index}]",
+            errors,
+        )
         owner = disposition.get("owner")
         if owner is not None and owner not in track_ids:
             errors.append(
@@ -277,12 +456,14 @@ def validate_spec(spec: Any) -> dict[str, Any]:
 
 def load_and_validate(path: Path) -> dict[str, Any]:
     try:
-        with path.open(encoding="utf-8") as handle:
-            spec = json.load(handle)
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        canonical_path, spec_bytes = read_regular_nofollow(path, "campaign specification")
+        spec = strict_json_loads(
+            spec_bytes.decode("utf-8"), f"campaign specification {canonical_path}"
+        )
+    except (OSError, UnicodeError, StrictArtifactError) as error:
         raise CampaignSpecError([f"cannot load {path}: {error}"]) from error
     summary = validate_spec(spec)
-    root = path.resolve().parent.parent
+    root = canonical_path.parent.parent
     bound_errors: list[str] = []
 
     def verify_bound_file(record: dict[str, Any], label: str) -> None:
@@ -294,18 +475,12 @@ def load_and_validate(path: Path) -> dict[str, Any]:
         artifact = Path(relative)
         if not artifact.is_absolute():
             artifact = root / artifact
-        if not artifact.is_file():
-            bound_errors.append(f"{label} file does not exist: {artifact}")
-            return
-        digest = hashlib.sha256()
         try:
-            with artifact.open("rb") as handle:
-                for block in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(block)
-        except OSError as error:
+            _, artifact_bytes = read_regular_nofollow(artifact, label)
+        except StrictArtifactError as error:
             bound_errors.append(f"cannot hash {label} file {artifact}: {error}")
             return
-        actual = digest.hexdigest()
+        actual = hashlib.sha256(artifact_bytes).hexdigest()
         if actual != expected:
             bound_errors.append(
                 f"{label} SHA-256 mismatch: expected {expected}, got {actual}"

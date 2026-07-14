@@ -36,13 +36,13 @@ def canonical_bytes(value: Any) -> bytes:
         rendered = json.dumps(
             value,
             allow_nan=False,
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
     except (TypeError, ValueError) as error:
         raise StagedCampaignError(f"value is not canonical JSON: {error}") from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def _resolved(path: Path) -> Path:
@@ -81,7 +81,7 @@ def _read_index(path: Path) -> tuple[dict[str, Any], str]:
         raise StagedCampaignError("; ".join(error.errors)) from error
     if set(data) != derivation.INDEX_KEYS:
         raise StagedCampaignError("continuation index has an incompatible schema")
-    if data.get("schema_version") != 1:
+    if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise StagedCampaignError("continuation index schema_version must be 1")
     if data.get("status") not in {"ready", "no_timeouts"}:
         raise StagedCampaignError("continuation index status is invalid")
@@ -224,7 +224,11 @@ def _verify_derived_parent(
     for field in immutable_fields:
         if lock[field] != source_lock[field]:
             raise StagedCampaignError(f"continuation drifted locked field {field!r}")
-    if lock["schema_version"] != 2 or lock["promotion_eligible"] is not False:
+    if (
+        type(lock["schema_version"]) is not int
+        or lock["schema_version"] != 2
+        or lock["promotion_eligible"] is not False
+    ):
         raise StagedCampaignError(
             "continuation lock must use schema v2 and be independently ineligible"
         )

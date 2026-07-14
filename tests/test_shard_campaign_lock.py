@@ -20,7 +20,11 @@ def parent_lock(instance_count: int = 10) -> dict:
         "schema_version": 1,
         "campaign_id": "test",
         "lock_sha256": "",
+        "created_from_commit_time": "2026-07-13T00:00:00+00:00",
         "promotion_eligible": True,
+        "spec": {},
+        "repository": {},
+        "host": {},
         "corpus": {
             "id": "test-corpus",
             "instances": [
@@ -31,6 +35,11 @@ def parent_lock(instance_count: int = 10) -> dict:
                 for index in range(instance_count)
             ],
         },
+        "solver_config": {},
+        "solver_release_lock": {},
+        "solvers": [],
+        "budgets_s": [2],
+        "execution": {},
         "output": {
             "directory": "/campaign/results",
             "journal": "journal.jsonl",
@@ -112,6 +121,23 @@ class ShardCampaignLockTests(unittest.TestCase):
             shard = SHARDER.derive_shards(parent_lock(), 2)[0]
             path.write_bytes(SHARDER.canonical_bytes(shard))
             with self.assertRaisesRegex(SHARDER.ShardError, "already sharded"):
+                SHARDER.load_lock(path)
+
+    def test_load_rejects_duplicate_keys_and_boolean_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "lock.json"
+            lock = parent_lock()
+            rendered = SHARDER.canonical_bytes(lock).decode("utf-8").rstrip()
+            path.write_text(
+                rendered[:-1] + ',"schema_version":1}\n', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(SHARDER.ShardError, "duplicate"):
+                SHARDER.load_lock(path)
+
+            lock["schema_version"] = True
+            lock["lock_sha256"] = SHARDER.lock_hash(lock)
+            path.write_bytes(SHARDER.canonical_bytes(lock))
+            with self.assertRaisesRegex(SHARDER.ShardError, "schema_version"):
                 SHARDER.load_lock(path)
 
 

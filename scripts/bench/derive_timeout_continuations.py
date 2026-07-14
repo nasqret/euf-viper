@@ -29,6 +29,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import analyze_campaign as campaign_analyzer  # noqa: E402
+from validate_campaign_spec import CampaignSpecError, validate_spec  # noqa: E402
 
 
 INDEX_SCHEMA_VERSION = 1
@@ -95,13 +96,13 @@ def canonical_bytes(value: Any) -> bytes:
         rendered = json.dumps(
             value,
             allow_nan=False,
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
     except (TypeError, ValueError) as error:
         raise ContinuationError(f"value is not canonical JSON: {error}") from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def lock_hash(lock: Mapping[str, Any]) -> str:
@@ -271,8 +272,17 @@ def _declared_budget_ladder(parent: Mapping[str, Any]) -> list[int | float]:
     try:
         if campaign_analyzer.sha256_file(spec_path) != expected_hash:
             raise ContinuationError("campaign specification SHA-256 drift")
-        spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        spec = campaign_analyzer._parse_json_strict(
+            spec_path.read_text(encoding="utf-8"),
+            f"campaign specification {spec_path}",
+        )
+        validate_spec(spec)
+    except (
+        OSError,
+        UnicodeError,
+        CampaignSpecError,
+        campaign_analyzer.CampaignInputError,
+    ) as error:
         raise ContinuationError(
             f"cannot read campaign specification {spec_path}: {error}"
         ) from error

@@ -56,6 +56,18 @@ Expected solver output is one of:
 `unsupported` is reserved for syntax or resource boundaries that are not
 implemented soundly; it is distinct from a timeout.
 
+`solve --evidence-out PATH` is an opt-in, restricted SAT-only certifying mode;
+it is not compiled by the default Cargo features. Build with
+`--features production-evidence` to use it. The mode forces deterministic
+canonical routes, and sidecars bind the assignment and ground model produced by
+that exact solve. Congruence-closure SAT and UNSAT, all other UNSAT routes, and
+unsupported routes remain nondecisive `unsupported` evidence. The independent
+checker validates supported SAT evidence directly against the source. A later
+`certify` rerun is separate evidence and is not treated as evidence for the
+timed solve. This mode does not certify the normal default solver, establish
+coverage, or change the ordinary off-mode solve contract. See
+[Production Evidence](docs/book/production-evidence.md).
+
 ## Historical Benchmark Checkpoints
 
 The results below remain useful as exact-corpus opportunity evidence. They are

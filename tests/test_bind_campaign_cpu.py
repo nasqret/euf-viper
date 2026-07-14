@@ -20,7 +20,18 @@ def prepared_lock() -> dict:
         "schema_version": 1,
         "campaign_id": "test",
         "lock_sha256": "",
+        "created_from_commit_time": "2026-07-13T00:00:00+00:00",
+        "promotion_eligible": False,
+        "spec": {},
+        "repository": {},
+        "host": {},
+        "corpus": {},
+        "solver_config": {},
+        "solver_release_lock": {},
+        "solvers": [],
+        "budgets_s": [2],
         "execution": {"cpu_ids": [0]},
+        "output": {},
     }
     lock["lock_sha256"] = BINDER.lock_hash(lock)
     return lock
@@ -80,6 +91,23 @@ class BindCampaignCpuTests(unittest.TestCase):
             lock["lock_sha256"] = BINDER.lock_hash(lock)
             path.write_bytes(BINDER.canonical_bytes(lock))
             with self.assertRaisesRegex(BINDER.BindingError, "placeholder"):
+                BINDER.read_lock(path)
+
+    def test_reader_rejects_duplicate_keys_and_boolean_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "lock.json"
+            lock = prepared_lock()
+            rendered = BINDER.canonical_bytes(lock).decode("utf-8").rstrip()
+            path.write_text(
+                rendered[:-1] + ',"schema_version":1}\n', encoding="utf-8"
+            )
+            with self.assertRaisesRegex(BINDER.BindingError, "duplicate"):
+                BINDER.read_lock(path)
+
+            lock["schema_version"] = True
+            lock["lock_sha256"] = BINDER.lock_hash(lock)
+            path.write_bytes(BINDER.canonical_bytes(lock))
+            with self.assertRaisesRegex(BINDER.BindingError, "schema_version"):
                 BINDER.read_lock(path)
 
 

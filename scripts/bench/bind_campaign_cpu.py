@@ -7,8 +7,24 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
+
+
+CERT_DIR = Path(__file__).resolve().parents[1] / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from strict_artifacts import StrictArtifactError, strict_json_loads  # noqa: E402
+
+
+BASE_LOCK_KEYS = {
+    "schema_version", "campaign_id", "lock_sha256", "created_from_commit_time",
+    "promotion_eligible", "spec", "repository", "host", "corpus", "solver_config",
+    "solver_release_lock", "solvers", "budgets_s", "execution", "output",
+}
+OPTIONAL_LOCK_KEYS = {"shard", "runtime_binding", "continuation", "run_selection"}
 
 
 class BindingError(ValueError):
@@ -17,9 +33,15 @@ class BindingError(ValueError):
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def lock_hash(lock: dict[str, Any]) -> str:
@@ -28,10 +50,12 @@ def lock_hash(lock: dict[str, Any]) -> str:
 
 def read_lock(path: Path) -> dict[str, Any]:
     try:
-        lock = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        lock = strict_json_loads(path.read_text(encoding="utf-8"), "prepared lock")
+    except (OSError, UnicodeError, StrictArtifactError) as error:
         raise BindingError(f"cannot read prepared lock {path}: {error}") from error
-    if not isinstance(lock, dict) or lock.get("schema_version") not in {1, 2}:
+    if type(lock) is not dict or set(lock) - (BASE_LOCK_KEYS | OPTIONAL_LOCK_KEYS) or not BASE_LOCK_KEYS <= set(lock):
+        raise BindingError("prepared lock has an incompatible key set")
+    if type(lock.get("schema_version")) is not int or lock["schema_version"] not in {1, 2}:
         raise BindingError("prepared lock must use schema_version 1 or 2")
     declared = lock.get("lock_sha256")
     if not isinstance(declared, str) or declared != lock_hash(lock):

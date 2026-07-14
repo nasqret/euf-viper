@@ -21,9 +21,40 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from validate_campaign_spec import CampaignSpecError, load_and_validate  # noqa: E402
 
+CERT_DIR = SCRIPT_DIR.parent / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from strict_artifacts import StrictArtifactError, strict_json_loads  # noqa: E402
+
 
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 RESULTS = {"sat", "unsat"}
+MANIFEST_KEYS = {
+    "id",
+    "relative_path",
+    "path",
+    "sha256",
+    "bytes",
+    "status",
+    "logic",
+    "official_family",
+    "official_name",
+    "official_result_rows",
+    "selection_source_commit",
+    "selection_source_sha256",
+}
+TAXONOMY_KEYS = {
+    "relative_path",
+    "family",
+    "source_family",
+    "lineage",
+    "generator_lineage",
+    "normalized_sha256",
+    "normalized_fingerprint",
+    "normalized_token_sha256",
+    "split",
+}
 PLACEHOLDERS = {"{binary}", "{instance}", "{budget_s}"}
 DEFAULT_ENVIRONMENT = {
     "LANG": "C",
@@ -39,9 +70,15 @@ class FreezeError(ValueError):
 
 def canonical_bytes(value: Any) -> bytes:
     return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         + "\n"
-    ).encode("ascii")
+    ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -58,10 +95,10 @@ def sha256_file(path: Path) -> str:
 
 def read_json(path: Path, context: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        value = strict_json_loads(path.read_text(encoding="utf-8"), context)
+    except (OSError, UnicodeError, StrictArtifactError) as error:
         raise FreezeError(f"cannot read {context} {path}: {error}") from error
-    if not isinstance(value, dict):
+    if type(value) is not dict:
         raise FreezeError(f"{context} root must be an object")
     return value
 
@@ -104,12 +141,14 @@ def _load_jsonl(path: Path, context: str) -> list[dict[str, Any]]:
                 if not line.strip():
                     continue
                 try:
-                    value = json.loads(line)
-                except json.JSONDecodeError as error:
+                    value = strict_json_loads(
+                        line, f"{context} {path}:{line_number}"
+                    )
+                except StrictArtifactError as error:
                     raise FreezeError(
                         f"{context} {path}:{line_number} is invalid JSON: {error}"
                     ) from error
-                if not isinstance(value, dict):
+                if type(value) is not dict:
                     raise FreezeError(
                         f"{context} {path}:{line_number} must be an object"
                     )
@@ -126,6 +165,8 @@ def load_taxonomy(path: Path | None) -> tuple[dict[str, dict[str, Any]], str | N
         return {}, None
     taxonomy: dict[str, dict[str, Any]] = {}
     for record in _load_jsonl(path, "taxonomy"):
+        if set(record) - TAXONOMY_KEYS:
+            raise FreezeError("taxonomy record has unknown keys")
         relative = record.get("relative_path")
         if not isinstance(relative, str) or not relative:
             raise FreezeError("taxonomy record lacks relative_path")
@@ -167,6 +208,13 @@ def load_instances(
     seen_paths: set[str] = set()
     instances: list[dict[str, Any]] = []
     for index, row in enumerate(rows):
+        if set(row) - MANIFEST_KEYS or not {
+            "id",
+            "relative_path",
+            "sha256",
+            "status",
+        } <= set(row):
+            raise FreezeError(f"manifest record {index} has an incompatible key set")
         identifier = row.get("id")
         relative = row.get("relative_path")
         expected = row.get("status")
@@ -205,8 +253,11 @@ def load_instances(
                 f"expected {expected_hash}, got {actual_hash}"
             )
         byte_count = instance_path.stat().st_size
-        if "bytes" in row and row["bytes"] != byte_count:
-            raise FreezeError(f"manifest instance size drift for {relative}")
+        if "bytes" in row:
+            if type(row["bytes"]) is not int or row["bytes"] < 0:
+                raise FreezeError(f"manifest {relative!r} has invalid byte count")
+            if row["bytes"] != byte_count:
+                raise FreezeError(f"manifest instance size drift for {relative}")
 
         record: dict[str, Any] = {
             "id": identifier_text,
@@ -282,7 +333,11 @@ def load_solvers(
     config_path: Path, spec: dict[str, Any], repository_root: Path
 ) -> tuple[list[dict[str, Any]], str]:
     config = read_json(config_path, "solver configuration")
-    if config.get("schema_version") != 1:
+    if set(config) - {"schema_version", "campaign", "campaign_sha256", "solvers"}:
+        raise FreezeError("solver configuration has unknown top-level keys")
+    if not {"schema_version", "solvers"} <= set(config):
+        raise FreezeError("solver configuration lacks required top-level keys")
+    if type(config.get("schema_version")) is not int or config["schema_version"] != 1:
         raise FreezeError("solver configuration schema_version must be 1")
     raw_solvers = config.get("solvers")
     if not isinstance(raw_solvers, list) or not raw_solvers:
@@ -300,8 +355,33 @@ def load_solvers(
     seen_pairs: set[tuple[str, str]] = set()
     solvers: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_solvers):
-        if not isinstance(raw, dict):
+        if type(raw) is not dict:
             raise FreezeError(f"solver configuration record {index} must be an object")
+        allowed_solver_keys = {
+            "id",
+            "comparator_id",
+            "configuration",
+            "version",
+            "binary",
+            "sha256",
+            "argv_template",
+            "version_argv",
+            "version_output_contains",
+            "environment",
+            "evidence",
+        }
+        required_solver_keys = {
+            "id",
+            "comparator_id",
+            "version",
+            "binary",
+            "sha256",
+            "argv_template",
+        }
+        if set(raw) - allowed_solver_keys or not required_solver_keys <= set(raw):
+            raise FreezeError(
+                f"solver configuration record {index} has an incompatible key set"
+            )
         identifier = raw.get("id")
         comparator_id = raw.get("comparator_id")
         configuration = raw.get("configuration", "default")
@@ -361,24 +441,41 @@ def load_solvers(
             for key, value in environment.items()
         ):
             raise FreezeError(f"solver {identifier!r} environment must map strings")
-        solvers.append(
-            {
-                "id": identifier,
-                "comparator_id": comparator_id,
-                "configuration": configuration,
-                "version": version,
-                "binary": str(binary),
-                "sha256": actual_hash,
-                "argv_template": template,
-                "version_output": version_output,
-                "version_output_sha256": (
-                    sha256_bytes(version_output.encode("utf-8"))
-                    if version_output is not None
-                    else None
-                ),
-                "environment": dict(sorted(environment.items())),
-            }
-        )
+        evidence = raw.get("evidence")
+        if evidence is not None:
+            if not isinstance(evidence, dict) or set(evidence) != {
+                "schema",
+                "argv_flag",
+                "accepted_decisive_statuses",
+            }:
+                raise FreezeError(f"solver {identifier!r} has invalid evidence contract")
+            if evidence["schema"] != "euf-viper.production-evidence.v3":
+                raise FreezeError(f"solver {identifier!r} has unsupported evidence schema")
+            if evidence["argv_flag"] != "--evidence-out":
+                raise FreezeError(f"solver {identifier!r} has invalid evidence argv flag")
+            if evidence["accepted_decisive_statuses"] != ["sat"]:
+                raise FreezeError(
+                    f"solver {identifier!r} must fail closed on production UNSAT evidence"
+                )
+        solver_record = {
+            "id": identifier,
+            "comparator_id": comparator_id,
+            "configuration": configuration,
+            "version": version,
+            "binary": str(binary),
+            "sha256": actual_hash,
+            "argv_template": template,
+            "version_output": version_output,
+            "version_output_sha256": (
+                sha256_bytes(version_output.encode("utf-8"))
+                if version_output is not None
+                else None
+            ),
+            "environment": dict(sorted(environment.items())),
+        }
+        if evidence is not None:
+            solver_record["evidence"] = evidence
+        solvers.append(solver_record)
         seen_ids.add(identifier)
         seen_pairs.add(pair)
 

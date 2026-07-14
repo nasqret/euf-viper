@@ -59,7 +59,9 @@ def _solver(directory: Path, solver_id: str) -> dict[str, Any]:
 def _parent_lock(directory: Path, budgets: list[int] | None = None) -> dict[str, Any]:
     spec_path = directory / "spec.json"
     spec_path.parent.mkdir(parents=True, exist_ok=True)
-    spec_path.write_text('{"budgets_s":[2,60,1200]}\n', encoding="utf-8")
+    spec_path.write_bytes(
+        (ROOT / "campaigns" / "best-overall-qf-uf-2026-07.json").read_bytes()
+    )
     lock: dict[str, Any] = {
         "schema_version": 1,
         "campaign_id": "continuation-test",

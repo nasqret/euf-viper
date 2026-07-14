@@ -35,6 +35,20 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
 
+CERT_DIR = Path(__file__).resolve().parents[1] / "cert"
+if str(CERT_DIR) not in sys.path:
+    sys.path.insert(0, str(CERT_DIR))
+
+from check_production_evidence import (  # noqa: E402
+    ProductionEvidenceError,
+    validate_production_evidence,
+)
+from strict_artifacts import (  # noqa: E402
+    StrictArtifactError,
+    read_regular_nofollow as strict_read_regular_nofollow,
+)
+
+
 SCHEMA_VERSION = 1
 FIELDNAMES = [
     "relative_path",
@@ -51,7 +65,7 @@ FIELDNAMES = [
 ]
 LABELS = ("baseline", "candidate")
 DECISIVE_RESULTS = {"sat", "unsat"}
-NONDECISIVE_RESULTS = {"timeout", "unknown", "error", "invalid"}
+NONDECISIVE_RESULTS = {"timeout", "unknown", "unsupported", "error", "invalid"}
 VALID_RESULTS = DECISIVE_RESULTS | NONDECISIVE_RESULTS
 HEX_DIGITS = frozenset("0123456789abcdef")
 
@@ -152,6 +166,11 @@ LOCK_SOLVER_KEYS = {
     "version_output_sha256",
     "environment",
 }
+LOCK_EVIDENCE_KEYS = {
+    "schema",
+    "argv_flag",
+    "accepted_decisive_statuses",
+}
 RUN_RECORD_KEYS = {
     "record_type",
     "schema_version",
@@ -194,6 +213,22 @@ RUN_RECORD_KEYS = {
     "previous_record_sha256",
     "record_sha256",
 }
+PRODUCTION_EVIDENCE_KEYS = {
+    "path",
+    "sha256",
+    "bytes",
+    "schema",
+    "source_sha256",
+    "solver_revision",
+    "solver_executable_sha256",
+    "solver_configuration",
+    "solver_config_sha256",
+    "solver_runtime_config_sha256",
+    "solver_build_sha256",
+    "run_nonce",
+    "status",
+    "backend_status",
+}
 
 
 class CampaignInputError(ValueError):
@@ -207,11 +242,11 @@ class CampaignInputError(ValueError):
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+    try:
+        _, content = strict_read_regular_nofollow(path, f"hash input {path}")
+    except StrictArtifactError as error:
+        raise OSError(str(error)) from error
+    return hashlib.sha256(content).hexdigest()
 
 
 def _is_sha256(value: str) -> bool:
@@ -346,7 +381,13 @@ def load_manifest(path: Path) -> dict[str, dict[str, str]]:
                     continue
                 context = f"{path}:{line_number}"
                 try:
-                    value = json.loads(line, object_pairs_hook=_unique_json_object)
+                    value = json.loads(
+                        line,
+                        object_pairs_hook=_unique_json_object,
+                        parse_constant=lambda item: (_ for _ in ()).throw(
+                            ValueError(f"non-finite JSON number {item!r}")
+                        ),
+                    )
                 except (json.JSONDecodeError, ValueError) as error:
                     errors.append(f"{context}: invalid JSON object: {error}")
                     continue
@@ -1305,13 +1346,13 @@ def _canonical_json_bytes(value: Any) -> bytes:
         rendered = json.dumps(
             value,
             allow_nan=False,
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
     except (TypeError, ValueError) as error:
         raise CampaignInputError([f"value is not canonical JSON: {error}"]) from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def _same_json(left: Any, right: Any) -> bool:
@@ -1366,8 +1407,9 @@ def _require_number_value(
 
 def _read_json_object(path: Path, context: str) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as error:
+        _, content = strict_read_regular_nofollow(path, context)
+        text = content.decode("utf-8")
+    except (StrictArtifactError, UnicodeError) as error:
         raise CampaignInputError([f"cannot read {context} {path}: {error}"]) from error
     value = _parse_json_strict(text, f"{context} {path}")
     if type(value) is not dict:
@@ -1375,8 +1417,7 @@ def _read_json_object(path: Path, context: str) -> dict[str, Any]:
     return value
 
 
-def _load_lock(lock_path: Path) -> dict[str, Any]:
-    payload = _read_json_object(lock_path, "campaign lock")
+def _load_lock_payload(payload: dict[str, Any], lock_path: Path) -> dict[str, Any]:
     has_continuation = "continuation" in payload
     has_run_selection = "run_selection" in payload
     expected_keys = LOCK_TOP_LEVEL_KEYS | {
@@ -1518,7 +1559,10 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
     seen_solver_ids: set[str] = set()
     for index, solver in enumerate(solvers):
         context = f"solvers[{index}]"
-        _require_exact_keys(solver, LOCK_SOLVER_KEYS, context)
+        solver_keys = LOCK_SOLVER_KEYS | (
+            {"evidence"} if type(solver) is dict and "evidence" in solver else set()
+        )
+        _require_exact_keys(solver, solver_keys, context)
         identifier = _require_string_value(solver["id"], f"{context}.id")
         if identifier in seen_solver_ids:
             raise CampaignInputError([f"duplicate locked solver id {identifier!r}"])
@@ -1534,6 +1578,18 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
             type(value) is str for value in solver["argv_template"]
         ):
             raise CampaignInputError([f"{context}.argv_template must be strings"])
+        if "evidence" in solver:
+            evidence = _require_exact_keys(
+                solver["evidence"], LOCK_EVIDENCE_KEYS, f"{context}.evidence"
+            )
+            if evidence != {
+                "schema": "euf-viper.production-evidence.v3",
+                "argv_flag": "--evidence-out",
+                "accepted_decisive_statuses": ["sat"],
+            }:
+                raise CampaignInputError(
+                    [f"{context}.evidence has an unsupported production contract"]
+                )
         if has_continuation and any(
             "{budget_s}" in argument for argument in solver["argv_template"]
         ):
@@ -1707,6 +1763,10 @@ def _load_lock(lock_path: Path) -> dict[str, Any]:
     return payload
 
 
+def _load_lock(lock_path: Path) -> dict[str, Any]:
+    return _load_lock_payload(_read_json_object(lock_path, "campaign lock"), lock_path)
+
+
 def _locked_solver_order(order: str, instance_index: int, solver_count: int) -> list[int]:
     if order == "abba":
         return [0, 1, 1, 0] if instance_index % 2 == 0 else [1, 0, 0, 1]
@@ -1733,6 +1793,7 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
     solvers = lock["solvers"]
     budgets = lock["budgets_s"]
     execution = lock["execution"]
+    output_directory = Path(lock["output"]["directory"])
     selected_pairs = (
         {
             (item["instance_id"], item["solver_id"])
@@ -1764,6 +1825,20 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
                     _canonical_json_bytes(environment)
                 ).hexdigest()
                 repetition = repetitions[solver_index]
+                argv = _expand_locked_argv(
+                    solver["argv_template"],
+                    solver["binary"],
+                    instance["path"],
+                    budget,
+                )
+                evidence_path = None
+                if "evidence" in solver:
+                    evidence_path = (
+                        output_directory
+                        / "production-evidence"
+                        / f"run-{sequence:08d}.json"
+                    )
+                    argv.extend([solver["evidence"]["argv_flag"], str(evidence_path)])
                 schedule.append(
                     {
                         "sequence": sequence,
@@ -1779,12 +1854,11 @@ def _locked_schedule(lock: Mapping[str, Any]) -> list[dict[str, Any]]:
                         "repetition": repetition,
                         "cpu_id": cpu_id,
                         "environment_sha256": environment_sha256,
-                        "argv": _expand_locked_argv(
-                            solver["argv_template"],
-                            solver["binary"],
-                            instance["path"],
-                            budget,
-                        ),
+                        "environment": environment,
+                        "argv": argv,
+                        "evidence_path": evidence_path,
+                        "output_directory": output_directory,
+                        "repository_revision": lock["repository"].get("commit", ""),
                     }
                 )
                 repetitions[solver_index] += 1
@@ -1814,8 +1888,8 @@ def _classify_locked_record(record: Mapping[str, Any]) -> str:
     if record["result_token_status"] != "valid":
         return "invalid"
     token = record["result_token"]
-    if token == "unknown":
-        return "unknown"
+    if token in {"unknown", "unsupported"}:
+        return token
     assert token in DECISIVE_RESULTS
     if (
         record["child_cpu_time_s"] is None
@@ -1825,14 +1899,157 @@ def _classify_locked_record(record: Mapping[str, Any]) -> str:
     return token
 
 
+def _expected_runtime_config(environment: Mapping[str, str]) -> dict[str, str]:
+    controls = {
+        "EUF_VIPER_RUN_NONCE",
+        "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+    }
+    config = {
+        key: value
+        for key, value in environment.items()
+        if key.startswith("EUF_VIPER_") and key not in controls
+    }
+    for name, default, resolved in (
+        ("EUF_VIPER_DIRECT_ROOT_CNF", "1", "resolved.direct_root_cnf"),
+        ("EUF_VIPER_DIRECT_NEGATED_ROOT", "0", "resolved.direct_negated_root"),
+    ):
+        setting = environment.get(name, default)
+        if setting not in {"0", "1"}:
+            raise CampaignInputError([f"{name} is invalid in the locked environment"])
+        config[resolved] = setting
+    config.update(
+        {
+            "resolved.production_evidence_contract": "deterministic-cnf-transcript-v1",
+            "resolved.production_evidence_mode": "cnf-assignment-transcript",
+            "resolved.eq_abstraction": "off",
+            "resolved.finite_domain": "off",
+            "resolved.full_ackermann": "off",
+            "resolved.chordal_transitivity": "off",
+            "resolved.refinement_mode": "model-cuts",
+        }
+    )
+    return dict(sorted(config.items()))
+
+
+def _validate_locked_production_evidence(
+    value: object,
+    record: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    context: str,
+) -> dict[str, Any] | None:
+    solver = expected["solver"]
+    contract = solver.get("evidence")
+    if contract is None:
+        raise CampaignInputError([f"{context}: unexpected production evidence"])
+    if value is None:
+        if record["result_token"] in DECISIVE_RESULTS:
+            raise CampaignInputError(
+                [f"{context}: decisive result is missing production evidence"]
+            )
+        return None
+    binding = _require_exact_keys(value, PRODUCTION_EVIDENCE_KEYS, context)
+    expected_path = expected["evidence_path"]
+    assert isinstance(expected_path, Path)
+    output_directory = expected["output_directory"]
+    assert isinstance(output_directory, Path)
+    expected_relative = expected_path.relative_to(output_directory).as_posix()
+    if binding["path"] != expected_relative:
+        raise CampaignInputError([f"{context}: evidence path differs from schedule"])
+    try:
+        expected_path.relative_to(output_directory)
+    except ValueError as error:
+        raise CampaignInputError([f"{context}: evidence artifact escapes output root"]) from error
+    evidence_sha256 = _require_hash_value(binding["sha256"], f"{context}.sha256")
+    evidence_bytes = _require_int_value(binding["bytes"], f"{context}.bytes", 1)
+    if binding["schema"] != contract["schema"]:
+        raise CampaignInputError([f"{context}: evidence schema differs from lock"])
+    if binding["source_sha256"] != expected["instance"]["sha256"]:
+        raise CampaignInputError([f"{context}: evidence source hash differs from lock"])
+    if binding["solver_revision"] != expected["repository_revision"]:
+        raise CampaignInputError([f"{context}: evidence solver revision differs from lock"])
+    if binding["solver_configuration"] != solver["configuration"]:
+        raise CampaignInputError([f"{context}: evidence solver configuration differs from lock"])
+    expected_solver_config_hash = hashlib.sha256(
+        _canonical_json_bytes(solver)
+    ).hexdigest()
+    if binding["solver_config_sha256"] != expected_solver_config_hash:
+        raise CampaignInputError([f"{context}: evidence solver config hash mismatch"])
+    _require_hash_value(
+        binding["solver_runtime_config_sha256"],
+        f"{context}.solver_runtime_config_sha256",
+    )
+    if binding["solver_executable_sha256"] != solver["sha256"]:
+        raise CampaignInputError([f"{context}: evidence executable hash differs from lock"])
+    _require_hash_value(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    _require_hash_value(binding["run_nonce"], f"{context}.run_nonce")
+    if (binding["status"], binding["backend_status"]) not in {
+        ("sat", "sat"),
+        ("unsupported", "sat"),
+        ("unsupported", "unsat"),
+        ("unsupported", "unsupported"),
+    }:
+        raise CampaignInputError([f"{context}: incoherent evidence statuses"])
+    if record["result_token"] in DECISIVE_RESULTS and (
+        record["result_token"] not in contract["accepted_decisive_statuses"]
+        or binding["status"] != record["result_token"]
+        or binding["backend_status"] != record["result_token"]
+    ):
+        raise CampaignInputError([f"{context}: evidence does not certify stdout"])
+
+    source_path = Path(expected["instance"]["path"])
+    expected_runtime = _expected_runtime_config(expected["environment"])
+    try:
+        checked = validate_production_evidence(
+            expected_path,
+            source_path,
+            expected_source_sha256=expected["instance"]["sha256"],
+            expected_revision=expected["repository_revision"],
+            expected_status=(record["result_token"] if record["result_token"] == "sat" else None),
+            expected_executable_sha256=solver["sha256"],
+            expected_runtime_config=expected_runtime,
+            expected_evidence_sha256=evidence_sha256,
+            expected_run_nonce=binding["run_nonce"],
+        )
+    except (OSError, ProductionEvidenceError) as error:
+        raise CampaignInputError(
+            [f"{context}: independent production-evidence check failed: {error}"]
+        ) from error
+    checked_bindings = {
+        "schema": binding["schema"],
+        "status": binding["status"],
+        "backend_status": binding["backend_status"],
+        "run_nonce": binding["run_nonce"],
+        "evidence_sha256": evidence_sha256,
+        "evidence_bytes": evidence_bytes,
+        "source_sha256": binding["source_sha256"],
+        "solver_revision": binding["solver_revision"],
+        "solver_executable_sha256": binding["solver_executable_sha256"],
+        "solver_config_sha256": binding["solver_runtime_config_sha256"],
+        "solver_build_sha256": binding["solver_build_sha256"],
+    }
+    for field, expected_value in checked_bindings.items():
+        if checked.get(field) != expected_value:
+            raise CampaignInputError(
+                [f"{context}: checker binding mismatch for {field}"]
+            )
+    return dict(binding)
+
+
 def _validate_locked_record(
     record: dict[str, Any],
     expected: Mapping[str, Any],
     lock_sha256: str,
     context: str,
 ) -> str:
-    _require_exact_keys(record, RUN_RECORD_KEYS, context)
-    if record["record_type"] != "run" or record["schema_version"] != 1:
+    expected_record_keys = RUN_RECORD_KEYS | (
+        {"production_evidence"} if "evidence" in expected["solver"] else set()
+    )
+    _require_exact_keys(record, expected_record_keys, context)
+    if (
+        record["record_type"] != "run"
+        or type(record["schema_version"]) is not int
+        or record["schema_version"] != 1
+    ):
         raise CampaignInputError([f"{context}: invalid run record type or schema"])
     if record["lock_sha256"] != lock_sha256:
         raise CampaignInputError([f"{context}: lock SHA-256 mismatch"])
@@ -1916,6 +2133,7 @@ def _validate_locked_record(
         "sat",
         "unsat",
         "unknown",
+        "unsupported",
     }:
         raise CampaignInputError([f"{context}: invalid result token"])
     if record["result_token_status"] not in {"valid", "missing", "malformed"}:
@@ -1934,15 +2152,25 @@ def _validate_locked_record(
                 f"got {record['result_token']!r}"
             ]
         )
+    if "evidence" in solver:
+        _validate_locked_production_evidence(
+            record["production_evidence"],
+            record,
+            expected,
+            f"{context}.production_evidence",
+        )
     return _classify_locked_record(record)
 
 
 def _load_locked_runs(
-    raw_path: Path, lock: Mapping[str, Any], schedule: Sequence[Mapping[str, Any]]
+    raw_bytes: bytes,
+    raw_path: Path,
+    lock: Mapping[str, Any],
+    schedule: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        lines = raw_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError) as error:
+        lines = raw_bytes.decode("utf-8").splitlines()
+    except UnicodeError as error:
         raise CampaignInputError([f"cannot read locked raw results {raw_path}: {error}"]) from error
     if not lines:
         raise CampaignInputError([f"{raw_path}: contains no run records"])
@@ -2041,7 +2269,7 @@ def _aggregate_locked_observation(records: Sequence[Mapping[str, Any]]) -> dict[
         [float(record["wall_time_s"]) for record in records], 0.5
     )
     assert cpu_time_s is not None and wall_time_s is not None
-    return {
+    observation = {
         "relative_path": records[0]["relative_path"],
         "family": records[0]["family"],
         "expected_status": expected,
@@ -2056,19 +2284,31 @@ def _aggregate_locked_observation(records: Sequence[Mapping[str, Any]]) -> dict[
         "source_lock_sha256": records[0]["lock_sha256"],
         "source_record_sha256": [record["record_sha256"] for record in records],
     }
+    if all("production_evidence" in record for record in records):
+        observation["production_evidence"] = [
+            record["production_evidence"] for record in records
+        ]
+    return observation
 
 
 def load_locked_campaign(lock_path: Path, raw_path: Path) -> dict[str, Any]:
     """Validate a runner lock/raw pair and aggregate locked repetitions."""
 
     try:
-        lock_file_sha256 = sha256_file(lock_path)
-        raw_sha256 = sha256_file(raw_path)
-    except OSError as error:
+        lock_path, lock_bytes = strict_read_regular_nofollow(lock_path, "campaign lock")
+        raw_path, raw_bytes = strict_read_regular_nofollow(raw_path, "locked raw results")
+        lock_file_sha256 = hashlib.sha256(lock_bytes).hexdigest()
+        raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+        lock_value = _parse_json_strict(
+            lock_bytes.decode("utf-8"), f"campaign lock {lock_path}"
+        )
+    except (StrictArtifactError, UnicodeError) as error:
         raise CampaignInputError([f"cannot hash locked campaign input: {error}"]) from error
-    lock = _load_lock(lock_path)
+    if type(lock_value) is not dict:
+        raise CampaignInputError([f"campaign lock {lock_path}: root must be an object"])
+    lock = _load_lock_payload(lock_value, lock_path)
     schedule = _locked_schedule(lock)
-    runs = _load_locked_runs(raw_path, lock, schedule)
+    runs = _load_locked_runs(raw_bytes, raw_path, lock, schedule)
     grouped: dict[tuple[str, float, str], list[dict[str, Any]]] = defaultdict(list)
     for record in runs:
         grouped[

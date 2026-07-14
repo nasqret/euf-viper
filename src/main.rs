@@ -12,6 +12,8 @@ mod forbidden_table_mvdd;
 mod hall_certificate;
 #[cfg(test)]
 mod model_scout;
+#[cfg(feature = "production-evidence")]
+mod nofollow_io;
 #[cfg(test)]
 mod novelty_census;
 #[cfg(test)]
@@ -19,6 +21,8 @@ mod novelty_census;
 mod orbit_canon;
 #[cfg(test)]
 mod orbit_cover;
+#[cfg(feature = "production-evidence")]
+mod production_evidence;
 #[cfg(test)]
 mod quotient_csp;
 #[cfg(test)]
@@ -50,8 +54,9 @@ use std::fs;
 use std::io::{self, Read};
 #[cfg(feature = "certificates")]
 use std::io::{BufReader, BufWriter, Write};
+use std::path::Path;
 #[cfg(feature = "certificates")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
@@ -191,8 +196,11 @@ impl TermArena {
     }
 }
 
+#[cfg_attr(not(feature = "production-evidence"), allow(dead_code))]
 #[derive(Debug)]
 struct Problem {
+    symbols: Option<SymbolInterner>,
+    internal_functions: Vec<SymId>,
     sorts: SortTable,
     fun_decls: FunDeclTable,
     arena: TermArena,
@@ -341,6 +349,8 @@ struct ParseCtx {
     bool_assertions: Vec<BoolExpr>,
     bool_unsupported: Vec<String>,
     fun_decls: FunDeclTable,
+    internal_functions: Vec<SymId>,
+    retain_evidence_symbols: bool,
     bool_definitions: HashMap<SymId, BoolExpr>,
     bool_value_terms: Option<(TermId, TermId)>,
     bool_data_terms: HashSet<TermId>,
@@ -362,7 +372,12 @@ impl ParseCtx {
         }
     }
 
+    #[cfg(test)]
     fn finish(self) -> Problem {
+        self.finish_retaining_symbols(false)
+    }
+
+    fn finish_retaining_symbols(self, retain_symbols: bool) -> Problem {
         let mut bool_data_terms = self.bool_data_terms.into_iter().collect::<Vec<_>>();
         bool_data_terms.sort_unstable();
         let bool_problem = (!self.bool_assertions.is_empty()
@@ -381,6 +396,8 @@ impl ParseCtx {
             }
         });
         Problem {
+            symbols: retain_symbols.then_some(self.symbols),
+            internal_functions: self.internal_functions,
             sorts: self.sorts,
             fun_decls: self.fun_decls,
             arena: self.arena,
@@ -394,7 +411,7 @@ impl ParseCtx {
 
     fn finish_with_symbol_names(self) -> (Problem, Vec<String>) {
         let symbol_names = self.symbols.ordered_names();
-        (self.finish(), symbol_names)
+        (self.finish_retaining_symbols(false), symbol_names)
     }
 
     fn add_unsupported(&mut self, msg: impl Into<String>) {
@@ -1687,6 +1704,9 @@ impl ParseCtx {
                     result_sort: sort,
                 },
             );
+            if self.retain_evidence_symbols {
+                self.internal_functions.push(sym);
+            }
             return self.arena.intern_typed(sym, Vec::new(), sort);
         }
     }
@@ -3252,6 +3272,7 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     let domain = &domain_analysis.domain;
     let domain_set = &domain_analysis.domain_set;
     let disequality_edges = &domain_analysis.mandatory_disequalities;
+    #[cfg(feature = "finite-symmetry")]
     let covered_terms = &closure.covered_terms;
     let closed_functions = &closure.closed_functions;
     let finite_terms = &closure.finite_terms;
@@ -3718,6 +3739,14 @@ fn domain_tuples_for_args(
 }
 
 fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>> {
+    congruence_axiom_clauses_with_contract(cnf, arena, false)
+}
+
+fn congruence_axiom_clauses_with_contract(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    deterministic_contract: bool,
+) -> Vec<Vec<i32>> {
     let mut equality_vars = HashMap::default();
     let mut bool_vars = HashMap::default();
     let mut equality_neighbors = vec![Vec::<(TermId, i32)>::new(); arena.terms.len()];
@@ -3745,10 +3774,11 @@ fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>
     let mut clauses = HashSet::default();
     let mode = env::var("EUF_VIPER_CONGRUENCE_MODE").unwrap_or_else(|_| "auto".to_owned());
     let canonical_values = canonical_value_terms(cnf, arena);
-    let canonical_only = mode == "canonical"
-        || (mode == "auto"
-            && canonical_values.len() >= 3
-            && (arena.apps.len() > 1_000 || has_predicate_applications(cnf, arena)));
+    let canonical_only = !deterministic_contract
+        && (mode == "canonical"
+            || (mode == "auto"
+                && canonical_values.len() >= 3
+                && (arena.apps.len() > 1_000 || has_predicate_applications(cnf, arena))));
     profile_measurement(
         "canonical_values",
         usize::from(canonical_only) as u128,
@@ -3840,7 +3870,11 @@ fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>
         }
     }
     let mut clauses = clauses.into_iter().collect::<Vec<_>>();
-    order_axiom_clauses(&mut clauses);
+    if deterministic_contract {
+        clauses.sort();
+    } else {
+        order_axiom_clauses(&mut clauses);
+    }
     clauses
 }
 
@@ -3982,6 +4016,7 @@ struct DpllSolver<'a> {
     node_limit: usize,
     occurrence: Vec<usize>,
     clauses_by_var: Vec<Vec<usize>>,
+    model: Option<Vec<i8>>,
 }
 
 impl<'a> DpllSolver<'a> {
@@ -4009,6 +4044,7 @@ impl<'a> DpllSolver<'a> {
             node_limit: 1_000_000,
             occurrence,
             clauses_by_var,
+            model: None,
         }
     }
 
@@ -4017,7 +4053,11 @@ impl<'a> DpllSolver<'a> {
         let Some(pending) = self.initial_units(&mut assignment) else {
             return CnfSearchResult::Unsat;
         };
-        self.search(&mut assignment, pending, true)
+        let result = self.search(&mut assignment, pending, true);
+        if result == CnfSearchResult::Sat && complete_cnf_assignment(self.cnf, &mut assignment) {
+            self.model = Some(assignment);
+        }
+        result
     }
 
     fn search(
@@ -4043,7 +4083,10 @@ impl<'a> DpllSolver<'a> {
             branch[var] = value;
             let theory_dirty = self.cnf.var_atoms[var].is_some();
             match self.search(&mut branch, vec![var], theory_dirty) {
-                CnfSearchResult::Sat => return CnfSearchResult::Sat,
+                CnfSearchResult::Sat => {
+                    assignment.copy_from_slice(&branch);
+                    return CnfSearchResult::Sat;
+                }
                 CnfSearchResult::Limit => return CnfSearchResult::Limit,
                 CnfSearchResult::Unsat => {}
             }
@@ -4295,6 +4338,213 @@ fn complete_cnf_assignment(cnf: &CnfProblem, assignment: &mut [i8]) -> bool {
     })
 }
 
+fn canonical_term_classes(arena: &TermArena, uf: &mut UnionFind) -> Vec<usize> {
+    let mut minimum_by_root = HashMap::<usize, usize>::default();
+    let roots = (0..arena.terms.len())
+        .map(|term| uf.find(term))
+        .collect::<Vec<_>>();
+    for (term, root) in roots.iter().copied().enumerate() {
+        minimum_by_root
+            .entry(root)
+            .and_modify(|minimum| *minimum = (*minimum).min(term))
+            .or_insert(term);
+    }
+    roots
+        .into_iter()
+        .map(|root| minimum_by_root[&root])
+        .collect()
+}
+
+fn backend_clause_stream(cnf: &CnfProblem, additions: &[&[Vec<i32>]]) -> Vec<Vec<i32>> {
+    let additional_count = additions.iter().map(|clauses| clauses.len()).sum::<usize>();
+    let mut stream = Vec::with_capacity(cnf.clauses.len() + additional_count);
+    stream.extend(cnf.clauses.iter().map(<[i32]>::to_vec));
+    for clauses in additions {
+        stream.extend(clauses.iter().cloned());
+    }
+    stream
+}
+
+fn assignment_literals(assignment: &[i8]) -> Option<Vec<i32>> {
+    if assignment.first() != Some(&0)
+        || assignment
+            .iter()
+            .skip(1)
+            .any(|value| !matches!(value, -1 | 1))
+    {
+        return None;
+    }
+    Some(
+        assignment
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(1)
+            .map(|(variable, value)| {
+                if value > 0 {
+                    variable as i32
+                } else {
+                    -(variable as i32)
+                }
+            })
+            .collect(),
+    )
+}
+
+fn append_clause_events(
+    events: &mut Vec<ProductionTranscriptEvent>,
+    phase: &'static str,
+    clauses: &[Vec<i32>],
+) {
+    events.extend(
+        clauses
+            .iter()
+            .cloned()
+            .map(|clause| ProductionTranscriptEvent::Clause { phase, clause }),
+    );
+}
+
+fn append_validation_events(
+    events: &mut Vec<ProductionTranscriptEvent>,
+    call: usize,
+    assignment: &[i8],
+    conflicts: &[Vec<i32>],
+) -> Option<()> {
+    events.push(ProductionTranscriptEvent::Solve { call });
+    events.push(ProductionTranscriptEvent::Assignment {
+        call,
+        assignment: assignment_literals(assignment)?,
+    });
+    events.push(ProductionTranscriptEvent::Validation {
+        call,
+        conflicts: conflicts.to_vec(),
+    });
+    Some(())
+}
+
+fn deterministic_theory_conflict_clause(cnf: &CnfProblem, assignment: &[i8]) -> Option<Vec<i32>> {
+    if assignment.len() != cnf.var_count() + 1 {
+        return None;
+    }
+    let mut clause = Vec::with_capacity(cnf.atom_vars.len());
+    for (variable, atom) in cnf.var_atoms.iter().enumerate().skip(1) {
+        if atom.is_none() {
+            continue;
+        }
+        clause.push(if assignment[variable] > 0 {
+            -(variable as i32)
+        } else if assignment[variable] < 0 {
+            variable as i32
+        } else {
+            return None;
+        });
+    }
+    clause.sort_unstable();
+    clause.dedup();
+    Some(clause)
+}
+
+fn production_theory_conflicts(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    assignment: &[i8],
+    capture_evidence: bool,
+) -> Option<Vec<Vec<i32>>> {
+    let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, assignment)?;
+    if capture_evidence && !conflicts.is_empty() {
+        Some(vec![deterministic_theory_conflict_clause(cnf, assignment)?])
+    } else {
+        Some(conflicts)
+    }
+}
+
+fn production_sat_witness_from_cnf(
+    backend: &str,
+    cnf: &CnfProblem,
+    backend_clauses: &[Vec<i32>],
+    transcript: &[ProductionTranscriptEvent],
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    assignment: &[i8],
+) -> Option<ProductionSatWitness> {
+    if assignment.len() != cnf.var_count() + 1
+        || assignment.first() != Some(&0)
+        || assignment
+            .iter()
+            .skip(1)
+            .any(|value| !matches!(value, -1 | 1))
+        || backend_clauses.iter().any(|clause| {
+            clause.is_empty()
+                || clause.iter().any(|literal| {
+                    *literal == 0 || literal.unsigned_abs() as usize > cnf.var_count()
+                })
+                || !clause
+                    .iter()
+                    .any(|literal| lit_status(*literal, assignment) == 1)
+        })
+    {
+        return None;
+    }
+    let mut uf = UnionFind::new(arena.terms.len());
+    let mut disequalities = vec![(true_term, false_term)];
+    let mut atoms = Vec::with_capacity(cnf.atom_vars.len());
+    for variable in 1..assignment.len() {
+        let Some(atom) = cnf.var_atoms[variable].as_ref() else {
+            continue;
+        };
+        let value = assignment[variable] > 0;
+        match atom {
+            BoolAtomKey::Eq(left, right) => {
+                if value {
+                    uf.union(*left, *right);
+                } else {
+                    disequalities.push((*left, *right));
+                }
+            }
+            BoolAtomKey::BoolTerm(term) => {
+                uf.union(*term, if value { true_term } else { false_term });
+            }
+        }
+        atoms.push(ProductionAtomWitness {
+            variable,
+            atom: atom.clone(),
+            value,
+        });
+    }
+    congruence_closure(arena, &mut uf);
+    if disequalities
+        .iter()
+        .any(|(left, right)| uf.find(*left) == uf.find(*right))
+    {
+        return None;
+    }
+    let term_classes = canonical_term_classes(arena, &mut uf);
+    let assignment = assignment_literals(assignment)?;
+    let mut transcript_clauses = cnf.clauses.iter().map(<[i32]>::to_vec).collect::<Vec<_>>();
+    transcript_clauses.extend(transcript.iter().filter_map(|event| match event {
+        ProductionTranscriptEvent::Clause { clause, .. } => Some(clause.clone()),
+        _ => None,
+    }));
+    if transcript_clauses != backend_clauses {
+        return None;
+    }
+    Some(ProductionSatWitness {
+        backend: backend.to_owned(),
+        assignment,
+        atoms,
+        variables: cnf.var_atoms.iter().skip(1).cloned().collect(),
+        initial_clauses: cnf.clauses.iter().map(<[i32]>::to_vec).collect(),
+        backend_clauses: backend_clauses.to_vec(),
+        transcript: transcript.to_vec(),
+        term_classes,
+        true_term,
+        false_term,
+    })
+}
+
 fn theory_conflict_clauses(
     cnf: &CnfProblem,
     arena: &TermArena,
@@ -4450,9 +4700,9 @@ fn dynamic_full_ackermann_before_refinement(
         && dynamic_full_ackermann_for_shape(setting, cnf_clauses, app_count, finite_added)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 enum EagerSolveOutcome {
-    Solved(SolveResult),
+    Solved(SolverOutcome),
     InvalidTheoryModel(usize),
     #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
     Unavailable,
@@ -4477,6 +4727,7 @@ fn solve_kissat_euf_once(
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
+    capture_evidence: bool,
 ) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
@@ -4489,24 +4740,27 @@ fn solve_kissat_euf_once(
     profile_phase("kissat_base_load", load_start, cnf.clauses.len());
 
     let transitivity_start = Instant::now();
-    let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    if capture_evidence {
+        transitivity.sort();
+    }
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        solver.add(&kissat_clause(&clause, &variables));
+    for clause in &transitivity {
+        solver.add(&kissat_clause(clause, &variables));
     }
     profile_phase("kissat_transitivity_load", transitivity_load_start, 0);
 
     let congruence_start = Instant::now();
     let congruence = if eager_congruence {
-        congruence_axiom_clauses(cnf, arena)
+        congruence_axiom_clauses_with_contract(cnf, arena, capture_evidence)
     } else {
         Vec::new()
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        solver.add(&kissat_clause(&clause, &variables));
+    for clause in &congruence {
+        solver.add(&kissat_clause(clause, &variables));
     }
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
@@ -4514,7 +4768,7 @@ fn solve_kissat_euf_once(
     let result = solver.sat();
     profile_phase("kissat_solve", sat_start, 0);
     let Some(solution) = result else {
-        return EagerSolveOutcome::Solved(SolveResult::Unsat);
+        return EagerSolveOutcome::Solved(SolverOutcome::unsat("kissat"));
     };
 
     let mut assignment = vec![0i8; cnf.var_count() + 1];
@@ -4528,12 +4782,39 @@ fn solve_kissat_euf_once(
     if !complete_cnf_assignment(cnf, &mut assignment) {
         return EagerSolveOutcome::Unavailable;
     }
-    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-    else {
+    let Some(conflicts) = production_theory_conflicts(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        &assignment,
+        capture_evidence,
+    ) else {
         return EagerSolveOutcome::Unavailable;
     };
+    let mut transcript = Vec::new();
+    append_clause_events(&mut transcript, "transitivity", &transitivity);
+    append_clause_events(&mut transcript, "congruence", &congruence);
+    if append_validation_events(&mut transcript, 1, &assignment, &conflicts).is_none() {
+        return EagerSolveOutcome::Unavailable;
+    }
     if conflicts.is_empty() {
-        EagerSolveOutcome::Solved(SolveResult::Sat)
+        let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
+        let witness = capture_evidence
+            .then(|| {
+                production_sat_witness_from_cnf(
+                    "kissat",
+                    cnf,
+                    &backend_clauses,
+                    &transcript,
+                    arena,
+                    true_term,
+                    false_term,
+                    &assignment,
+                )
+            })
+            .flatten();
+        EagerSolveOutcome::Solved(SolverOutcome::sat("kissat", witness))
     } else {
         EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
     }
@@ -4557,6 +4838,7 @@ fn solve_kissat_euf_once(
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
+    capture_evidence: bool,
 ) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
@@ -4571,11 +4853,14 @@ fn solve_kissat_euf_once(
     profile_phase("kissat_base_load", load_start, cnf.clauses.len());
 
     let transitivity_start = Instant::now();
-    let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    if capture_evidence {
+        transitivity.sort();
+    }
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+    for clause in &transitivity {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
             return EagerSolveOutcome::Unavailable;
         }
     }
@@ -4583,14 +4868,14 @@ fn solve_kissat_euf_once(
 
     let congruence_start = Instant::now();
     let congruence = if eager_congruence {
-        congruence_axiom_clauses(cnf, arena)
+        congruence_axiom_clauses_with_contract(cnf, arena, capture_evidence)
     } else {
         Vec::new()
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        if solver.add_clause(rustsat_clause(&clause)).is_err() {
+    for clause in &congruence {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
             return EagerSolveOutcome::Unavailable;
         }
     }
@@ -4602,7 +4887,9 @@ fn solve_kissat_euf_once(
     };
     profile_phase("kissat_solve", sat_start, 0);
     match result {
-        RustSatResult::Unsat => return EagerSolveOutcome::Solved(SolveResult::Unsat),
+        RustSatResult::Unsat => {
+            return EagerSolveOutcome::Solved(SolverOutcome::unsat("kissat"));
+        }
         RustSatResult::Interrupted => return EagerSolveOutcome::Unavailable,
         RustSatResult::Sat => {}
     }
@@ -4624,12 +4911,39 @@ fn solve_kissat_euf_once(
     if !complete_cnf_assignment(cnf, &mut assignment) {
         return EagerSolveOutcome::Unavailable;
     }
-    let Some(conflicts) = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-    else {
+    let Some(conflicts) = production_theory_conflicts(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        &assignment,
+        capture_evidence,
+    ) else {
         return EagerSolveOutcome::Unavailable;
     };
+    let mut transcript = Vec::new();
+    append_clause_events(&mut transcript, "transitivity", &transitivity);
+    append_clause_events(&mut transcript, "congruence", &congruence);
+    if append_validation_events(&mut transcript, 1, &assignment, &conflicts).is_none() {
+        return EagerSolveOutcome::Unavailable;
+    }
     if conflicts.is_empty() {
-        EagerSolveOutcome::Solved(SolveResult::Sat)
+        let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
+        let witness = capture_evidence
+            .then(|| {
+                production_sat_witness_from_cnf(
+                    "kissat",
+                    cnf,
+                    &backend_clauses,
+                    &transcript,
+                    arena,
+                    true_term,
+                    false_term,
+                    &assignment,
+                )
+            })
+            .flatten();
+        EagerSolveOutcome::Solved(SolverOutcome::sat("kissat", witness))
     } else {
         EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
     }
@@ -4676,13 +4990,17 @@ fn solve_cadical_euf_once(
     true_term: TermId,
     false_term: TermId,
     eager_congruence: bool,
-) -> Option<SolveResult> {
+    capture_evidence: bool,
+) -> Option<SolverOutcome> {
     let transitivity_start = Instant::now();
-    let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    if capture_evidence {
+        transitivity.sort();
+    }
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let congruence_start = Instant::now();
     let congruence = if eager_congruence {
-        congruence_axiom_clauses(cnf, arena)
+        congruence_axiom_clauses_with_contract(cnf, arena, capture_evidence)
     } else {
         Vec::new()
     };
@@ -4713,14 +5031,14 @@ fn solve_cadical_euf_once(
     profile_phase("cadical_base_load", load_start, cnf.clauses.len());
 
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    for clause in &transitivity {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
     }
     profile_phase("cadical_transitivity_load", transitivity_load_start, 0);
 
     let congruence_load_start = Instant::now();
-    for clause in congruence {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    for clause in &congruence {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
     }
     profile_phase("cadical_congruence_load", congruence_load_start, 0);
 
@@ -4737,7 +5055,7 @@ fn solve_cadical_euf_once(
         solver.decisions(),
     );
     match result {
-        RustSatResult::Unsat => return Some(SolveResult::Unsat),
+        RustSatResult::Unsat => return Some(SolverOutcome::unsat("cadical")),
         RustSatResult::Interrupted => return None,
         RustSatResult::Sat => {}
     }
@@ -4752,9 +5070,37 @@ fn solve_cadical_euf_once(
         };
     }
     complete_cnf_assignment(cnf, &mut assignment).then_some(())?;
-    theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?
-        .is_empty()
-        .then_some(SolveResult::Sat)
+    let conflicts = production_theory_conflicts(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        &assignment,
+        capture_evidence,
+    )?;
+    let mut transcript = Vec::new();
+    append_clause_events(&mut transcript, "transitivity", &transitivity);
+    append_clause_events(&mut transcript, "congruence", &congruence);
+    append_validation_events(&mut transcript, 1, &assignment, &conflicts)?;
+    if !conflicts.is_empty() {
+        return None;
+    }
+    let backend_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
+    let witness = capture_evidence
+        .then(|| {
+            production_sat_witness_from_cnf(
+                "cadical",
+                cnf,
+                &backend_clauses,
+                &transcript,
+                arena,
+                true_term,
+                false_term,
+                &assignment,
+            )
+        })
+        .flatten();
+    Some(SolverOutcome::sat("cadical", witness))
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -4842,7 +5188,8 @@ fn solve_cadical_euf_refining(
     true_term: TermId,
     false_term: TermId,
     refinement_mode: RefinementMode,
-) -> Option<(SolveResult, usize, usize)> {
+    capture_evidence: bool,
+) -> Option<(SolverOutcome, usize, usize)> {
     let max_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -4855,6 +5202,7 @@ fn solve_cadical_euf_refining(
         false_term,
         refinement_mode,
         max_rounds,
+        capture_evidence,
         &mut telemetry,
     );
     telemetry.profile();
@@ -4868,18 +5216,28 @@ fn solve_cadical_euf_refining_with_limit(
     false_term: TermId,
     refinement_mode: RefinementMode,
     max_rounds: usize,
+    capture_evidence: bool,
     telemetry: &mut CadicalRefinementTelemetry,
-) -> Option<(SolveResult, usize, usize)> {
+) -> Option<(SolverOutcome, usize, usize)> {
+    let refinement_mode = if capture_evidence {
+        RefinementMode::ModelCuts
+    } else {
+        refinement_mode
+    };
     let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
     configure_cadical(&mut solver, false)?;
     for clause in &cnf.clauses {
         solver.add_clause(rustsat_clause(clause)).ok()?;
     }
-    let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
-    for clause in transitivity {
-        solver.add_clause(rustsat_clause(&clause)).ok()?;
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    if capture_evidence {
+        transitivity.sort();
     }
+    for clause in &transitivity {
+        solver.add_clause(rustsat_clause(clause)).ok()?;
+    }
+    let mut loaded_clauses = backend_clause_stream(cnf, &[&transitivity]);
     profile_phase("cadical_refine_base_load", load_start, cnf.clauses.len());
 
     let mut congruence = Vec::new();
@@ -4914,6 +5272,10 @@ fn solve_cadical_euf_refining_with_limit(
     }
     let mut learned_theory = HashSet::<Vec<i32>>::default();
     let mut lemma_count = 0usize;
+    let mut transcript = Vec::new();
+    if capture_evidence {
+        append_clause_events(&mut transcript, "transitivity", &transitivity);
+    }
 
     for round in 1..=max_rounds {
         telemetry.rounds = round;
@@ -4923,7 +5285,7 @@ fn solve_cadical_euf_refining_with_limit(
         telemetry.sat_time_ns += sat_start.elapsed().as_nanos();
         match result {
             RustSatResult::Unsat => {
-                return Some((SolveResult::Unsat, round, lemma_count));
+                return Some((SolverOutcome::unsat("cadical-refine"), round, lemma_count));
             }
             RustSatResult::Interrupted => return None,
             RustSatResult::Sat => {}
@@ -4961,6 +5323,7 @@ fn solve_cadical_euf_refining_with_limit(
             for &index in &congruence_groups[&group] {
                 if !loaded_congruence[index] {
                     solver.add_clause(rustsat_clause(&congruence[index])).ok()?;
+                    loaded_clauses.push(congruence[index].clone());
                     loaded_congruence[index] = true;
                     lemma_count += 1;
                     added += 1;
@@ -4969,25 +5332,67 @@ fn solve_cadical_euf_refining_with_limit(
         }
         for index in violated_ungrouped {
             solver.add_clause(rustsat_clause(&congruence[index])).ok()?;
+            loaded_clauses.push(congruence[index].clone());
             loaded_congruence[index] = true;
             lemma_count += 1;
             added += 1;
         }
 
         let validation_start = Instant::now();
-        let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?;
+        let conflicts = production_theory_conflicts(
+            cnf,
+            arena,
+            true_term,
+            false_term,
+            &assignment,
+            capture_evidence,
+        )?;
         telemetry.validation_time_ns += validation_start.elapsed().as_nanos();
         telemetry.validation_calls += 1;
-        if conflicts.is_empty() && added == 0 {
-            return Some((SolveResult::Sat, round, lemma_count));
+        if capture_evidence {
+            append_validation_events(&mut transcript, round, &assignment, &conflicts)?;
         }
+        if conflicts.is_empty() && added == 0 {
+            let witness = capture_evidence
+                .then(|| {
+                    production_sat_witness_from_cnf(
+                        "cadical-refine",
+                        cnf,
+                        &loaded_clauses,
+                        &transcript,
+                        arena,
+                        true_term,
+                        false_term,
+                        &assignment,
+                    )
+                })
+                .flatten();
+            return Some((
+                SolverOutcome::sat("cadical-refine", witness),
+                round,
+                lemma_count,
+            ));
+        }
+        let mut added_clauses = Vec::new();
         let cut_count = add_novel_theory_cuts(
             &conflicts,
             &mut learned_theory,
             cnf.var_count(),
             telemetry,
-            |clause| solver.add_clause(rustsat_clause(clause)).is_ok(),
+            |clause| {
+                if solver.add_clause(rustsat_clause(clause)).is_err() {
+                    return false;
+                }
+                loaded_clauses.push(clause.to_vec());
+                if capture_evidence {
+                    added_clauses.push(clause.to_vec());
+                }
+                true
+            },
         )?;
+        if capture_evidence {
+            append_clause_events(&mut transcript, "theory", &added_clauses);
+        }
         lemma_count += cut_count;
         added += cut_count;
         if added == 0 {
@@ -5003,7 +5408,8 @@ fn solve_varisat_euf(
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
-) -> (SolveResult, usize, usize) {
+    capture_evidence: bool,
+) -> (SolverOutcome, usize, usize) {
     let load_start = Instant::now();
     let mut solver = VarisatSolver::new();
     for clause in &cnf.clauses {
@@ -5016,10 +5422,13 @@ fn solve_varisat_euf(
     profile_phase("varisat_base_load", load_start, cnf.clauses.len());
 
     let transitivity_start = Instant::now();
-    let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    if capture_evidence {
+        transitivity.sort();
+    }
     profile_phase("transitivity", transitivity_start, transitivity.len());
     let transitivity_load_start = Instant::now();
-    for clause in transitivity {
+    for clause in &transitivity {
         let lits = clause
             .iter()
             .map(|literal| Lit::from_dimacs(*literal as isize))
@@ -5032,11 +5441,11 @@ fn solve_varisat_euf(
     let congruence = if env::var("EUF_VIPER_EAGER_CONGRUENCE").as_deref() == Ok("0") {
         Vec::new()
     } else {
-        congruence_axiom_clauses(cnf, arena)
+        congruence_axiom_clauses_with_contract(cnf, arena, capture_evidence)
     };
     profile_phase("congruence", congruence_start, congruence.len());
     let congruence_load_start = Instant::now();
-    for clause in congruence {
+    for clause in &congruence {
         let lits = clause
             .iter()
             .map(|literal| Lit::from_dimacs(*literal as isize))
@@ -5044,6 +5453,12 @@ fn solve_varisat_euf(
         solver.add_clause(&lits);
     }
     profile_phase("varisat_congruence_load", congruence_load_start, 0);
+    let mut loaded_clauses = backend_clause_stream(cnf, &[&transitivity, &congruence]);
+    let mut transcript = Vec::new();
+    if capture_evidence {
+        append_clause_events(&mut transcript, "transitivity", &transitivity);
+        append_clause_events(&mut transcript, "congruence", &congruence);
+    }
 
     let mut learned = HashSet::<Vec<i32>>::default();
     let max_theory_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
@@ -5058,12 +5473,12 @@ fn solve_varisat_euf(
         match sat_result {
             Ok(false) => {
                 profile_measurement("varisat_solve", sat_time_ns, round);
-                return (SolveResult::Unsat, round, learned.len());
+                return (SolverOutcome::unsat("varisat"), round, learned.len());
             }
             Err(error) => {
                 profile_measurement("varisat_solve", sat_time_ns, round);
                 return (
-                    SolveResult::Unsupported(vec![format!("Varisat failed: {error}")]),
+                    SolverOutcome::unsupported("varisat", vec![format!("Varisat failed: {error}")]),
                     round,
                     learned.len(),
                 );
@@ -5082,29 +5497,65 @@ fn solve_varisat_euf(
         if !complete_cnf_assignment(cnf, &mut assignment) {
             profile_measurement("varisat_solve", sat_time_ns, round);
             return (
-                SolveResult::Unsupported(vec![
-                    "Varisat returned an incomplete model that does not satisfy the base CNF"
-                        .to_owned(),
-                ]),
+                SolverOutcome::unsupported(
+                    "varisat",
+                    vec![
+                        "Varisat returned an incomplete model that does not satisfy the base CNF"
+                            .to_owned(),
+                    ],
+                ),
                 round,
                 learned.len(),
             );
         }
-        let Some(conflicts) =
-            theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)
-        else {
+        let Some(conflicts) = production_theory_conflicts(
+            cnf,
+            arena,
+            true_term,
+            false_term,
+            &assignment,
+            capture_evidence,
+        ) else {
             profile_measurement("varisat_solve", sat_time_ns, round);
             return (
-                SolveResult::Unsupported(vec![
-                    "Varisat model could not be completed for EUF validation".to_owned(),
-                ]),
+                SolverOutcome::unsupported(
+                    "varisat",
+                    vec!["Varisat model could not be completed for EUF validation".to_owned()],
+                ),
                 round,
                 learned.len(),
             );
         };
+        if capture_evidence
+            && append_validation_events(&mut transcript, round, &assignment, &conflicts).is_none()
+        {
+            profile_measurement("varisat_solve", sat_time_ns, round);
+            return (
+                SolverOutcome::unsupported(
+                    "varisat",
+                    vec!["Varisat assignment could not be recorded".to_owned()],
+                ),
+                round,
+                learned.len(),
+            );
+        }
         if conflicts.is_empty() {
             profile_measurement("varisat_solve", sat_time_ns, round);
-            return (SolveResult::Sat, round, learned.len());
+            let witness = capture_evidence
+                .then(|| {
+                    production_sat_witness_from_cnf(
+                        "varisat",
+                        cnf,
+                        &loaded_clauses,
+                        &transcript,
+                        arena,
+                        true_term,
+                        false_term,
+                        &assignment,
+                    )
+                })
+                .flatten();
+            return (SolverOutcome::sat("varisat", witness), round, learned.len());
         }
 
         let mut added = 0usize;
@@ -5115,15 +5566,23 @@ fn solve_varisat_euf(
                     .map(|literal| Lit::from_dimacs(*literal as isize))
                     .collect::<Vec<_>>();
                 solver.add_clause(&lits);
+                loaded_clauses.push(clause.clone());
+                if capture_evidence {
+                    transcript.push(ProductionTranscriptEvent::Clause {
+                        phase: "theory",
+                        clause,
+                    });
+                }
                 added += 1;
             }
         }
         if added == 0 {
             profile_measurement("varisat_solve", sat_time_ns, round);
             return (
-                SolveResult::Unsupported(vec![
-                    "Varisat repeated an existing EUF conflict clause".to_owned(),
-                ]),
+                SolverOutcome::unsupported(
+                    "varisat",
+                    vec!["Varisat repeated an existing EUF conflict clause".to_owned()],
+                ),
                 round,
                 learned.len(),
             );
@@ -5131,9 +5590,12 @@ fn solve_varisat_euf(
     }
     profile_measurement("varisat_solve", sat_time_ns, max_theory_rounds);
     (
-        SolveResult::Unsupported(vec![format!(
-            "Varisat reached the {max_theory_rounds}-round EUF lemma limit"
-        )]),
+        SolverOutcome::unsupported(
+            "varisat",
+            vec![format!(
+                "Varisat reached the {max_theory_rounds}-round EUF lemma limit"
+            )],
+        ),
         max_theory_rounds,
         learned.len(),
     )
@@ -5605,6 +6067,87 @@ enum SolveResult {
     Unsupported(Vec<String>),
 }
 
+#[cfg_attr(not(feature = "production-evidence"), allow(dead_code))]
+#[derive(Debug, Clone)]
+struct ProductionAtomWitness {
+    variable: usize,
+    atom: BoolAtomKey,
+    value: bool,
+}
+
+#[cfg_attr(not(feature = "production-evidence"), allow(dead_code))]
+#[derive(Debug, Clone)]
+enum ProductionTranscriptEvent {
+    Clause {
+        phase: &'static str,
+        clause: Vec<i32>,
+    },
+    Solve {
+        call: usize,
+    },
+    Assignment {
+        call: usize,
+        assignment: Vec<i32>,
+    },
+    Validation {
+        call: usize,
+        conflicts: Vec<Vec<i32>>,
+    },
+}
+
+#[cfg_attr(not(feature = "production-evidence"), allow(dead_code))]
+#[derive(Debug, Clone)]
+struct ProductionSatWitness {
+    backend: String,
+    assignment: Vec<i32>,
+    atoms: Vec<ProductionAtomWitness>,
+    variables: Vec<Option<BoolAtomKey>>,
+    initial_clauses: Vec<Vec<i32>>,
+    backend_clauses: Vec<Vec<i32>>,
+    transcript: Vec<ProductionTranscriptEvent>,
+    term_classes: Vec<usize>,
+    true_term: TermId,
+    false_term: TermId,
+}
+
+#[derive(Debug)]
+struct SolverOutcome {
+    result: SolveResult,
+    backend: &'static str,
+    sat_witness: Option<ProductionSatWitness>,
+}
+
+impl SolverOutcome {
+    fn unsat(backend: &'static str) -> Self {
+        Self {
+            result: SolveResult::Unsat,
+            backend,
+            sat_witness: None,
+        }
+    }
+
+    fn sat(backend: &'static str, witness: Option<ProductionSatWitness>) -> Self {
+        debug_assert!(
+            witness
+                .as_ref()
+                .is_none_or(|value| value.backend == backend)
+        );
+        Self {
+            result: SolveResult::Sat,
+            backend,
+            sat_witness: witness,
+        }
+    }
+
+    fn unsupported(backend: &'static str, reasons: Vec<String>) -> Self {
+        Self {
+            result: SolveResult::Unsupported(reasons),
+            backend,
+            sat_witness: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct SolveStats {
     terms: usize,
@@ -5620,10 +6163,13 @@ struct SolveStats {
     theory_lemmas: usize,
 }
 
+#[cfg_attr(not(feature = "production-evidence"), allow(dead_code))]
 #[derive(Debug)]
 struct SolveReport {
     result: SolveResult,
     stats: SolveStats,
+    backend: &'static str,
+    sat_witness: Option<ProductionSatWitness>,
 }
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
@@ -6113,6 +6659,20 @@ fn solve_problem_with_options_and_eq_abstraction(
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
 ) -> SolveReport {
+    solve_problem_ref_with_options_and_eq_abstraction(
+        &problem,
+        root_cnf_options,
+        eq_abstraction_mode,
+        false,
+    )
+}
+
+fn solve_problem_ref_with_options_and_eq_abstraction(
+    problem: &Problem,
+    root_cnf_options: RootCnfOptions,
+    eq_abstraction_mode: EqAbstractionMode,
+    capture_evidence: bool,
+) -> SolveReport {
     debug_assert!(problem.terms_are_well_sorted());
     let stats_base = SolveStats {
         terms: problem.arena.terms.len(),
@@ -6132,6 +6692,8 @@ fn solve_problem_with_options_and_eq_abstraction(
         return SolveReport {
             result: SolveResult::Unsat,
             stats: stats_base,
+            backend: "parser-contradiction",
+            sat_witness: None,
         };
     }
 
@@ -6146,8 +6708,14 @@ fn solve_problem_with_options_and_eq_abstraction(
                     root_cnf_options,
                     eq_abstraction_mode,
                     &mut finite_context,
+                    capture_evidence,
                 )
             {
+                let SolverOutcome {
+                    result,
+                    backend,
+                    sat_witness,
+                } = result;
                 return SolveReport {
                     result,
                     stats: SolveStats {
@@ -6158,6 +6726,8 @@ fn solve_problem_with_options_and_eq_abstraction(
                         theory_lemmas,
                         ..stats_base
                     },
+                    backend,
+                    sat_witness,
                 };
             }
         }
@@ -6179,18 +6749,22 @@ fn solve_problem_with_options_and_eq_abstraction(
                     congruence_merges,
                     ..stats_base
                 },
+                backend: "congruence-closure",
+                sat_witness: None,
             };
         }
     }
 
     if !problem.unsupported.is_empty() {
         return SolveReport {
-            result: SolveResult::Unsupported(problem.unsupported),
+            result: SolveResult::Unsupported(problem.unsupported.clone()),
             stats: SolveStats {
                 closure_passes,
                 congruence_merges,
                 ..stats_base
             },
+            backend: "congruence-closure",
+            sat_witness: None,
         };
     }
 
@@ -6201,6 +6775,8 @@ fn solve_problem_with_options_and_eq_abstraction(
             congruence_merges,
             ..stats_base
         },
+        backend: "congruence-closure",
+        sat_witness: None,
     }
 }
 
@@ -6215,6 +6791,7 @@ fn solve_dynamic_full_ackermann(
         bool_problem,
         accepted_equality_facts,
         false,
+        false,
     )
 }
 
@@ -6225,6 +6802,7 @@ fn solve_dynamic_full_ackermann_with_negated_root(
     bool_problem: &BoolProblem,
     accepted_equality_facts: &[(TermId, TermId)],
     direct_negated_root: bool,
+    capture_evidence: bool,
 ) -> (CnfProblem, EagerSolveOutcome) {
     let direct_cnf_start = Instant::now();
     let mut completed = CnfProblem::new();
@@ -6249,6 +6827,7 @@ fn solve_dynamic_full_ackermann_with_negated_root(
         bool_problem.true_term,
         bool_problem.false_term,
         false,
+        capture_evidence,
     );
     (completed, outcome)
 }
@@ -6259,7 +6838,8 @@ fn solve_bool_problem(
     root_cnf_options: RootCnfOptions,
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
-) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    capture_evidence: bool,
+) -> Option<(SolverOutcome, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
@@ -6276,6 +6856,11 @@ fn solve_bool_problem(
         }
     }
     profile_phase("cnf", cnf_start, cnf.clauses.len());
+    let requested_eq_abstraction_mode = if capture_evidence {
+        EqAbstractionMode::Off
+    } else {
+        requested_eq_abstraction_mode
+    };
     let eq_abstraction_mode = route_eq_abstraction_mode(
         requested_eq_abstraction_mode,
         arena,
@@ -6306,8 +6891,9 @@ fn solve_bool_problem(
         backend.as_str(),
         "auto" | "varisat" | "kissat" | "cadical" | "cadical-refine"
     ) {
-        let finite_added = if matches!(backend.as_str(), "auto" | "cadical" | "cadical-refine")
-            || env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1")
+        let finite_added = if !capture_evidence
+            && (matches!(backend.as_str(), "auto" | "cadical" | "cadical-refine")
+                || env::var("EUF_VIPER_FINITE_DOMAIN").as_deref() == Ok("1"))
         {
             let finite_start = Instant::now();
             let added = add_finite_domain_axioms_with_context(
@@ -6321,12 +6907,18 @@ fn solve_bool_problem(
         } else {
             0
         };
-        let refinement_mode = selected_refinement_mode();
+        let refinement_mode = if capture_evidence {
+            RefinementMode::ModelCuts
+        } else {
+            selected_refinement_mode()
+        };
         let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
-        let full_ackermann_forced = force_full_ackermann(full_ackermann_setting.as_deref());
+        let full_ackermann_forced =
+            !capture_evidence && force_full_ackermann(full_ackermann_setting.as_deref());
         if full_ackermann_forced {
             add_full_ackermann_completion(&mut cnf, arena);
-        } else if !cnf.finite_equalities_complete
+        } else if !capture_evidence
+            && !cnf.finite_equalities_complete
             && matches!(
                 env::var("EUF_VIPER_CHORDAL_TRANSITIVITY").as_deref(),
                 Ok("1" | "on")
@@ -6365,6 +6957,7 @@ fn solve_bool_problem(
                 bool_problem.true_term,
                 bool_problem.false_term,
                 eager_congruence,
+                capture_evidence,
             ) {
                 return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
             }
@@ -6376,6 +6969,7 @@ fn solve_bool_problem(
                 bool_problem.true_term,
                 bool_problem.false_term,
                 eager_congruence,
+                capture_evidence,
             );
             match outcome {
                 EagerSolveOutcome::Solved(result) => {
@@ -6398,6 +6992,7 @@ fn solve_bool_problem(
                                 bool_problem,
                                 &accepted_equality_facts,
                                 root_cnf_options.direct_negated_root,
+                                capture_evidence,
                             );
                         prior_sat_calls += 1;
                         match completed_outcome {
@@ -6426,6 +7021,7 @@ fn solve_bool_problem(
                             bool_problem.true_term,
                             bool_problem.false_term,
                             refinement_mode,
+                            capture_evidence,
                         ) {
                             return Some((
                                 result,
@@ -6448,6 +7044,7 @@ fn solve_bool_problem(
                 bool_problem.true_term,
                 bool_problem.false_term,
                 eager_congruence,
+                capture_evidence,
             ) {
                 return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
             }
@@ -6459,6 +7056,7 @@ fn solve_bool_problem(
                 bool_problem.true_term,
                 bool_problem.false_term,
                 refinement_mode,
+                capture_evidence,
             ) {
                 return Some((
                     result,
@@ -6470,8 +7068,13 @@ fn solve_bool_problem(
                 ));
             }
         }
-        let (result, sat_calls, theory_lemmas) =
-            solve_varisat_euf(&cnf, arena, bool_problem.true_term, bool_problem.false_term);
+        let (result, sat_calls, theory_lemmas) = solve_varisat_euf(
+            &cnf,
+            arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            capture_evidence,
+        );
         return Some((
             result,
             cnf.var_count(),
@@ -6488,12 +7091,36 @@ fn solve_bool_problem(
     let mut solver = DpllSolver::new(&cnf, arena, bool_problem.true_term, bool_problem.false_term);
     let search_result = solver.solve();
     let result = match search_result {
-        CnfSearchResult::Sat => SolveResult::Sat,
-        CnfSearchResult::Unsat => SolveResult::Unsat,
-        CnfSearchResult::Limit => SolveResult::Unsupported(vec![format!(
-            "DPLL(T) node limit reached after {} nodes",
-            solver.nodes
-        )]),
+        CnfSearchResult::Sat => {
+            let witness = if capture_evidence {
+                let loaded_clauses = backend_clause_stream(&cnf, &[]);
+                solver.model.as_ref().and_then(|assignment| {
+                    let mut transcript = Vec::new();
+                    append_validation_events(&mut transcript, 1, assignment, &[])?;
+                    production_sat_witness_from_cnf(
+                        "dpll-t",
+                        &cnf,
+                        &loaded_clauses,
+                        &transcript,
+                        arena,
+                        bool_problem.true_term,
+                        bool_problem.false_term,
+                        assignment,
+                    )
+                })
+            } else {
+                None
+            };
+            SolverOutcome::sat("dpll-t", witness)
+        }
+        CnfSearchResult::Unsat => SolverOutcome::unsat("dpll-t"),
+        CnfSearchResult::Limit => SolverOutcome::unsupported(
+            "dpll-t",
+            vec![format!(
+                "DPLL(T) node limit reached after {} nodes",
+                solver.nodes
+            )],
+        ),
     };
     Some((
         result,
@@ -6716,14 +7343,15 @@ fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
 }
 
 fn parse_problem(input: &str) -> Result<Problem, String> {
-    parse_problem_with_scoped_let_mode(input, selected_scoped_let_mode()?)
+    parse_problem_with_options(input, selected_scoped_let_mode()?, false)
 }
 
+#[cfg(test)]
 fn parse_problem_with_scoped_let_mode(
     input: &str,
     scoped_let_mode: ScopedLetMode,
 ) -> Result<Problem, String> {
-    parse_context_with_scoped_let_mode(input, scoped_let_mode).map(ParseCtx::finish)
+    parse_problem_with_options(input, scoped_let_mode, false)
 }
 
 fn parse_problem_with_scoped_let_mode_and_symbols(
@@ -6738,12 +7366,30 @@ fn parse_context_with_scoped_let_mode(
     input: &str,
     scoped_let_mode: ScopedLetMode,
 ) -> Result<ParseCtx, String> {
+    parse_context_with_options(input, scoped_let_mode, false)
+}
+
+fn parse_problem_with_options(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+    retain_symbols: bool,
+) -> Result<Problem, String> {
+    parse_context_with_options(input, scoped_let_mode, retain_symbols)
+        .map(|ctx| ctx.finish_retaining_symbols(retain_symbols))
+}
+
+fn parse_context_with_options(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+    retain_symbols: bool,
+) -> Result<ParseCtx, String> {
     let bounded_let_count = bounded_lexical_let_count(input);
     let scoped_let_selected = scoped_let_selected(scoped_let_mode, bounded_let_count);
     profile_scoped_let(scoped_let_mode, bounded_let_count, scoped_let_selected);
 
     let sexps = parse_sexps(input)?;
     let mut ctx = ParseCtx::new(scoped_let_selected);
+    ctx.retain_evidence_symbols = retain_symbols;
     ctx.preprocess_branch_intersections = sexps
         .iter()
         .filter(|sexp| {
@@ -6796,28 +7442,124 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
     }
 }
 
-fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
+fn solve_file(path: &str, with_stats: bool, evidence_out: Option<&str>) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
-    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options)
+    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, evidence_out)
+}
+
+fn read_source_nofollow(path: &Path) -> Result<Vec<u8>, String> {
+    #[cfg(feature = "production-evidence")]
+    {
+        nofollow_io::read_regular(path)
+    }
+    #[cfg(not(feature = "production-evidence"))]
+    {
+        let _ = path;
+        Err("--evidence-out requires the production-evidence feature".to_owned())
+    }
 }
 
 fn solve_file_with_root_cnf_options(
     path: &str,
     with_stats: bool,
     root_cnf_options: RootCnfOptions,
+    evidence_out: Option<&str>,
 ) -> Result<i32, String> {
-    let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+    let source_bytes = evidence_out
+        .map(|_| read_source_nofollow(Path::new(path)))
+        .transpose()?;
+    let ordinary_input;
+    let input = if let Some(source_bytes) = source_bytes.as_deref() {
+        std::str::from_utf8(source_bytes)
+            .map_err(|error| format!("{path} is not UTF-8: {error}"))?
+    } else {
+        ordinary_input =
+            fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
+        &ordinary_input
+    };
     let start = Instant::now();
     let parse_start = Instant::now();
-    let problem = parse_problem(&input)?;
+    let problem =
+        parse_problem_with_options(input, selected_scoped_let_mode()?, evidence_out.is_some())?;
     profile_phase("parse", parse_start, input.len());
-    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+    let report = solve_problem_ref_with_options_and_eq_abstraction(
+        &problem,
+        root_cnf_options,
+        selected_eq_abstraction_mode(),
+        evidence_out.is_some(),
+    );
     let elapsed = start.elapsed();
+    #[cfg(feature = "production-evidence")]
+    let mut report = report;
+    #[cfg(feature = "production-evidence")]
+    if let Some(output) = evidence_out {
+        let disposition = production_evidence::write(
+            Path::new(output),
+            Path::new(path),
+            source_bytes
+                .as_deref()
+                .expect("evidence mode opens and binds source bytes"),
+            &problem,
+            &report,
+            root_cnf_options,
+        )?;
+        if disposition == production_evidence::EvidenceDisposition::Unsupported {
+            report.result = SolveResult::Unsupported(vec![format!(
+                "{} result is not supported by the production-evidence contract",
+                report.backend
+            )]);
+        }
+    }
+    #[cfg(not(feature = "production-evidence"))]
+    if evidence_out.is_some() {
+        return Err("--evidence-out requires the production-evidence feature".to_owned());
+    }
     print_report(&report, elapsed, with_stats);
     Ok(match report.result {
         SolveResult::Unsupported(_) => 3,
         _ => 0,
     })
+}
+
+fn parse_solve_args(args: &[String]) -> Result<(&str, bool, Option<&str>), String> {
+    let mut file = None;
+    let mut evidence_out = None;
+    let mut with_stats = false;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--stats" => {
+                with_stats = true;
+                index += 1;
+            }
+            "--evidence-out" => {
+                if evidence_out.is_some() {
+                    return Err("--evidence-out may be specified only once".to_owned());
+                }
+                let Some(value) = args.get(index + 1) else {
+                    return Err("--evidence-out requires a value".to_owned());
+                };
+                if value.starts_with("--") {
+                    return Err("--evidence-out requires a value".to_owned());
+                }
+                evidence_out = Some(value.as_str());
+                index += 2;
+            }
+            option if option.starts_with("--") => {
+                return Err(format!("unknown solve option `{option}`"));
+            }
+            path if file.is_none() => {
+                file = Some(path);
+                index += 1;
+            }
+            path => return Err(format!("unexpected solve argument `{path}`")),
+        }
+    }
+    Ok((
+        file.ok_or_else(|| "solve input file is required".to_owned())?,
+        with_stats,
+        evidence_out,
+    ))
 }
 
 // Frozen depth-3 candidate emitted by scripts/bench/train_structural_router.py.
@@ -6859,7 +7601,7 @@ fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, Stri
         );
     }
     if use_euf {
-        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options);
+        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, None);
     }
 
     #[cfg(unix)]
@@ -7213,7 +7955,10 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
 #[cfg(not(feature = "certificates"))]
 fn usage() -> &'static str {
     "usage:
-  euf-viper solve [--stats] FILE
+  euf-viper solve [--stats] [--evidence-out PATH] FILE
+    --evidence-out: restricted SAT-only certifying mode; requires the opt-in
+      production-evidence feature, forces deterministic canonical routes, and
+      reports congruence-closure SAT/UNSAT as unsupported
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper parse-check FILE|-
@@ -7228,7 +7973,10 @@ fn usage() -> &'static str {
 #[cfg(feature = "certificates")]
 fn usage() -> &'static str {
     "usage:
-  euf-viper solve [--stats] FILE
+  euf-viper solve [--stats] [--evidence-out PATH] FILE
+    --evidence-out: restricted SAT-only certifying mode; requires the opt-in
+      production-evidence feature, forces deterministic canonical routes, and
+      reports congruence-closure SAT/UNSAT as unsupported
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper parse-check FILE|-
@@ -7250,13 +7998,8 @@ fn run() -> Result<i32, String> {
     }
     match args[1].as_str() {
         "solve" => {
-            let with_stats = args.iter().any(|arg| arg == "--stats");
-            let file = args
-                .iter()
-                .skip(2)
-                .find(|arg| !arg.starts_with("--"))
-                .ok_or_else(|| usage().to_owned())?;
-            solve_file(file, with_stats)
+            let (file, with_stats, evidence_out) = parse_solve_args(&args)?;
+            solve_file(file, with_stats, evidence_out)
         }
         "portfolio" => {
             let (file, yices, with_stats) = parse_portfolio_args(&args)?;
@@ -7494,6 +8237,106 @@ mod tests {
             parse_portfolio_args(&args).unwrap(),
             ("input.smt2", "/solver/yices-smt2", true)
         );
+    }
+
+    #[test]
+    fn parses_and_rejects_ambiguous_production_evidence_arguments() {
+        let args = [
+            "euf-viper".to_owned(),
+            "solve".to_owned(),
+            "--stats".to_owned(),
+            "input.smt2".to_owned(),
+            "--evidence-out".to_owned(),
+            "evidence.json".to_owned(),
+        ];
+        assert_eq!(
+            parse_solve_args(&args).unwrap(),
+            ("input.smt2", true, Some("evidence.json"))
+        );
+
+        let missing_value = [
+            "euf-viper".to_owned(),
+            "solve".to_owned(),
+            "--evidence-out".to_owned(),
+            "--stats".to_owned(),
+            "input.smt2".to_owned(),
+        ];
+        assert_eq!(
+            parse_solve_args(&missing_value),
+            Err("--evidence-out requires a value".to_owned())
+        );
+
+        let duplicate = [
+            "euf-viper".to_owned(),
+            "solve".to_owned(),
+            "input.smt2".to_owned(),
+            "--evidence-out".to_owned(),
+            "one.json".to_owned(),
+            "--evidence-out".to_owned(),
+            "two.json".to_owned(),
+        ];
+        assert_eq!(
+            parse_solve_args(&duplicate),
+            Err("--evidence-out may be specified only once".to_owned())
+        );
+    }
+
+    #[test]
+    fn ordinary_wrapper_preserves_off_mode_result_and_configuration() {
+        let input = "(set-logic QF_UF)\n(declare-fun p () Bool)\n(assert p)\n(check-sat)\n";
+        let options = RootCnfOptions {
+            direct_root_cnf: true,
+            direct_negated_root: false,
+        };
+        let wrapped_problem =
+            parse_problem_with_scoped_let_mode(input, ScopedLetMode::Auto).unwrap();
+        let reference_problem =
+            parse_problem_with_scoped_let_mode(input, ScopedLetMode::Auto).unwrap();
+
+        let wrapped = solve_problem_with_options_and_eq_abstraction(
+            wrapped_problem,
+            options,
+            EqAbstractionMode::Off,
+        );
+        let reference = solve_problem_ref_with_options_and_eq_abstraction(
+            &reference_problem,
+            options,
+            EqAbstractionMode::Off,
+            false,
+        );
+
+        assert_eq!(wrapped.result, reference.result);
+        assert_eq!(wrapped.backend, reference.backend);
+        assert_eq!(
+            (
+                wrapped.stats.terms,
+                wrapped.stats.apps,
+                wrapped.stats.eqs,
+                wrapped.stats.diseqs,
+                wrapped.stats.closure_passes,
+                wrapped.stats.congruence_merges,
+                wrapped.stats.cnf_vars,
+                wrapped.stats.cnf_clauses,
+                wrapped.stats.search_nodes,
+                wrapped.stats.sat_calls,
+                wrapped.stats.theory_lemmas,
+            ),
+            (
+                reference.stats.terms,
+                reference.stats.apps,
+                reference.stats.eqs,
+                reference.stats.diseqs,
+                reference.stats.closure_passes,
+                reference.stats.congruence_merges,
+                reference.stats.cnf_vars,
+                reference.stats.cnf_clauses,
+                reference.stats.search_nodes,
+                reference.stats.sat_calls,
+                reference.stats.theory_lemmas,
+            )
+        );
+        assert!(wrapped.sat_witness.is_none());
+        assert!(reference.sat_witness.is_none());
     }
 
     #[test]
@@ -8604,8 +9447,13 @@ mod tests {
         let bool_problem = problem.bool_problem.as_ref().unwrap();
 
         let (existing, _) = solve_dynamic_full_ackermann(&problem.arena, bool_problem, &[]);
-        let (direct_negated, _) =
-            solve_dynamic_full_ackermann_with_negated_root(&problem.arena, bool_problem, &[], true);
+        let (direct_negated, _) = solve_dynamic_full_ackermann_with_negated_root(
+            &problem.arena,
+            bool_problem,
+            &[],
+            true,
+            false,
+        );
 
         assert_eq!(existing.var_count(), 4);
         assert_eq!(existing.clauses.len(), 5);
@@ -8627,8 +9475,10 @@ mod tests {
             &problem.arena,
             bool_problem.true_term,
             bool_problem.false_term,
+            false,
         )
         .0
+        .result
     }
 
     fn solve_text_cadical_refinement(
@@ -8658,8 +9508,10 @@ mod tests {
             bool_problem.false_term,
             refinement_mode,
             max_rounds,
+            false,
             &mut telemetry,
         );
+        let outcome = outcome.map(|(outcome, rounds, lemmas)| (outcome.result, rounds, lemmas));
         (outcome, telemetry, initial_vars, cnf.var_count())
     }
 
@@ -9559,7 +10411,9 @@ mod tests {
                 bool_problem.true_term,
                 bool_problem.false_term,
                 false,
-            ),
+                false,
+            )
+            .map(|outcome| outcome.result),
             Some(SolveResult::Unsat)
         );
     }

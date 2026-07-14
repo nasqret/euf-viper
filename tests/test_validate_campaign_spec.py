@@ -75,6 +75,28 @@ class CampaignSpecTests(unittest.TestCase):
 
         self.assertTrue(any("release_lock" in error for error in caught.exception.errors))
 
+    def test_boolean_schema_version_is_rejected(self) -> None:
+        spec = load_spec()
+        spec["schema_version"] = True
+
+        with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+            VALIDATOR.validate_spec(spec)
+
+        self.assertTrue(any("schema_version" in error for error in caught.exception.errors))
+
+    def test_duplicate_json_keys_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "campaign.json"
+            rendered = CAMPAIGN.read_text(encoding="utf-8").rstrip()
+            path.write_text(
+                rendered[:-1] + ',"schema_version":1}\n', encoding="utf-8"
+            )
+
+            with self.assertRaises(VALIDATOR.CampaignSpecError) as caught:
+                VALIDATOR.load_and_validate(path)
+
+            self.assertTrue(any("duplicate" in error for error in caught.exception.errors))
+
     def test_cli_writes_machine_readable_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "validated.json"
