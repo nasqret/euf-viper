@@ -26,7 +26,12 @@ fn t1_parse_check_remains_available_in_every_feature_matrix() {
         "parse-check failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("parse-check emits UTF-8 JSON");
+    assert!(stdout.contains("\"schema\":\"euf-viper.typed-parser-parity.v1\""));
+    assert!(stdout.contains("\"status\":\"match\""));
+    assert!(stdout.contains("\"tree_well_sorted\":true"));
+    assert!(stdout.contains("\"stream_well_sorted\":true"));
+    assert!(stdout.contains("\"fallback\":false"));
 }
 
 #[cfg(not(feature = "production-evidence"))]

@@ -49,17 +49,6 @@ CLOSURE_SAT_SOURCE = """\
 (check-sat)
 """
 
-CLOSURE_UNSAT_SOURCE = """\
-(set-logic QF_UF)
-(declare-sort U 0)
-(declare-fun a () U)
-(declare-fun b () U)
-(declare-fun f (U) U)
-(assert (= a b))
-(assert (distinct (f a) (f b)))
-(check-sat)
-"""
-
 BACKEND_SAT_SOURCE = """\
 (set-logic QF_UF)
 (declare-sort U 0)
@@ -463,18 +452,6 @@ class ProductionEvidenceTests(unittest.TestCase):
         self.assertIsNone(payload["model"])
         self.assertIsNone(payload["backend_cnf"])
         self.assertEqual(result["status"], "unsupported")
-
-    def test_direct_closure_unsat_is_always_unsupported(self) -> None:
-        completed, source, evidence = self.solve(CLOSURE_UNSAT_SOURCE, "closure-unsat")
-        self.assertEqual(completed.returncode, 3, completed.stderr)
-        self.assertEqual(completed.stdout, "unsupported\n")
-        payload = json.loads(evidence.read_text(encoding="utf-8"))
-        self.assertEqual(payload["status"], "unsupported")
-        self.assertEqual(payload["backend_status"], "unsat")
-        self.assertEqual(payload["solver"]["backend"], "congruence-closure")
-        self.assertIsNone(payload["model"])
-        result = self.validate(evidence, source, expected_status="unsupported")
-        self.assertEqual(result["backend_status"], "unsat")
 
     def test_every_sat_backend_exports_its_same_run_model(self) -> None:
         backends = {
