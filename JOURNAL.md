@@ -1285,6 +1285,22 @@
   symbol cloning polluted the timed path, and untracked remote inputs escaped
   provenance checks. The repaired campaign must fail closed over all 7,503
   sources before producing any timing decision.
+- Second independent production-evidence review rejected `939bc60`. The repair
+  correctly requests both Cargo features and guards reviewed happy-path
+  evidence allocations, but WMI provenance still permits ambient/untracked
+  build influence; ordinary help/error output differs from `f8d9205`;
+  exceptional solver exits lack zero-work assertions; and no exact combined-
+  release binary traverses recorder, checker, runner, and analyzer. All 78
+  focused review tests passed, but no Rust matrix or campaign was accepted.
+- Sixth independent T5 review rejected `cf1aa3e`. A retained staging hard link
+  allowed a concrete write to mutate the completed archive after `.current`;
+  the symlink marker was swappable and unverified; Git and the campaign lock
+  remained ambient-environment sensitive; final nonce/digests were absent from
+  the completed receipt; pathname cleanup races survived below the finalizer;
+  and the verifier reused the candidate projection implementation. No branch
+  push or WMI submission occurred despite 32 focused and 83 semantic test
+  passes. The replacement design uses an unnamed one-link Linux inode and an
+  independently checked content-bearing completion receipt.
 
 ## Next Entry Template
 

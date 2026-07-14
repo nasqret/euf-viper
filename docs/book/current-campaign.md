@@ -117,6 +117,16 @@ evidence is disabled, and the ordinary solve CLI changed. A real combined-
 feature smoke, instrumented zero-work off mode, and legacy CLI parity are
 required before branch publication. No production-evidence corpus run exists.
 
+Repair revision `939bc60` requests both features, probes the compiled feature
+report, and removes the reviewed SAT-happy-path allocations, but a second
+independent review is still NO-GO. The submitter reuses a revision checkout and
+exports ambient/untracked build influence; ordinary usage output is not
+byte-identical to `f8d9205`; zero-work tests omit exceptional solver paths; and
+the exact combined release does not traverse the complete miniature evidence
+pipeline. A private attempt checkout, environment allowlist, exhaustive CLI
+differential, path-complete telemetry, and combined-release Linux smoke are
+required before publication or WMI.
+
 ## Causal Controls
 
 ### Modern Kissat
@@ -243,9 +253,15 @@ check-then-unlink cleanup, and a source-swap test that preferred relinking to a
 fail-closed stop. Revision `55c0101` removed that fallback but still trusted a
 stage pathname after checking descriptor identity, could unlink a replacement
 `.current`, and reused revision-keyed remote work/results across concurrent
-submissions. Descriptor-authoritative publication, no fallible pathname
-cleanup after final validation, and unique receipt-bound remote roots are
-required before WMI.
+submissions. Revision `cf1aa3e` added private roots and descriptor-selected
+publication, but review demonstrated that the retained staging hard link could
+mutate the completed archive after `.current`. The symlink marker was also
+swappable, Git/lock checks remained environment-sensitive, nonce/final digests
+were not bound into a completed receipt, lower-level cleanup races survived,
+Linux tests emulated pathname linking, and the verifier reused the candidate
+projection implementation. An unnamed one-link archive, content-bearing
+completion receipt, hermetic exact-blob guard, real Linux race tests, and an
+independent projection checker are required before WMI.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit.

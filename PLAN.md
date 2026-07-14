@@ -155,7 +155,13 @@ result cache can satisfy V1-V4.
   ordinary solves still allocate evidence transcripts and duplicate clauses;
   and solve-CLI compatibility changed. Require a real feature-combination smoke,
   zero evidence-only off-mode work, and legacy ordinary-CLI parity before branch
-  publication or hosted validation.
+  publication or hosted validation. Repair revision `939bc60` closes the
+  combined-feature build request and guards the reviewed happy-path
+  allocations, but a second review remains NO-GO: WMI still accepts ambient and
+  untracked build/checker influence, ordinary usage output is not byte-identical
+  to `f8d9205`, exceptional paths lack zero-work coverage, and the exact
+  combined release has no end-to-end smoke. An attempt-private, environment-
+  whitelisted repair is active; no branch publication or corpus run exists.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke
@@ -416,9 +422,15 @@ independent evidence checks, and a frozen family holdout.
   descriptor identity, cleanup could unlink a replacement `.current`, and
   revision-keyed remote work/results allowed concurrent same-revision campaigns
   to erase each other. Generated Python caches also violated the post-test
-  checkout guard. Descriptor-authoritative publication, cleanup-free final
-  validation, and unique receipt-bound remote roots are under repair. No WMI
-  submission is allowed before another independent review.
+  checkout guard. Revision `cf1aa3e` added descriptor-selected publication and
+  unique roots, but the sixth review found a concrete post-completion corruption
+  path through the retained staging hard link, a swappable symlink marker,
+  environment-sensitive Git/lock checks, incomplete nonce/final-digest binding,
+  lower-level cleanup races, pathname-only Linux emulation, and common-mode
+  semantic replay. An unnamed one-link archive, content-bearing completion
+  receipt, hermetic exact-blob guard, real Linux tests, and independent
+  projection implementation are under repair. No WMI submission is allowed
+  before another independent review.
 
 ### T6: Theory-Conditioned Boolean DAG
 
