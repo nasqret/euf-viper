@@ -5789,24 +5789,34 @@ struct CertificateSeedPlan {
     transitivity_clauses: usize,
     congruence_clauses: usize,
     literals: usize,
+    content_commitment: [u8; 32],
 }
 
 #[cfg(feature = "certificates")]
 struct CertificateSeedCounter {
     budget: CertificateSeedBudget,
     plan: CertificateSeedPlan,
+    content_hasher: Sha256,
+    normalized_clause: Vec<i32>,
+    next_clause_ordinal: usize,
 }
 
 #[cfg(feature = "certificates")]
 impl CertificateSeedCounter {
     fn new(budget: CertificateSeedBudget) -> Self {
+        let mut content_hasher = Sha256::new();
+        content_hasher.update(b"euf-viper-certificate-seed-plan-v1\0");
         Self {
             budget,
             plan: CertificateSeedPlan {
                 transitivity_clauses: 0,
                 congruence_clauses: 0,
                 literals: 0,
+                content_commitment: [0; 32],
             },
+            content_hasher,
+            normalized_clause: Vec::new(),
+            next_clause_ordinal: 0,
         }
     }
 
@@ -5854,6 +5864,52 @@ impl CertificateSeedCounter {
         }
         self.plan.literals = literals;
         Ok(())
+    }
+
+    fn account_clause(
+        &mut self,
+        family: CertificateSeedFamily,
+        clause: &[i32],
+    ) -> Result<(), CertificateSeedFallbackReason> {
+        self.account(family, clause.len())?;
+
+        // This reused scratch buffer is bounded by the accepted aggregate literal budget.
+        self.normalized_clause.clear();
+        self.normalized_clause
+            .try_reserve(clause.len())
+            .map_err(|_| CertificateSeedFallbackReason::AllocationRejected)?;
+        self.normalized_clause.extend_from_slice(clause);
+        self.normalized_clause.sort_unstable();
+        self.normalized_clause.dedup();
+
+        let ordinal = u64::try_from(self.next_clause_ordinal)
+            .map_err(|_| CertificateSeedFallbackReason::ArithmeticOverflow)?;
+        self.next_clause_ordinal = self
+            .next_clause_ordinal
+            .checked_add(1)
+            .ok_or(CertificateSeedFallbackReason::ArithmeticOverflow)?;
+        let normalized_len = u64::try_from(self.normalized_clause.len())
+            .map_err(|_| CertificateSeedFallbackReason::ArithmeticOverflow)?;
+        let family_tag = match family {
+            CertificateSeedFamily::Transitivity => 0u8,
+            CertificateSeedFamily::Congruence => 1u8,
+        };
+        self.content_hasher.update(ordinal.to_le_bytes());
+        self.content_hasher.update([family_tag]);
+        self.content_hasher.update(normalized_len.to_le_bytes());
+        for literal in &self.normalized_clause {
+            self.content_hasher.update(literal.to_le_bytes());
+        }
+        Ok(())
+    }
+
+    fn finish(mut self) -> CertificateSeedPlan {
+        debug_assert_eq!(
+            self.next_clause_ordinal,
+            self.plan.transitivity_clauses + self.plan.congruence_clauses
+        );
+        self.plan.content_commitment = self.content_hasher.finalize().into();
+        self.plan
     }
 }
 
@@ -6166,15 +6222,22 @@ fn plan_certificate_theory_seeds(
 ) -> Result<CertificateSeedPlan, CertificateSeedFallbackReason> {
     let mut counter = CertificateSeedCounter::new(budget);
     visit_certificate_theory_seed_clauses(cnf, arena, |family, clause| {
-        counter.account(family, clause.len())
+        counter.account_clause(family, clause)
     })?;
-    Ok(counter.plan)
+    Ok(counter.finish())
+}
+
+#[cfg(all(feature = "certificates", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CertificateMaterializationTestInjection {
+    TraversalError(CertificateSeedFallbackReason),
+    SameSizeContentChange,
 }
 
 #[cfg(all(feature = "certificates", test))]
 std::thread_local! {
-    static CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR:
-        std::cell::Cell<Option<CertificateSeedFallbackReason>> = const {
+    static CERTIFICATE_TEST_MATERIALIZATION_INJECTION:
+        std::cell::Cell<Option<CertificateMaterializationTestInjection>> = const {
             std::cell::Cell::new(None)
         };
 }
@@ -6197,8 +6260,8 @@ fn certificate_theory_seeds_with_budget(
             CertificateSeedFallbackReason::LiteralBudget,
         ));
     }
-    // The planning pass retains no clauses. Materialization starts only after the complete
-    // transitivity-plus-congruence suffix fits both shared budgets.
+    // Planning retains one budget-bounded normalization scratch clause plus a digest, never the
+    // seed set. Materialization starts only after the complete suffix fits both shared budgets.
     let plan = match plan_certificate_theory_seeds(cnf, arena, budget) {
         Ok(plan) => plan,
         Err(reason) => return Ok(CertificateTheorySeeds::fallback(budget, reason)),
@@ -6217,12 +6280,25 @@ fn certificate_theory_seeds_with_budget(
     let mut counter = CertificateSeedCounter::new(budget);
     let result = visit_certificate_theory_seed_clauses(cnf, arena, |family, clause| {
         #[cfg(test)]
-        if let Some(reason) =
-            CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| injected.take())
-        {
+        let injection = CERTIFICATE_TEST_MATERIALIZATION_INJECTION.with(|injected| injected.take());
+        #[cfg(test)]
+        if let Some(CertificateMaterializationTestInjection::TraversalError(reason)) = injection {
             return Err(reason);
         }
-        counter.account(family, clause.len())?;
+        #[cfg(test)]
+        let mut changed_clause = Vec::new();
+        #[cfg(test)]
+        let clause =
+            if injection == Some(CertificateMaterializationTestInjection::SameSizeContentChange) {
+                changed_clause.extend_from_slice(clause);
+                changed_clause[0] = changed_clause[0]
+                    .checked_neg()
+                    .ok_or(CertificateSeedFallbackReason::ArithmeticOverflow)?;
+                changed_clause.as_slice()
+            } else {
+                clause
+            };
+        counter.account_clause(family, clause)?;
         match family {
             CertificateSeedFamily::Transitivity => transitivity.push(clause.to_vec()),
             CertificateSeedFamily::Congruence => congruence.push(clause.to_vec()),
@@ -6232,7 +6308,7 @@ fn certificate_theory_seeds_with_budget(
     if let Err(reason) = result {
         return Err(reason);
     }
-    if counter.plan != plan {
+    if counter.finish() != plan {
         return Err(CertificateSeedFallbackReason::InconsistentEnumeration);
     }
     transitivity.sort();
@@ -6550,14 +6626,151 @@ fn path_with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
 }
 
 #[cfg(feature = "certificates")]
-fn clear_certificate_artifacts(paths: &[&Path]) -> Result<(), String> {
-    for path in paths {
-        if path.exists() {
-            fs::remove_file(path)
-                .map_err(|error| format!("failed to remove stale {}: {error}", path.display()))?;
+struct CertificateOutputTransaction {
+    dimacs_path: PathBuf,
+    proof_path: PathBuf,
+    manifest_path: PathBuf,
+    keep_outputs: bool,
+}
+
+#[cfg(feature = "certificates")]
+impl CertificateOutputTransaction {
+    fn begin(prefix: &Path) -> Result<Self, String> {
+        let transaction = Self {
+            dimacs_path: path_with_suffix(prefix, ".cnf"),
+            proof_path: path_with_suffix(prefix, ".drat"),
+            manifest_path: path_with_suffix(prefix, ".euf.json"),
+            keep_outputs: false,
+        };
+        transaction.clear()?;
+        if let Some(parent) = transaction
+            .dimacs_path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        }
+        Ok(transaction)
+    }
+
+    fn paths(&self) -> [&Path; 3] {
+        [&self.dimacs_path, &self.proof_path, &self.manifest_path]
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        let mut failures = Vec::new();
+        for path in self.paths() {
+            match fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => failures.push(format!("{}: {error}", path.display())),
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "failed to remove certificate outputs: {}",
+                failures.join("; ")
+            ))
         }
     }
-    Ok(())
+
+    fn finish<T>(mut self, result: Result<T, String>) -> Result<T, String> {
+        match result {
+            Ok(value) => {
+                self.keep_outputs = true;
+                Ok(value)
+            }
+            Err(error) => match self.clear() {
+                Ok(()) => {
+                    self.keep_outputs = true;
+                    Err(error)
+                }
+                Err(cleanup_error) => Err(format!("{error}; {cleanup_error}")),
+            },
+        }
+    }
+}
+
+#[cfg(feature = "certificates")]
+impl Drop for CertificateOutputTransaction {
+    fn drop(&mut self) {
+        if !self.keep_outputs {
+            let _ = self.clear();
+        }
+    }
+}
+
+#[cfg(feature = "certificates")]
+fn with_certificate_output_transaction<T>(
+    prefix: &Path,
+    run: impl FnOnce(&CertificateOutputTransaction) -> Result<T, String>,
+) -> Result<T, String> {
+    let transaction = CertificateOutputTransaction::begin(prefix)?;
+    let result = run(&transaction);
+    transaction.finish(result)
+}
+
+#[cfg(feature = "certificates")]
+fn write_certificate_manifest(path: &Path, manifest: &impl Serialize) -> Result<(), String> {
+    let file = fs::File::create(path)
+        .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, manifest)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+    writeln!(writer).map_err(|error| format!("failed to finish {}: {error}", path.display()))?;
+    writer
+        .flush()
+        .map_err(|error| format!("failed to flush {}: {error}", path.display()))
+}
+
+#[cfg(all(feature = "certificates", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CertificateOutputTestFailurePoint {
+    AfterDimacs,
+    AfterProof,
+    AfterManifest,
+}
+
+#[cfg(all(feature = "certificates", test))]
+impl CertificateOutputTestFailurePoint {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AfterDimacs => "dimacs",
+            Self::AfterProof => "proof",
+            Self::AfterManifest => "manifest",
+        }
+    }
+}
+
+#[cfg(all(feature = "certificates", test))]
+std::thread_local! {
+    static CERTIFICATE_TEST_OUTPUT_FAILURE:
+        std::cell::Cell<Option<CertificateOutputTestFailurePoint>> = const {
+            std::cell::Cell::new(None)
+        };
+}
+
+#[cfg(all(feature = "certificates", test))]
+fn certificate_test_output_failure(point: CertificateOutputTestFailurePoint) -> Result<(), String> {
+    let injected = CERTIFICATE_TEST_OUTPUT_FAILURE.with(|failure| {
+        if failure.get() == Some(point) {
+            failure.set(None);
+            true
+        } else {
+            false
+        }
+    });
+    if injected {
+        Err(format!(
+            "injected certificate output failure after {}",
+            point.label()
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "certificates")]
@@ -6610,11 +6823,12 @@ fn certify_orbit_kernel(
         ));
     }
 
-    if let Err(error) = write_cadical_drat(proof_path, cnf) {
-        let _ = fs::remove_file(proof_path);
-        return Err(error);
-    }
+    write_cadical_drat(proof_path, cnf)?;
+    #[cfg(test)]
+    certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterProof)?;
     write_dimacs(dimacs_path, cnf)?;
+    #[cfg(test)]
+    certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterDimacs)?;
     let manifest = OrbitCertificateManifest {
         format: "euf-viper-euf-cnf-v3",
         result: "unsat",
@@ -6638,13 +6852,9 @@ fn certify_orbit_kernel(
         },
         finite_orbit: kernel.witness,
     };
-    let manifest_file = fs::File::create(manifest_path)
-        .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
-    let mut manifest_writer = BufWriter::new(manifest_file);
-    serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
-        .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
-    writeln!(manifest_writer)
-        .map_err(|error| format!("failed to finish {}: {error}", manifest_path.display()))?;
+    write_certificate_manifest(manifest_path, &manifest)?;
+    #[cfg(test)]
+    certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterManifest)?;
 
     println!("unsat");
     eprintln!("dimacs={}", dimacs_path.display());
@@ -6684,18 +6894,22 @@ fn certify_file(
     max_rounds: usize,
     finite_orbit: bool,
 ) -> Result<i32, String> {
-    let seed_budget = certificate_seed_budget()?;
-    certify_file_with_seed_budget_and_finite(path, prefix, max_rounds, seed_budget, finite_orbit)
+    with_certificate_output_transaction(Path::new(prefix), |outputs| {
+        let seed_budget = certificate_seed_budget()?;
+        certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, finite_orbit, outputs)
+    })
 }
 
-#[cfg(feature = "certificates")]
+#[cfg(all(feature = "certificates", test))]
 fn certify_file_with_seed_budget(
     path: &str,
     prefix: &str,
     max_rounds: usize,
     seed_budget: CertificateSeedBudget,
 ) -> Result<i32, String> {
-    certify_file_with_seed_budget_and_finite(path, prefix, max_rounds, seed_budget, false)
+    with_certificate_output_transaction(Path::new(prefix), |outputs| {
+        certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, false, outputs)
+    })
 }
 
 #[cfg(feature = "certificates")]
@@ -6705,6 +6919,19 @@ fn certify_file_with_seed_budget_and_finite(
     max_rounds: usize,
     seed_budget: CertificateSeedBudget,
     finite_orbit: bool,
+) -> Result<i32, String> {
+    with_certificate_output_transaction(Path::new(prefix), |outputs| {
+        certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, finite_orbit, outputs)
+    })
+}
+
+#[cfg(feature = "certificates")]
+fn certify_file_with_seed_budget_inner(
+    path: &str,
+    max_rounds: usize,
+    seed_budget: CertificateSeedBudget,
+    finite_orbit: bool,
+    outputs: &CertificateOutputTransaction,
 ) -> Result<i32, String> {
     if max_rounds == 0 {
         return Err("--max-theory-rounds must be at least 1".to_owned());
@@ -6726,49 +6953,22 @@ fn certify_file_with_seed_budget_and_finite(
         ));
     }
 
-    let prefix = Path::new(prefix);
-    let dimacs_path = path_with_suffix(prefix, ".cnf");
-    let proof_path = path_with_suffix(prefix, ".drat");
-    let manifest_path = path_with_suffix(prefix, ".euf.json");
-    if let Some(parent) = dimacs_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
     for assertion in &bool_problem.assertions {
         cnf.add_assertion(assertion);
     }
     if finite_orbit {
-        let artifacts = [
-            dimacs_path.as_path(),
-            proof_path.as_path(),
-            manifest_path.as_path(),
-        ];
-        clear_certificate_artifacts(&artifacts)?;
-        let result = certify_orbit_kernel(
+        return certify_orbit_kernel(
             source_path,
             &source_bytes,
-            &dimacs_path,
-            &proof_path,
-            &manifest_path,
+            &outputs.dimacs_path,
+            &outputs.proof_path,
+            &outputs.manifest_path,
             &mut cnf,
             &problem,
             bool_problem,
         );
-        if let Err(error) = result {
-            return match clear_certificate_artifacts(&artifacts) {
-                Ok(()) => Err(error),
-                Err(cleanup_error) => Err(format!(
-                    "{error}; finite-orbit artifact cleanup also failed: {cleanup_error}"
-                )),
-            };
-        }
-        return result;
     }
     let base_count = cnf.clauses.len();
     let theory_seed_start = cnf.clauses.len();
@@ -6839,9 +7039,6 @@ fn certify_file_with_seed_budget_and_finite(
             cnf.clauses.len()
         ));
     }
-    let manifest_file = fs::File::create(&manifest_path)
-        .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
-    let mut manifest_writer = BufWriter::new(manifest_file);
     match saturation {
         CertificateSaturation::Sat {
             theory_rounds,
@@ -6859,13 +7056,11 @@ fn certify_file_with_seed_budget_and_finite(
                 theory_rounds,
                 theory_conflicts: conflict_count,
             };
-            serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
-                .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
-            writeln!(manifest_writer).map_err(|error| {
-                format!("failed to finish {}: {error}", manifest_path.display())
-            })?;
+            write_certificate_manifest(&outputs.manifest_path, &manifest)?;
+            #[cfg(test)]
+            certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterManifest)?;
             println!("sat");
-            eprintln!("manifest={}", manifest_path.display());
+            eprintln!("manifest={}", outputs.manifest_path.display());
             eprintln!("cnf_vars={}", cnf.var_count());
             eprintln!("cnf_clauses={}", cnf.clauses.len());
             eprintln!("theory_rounds={theory_rounds}");
@@ -6879,8 +7074,12 @@ fn certify_file_with_seed_budget_and_finite(
             theory_rounds,
             conflict_count,
         } => {
-            write_dimacs(&dimacs_path, &cnf)?;
-            write_cadical_drat(&proof_path, &cnf)?;
+            write_dimacs(&outputs.dimacs_path, &cnf)?;
+            #[cfg(test)]
+            certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterDimacs)?;
+            write_cadical_drat(&outputs.proof_path, &cnf)?;
+            #[cfg(test)]
+            certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterProof)?;
             let terms = problem
                 .arena
                 .terms
@@ -6898,10 +7097,10 @@ fn certify_file_with_seed_budget_and_finite(
                 encoding: "canonical-tseitin-v1",
                 source: source_path.display().to_string(),
                 source_sha256: sha256_hex(&source_bytes),
-                dimacs: dimacs_path.display().to_string(),
-                dimacs_sha256: sha256_file(&dimacs_path)?,
-                proof: proof_path.display().to_string(),
-                proof_sha256: sha256_file(&proof_path)?,
+                dimacs: outputs.dimacs_path.display().to_string(),
+                dimacs_sha256: sha256_file(&outputs.dimacs_path)?,
+                proof: outputs.proof_path.display().to_string(),
+                proof_sha256: sha256_file(&outputs.proof_path)?,
                 variables: cnf.var_count(),
                 true_term: bool_problem.true_term,
                 false_term: bool_problem.false_term,
@@ -6917,15 +7116,13 @@ fn certify_file_with_seed_budget_and_finite(
                 theory_rounds,
                 finite_domain_axioms: 0,
             };
-            serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
-                .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
-            writeln!(manifest_writer).map_err(|error| {
-                format!("failed to finish {}: {error}", manifest_path.display())
-            })?;
+            write_certificate_manifest(&outputs.manifest_path, &manifest)?;
+            #[cfg(test)]
+            certificate_test_output_failure(CertificateOutputTestFailurePoint::AfterManifest)?;
             println!("unsat");
-            eprintln!("dimacs={}", dimacs_path.display());
-            eprintln!("proof={}", proof_path.display());
-            eprintln!("manifest={}", manifest_path.display());
+            eprintln!("dimacs={}", outputs.dimacs_path.display());
+            eprintln!("proof={}", outputs.proof_path.display());
+            eprintln!("manifest={}", outputs.manifest_path.display());
             eprintln!("cnf_vars={}", cnf.var_count());
             eprintln!("cnf_clauses={}", cnf.clauses.len());
             eprintln!("theory_rounds={theory_rounds}");
@@ -8720,13 +8917,38 @@ mod tests {
     }
 
     #[cfg(feature = "certificates")]
-    struct CertificateMaterializationErrorReset;
+    struct CertificateMaterializationInjectionReset;
 
     #[cfg(feature = "certificates")]
-    impl Drop for CertificateMaterializationErrorReset {
+    impl Drop for CertificateMaterializationInjectionReset {
         fn drop(&mut self) {
-            CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| injected.set(None));
+            CERTIFICATE_TEST_MATERIALIZATION_INJECTION.with(|injected| injected.set(None));
         }
+    }
+
+    #[cfg(feature = "certificates")]
+    fn with_certificate_materialization_injection<T>(
+        injection: CertificateMaterializationTestInjection,
+        run: impl FnOnce() -> T,
+    ) -> T {
+        CERTIFICATE_TEST_MATERIALIZATION_INJECTION.with(|injected| {
+            assert_eq!(
+                injected.replace(Some(injection)),
+                None,
+                "nested certificate materialization injection"
+            );
+        });
+        let reset = CertificateMaterializationInjectionReset;
+        let result = run();
+        CERTIFICATE_TEST_MATERIALIZATION_INJECTION.with(|injected| {
+            assert_eq!(
+                injected.take(),
+                None,
+                "certificate materialization injection was not consumed"
+            );
+        });
+        drop(reset);
+        result
     }
 
     #[cfg(feature = "certificates")]
@@ -8734,24 +8956,66 @@ mod tests {
         reason: CertificateSeedFallbackReason,
         run: impl FnOnce() -> T,
     ) -> T {
-        CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| {
+        with_certificate_materialization_injection(
+            CertificateMaterializationTestInjection::TraversalError(reason),
+            run,
+        )
+    }
+
+    #[cfg(feature = "certificates")]
+    struct CertificateOutputFailureReset;
+
+    #[cfg(feature = "certificates")]
+    impl Drop for CertificateOutputFailureReset {
+        fn drop(&mut self) {
+            CERTIFICATE_TEST_OUTPUT_FAILURE.with(|failure| failure.set(None));
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    fn with_certificate_output_failure<T>(
+        point: CertificateOutputTestFailurePoint,
+        run: impl FnOnce() -> T,
+    ) -> T {
+        CERTIFICATE_TEST_OUTPUT_FAILURE.with(|failure| {
             assert_eq!(
-                injected.replace(Some(reason)),
+                failure.replace(Some(point)),
                 None,
-                "nested certificate materialization error injection"
+                "nested certificate output failure injection"
             );
         });
-        let reset = CertificateMaterializationErrorReset;
+        let reset = CertificateOutputFailureReset;
         let result = run();
-        CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| {
+        CERTIFICATE_TEST_OUTPUT_FAILURE.with(|failure| {
             assert_eq!(
-                injected.take(),
+                failure.take(),
                 None,
-                "certificate materialization error injection was not consumed"
+                "certificate output failure injection was not consumed"
             );
         });
         drop(reset);
         result
+    }
+
+    #[cfg(feature = "certificates")]
+    fn preseed_certificate_outputs(prefix: &Path) {
+        for suffix in [".cnf", ".drat", ".euf.json"] {
+            fs::write(
+                path_with_suffix(prefix, suffix),
+                format!("stale {suffix}\n"),
+            )
+            .expect("preseed stale certificate output");
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    fn assert_no_certificate_outputs(prefix: &Path) {
+        for suffix in [".cnf", ".drat", ".euf.json"] {
+            assert!(
+                !path_with_suffix(prefix, suffix).exists(),
+                "certificate output {suffix} survived failure"
+            );
+        }
     }
 
     #[cfg(feature = "certificates")]
@@ -9374,6 +9638,117 @@ mod tests {
 
     #[cfg(feature = "certificates")]
     #[test]
+    fn certificate_same_size_second_pass_content_change_aborts_and_cleans_outputs() {
+        let directory = CertificateTestDirectory::new("materialization-content-change");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE)
+            .expect("write materialization content test input");
+        preseed_certificate_outputs(&prefix);
+
+        let error = with_certificate_materialization_injection(
+            CertificateMaterializationTestInjection::SameSizeContentChange,
+            || {
+                certify_file_with_seed_budget(
+                    source_path.to_str().unwrap(),
+                    prefix.to_str().unwrap(),
+                    8,
+                    CertificateSeedBudget::default(),
+                )
+                .expect_err("same-size second-pass content change must abort certification")
+            },
+        );
+        assert_eq!(
+            error,
+            "certificate seed planning/materialization divergence failed closed: \
+             fallback_inconsistent_enumeration"
+        );
+        assert_no_certificate_outputs(&prefix);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_reused_prefix_is_cleared_before_validation() {
+        let directory = CertificateTestDirectory::new("stale-certificate-outputs");
+        let prefix = directory.path("certificate");
+        preseed_certificate_outputs(&prefix);
+
+        assert_eq!(
+            certify_file_with_seed_budget(
+                "unused-input.smt2",
+                prefix.to_str().unwrap(),
+                0,
+                CertificateSeedBudget::default(),
+            ),
+            Err("--max-theory-rounds must be at least 1".to_owned())
+        );
+        assert_no_certificate_outputs(&prefix);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_late_output_failures_remove_every_partial_artifact() {
+        let directory = CertificateTestDirectory::new("late-certificate-output-failures");
+        let unsat_source_path = directory.path("unsat.smt2");
+        fs::write(&unsat_source_path, MIXED_CERTIFICATE_SOURCE)
+            .expect("write late-failure UNSAT input");
+
+        for point in [
+            CertificateOutputTestFailurePoint::AfterDimacs,
+            CertificateOutputTestFailurePoint::AfterProof,
+            CertificateOutputTestFailurePoint::AfterManifest,
+        ] {
+            let prefix = directory.path(&format!("unsat-after-{}", point.label()));
+            preseed_certificate_outputs(&prefix);
+            let error = with_certificate_output_failure(point, || {
+                certify_file_with_seed_budget(
+                    unsat_source_path.to_str().unwrap(),
+                    prefix.to_str().unwrap(),
+                    8,
+                    CertificateSeedBudget::default(),
+                )
+                .expect_err("injected late UNSAT output failure must abort certification")
+            });
+            assert_eq!(
+                error,
+                format!(
+                    "injected certificate output failure after {}",
+                    point.label()
+                )
+            );
+            assert_no_certificate_outputs(&prefix);
+        }
+
+        let sat_source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (assert (= a b))
+            (check-sat)
+        "#;
+        let sat_source_path = directory.path("sat.smt2");
+        let sat_prefix = directory.path("sat-after-manifest");
+        fs::write(&sat_source_path, sat_source).expect("write late-failure SAT input");
+        preseed_certificate_outputs(&sat_prefix);
+        let error = with_certificate_output_failure(
+            CertificateOutputTestFailurePoint::AfterManifest,
+            || {
+                certify_file_with_seed_budget(
+                    sat_source_path.to_str().unwrap(),
+                    sat_prefix.to_str().unwrap(),
+                    8,
+                    CertificateSeedBudget::default(),
+                )
+                .expect_err("injected late SAT output failure must abort certification")
+            },
+        );
+        assert_eq!(error, "injected certificate output failure after manifest");
+        assert_no_certificate_outputs(&sat_prefix);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
     fn certificate_seed_budget_accounting_is_family_order_independent() {
         let budget = CertificateSeedBudget {
             clauses: 2,
@@ -9412,6 +9787,55 @@ mod tests {
                 counter.account(second_family, 3),
                 Err(CertificateSeedFallbackReason::ClauseBudget)
             );
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_seed_commitment_binds_normalized_content_family_and_order() {
+        let build_plan = |clauses: &[(CertificateSeedFamily, &[i32])]| {
+            let mut counter = CertificateSeedCounter::new(CertificateSeedBudget::default());
+            for &(family, clause) in clauses {
+                counter.account_clause(family, clause).unwrap();
+            }
+            counter.finish()
+        };
+        let original = build_plan(&[
+            (CertificateSeedFamily::Transitivity, &[3, -1, 3]),
+            (CertificateSeedFamily::Congruence, &[4, -2, 4]),
+        ]);
+        let normalized_equivalent = build_plan(&[
+            (CertificateSeedFamily::Transitivity, &[-1, 3, 3]),
+            (CertificateSeedFamily::Congruence, &[4, 4, -2]),
+        ]);
+        assert_eq!(original, normalized_equivalent);
+
+        let changed_content = build_plan(&[
+            (CertificateSeedFamily::Transitivity, &[3, -5, 3]),
+            (CertificateSeedFamily::Congruence, &[4, -2, 4]),
+        ]);
+        let changed_order = build_plan(&[
+            (CertificateSeedFamily::Congruence, &[4, -2, 4]),
+            (CertificateSeedFamily::Transitivity, &[3, -1, 3]),
+        ]);
+        let changed_family = build_plan(&[
+            (CertificateSeedFamily::Congruence, &[3, -1, 3]),
+            (CertificateSeedFamily::Transitivity, &[4, -2, 4]),
+        ]);
+        for changed in [changed_content, changed_order, changed_family] {
+            assert_eq!(
+                (
+                    changed.transitivity_clauses,
+                    changed.congruence_clauses,
+                    changed.literals,
+                ),
+                (
+                    original.transitivity_clauses,
+                    original.congruence_clauses,
+                    original.literals,
+                )
+            );
+            assert_ne!(changed.content_commitment, original.content_commitment);
         }
     }
 
@@ -9850,6 +10274,7 @@ mod tests {
         let first_prefix = directory.path("first");
         let second_prefix = directory.path("second");
         fs::write(&source_path, source).expect("write SAT certificate source");
+        preseed_certificate_outputs(&first_prefix);
         certify_file_with_seed_budget(
             source_path.to_str().unwrap(),
             first_prefix.to_str().unwrap(),
