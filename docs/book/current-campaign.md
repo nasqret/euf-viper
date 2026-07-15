@@ -324,7 +324,17 @@ a sub-1% conclusion. Hosted run `29386186960` then failed before creating any
 job: the workflow used `runner.temp` in job-level `env`, where the
 [GitHub context table](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)
 does not provide `runner`. A fourth evidence repair is isolated; no timing row
-or WMI submission exists.
+or WMI submission exists. That repair, `7a278b7`, passed local matrices and was
+published only after review allowed a hosted diagnostic. Exact run
+`29389308332` failed both real Linux mutate-and-restore tests because the
+monitor returned success rather than the fail-closed semantic exit. Review also
+found that scripts were reopened by pathname after monitoring, a manual ELF
+walk did not establish the dynamic loader's actual closure, and 128 exclusive
+array elements pinned to sole node `c1n1` could not realize the declared 32-way
+schedule. The run failure cancels the conditional one-shard infrastructure
+canary. A fifth repair must bind actual executed bytes, obtain monitor-owned
+readiness evidence, and replace the placement claim with an enforceable
+schedule before another hosted review. No T1 timing WMI job exists.
 
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,

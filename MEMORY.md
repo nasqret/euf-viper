@@ -984,3 +984,10 @@
   the held census before local receipt persistence, and hosted CI does not run
   the provisioned 7,503-source/sacct path. Repair all three; no T5 WMI job
   exists.
+- T1 timing `7a278b7` remains WMI NO-GO. Exact hosted run `29389308332` failed
+  both real Linux mutate-and-restore monitor tests, so its conditional one-shard
+  canary is stopped. Independent review also found pathname reopen gaps, an
+  incomplete hand-rolled dynamic-loader closure, and an impossible 32-way
+  exclusive schedule on sole node `c1n1`. Bind actual executed bytes, repair
+  monitor readiness, and use truthful placement before another review. No T1
+  timing WMI job exists.

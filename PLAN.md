@@ -329,7 +329,17 @@ independent evidence checks, and a frozen family holdout.
   Exact hosted run `29386186960` then failed before GitHub created a job because
   `runner.temp` was used in `jobs.validate.env`, where the `runner` context is
   unavailable. Repair those boundaries, add a genuinely bounded canary mode,
-  and obtain a fresh independent review before any WMI submission.
+  and obtain a fresh independent review before any WMI submission. Repair
+  `7a278b7` fixed workflow evaluation and received branch-only approval, but
+  exact hosted run `29389308332` failed both real Linux mutate-and-restore
+  monitor tests. The same review rejected full timing because build and harness
+  scripts are reopened by pathname after monitoring, the hand-rolled ELF walk
+  does not bind the dynamic loader's actual closure, and `0-127%32` combined
+  with `--exclusive` on sole node `c1n1` can run only one array element at a
+  time. The conditional one-shard WMI canary is therefore stopped. Bind every
+  executed script/runtime byte, require monitor-owned readiness evidence, and
+  use an evidence-valid placement schedule before another hosted review. No T1
+  timing WMI job exists.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 

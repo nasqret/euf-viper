@@ -1426,6 +1426,17 @@
   passed the Linux publication diagnostics and root test matrix. This is useful
   procfs/filesystem smoke only; it does not authorize T5, merge, or WMI. A new
   parser/release-order/CI-label repair is isolated and active.
+- Independent T1 review allowed exact `7a278b7` only as a hosted probe and made
+  a one-shard nonpromotable canary conditional on a green run. It rejected full
+  timing: scripts are reopened by pathname after mutation monitoring, the
+  recursive ELF inventory is not the loader's actual closure, and exclusive
+  array elements pinned to sole node `c1n1` cannot realize 32-way concurrency.
+- Published `7a278b79f3f3038e9ae18f5a218836a6211b4b54` to
+  `research-typed-parser-timing`. Exact run `29389308332` created a Linux job
+  but failed both source and dependency mutate-then-restore tests: the monitor
+  returned success instead of semantic exit 3. The conditional WMI canary was
+  not submitted. A fifth isolated repair now owns monitor readiness, executed
+  byte binding, runtime closure, and truthful exclusive placement.
 
 ## Next Entry Template
 
