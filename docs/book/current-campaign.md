@@ -408,7 +408,14 @@ when enabled. Linux mechanism smoke is therefore green while T5 and WMI remain
 NO-GO. The scope/release/CI repair is active.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
-audit.
+audit. Diagnostic commit `b71a491` reproduced exactly 90,036 observation keys
+and the 12 current qg7 UNSAT deficits, with byte-identical regeneration and
+independently matching source records. Review still rejects it: inputs are
+hashed then reopened, observation-matrix semantics and provenance are
+underchecked, complete physical `DOMAIN7_HUGE` membership is not proved, alias
+paths pass, and the 10-of-12 gate is not derived from population size. The
+checkpoint is branch-only. A repair must derive the gate as `ceil(4N/5)` and
+close every input/structure boundary; old job `146075` remains untouched.
 
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or

@@ -1464,6 +1464,16 @@
   `147311`, and certificate arrays/audits `147315`-`147320` remained pending or
   dependency-held. No partial audit, benchmark row, or certificate row was
   interpreted.
+- Independent review reproduced T6 P0 target-manifest commit `b71a491`: all
+  90,036 current observation keys were present, exactly 12 qg7 UNSAT deficits
+  were selected, source size/hash/status/parenthesis checks matched, generated
+  artifact SHA-256 was `f0367bdb...7260a`, and regeneration was byte-identical.
+  It nevertheless rejected promotion because inputs are hashed then reopened,
+  exact observation-matrix semantics and provenance are not enforced under hash
+  overrides, full `DOMAIN7_HUGE` structure is inferred rather than proved,
+  `10/12` is not mechanically population-bound, and alias paths pass. The exact
+  checkpoint was pushed only to `research-t6-theory-dag`; a separate repair is
+  active and job `146075` remains untouched.
 
 ## Next Entry Template
 

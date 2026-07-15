@@ -532,10 +532,16 @@ independent evidence checks, and a frozen family holdout.
 - [ ] Run dual source-EUF/Boolean-gate congruence census. Exact research
   revision `9833ec3` pins Cargo and all source/provenance hashes; WMI job
   `146075` is priority-pending. Historical hard-10 rows are explicitly marked
-  pre-fix development evidence, and promotion is disabled until a current
-  frozen 12-source manifest is mechanically derived from P0.
-- [ ] Require at least 25% projected CNF reduction on 8/10 frozen hard-table
-  cases and more benefit than rejected unconditional quotienting.
+  pre-fix development evidence. Diagnostic commit `b71a491` mechanically
+  reconstructs the current 12-source P0 set and was independently reproduced,
+  but review rejects hash-then-reopen inputs, incomplete observation-matrix
+  validation, unproved `DOMAIN7_HUGE` membership, path aliases, and a gate not
+  bound to population size. It is branch-only and nonpromotable; job `146075`
+  remains untouched while the generator is repaired.
+- [ ] Require at least 25% projected CNF reduction on `ceil(4N/5)` frozen
+  hard-table cases, which is 10/12 for the current population, and more benefit
+  than rejected unconditional quotienting. Derive both `N` and the threshold
+  mechanically before reading any T6 projection output.
 
 P1 exit: every survivor passes semantic differential and its preregistered
 opportunity threshold. Failed tracks stop before expensive timing.

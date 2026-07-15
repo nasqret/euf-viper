@@ -1004,3 +1004,9 @@
   before producing a transcript. Analyzer aggregation, empty-report admission,
   cost accounting, parser scope, timing isolation, and forest reconstruction
   also remain defective. No canary or WMI job is authorized.
+- T6 manifest checkpoint `b71a491` independently reconstructs the current 12
+  qg7 P0 deficits and exact 90,036-observation keyset, but is diagnostic-only.
+  Hash-then-reopen inputs, incomplete matrix/provenance semantics, unproved
+  physical `DOMAIN7_HUGE` membership, path aliases, and a non-population-bound
+  gate block promotion. It is preserved on `research-t6-theory-dag`; repair is
+  isolated and old job `146075` remains untouched.
