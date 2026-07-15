@@ -6628,23 +6628,6 @@ fn path_with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
 }
 
 #[cfg(feature = "certificates")]
-fn lexically_normalize_absolute(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
-}
-
-#[cfg(feature = "certificates")]
 fn normalized_certificate_path(path: &Path) -> Result<PathBuf, String> {
     let absolute = if path.is_absolute() {
         path.to_owned()
@@ -6653,35 +6636,35 @@ fn normalized_certificate_path(path: &Path) -> Result<PathBuf, String> {
             .map_err(|error| format!("failed to resolve current directory: {error}"))?
             .join(path)
     };
-    // Preserve pathname resolution order: a symlink followed by `..` is not
-    // equivalent to lexically removing both components before canonicalizing.
-    let mut existing = absolute.as_path();
-    let mut suffix = Vec::<std::ffi::OsString>::new();
-    loop {
-        match fs::canonicalize(existing) {
-            Ok(mut canonical) => {
-                for part in suffix.iter().rev() {
-                    canonical.push(part);
+    // Resolve existing components in pathname order so that `..` applies to a
+    // symlink target, while unresolved components remain available to pop.
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => {
+                let candidate = normalized.join(part);
+                match fs::canonicalize(&candidate) {
+                    Ok(canonical) => normalized = canonical,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        normalized.push(part);
+                    }
+                    Err(error) => {
+                        return Err(format!(
+                            "failed to normalize certificate path {}: {error}",
+                            path.display()
+                        ));
+                    }
                 }
-                return Ok(lexically_normalize_absolute(&canonical));
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                let part = existing.file_name().ok_or_else(|| {
-                    format!("failed to normalize certificate path {}", path.display())
-                })?;
-                suffix.push(part.to_os_string());
-                existing = existing.parent().ok_or_else(|| {
-                    format!("failed to normalize certificate path {}", path.display())
-                })?;
-            }
-            Err(error) => {
-                return Err(format!(
-                    "failed to normalize certificate path {}: {error}",
-                    path.display()
-                ));
             }
         }
     }
+    Ok(normalized)
 }
 
 #[cfg(all(feature = "certificates", unix))]
@@ -10075,6 +10058,45 @@ mod tests {
         .expect_err("lexically normalized source/output alias must fail");
         assert!(error.contains("aliases output"));
         assert_eq!(fs::read(&source_path).unwrap(), original_source);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_missing_component_before_parent_preserves_alias_checks() {
+        let directory = CertificateTestDirectory::new("certificate-missing-parent");
+        let base = directory.path("base");
+        fs::create_dir(&base).expect("create certificate path base");
+        let missing = base.join("missing");
+        let source_path = base.join("out");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write certificate source");
+        let source_alias = missing.join("..").join("out");
+
+        assert!(source_alias.is_absolute());
+        assert!(!missing.exists());
+        assert_eq!(
+            normalized_certificate_path(&source_alias).unwrap(),
+            fs::canonicalize(&source_path).unwrap()
+        );
+        let source_error = ensure_distinct_certificate_paths(&source_path, &[&source_alias])
+            .expect_err("missing-component source alias must fail");
+        assert!(source_error.contains("certificate source"));
+        assert!(source_error.contains("aliases output"));
+        assert_eq!(
+            fs::read(&source_path).unwrap(),
+            MIXED_CERTIFICATE_SOURCE.as_bytes()
+        );
+
+        let direct_output = base.join("result.cnf");
+        let output_alias = missing.join("..").join("result.cnf");
+        assert_eq!(
+            normalized_certificate_path(&direct_output).unwrap(),
+            normalized_certificate_path(&output_alias).unwrap()
+        );
+        let output_error =
+            ensure_distinct_certificate_paths(&source_path, &[&direct_output, &output_alias])
+                .expect_err("missing-component output alias must fail");
+        assert!(output_error.contains("certificate outputs"));
+        assert!(output_error.contains("alias each other"));
     }
 
     #[cfg(all(feature = "certificates", unix))]
