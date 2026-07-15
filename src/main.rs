@@ -3718,6 +3718,15 @@ fn domain_tuples_for_args(
 }
 
 fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>> {
+    let mode = env::var("EUF_VIPER_CONGRUENCE_MODE").unwrap_or_else(|_| "auto".to_owned());
+    congruence_axiom_clauses_with_mode(cnf, arena, &mode)
+}
+
+fn congruence_axiom_clauses_with_mode(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    mode: &str,
+) -> Vec<Vec<i32>> {
     let mut equality_vars = HashMap::default();
     let mut bool_vars = HashMap::default();
     let mut equality_neighbors = vec![Vec::<(TermId, i32)>::new(); arena.terms.len()];
@@ -3743,7 +3752,6 @@ fn congruence_axiom_clauses(cnf: &CnfProblem, arena: &TermArena) -> Vec<Vec<i32>
     }
 
     let mut clauses = HashSet::default();
-    let mode = env::var("EUF_VIPER_CONGRUENCE_MODE").unwrap_or_else(|_| "auto".to_owned());
     let canonical_values = canonical_value_terms(cnf, arena);
     let canonical_only = mode == "canonical"
         || (mode == "auto"
@@ -5140,13 +5148,63 @@ fn solve_varisat_euf(
 }
 
 #[cfg(feature = "certificates")]
+#[derive(Debug, PartialEq, Eq)]
+struct CertificateTheorySeeds {
+    transitivity: Vec<Vec<i32>>,
+    congruence: Vec<Vec<i32>>,
+}
+
+#[cfg(feature = "certificates")]
+fn certificate_theory_seeds(cnf: &CnfProblem, arena: &TermArena) -> CertificateTheorySeeds {
+    let mut transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
+    let mut congruence = congruence_axiom_clauses_with_mode(cnf, arena, "auto");
+    transitivity.sort();
+    congruence.sort();
+    CertificateTheorySeeds {
+        transitivity,
+        congruence,
+    }
+}
+
+#[cfg(feature = "certificates")]
+fn certificate_theory_clause_key(cnf: &CnfProblem, clause: &[i32]) -> Result<Vec<i32>, String> {
+    if clause.is_empty() {
+        return Err("certificate EUF theory clause must not be empty".to_owned());
+    }
+    let mut key = clause.to_vec();
+    key.sort_unstable();
+    key.dedup();
+    for &literal in &key {
+        let variable = literal.unsigned_abs() as usize;
+        if literal == 0 || !matches!(cnf.var_atoms.get(variable), Some(Some(_))) {
+            return Err(format!(
+                "certificate EUF theory clause contains non-theory literal {literal}"
+            ));
+        }
+        if key.binary_search(&-literal).is_ok() {
+            return Err("certificate EUF theory clause must not be tautological".to_owned());
+        }
+    }
+    Ok(key)
+}
+
+#[cfg(feature = "certificates")]
 fn discover_certificate_theory_conflicts(
     cnf: &mut CnfProblem,
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
+    theory_seed_start: usize,
     max_rounds: usize,
 ) -> Result<CertificateSaturation, String> {
+    if theory_seed_start > cnf.clauses.len() {
+        return Err("certificate EUF seed boundary exceeds the CNF".to_owned());
+    }
+    let mut known_theory_clauses = HashSet::<Vec<i32>>::default();
+    for clause in cnf.clauses.iter().skip(theory_seed_start) {
+        known_theory_clauses.insert(certificate_theory_clause_key(cnf, clause)?);
+    }
+
     let mut solver = VarisatSolver::new();
     for clause in &cnf.clauses {
         let literals = clause
@@ -5156,13 +5214,13 @@ fn discover_certificate_theory_conflicts(
         solver.add_clause(&literals);
     }
 
-    let mut learned = HashSet::<Vec<i32>>::default();
+    let mut dynamic_conflict_count = 0usize;
     for round in 1..=max_rounds {
         match solver.solve() {
             Ok(false) => {
                 return Ok(CertificateSaturation::Unsat {
                     theory_rounds: round,
-                    conflict_count: learned.len(),
+                    conflict_count: dynamic_conflict_count,
                 });
             }
             Err(error) => return Err(format!("Varisat failed during certification: {error}")),
@@ -5198,14 +5256,15 @@ fn discover_certificate_theory_conflicts(
                 .collect();
             return Ok(CertificateSaturation::Sat {
                 theory_rounds: round,
-                conflict_count: learned.len(),
+                conflict_count: dynamic_conflict_count,
                 assignment,
             });
         }
 
         let mut added = 0usize;
         for clause in conflicts {
-            if learned.insert(clause.clone()) {
+            let clause = certificate_theory_clause_key(cnf, &clause)?;
+            if known_theory_clauses.insert(clause.clone()) {
                 let literals = clause
                     .iter()
                     .map(|literal| Lit::from_dimacs(*literal as isize))
@@ -5213,6 +5272,7 @@ fn discover_certificate_theory_conflicts(
                 solver.add_clause(&literals);
                 cnf.clauses.push(clause);
                 added += 1;
+                dynamic_conflict_count += 1;
             }
         }
         if added == 0 {
@@ -5471,13 +5531,34 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
         cnf.add_assertion(assertion);
     }
     let base_count = cnf.clauses.len();
+    let seeds = certificate_theory_seeds(&cnf, &problem.arena);
+    let transitivity_count = seeds.transitivity.len();
+    let congruence_count = seeds.congruence.len();
+    cnf.clauses.extend(seeds.transitivity);
+    cnf.clauses.extend(seeds.congruence);
     let saturation = discover_certificate_theory_conflicts(
         &mut cnf,
         &problem.arena,
         bool_problem.true_term,
         bool_problem.false_term,
+        base_count,
         max_rounds,
     )?;
+    let dynamic_conflict_count = match &saturation {
+        CertificateSaturation::Sat { conflict_count, .. }
+        | CertificateSaturation::Unsat { conflict_count, .. } => *conflict_count,
+    };
+    let accounted_clause_count = base_count
+        .checked_add(transitivity_count)
+        .and_then(|count| count.checked_add(congruence_count))
+        .and_then(|count| count.checked_add(dynamic_conflict_count))
+        .ok_or_else(|| "certificate clause accounting overflow".to_owned())?;
+    if accounted_clause_count != cnf.clauses.len() {
+        return Err(format!(
+            "certificate clause accounting mismatch: expected {accounted_clause_count}, got {}",
+            cnf.clauses.len()
+        ));
+    }
     let manifest_file = fs::File::create(&manifest_path)
         .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
     let mut manifest_writer = BufWriter::new(manifest_file);
@@ -5509,6 +5590,10 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
             eprintln!("cnf_clauses={}", cnf.clauses.len());
             eprintln!("theory_rounds={theory_rounds}");
             eprintln!("theory_conflicts={conflict_count}");
+            eprintln!("transitivity_clauses={transitivity_count}");
+            eprintln!("congruence_clauses={congruence_count}");
+            eprintln!("dynamic_theory_conflicts={conflict_count}");
+            eprintln!("finite_domain_axioms=0");
         }
         CertificateSaturation::Unsat {
             theory_rounds,
@@ -5544,8 +5629,8 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
                 atoms: certificate_atoms(&cnf),
                 clauses: CertificateClauseCounts {
                     base: base_count,
-                    transitivity: 0,
-                    congruence: 0,
+                    transitivity: transitivity_count,
+                    congruence: congruence_count,
                     theory_conflicts: conflict_count,
                     total: cnf.clauses.len(),
                 },
@@ -5565,6 +5650,10 @@ fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, Stri
             eprintln!("cnf_clauses={}", cnf.clauses.len());
             eprintln!("theory_rounds={theory_rounds}");
             eprintln!("theory_conflicts={conflict_count}");
+            eprintln!("transitivity_clauses={transitivity_count}");
+            eprintln!("congruence_clauses={congruence_count}");
+            eprintln!("dynamic_theory_conflicts={conflict_count}");
+            eprintln!("finite_domain_axioms=0");
         }
     }
     Ok(0)
@@ -7320,6 +7409,83 @@ fn main() {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "certificates")]
+    struct CertificateTestDirectory(PathBuf);
+
+    #[cfg(feature = "certificates")]
+    impl CertificateTestDirectory {
+        fn new(label: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+
+            static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+            let nonce = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+            let path = env::temp_dir().join(format!("euf-viper-{label}-{}-{nonce}", process::id()));
+            fs::create_dir_all(&path).expect("create certificate test directory");
+            Self(path)
+        }
+
+        fn path(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    impl Drop for CertificateTestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    fn certificate_base_and_seeds(
+        source: &str,
+    ) -> (Problem, CnfProblem, usize, CertificateTheorySeeds) {
+        let problem = parse_problem(source).expect("parse certificate test problem");
+        let bool_problem = problem
+            .bool_problem
+            .as_ref()
+            .expect("certificate test Boolean problem");
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        let base_count = cnf.clauses.len();
+        let seeds = certificate_theory_seeds(&cnf, &problem.arena);
+        (problem, cnf, base_count, seeds)
+    }
+
+    #[cfg(feature = "certificates")]
+    fn read_test_dimacs(path: &Path) -> (usize, Vec<Vec<i32>>) {
+        let text = fs::read_to_string(path).expect("read certificate DIMACS");
+        let mut variables = None;
+        let mut clauses = Vec::new();
+        let mut clause = Vec::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('c') {
+                continue;
+            }
+            if line.starts_with('p') {
+                let fields = line.split_whitespace().collect::<Vec<_>>();
+                assert_eq!(fields.len(), 4);
+                assert_eq!(&fields[..2], &["p", "cnf"]);
+                variables = Some(fields[2].parse().expect("DIMACS variable count"));
+                continue;
+            }
+            for token in line.split_whitespace() {
+                let literal = token.parse::<i32>().expect("DIMACS literal");
+                if literal == 0 {
+                    clauses.push(std::mem::take(&mut clause));
+                } else {
+                    clause.push(literal);
+                }
+            }
+        }
+        assert!(clause.is_empty(), "unterminated DIMACS clause");
+        (variables.expect("DIMACS header"), clauses)
+    }
+
     #[test]
     fn flat_clauses_preserve_empty_and_unit_clauses() {
         let mut clauses = FlatClauses::new();
@@ -7464,6 +7630,268 @@ mod tests {
         fs::remove_file(&path).expect("remove flat clause DIMACS");
 
         assert_eq!(bytes, b"p cnf 3 4\n3 -1 3 0\n0\n2 0\n0\n");
+    }
+
+    #[cfg(feature = "certificates")]
+    const MIXED_CERTIFICATE_SOURCE: &str = r#"
+        (set-logic QF_UF)
+        (declare-sort U 0)
+        (declare-fun a () U)
+        (declare-fun b () U)
+        (declare-fun c () U)
+        (declare-fun d () U)
+        (declare-fun e () U)
+        (declare-fun g () U)
+        (declare-fun h () U)
+        (declare-fun f (U) U)
+        (assert (= a b))
+        (assert (= b c))
+        (assert (= a c))
+        (assert (= (f a) (f b)))
+        (assert (= d e))
+        (assert (= e g))
+        (assert (= g h))
+        (assert (distinct d h))
+        (check-sat)
+    "#;
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_seeds_preserve_base_and_append_only_ordered_pure_euf_lemmas() {
+        let (problem, mut cnf, base_count, seeds) =
+            certificate_base_and_seeds(MIXED_CERTIFICATE_SOURCE);
+        let base_clauses = cnf.clauses.iter().map(<[_]>::to_vec).collect::<Vec<_>>();
+        let variable_count = cnf.var_count();
+
+        assert_eq!(seeds.transitivity.len(), 3);
+        assert_eq!(seeds.congruence.len(), 1);
+        assert!(seeds.transitivity.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(seeds.congruence.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(
+            certificate_theory_seeds(
+                &cnf,
+                &parse_problem(MIXED_CERTIFICATE_SOURCE).unwrap().arena
+            ),
+            seeds
+        );
+
+        for clause in seeds.transitivity.iter().chain(&seeds.congruence) {
+            assert_eq!(
+                certificate_theory_clause_key(&cnf, clause).unwrap().len(),
+                clause.len()
+            );
+            assert!(clause.iter().all(|literal| matches!(
+                cnf.var_atoms.get(literal.unsigned_abs() as usize),
+                Some(Some(BoolAtomKey::Eq(_, _) | BoolAtomKey::BoolTerm(_)))
+            )));
+
+            let mut falsifying_assignment = vec![-1i8; cnf.var_count() + 1];
+            falsifying_assignment[0] = 0;
+            for &literal in clause {
+                falsifying_assignment[literal.unsigned_abs() as usize] =
+                    if literal > 0 { -1 } else { 1 };
+            }
+            let bool_problem = problem.bool_problem.as_ref().unwrap();
+            assert!(
+                !theory_conflict_clauses(
+                    &cnf,
+                    &problem.arena,
+                    bool_problem.true_term,
+                    bool_problem.false_term,
+                    &falsifying_assignment,
+                )
+                .unwrap()
+                .is_empty()
+            );
+        }
+
+        let transitivity = seeds.transitivity.clone();
+        let congruence = seeds.congruence.clone();
+        cnf.clauses.extend(seeds.transitivity);
+        cnf.clauses.extend(seeds.congruence);
+        assert_eq!(cnf.var_count(), variable_count);
+        assert!(!cnf.finite_equalities_complete);
+        assert!(!cnf.finite_predicate_congruence_complete);
+        assert_eq!(base_count, base_clauses.len());
+        assert_eq!(
+            cnf.clauses
+                .iter()
+                .take(base_count)
+                .map(<[_]>::to_vec)
+                .collect::<Vec<_>>(),
+            base_clauses
+        );
+        assert_eq!(
+            cnf.clauses
+                .iter()
+                .skip(base_count)
+                .take(transitivity.len())
+                .map(<[_]>::to_vec)
+                .collect::<Vec<_>>(),
+            transitivity
+        );
+        assert_eq!(
+            cnf.clauses
+                .iter()
+                .skip(base_count + transitivity.len())
+                .map(<[_]>::to_vec)
+                .collect::<Vec<_>>(),
+            congruence
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_clause_dedup_normalizes_seed_and_dynamic_literal_order() {
+        let mut cnf = CnfProblem::new();
+        let left = cnf.atom_lit(BoolAtomKey::Eq(0, 1));
+        let right = cnf.atom_lit(BoolAtomKey::Eq(2, 3));
+        let key = certificate_theory_clause_key(&cnf, &[-left, right]).unwrap();
+        assert_eq!(
+            certificate_theory_clause_key(&cnf, &[right, -left, right]).unwrap(),
+            key
+        );
+
+        let mut known = HashSet::default();
+        assert!(known.insert(key.clone()));
+        assert!(!known.insert(certificate_theory_clause_key(&cnf, &[right, -left]).unwrap()));
+
+        let auxiliary = cnf.new_var(None);
+        assert!(certificate_theory_clause_key(&cnf, &[auxiliary]).is_err());
+        assert!(certificate_theory_clause_key(&cnf, &[0]).is_err());
+        assert!(certificate_theory_clause_key(&cnf, &[left, -left]).is_err());
+        assert!(certificate_theory_clause_key(&cnf, &[]).is_err());
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn sat_certificate_with_eager_seeds_is_sound_and_deterministic() {
+        let source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (= (f a) (f b)))
+            (check-sat)
+        "#;
+        let directory = CertificateTestDirectory::new("sat-certificate-seeds");
+        let source_path = directory.path("input.smt2");
+        let first_prefix = directory.path("first");
+        let second_prefix = directory.path("second");
+        fs::write(&source_path, source).expect("write SAT certificate source");
+        certify_file(
+            source_path.to_str().unwrap(),
+            first_prefix.to_str().unwrap(),
+            8,
+        )
+        .expect("first SAT certification");
+        certify_file(
+            source_path.to_str().unwrap(),
+            second_prefix.to_str().unwrap(),
+            8,
+        )
+        .expect("second SAT certification");
+
+        let first_manifest = fs::read(path_with_suffix(&first_prefix, ".euf.json"))
+            .expect("read first SAT manifest");
+        let second_manifest = fs::read(path_with_suffix(&second_prefix, ".euf.json"))
+            .expect("read second SAT manifest");
+        assert_eq!(first_manifest, second_manifest);
+        assert!(!path_with_suffix(&first_prefix, ".cnf").exists());
+        assert!(!path_with_suffix(&first_prefix, ".drat").exists());
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&first_manifest).expect("parse SAT manifest");
+        assert_eq!(manifest["result"], "sat");
+        assert_eq!(manifest["theory_conflicts"], 0);
+
+        let (problem, mut cnf, base_count, seeds) = certificate_base_and_seeds(source);
+        assert_eq!(seeds.transitivity.len(), 0);
+        assert_eq!(seeds.congruence.len(), 1);
+        cnf.clauses.extend(seeds.transitivity);
+        cnf.clauses.extend(seeds.congruence);
+        assert_eq!(base_count + 1, cnf.clauses.len());
+        let mut assignment = vec![0i8; cnf.var_count() + 1];
+        for value in manifest["assignment"].as_array().unwrap() {
+            let literal = value.as_i64().unwrap() as i32;
+            let variable = literal.unsigned_abs() as usize;
+            assert!((1..assignment.len()).contains(&variable));
+            assert_eq!(assignment[variable], 0);
+            assignment[variable] = if literal > 0 { 1 } else { -1 };
+        }
+        assert!(complete_cnf_assignment(&cnf, &mut assignment));
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        assert!(
+            theory_conflict_clauses(
+                &cnf,
+                &problem.arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+                &assignment,
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn unsat_certificate_orders_seeds_and_reports_dynamic_manifest_counts() {
+        let directory = CertificateTestDirectory::new("unsat-certificate-seeds");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write UNSAT certificate source");
+        certify_file(source_path.to_str().unwrap(), prefix.to_str().unwrap(), 8)
+            .expect("UNSAT certification");
+
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(path_with_suffix(&prefix, ".euf.json"))
+                .expect("read UNSAT certificate manifest"),
+        )
+        .expect("parse UNSAT certificate manifest");
+        let (problem, cnf, base_count, seeds) =
+            certificate_base_and_seeds(MIXED_CERTIFICATE_SOURCE);
+        let (variables, clauses) = read_test_dimacs(&path_with_suffix(&prefix, ".cnf"));
+        let base_clauses = cnf.clauses.iter().map(<[_]>::to_vec).collect::<Vec<_>>();
+
+        assert_eq!(manifest["result"], "unsat");
+        assert_eq!(manifest["finite_domain_axioms"], 0);
+        assert_eq!(manifest["clauses"]["base"], base_count as u64);
+        assert_eq!(
+            manifest["clauses"]["transitivity"],
+            seeds.transitivity.len() as u64
+        );
+        assert_eq!(
+            manifest["clauses"]["congruence"],
+            seeds.congruence.len() as u64
+        );
+        assert_eq!(manifest["clauses"]["theory_conflicts"], 1);
+        assert_eq!(manifest["clauses"]["total"], clauses.len() as u64);
+        assert_eq!(variables, cnf.var_count());
+        assert_eq!(&clauses[..base_count], base_clauses.as_slice());
+        let transitivity_end = base_count + seeds.transitivity.len();
+        assert_eq!(
+            &clauses[base_count..transitivity_end],
+            seeds.transitivity.as_slice()
+        );
+        let congruence_end = transitivity_end + seeds.congruence.len();
+        assert_eq!(
+            &clauses[transitivity_end..congruence_end],
+            seeds.congruence.as_slice()
+        );
+        assert_eq!(clauses.len(), congruence_end + 1);
+        assert!(certificate_theory_clause_key(&cnf, &clauses[congruence_end]).is_ok());
+        assert_eq!(
+            clauses.len(),
+            base_count
+                + seeds.transitivity.len()
+                + seeds.congruence.len()
+                + manifest["clauses"]["theory_conflicts"].as_u64().unwrap() as usize
+        );
+        assert!(path_with_suffix(&prefix, ".drat").exists());
+        assert_eq!(problem.bool_problem.as_ref().unwrap().unsupported.len(), 0);
     }
 
     #[test]
