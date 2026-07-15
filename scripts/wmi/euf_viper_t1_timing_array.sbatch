@@ -10,7 +10,24 @@
 
 set -euo pipefail
 
-[ "$#" -eq 7 ] || { echo "expected exact root/ref contract arguments" >&2; exit 2; }
+[ "$#" -eq 9 ] || { echo "expected exact root/ref/receipt arguments" >&2; exit 2; }
+EXPECTED_WRAPPER_SHA256="$9"
+if [ "${EUF_VIPER_T1_WRAPPER_BOUND:-}" != "$EXPECTED_WRAPPER_SHA256" ]; then
+  exec 30<"${BASH_SOURCE[0]}"
+  [ "$(/usr/bin/sha256sum /proc/self/fd/30 | /usr/bin/awk '{print $1}')" = "$EXPECTED_WRAPPER_SHA256" ] || {
+    echo "spooled array wrapper hash mismatch" >&2
+    exit 2
+  }
+  /usr/bin/python3 -I -B -c 'import os; os.lseek(30, 0, os.SEEK_SET)'
+  export EUF_VIPER_T1_WRAPPER_BOUND="$EXPECTED_WRAPPER_SHA256"
+  exec /bin/bash /proc/self/fd/30 "$@"
+fi
+unset EUF_VIPER_T1_WRAPPER_BOUND
+/usr/bin/python3 -I -B -c 'import os; os.lseek(30, 0, os.SEEK_SET)'
+[ "$(/usr/bin/sha256sum /proc/self/fd/30 | /usr/bin/awk '{print $1}')" = "$EXPECTED_WRAPPER_SHA256" ] || {
+  echo "retained array wrapper hash mismatch" >&2
+  exit 2
+}
 T1_JOB_ROOT="$1"
 EXPECTED_REVISION="$2"
 PUBLISHED_REF="$3"
@@ -18,6 +35,7 @@ SUBMISSION_MODE="$4"
 EXPECTED_CONTRACT_SHA256="$5"
 EXPECTED_MANIFEST_SHA256="$6"
 EXPECTED_RECEIPT_SHA256="$7"
+SUBMISSION_RECEIPT="$8"
 case "$T1_JOB_ROOT" in /*) ;; *) echo "T1 execution root must be absolute" >&2; exit 2 ;; esac
 [ "${#EXPECTED_REVISION}" -eq 40 ] || { echo "T1 revision length is invalid" >&2; exit 2; }
 case "$EXPECTED_REVISION" in *[!0-9a-f]*) echo "T1 revision is malformed" >&2; exit 2 ;; esac
@@ -54,6 +72,17 @@ exec 18<"$COMMON_PATH"
 source /proc/self/fd/18
 exec 18<&-
 t1_reject_ambient_influence
+EXPECTED_JOB_PREFIX="euf-t1-array-"
+case "${SLURM_JOB_NAME:-}" in
+  "$EXPECTED_JOB_PREFIX"*) EXPECTED_SUBMISSION_RECEIPT_SHA256="${SLURM_JOB_NAME#"$EXPECTED_JOB_PREFIX"}" ;;
+  *) echo "array job name does not bind a submission receipt" >&2; exit 2 ;;
+esac
+t1_require_sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" "submission receipt SHA-256"
+exec 6<"$SUBMISSION_RECEIPT"
+[ "$(sha256sum /proc/self/fd/6 | awk '{print $1}')" = "$EXPECTED_SUBMISSION_RECEIPT_SHA256" ] || {
+  echo "opened submission receipt hash mismatch" >&2
+  exit 2
+}
 cd "$T1_JOB_ROOT"
 export LANG=C LC_ALL=C TZ=UTC OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1
 export EUF_VIPER_SCOPED_LET=auto
@@ -87,6 +116,21 @@ t1_verify_pinned_tool AR EUF_VIPER_AR EUF_VIPER_AR_SHA256 EUF_VIPER_AR_VERSION
 HARNESS_ENTRY="$(t1_git ls-tree "$EXPECTED_REVISION" -- scripts/bench/typed_parser_timing.py)"
 [ "${HARNESS_ENTRY%% *}" = 100755 ] || { echo "timing harness mode mismatch" >&2; exit 2; }
 HARNESS_BLOB="$(printf '%s\n' "$HARNESS_ENTRY" | awk '{print $3}')"
+exec 18<"$HARNESS" 19<"$EUF_VIPER_PYTHON"
+[ "$(t1_git hash-object --no-filters -- /proc/self/fd/18)" = "$HARNESS_BLOB" ] || {
+  echo "opened timing harness differs from the immutable revision" >&2
+  exit 2
+}
+[ "$(sha256sum /proc/self/fd/19 | awk '{print $1}')" = "$EUF_VIPER_PYTHON_SHA256" ] || {
+  echo "opened Python descriptor hash mismatch" >&2
+  exit 2
+}
+/proc/self/fd/19 -I -B /proc/self/fd/18 verify-submission-receipt \
+  --submission-receipt "$SUBMISSION_RECEIPT" --submission-receipt-fd 6 \
+  --expected-submission-receipt-sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" \
+  --revision "$EXPECTED_REVISION" --submission-mode "$SUBMISSION_MODE" \
+  --role array --expected-wrapper-sha256 "$EXPECTED_WRAPPER_SHA256" \
+  --expected-shard "$SHARD" >/dev/null
 RUN_SHARD=(
   /bin/bash -c '
     set -euo pipefail
@@ -94,8 +138,14 @@ RUN_SHARD=(
     harness_blob=$2
     python=$3
     python_sha256=$4
-    shift 4
-    exec 18<"$harness" 19<"$python"
+    receipt=$5
+    receipt_sha256=$6
+    shift 6
+    exec 6<"$receipt" 18<"$harness" 19<"$python"
+    [ "$(sha256sum /proc/self/fd/6 | awk "{print \$1}")" = "$receipt_sha256" ] || {
+      echo "opened step submission receipt hash mismatch" >&2
+      exit 2
+    }
     [ "$(git -C "$(dirname "$(dirname "$(dirname "$harness")")")" hash-object --no-filters -- /proc/self/fd/18)" = "$harness_blob" ] || {
       echo "opened timing harness differs from the immutable revision" >&2
       exit 2
@@ -106,7 +156,8 @@ RUN_SHARD=(
     }
     exec /proc/self/fd/19 -I -B /proc/self/fd/18 "$@"
   ' t1-bound-step "$HARNESS" "$HARNESS_BLOB" \
-  "$EUF_VIPER_PYTHON" "$EUF_VIPER_PYTHON_SHA256" run-shard
+  "$EUF_VIPER_PYTHON" "$EUF_VIPER_PYTHON_SHA256" \
+  "$SUBMISSION_RECEIPT" "$EXPECTED_SUBMISSION_RECEIPT_SHA256" run-shard
   --root "$CAMPAIGN_ROOT" \
   --revision "$EXPECTED_REVISION" \
   --shard "$SHARD" \
@@ -114,6 +165,10 @@ RUN_SHARD=(
   --expected-checkout-receipt-sha256 "$EXPECTED_RECEIPT_SHA256" \
   --expected-contract-sha256 "$EXPECTED_CONTRACT_SHA256" \
   --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+  --submission-receipt "$SUBMISSION_RECEIPT" \
+  --submission-receipt-fd 6 \
+  --expected-submission-receipt-sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" \
+  --expected-wrapper-sha256 "$EXPECTED_WRAPPER_SHA256" \
   --require-linux-affinity
 )
 if [ "$SUBMISSION_MODE" = full ]; then

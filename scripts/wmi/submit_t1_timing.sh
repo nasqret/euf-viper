@@ -1,16 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Re-enter through retained bytes before any campaign logic. The initial pathname
+# invocation performs only this immutable-revision bootstrap.
+if [ -z "${EUF_VIPER_T1_LOCAL_SUBMIT_BOUND:-}" ]; then
+  INITIAL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  INITIAL_REVISION="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$INITIAL_ROOT" rev-parse --verify HEAD^{commit})"
+  ENTRY="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$INITIAL_ROOT" ls-tree "$INITIAL_REVISION" -- scripts/wmi/submit_t1_timing.sh)"
+  [ "${ENTRY%% *}" = 100755 ] || { echo "T1 submit helper mode mismatch" >&2; exit 2; }
+  BLOB="$(printf '%s\n' "$ENTRY" | awk '{print $3}')"
+  exec 30<"${BASH_SOURCE[0]}"
+  DESCRIPTOR=/dev/fd/30
+  [ -d /proc/self/fd ] && DESCRIPTOR=/proc/self/fd/30
+  [ "$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -C "$INITIAL_ROOT" hash-object --no-filters -- "$DESCRIPTOR")" = "$BLOB" ] || {
+    echo "opened T1 submit helper differs from the immutable revision" >&2
+    exit 2
+  }
+  env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
+    'import os; os.lseek(30, 0, os.SEEK_SET)'
+  export EUF_VIPER_T1_LOCAL_SUBMIT_BOUND="$INITIAL_ROOT:$INITIAL_REVISION:$BLOB"
+  exec /bin/bash "$DESCRIPTOR" "$@"
+fi
+
+IFS=: read -r ROOT BOOTSTRAP_REVISION SUBMIT_BLOB <<<"$EUF_VIPER_T1_LOCAL_SUBMIT_BOUND"
+unset EUF_VIPER_T1_LOCAL_SUBMIT_BOUND
+case "$ROOT" in /*) ;; *) echo "bound T1 root is not absolute" >&2; exit 2 ;; esac
+if [ -d /proc/self/fd ]; then
+  SELF_DESCRIPTOR=/proc/self/fd/30
+else
+  SELF_DESCRIPTOR=/dev/fd/30
+fi
+env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
+  'import os; os.lseek(30, 0, os.SEEK_SET)'
+[ "$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$ROOT" hash-object --no-filters -- "$SELF_DESCRIPTOR")" = "$SUBMIT_BLOB" ] || {
+  echo "retained T1 submit helper hash mismatch" >&2
+  exit 2
+}
+
 REMOTE_HOST="wmicluster"
 PUBLISHED_REF="origin/research-typed-parser-timing"
-PARTITION="cpu_idle"
-NODELIST="c1n1"
-DEPENDENCY=""
 MODE=""
+DEPENDENCY=""
 SHARDS=128
 MAX_PARALLEL=1
-CANARY_SHARDS=1
 WARMUP_ROUNDS=1
 MEASURED_ROUNDS=5
 TIMEOUT_SECONDS=2
@@ -18,29 +58,20 @@ MANIFEST_SHA256="32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d
 PARITY_RECEIPT_SHA256="c0c9c1879c9ac2da524c69f07affa991626c326ac0837f8f8066fde708d8482c"
 
 cd "$ROOT"
-BOOTSTRAP_REVISION="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
-  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-  git -C "$ROOT" rev-parse --verify HEAD^{commit})"
 COMMON_RELATIVE="scripts/wmi/t1_timing_common.sh"
-COMMON_PATH="$ROOT/$COMMON_RELATIVE"
 COMMON_ENTRY="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$ROOT" ls-tree "$BOOTSTRAP_REVISION" -- "$COMMON_RELATIVE")"
 [ "${COMMON_ENTRY%% *}" = 100755 ] || { echo "T1 common helper mode mismatch" >&2; exit 2; }
 COMMON_BLOB="$(printf '%s\n' "$COMMON_ENTRY" | awk '{print $3}')"
-exec 18<"$COMMON_PATH"
-if [ -d /proc/self/fd ]; then
-  COMMON_DESCRIPTOR=/proc/self/fd/18
-else
-  COMMON_DESCRIPTOR=/dev/fd/18
-fi
+exec 18<"$ROOT/$COMMON_RELATIVE"
+if [ -d /proc/self/fd ]; then COMMON_DESCRIPTOR=/proc/self/fd/18; else COMMON_DESCRIPTOR=/dev/fd/18; fi
 [ "$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
   git -C "$ROOT" hash-object --no-filters -- "$COMMON_DESCRIPTOR")" = "$COMMON_BLOB" ] || {
   echo "T1 common helper blob mismatch" >&2
   exit 2
 }
-# macOS /dev/fd hashing shares and advances the opened file description.
 env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
   'import os; os.lseek(18, 0, os.SEEK_SET)'
 source "$COMMON_DESCRIPTOR"
@@ -68,32 +99,37 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$MODE" ] || usage
-
-case "$PUBLISHED_REF" in
-  origin/*) PUBLISHED_BRANCH="${PUBLISHED_REF#origin/}" ;;
-  *) echo "published ref must name an origin branch" >&2; exit 2 ;;
-esac
-case "$PUBLISHED_BRANCH" in
-  ''|*[!A-Za-z0-9._/-]*|*..*|-*) echo "published branch is unsafe" >&2; exit 2 ;;
-esac
-case "$REMOTE_HOST" in
-  ''|*[!A-Za-z0-9._@-]*) echo "remote host is unsafe" >&2; exit 2 ;;
-esac
-if [ -n "$DEPENDENCY" ]; then
-  case "$DEPENDENCY" in *[!0-9]*) echo "dependency must be numeric" >&2; exit 2 ;; esac
-fi
+case "$DEPENDENCY" in ''|[1-9][0-9]*) ;; *) echo "dependency must be a canonical job id" >&2; exit 2 ;; esac
+case "$PUBLISHED_REF" in origin/*) PUBLISHED_BRANCH="${PUBLISHED_REF#origin/}" ;; *) exit 2 ;; esac
+case "$PUBLISHED_BRANCH" in ''|*[!A-Za-z0-9._/-]*|*..*) echo "published branch is unsafe" >&2; exit 2 ;; esac
+case "$REMOTE_HOST" in ''|*[!A-Za-z0-9._@-]*) echo "remote host is unsafe" >&2; exit 2 ;; esac
 
 REVISION="$(t1_git rev-parse --verify HEAD^{commit})"
 [ "$REVISION" = "$BOOTSTRAP_REVISION" ] || {
-  echo "T1 checkout changed after binding the common helper" >&2
+  echo "T1 checkout changed after binding the submit helper" >&2
   exit 2
 }
 t1_verify_checkout "$REVISION" "$PUBLISHED_REF"
-SHORT_REVISION="$(t1_git rev-parse --short=12 "$REVISION")"
 CONTRACT_SHA256="$(sha256sum campaigns/t1-typed-parser-timing-v1.json | awk '{print $1}')"
 ACCEPTED_PARITY_RECEIPT="$ROOT/results/wmi/typed-parser-parity-146510/receipt.json"
 t1_verify_bound_file "$ACCEPTED_PARITY_RECEIPT" "$PARITY_RECEIPT_SHA256" "accepted parity receipt"
-python3 -I -B scripts/bench/typed_parser_timing.py verify-evidence \
+
+HARNESS_RELATIVE="scripts/bench/typed_parser_timing.py"
+HARNESS_ENTRY="$(t1_git ls-tree "$REVISION" -- "$HARNESS_RELATIVE")"
+[ "${HARNESS_ENTRY%% *}" = 100755 ] || { echo "timing harness mode mismatch" >&2; exit 2; }
+HARNESS_BLOB="$(printf '%s\n' "$HARNESS_ENTRY" | awk '{print $3}')"
+exec 17<"$ROOT/$HARNESS_RELATIVE"
+if [ -d /proc/self/fd ]; then HARNESS_DESCRIPTOR=/proc/self/fd/17; else HARNESS_DESCRIPTOR=/dev/fd/17; fi
+[ "$(t1_git hash-object --no-filters -- "$HARNESS_DESCRIPTOR")" = "$HARNESS_BLOB" ] || {
+  echo "opened timing harness differs from the immutable revision" >&2
+  exit 2
+}
+local_harness() {
+  env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
+    'import os; os.lseek(17, 0, os.SEEK_SET)'
+  /usr/bin/python3 -I -B "$HARNESS_DESCRIPTOR" "$@"
+}
+local_harness verify-evidence \
   --contract campaigns/t1-typed-parser-timing-v1.json \
   --accepted-parity-receipt "$ACCEPTED_PARITY_RECEIPT" \
   --expected-contract-sha256 "$CONTRACT_SHA256" \
@@ -103,183 +139,109 @@ python3 -I -B scripts/bench/typed_parser_timing.py verify-evidence \
   --expected-measured-rounds "$MEASURED_ROUNDS" \
   --expected-timeout-seconds "$TIMEOUT_SECONDS" >/dev/null
 
-REMOTE_HOME="$(ssh "$REMOTE_HOST" 'printf %s "$HOME"')"
-case "$REMOTE_HOME" in
-  /*) ;;
-  *) echo "remote HOME is not absolute" >&2; exit 2 ;;
-esac
-REMOTE_PARENT="$REMOTE_HOME/euf-viper-t1-timing-campaigns"
-case "$REMOTE_PARENT" in
-  /*) ;;
-  *) echo "remote campaign parent must be absolute" >&2; exit 2 ;;
-esac
-case "$REMOTE_PARENT" in
-  *[!A-Za-z0-9_./-]*) echo "remote campaign parent is unsafe" >&2; exit 2 ;;
-esac
-
-remote_tool_identity() {
-  local requested="$1"
-  local label="$2"
-  local canonical digest version
-  case "$requested" in
-    /*) ;;
-    *) echo "$label path must be absolute" >&2; return 2 ;;
-  esac
-  case "$requested" in
-    *[!A-Za-z0-9_./-]*) echo "$label path is unsafe" >&2; return 2 ;;
-  esac
-  canonical="$(ssh "$REMOTE_HOST" "readlink -f -- '$requested'")" || {
-    echo "cannot canonicalize remote $label" >&2
-    return 2
-  }
-  digest="$(ssh "$REMOTE_HOST" "test -f '$canonical' && test -x '$canonical' && test ! -L '$canonical' && sha256sum '$canonical' | awk '{print \$1}'")" || {
-    echo "remote $label is unavailable" >&2
-    return 2
-  }
-  t1_require_sha256 "$digest" "remote $label SHA-256" || return
-  version="$(ssh "$REMOTE_HOST" "'$canonical' --version 2>&1" | sed -n '1p')" || {
-    echo "remote $label --version failed" >&2
-    return 2
-  }
-  case "$version" in
-    ''|*$'\n'*|*$'\r'*|*[!A-Za-z0-9._+\ \(\)/:-]*)
-      echo "remote $label version is unsafe: $version" >&2
-      return 2
-      ;;
-  esac
-  printf '%s\t%s\t%s\n' "$canonical" "$digest" "$version"
+REMOTE_HELPER_RELATIVE="scripts/wmi/t1_timing_remote_submit.py"
+REMOTE_HELPER_ENTRY="$(t1_git ls-tree "$REVISION" -- "$REMOTE_HELPER_RELATIVE")"
+[ "${REMOTE_HELPER_ENTRY%% *}" = 100755 ] || { echo "remote transaction helper mode mismatch" >&2; exit 2; }
+REMOTE_HELPER_BLOB="$(printf '%s\n' "$REMOTE_HELPER_ENTRY" | awk '{print $3}')"
+exec 19<"$ROOT/$REMOTE_HELPER_RELATIVE"
+if [ -d /proc/self/fd ]; then REMOTE_HELPER_DESCRIPTOR=/proc/self/fd/19; else REMOTE_HELPER_DESCRIPTOR=/dev/fd/19; fi
+[ "$(t1_git hash-object --no-filters -- "$REMOTE_HELPER_DESCRIPTOR")" = "$REMOTE_HELPER_BLOB" ] || {
+  echo "opened remote transaction helper differs from the immutable revision" >&2
+  exit 2
 }
 
-IFS=$'\t' read -r REMOTE_PYTHON REMOTE_PYTHON_SHA256 REMOTE_PYTHON_VERSION < <(
-  remote_tool_identity /usr/bin/python3 Python
-)
-REQUESTED_REMOTE_CARGO="$(ssh "$REMOTE_HOST" "'$REMOTE_HOME/.cargo/bin/rustup' which cargo")"
-REQUESTED_REMOTE_RUSTC="$(ssh "$REMOTE_HOST" "'$REMOTE_HOME/.cargo/bin/rustup' which rustc")"
-IFS=$'\t' read -r REMOTE_CARGO REMOTE_CARGO_SHA256 REMOTE_CARGO_VERSION < <(
-  remote_tool_identity "$REQUESTED_REMOTE_CARGO" Cargo
-)
-IFS=$'\t' read -r REMOTE_RUSTC REMOTE_RUSTC_SHA256 REMOTE_RUSTC_VERSION < <(
-  remote_tool_identity "$REQUESTED_REMOTE_RUSTC" Rustc
-)
-IFS=$'\t' read -r REMOTE_CC REMOTE_CC_SHA256 REMOTE_CC_VERSION < <(
-  remote_tool_identity /usr/bin/cc CC
-)
-IFS=$'\t' read -r REMOTE_LD REMOTE_LD_SHA256 REMOTE_LD_VERSION < <(
-  remote_tool_identity /usr/bin/ld LD
-)
-IFS=$'\t' read -r REMOTE_AR REMOTE_AR_SHA256 REMOTE_AR_VERSION < <(
-  remote_tool_identity /usr/bin/ar AR
-)
-
-CAMPAIGN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-case "$CAMPAIGN_TAG" in
-  ''|*[!A-Za-z0-9._-]*) echo "campaign tag is unsafe" >&2; exit 2 ;;
-esac
-REMOTE_RUN="$REMOTE_PARENT/$CAMPAIGN_TAG-$SHORT_REVISION"
-REMOTE_WORK="$REMOTE_RUN/repo"
-CAMPAIGN_ROOT="$REMOTE_RUN/artifacts"
-REMOTE_LOGS="$REMOTE_RUN/logs"
-CHECKOUT_RECEIPT="$REMOTE_RUN/checkout-receipt.json"
-REMOTE_MANIFEST="$REMOTE_HOME/euf-viper/benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
-REMOTE_PARITY_RECEIPT="$REMOTE_WORK/results/wmi/typed-parser-parity-146510/receipt.json"
-
-ssh "$REMOTE_HOST" "set -euo pipefail; umask 077; mkdir -p '$REMOTE_PARENT'; test ! -e '$REMOTE_RUN'; mkdir '$REMOTE_RUN'; git clone --quiet https://github.com/nasqret/euf-viper.git '$REMOTE_WORK'; git -C '$REMOTE_WORK' fetch --quiet origin '+refs/heads/$PUBLISHED_BRANCH:refs/remotes/origin/$PUBLISHED_BRANCH'; test \"\$(git -C '$REMOTE_WORK' rev-parse 'origin/$PUBLISHED_BRANCH^{commit}')\" = '$REVISION'; git -C '$REMOTE_WORK' checkout --quiet --detach '$REVISION'; test \"\$(git -C '$REMOTE_WORK' rev-parse HEAD)\" = '$REVISION'; mkdir '$REMOTE_LOGS'; test -s '$REMOTE_MANIFEST'; test \"\$(sha256sum '$REMOTE_WORK/campaigns/t1-typed-parser-timing-v1.json' | awk '{print \$1}')\" = '$CONTRACT_SHA256'; test \"\$(sha256sum '$REMOTE_MANIFEST' | awk '{print \$1}')\" = '$MANIFEST_SHA256'; test \"\$(sha256sum '$REMOTE_PARITY_RECEIPT' | awk '{print \$1}')\" = '$PARITY_RECEIPT_SHA256'; '$REMOTE_PYTHON' -I -B '$REMOTE_WORK/scripts/bench/typed_parser_timing.py' verify-corpus --manifest '$REMOTE_MANIFEST' --source-root '$REMOTE_HOME/euf-viper' --contract '$REMOTE_WORK/campaigns/t1-typed-parser-timing-v1.json' --accepted-parity-receipt '$REMOTE_PARITY_RECEIPT' --expected-accepted-parity-receipt-sha256 '$PARITY_RECEIPT_SHA256' --expected-contract-sha256 '$CONTRACT_SHA256' >/dev/null; '$REMOTE_PYTHON' -I -B '$REMOTE_WORK/scripts/wmi/t1_timing_checkout_receipt.py' --repository '$REMOTE_WORK' --revision '$REVISION' --published-ref '$PUBLISHED_REF' --output '$CHECKOUT_RECEIPT'"
-CHECKOUT_RECEIPT_SHA256="$(ssh "$REMOTE_HOST" "sha256sum '$CHECKOUT_RECEIPT' | awk '{print \$1}'")"
-t1_require_sha256 "$MANIFEST_SHA256" "remote manifest SHA-256"
-t1_require_sha256 "$CHECKOUT_RECEIPT_SHA256" "checkout receipt SHA-256"
-
-common_environment="EUF_VIPER_PYTHON='$REMOTE_PYTHON' EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256' EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION' EUF_VIPER_CARGO='$REMOTE_CARGO' EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256' EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION' EUF_VIPER_RUSTC='$REMOTE_RUSTC' EUF_VIPER_RUSTC_SHA256='$REMOTE_RUSTC_SHA256' EUF_VIPER_RUSTC_VERSION='$REMOTE_RUSTC_VERSION' EUF_VIPER_CC='$REMOTE_CC' EUF_VIPER_CC_SHA256='$REMOTE_CC_SHA256' EUF_VIPER_CC_VERSION='$REMOTE_CC_VERSION' EUF_VIPER_LD='$REMOTE_LD' EUF_VIPER_LD_SHA256='$REMOTE_LD_SHA256' EUF_VIPER_LD_VERSION='$REMOTE_LD_VERSION' EUF_VIPER_AR='$REMOTE_AR' EUF_VIPER_AR_SHA256='$REMOTE_AR_SHA256' EUF_VIPER_AR_VERSION='$REMOTE_AR_VERSION'"
-
-prepare_dependency=""
-if [ -n "$DEPENDENCY" ]; then
-  prepare_dependency="--dependency=afterok:$DEPENDENCY"
-fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local $prepare_dependency --output='$REMOTE_LOGS/prepare-%j.out' --error='$REMOTE_LOGS/prepare-%j.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_prepare.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256' '$PARITY_RECEIPT_SHA256'")"
-PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
-case "$PREPARE_JOB" in ''|*[!0-9]*) echo "invalid prepare job id: $PREPARE_SUBMISSION" >&2; exit 2 ;; esac
-
-LAST_SHARD="$((SHARDS - 1))"
-if [ "$MODE" = full ]; then
-  [ "$MAX_PARALLEL" -eq 1 ] || { echo "full T1 schedule must be serial" >&2; exit 2; }
-  ARRAY_SPEC="0-$LAST_SHARD%1"
-  SCHEDULED_SHARDS="$SHARDS"
-  SCHEDULED_MAX_PARALLEL="$MAX_PARALLEL"
-  ARRAY_PLACEMENT="--exclusive --cpu-freq=high:UserSpace"
-else
-  ARRAY_SPEC="0-$((CANARY_SHARDS - 1))%1"
-  SCHEDULED_SHARDS="$CANARY_SHARDS"
-  SCHEDULED_MAX_PARALLEL=1
-  ARRAY_PLACEMENT=""
-fi
-ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local $ARRAY_PLACEMENT --dependency=afterok:$PREPARE_JOB --array='$ARRAY_SPEC' --output='$REMOTE_LOGS/array-%A_%a.out' --error='$REMOTE_LOGS/array-%A_%a.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_array.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256'")"
-ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
-case "$ARRAY_JOB" in ''|*[!0-9]*) echo "invalid array job id: $ARRAY_SUBMISSION" >&2; exit 2 ;; esac
-
-AUDIT_JOB=""
-if [ "$MODE" = full ]; then
-  AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local --dependency=afterok:$ARRAY_JOB --output='$REMOTE_LOGS/audit-%j.out' --error='$REMOTE_LOGS/audit-%j.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_audit.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256'")"
-  AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
-  case "$AUDIT_JOB" in ''|*[!0-9]*) echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
-  AUDIT_JOB_PY="'$AUDIT_JOB'"
-else
-  AUDIT_JOB_PY=None
-fi
+remote_helper() {
+  env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
+    'import os; os.lseek(19, 0, os.SEEK_SET)'
+  ssh "$REMOTE_HOST" /usr/bin/python3 -I -B - "$@" < "$REMOTE_HELPER_DESCRIPTOR"
+}
 
 mkdir -p results
+TEMPORARY="results/.t1-submission-receipt.$$.tmp"
+[ ! -e "$TEMPORARY" ] || { echo "temporary receipt already exists" >&2; exit 2; }
+STAGED=0
+REMOTE_RECEIPT=""
+RECEIPT_SHA256=""
+cleanup() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ "$STAGED" -eq 1 ] && [ -n "$REMOTE_RECEIPT" ] && [ -n "$RECEIPT_SHA256" ]; then
+    remote_helper cancel --receipt "$REMOTE_RECEIPT" \
+      --receipt-sha256 "$RECEIPT_SHA256" >/dev/null 2>&1 || true
+  fi
+  rm -f "$TEMPORARY"
+  exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+STAGE_ARGUMENTS=(
+  stage
+  --revision "$REVISION"
+  --published-ref "$PUBLISHED_REF"
+  --published-branch "$PUBLISHED_BRANCH"
+  --mode "$MODE"
+  --contract-sha256 "$CONTRACT_SHA256"
+  --manifest-sha256 "$MANIFEST_SHA256"
+  --parity-receipt-sha256 "$PARITY_RECEIPT_SHA256"
+)
+if [ -n "$DEPENDENCY" ]; then
+  STAGE_ARGUMENTS+=(--dependency "$DEPENDENCY")
+fi
+remote_helper "${STAGE_ARGUMENTS[@]}" > "$TEMPORARY"
+[ -s "$TEMPORARY" ] || { echo "remote stage emitted no receipt" >&2; exit 2; }
+exec 16<"$TEMPORARY"
+if [ -d /proc/self/fd ]; then RECEIPT_DESCRIPTOR=/proc/self/fd/16; else RECEIPT_DESCRIPTOR=/dev/fd/16; fi
+RECEIPT_SHA256="$(sha256sum "$RECEIPT_DESCRIPTOR" | awk '{print $1}')"
+t1_require_sha256 "$RECEIPT_SHA256" "staged receipt SHA-256"
+REMOTE_RECEIPT="$(/usr/bin/python3 -I -B -c '
+import json,os
+content=os.pread(16, os.fstat(16).st_size, 0)
+print(json.loads(content.decode("ascii"))["receipt_path"])
+')"
+case "$REMOTE_RECEIPT" in /*) ;; *) echo "remote receipt path is not absolute" >&2; exit 2 ;; esac
+case "$REMOTE_RECEIPT" in *[!A-Za-z0-9_./-]*) echo "remote receipt path is unsafe" >&2; exit 2 ;; esac
+STAGED=1
+SUMMARY="$(local_harness verify-submission-receipt-file \
+  --submission-receipt "$TEMPORARY" \
+  --submission-receipt-fd 16 \
+  --expected-submission-receipt-sha256 "$RECEIPT_SHA256" \
+  --revision "$REVISION" --submission-mode "$MODE")"
+PREPARE_JOB="$(printf '%s\n' "$SUMMARY" | /usr/bin/python3 -I -B -c \
+  'import json,sys; print(json.load(sys.stdin)["prepare_job"])')"
+SUMMARY_RECEIPT="$(printf '%s\n' "$SUMMARY" | /usr/bin/python3 -I -B -c \
+  'import json,sys; print(json.load(sys.stdin)["receipt_path"])')"
+case "$PREPARE_JOB" in [1-9][0-9]*) ;; *) echo "staged prepare job is malformed" >&2; exit 2 ;; esac
+[ "$SUMMARY_RECEIPT" = "$REMOTE_RECEIPT" ] || { echo "receipt path validation drifted" >&2; exit 2; }
+
 RECEIPT="results/t1-typed-parser-timing-submission-$PREPARE_JOB.json"
 [ ! -e "$RECEIPT" ] || { echo "refusing to replace receipt: $RECEIPT" >&2; exit 2; }
-TEMPORARY="$RECEIPT.tmp.$$"
-trap 'rm -f "$TEMPORARY"' EXIT
-ssh "$REMOTE_HOST" "'$REMOTE_PYTHON' -" > "$TEMPORARY" <<PY
-import json
-payload = {
-    "array_job": "$ARRAY_JOB",
-    "array_spec": "$ARRAY_SPEC",
-    "audit_job": $AUDIT_JOB_PY,
-    "campaign_root": "$CAMPAIGN_ROOT",
-    "contract_sha256": "$CONTRACT_SHA256",
-    "manifest_sha256": "$MANIFEST_SHA256",
-    "accepted_parity_receipt_sha256": "$PARITY_RECEIPT_SHA256",
-    "checkout_receipt_sha256": "$CHECKOUT_RECEIPT_SHA256",
-    "dependency": "$DEPENDENCY" or None,
-    "contract_max_parallel": $MAX_PARALLEL,
-    "partition": "$PARTITION",
-    "nodelist": "$NODELIST",
-    "mode": "$MODE",
-    "placement": {
-        "cpu_binding": "cores",
-        "exclusive_requested": "$MODE" == "full",
-        "frequency_contract": "high:UserSpace" if "$MODE" == "full" else None,
-        "memory_binding": "local",
-        "schedule": "serial-exclusive-array.v1" if "$MODE" == "full" else "single-shard-canary.v1",
-        "threads_per_core": 1,
-    },
-    "promotable": False,
-    "promotion_reasons": ["T1 timing evidence is permanently nonpromotable research evidence"] +
-        (["bounded canary is incomplete"] if "$MODE" == "canary" else []),
-    "prepare_job": "$PREPARE_JOB",
-    "published_ref": "$PUBLISHED_REF",
-    "remote_host": "$REMOTE_HOST",
-    "remote_worktree": "$REMOTE_WORK",
-    "remote_run": "$REMOTE_RUN",
-    "revision": "$REVISION",
-    "scheduled_max_parallel": $SCHEDULED_MAX_PARALLEL,
-    "scheduled_shards": $SCHEDULED_SHARDS,
-    "schema": "euf-viper.typed-parser-timing-submission.v3",
-    "shards": $SHARDS,
-    "status": "submitted",
-    "tools": {
-        "ar": {"path": "$REMOTE_AR", "sha256": "$REMOTE_AR_SHA256", "version": "$REMOTE_AR_VERSION"},
-        "cargo": {"path": "$REMOTE_CARGO", "sha256": "$REMOTE_CARGO_SHA256", "version": "$REMOTE_CARGO_VERSION"},
-        "cc": {"path": "$REMOTE_CC", "sha256": "$REMOTE_CC_SHA256", "version": "$REMOTE_CC_VERSION"},
-        "ld": {"path": "$REMOTE_LD", "sha256": "$REMOTE_LD_SHA256", "version": "$REMOTE_LD_VERSION"},
-        "python": {"path": "$REMOTE_PYTHON", "sha256": "$REMOTE_PYTHON_SHA256", "version": "$REMOTE_PYTHON_VERSION"},
-        "rustc": {"path": "$REMOTE_RUSTC", "sha256": "$REMOTE_RUSTC_SHA256", "version": "$REMOTE_RUSTC_VERSION"},
-    },
-}
-print(json.dumps(payload, allow_nan=False, indent=2, sort_keys=True))
-PY
-ln "$TEMPORARY" "$RECEIPT"
+/usr/bin/python3 -I -B -c '
+import os,sys
+source,destination,directory=sys.argv[1:]
+descriptor=16
+identity=lambda value: (value.st_dev,value.st_ino,value.st_mode,value.st_size,value.st_mtime_ns)
+try:
+    os.fchmod(descriptor, 0o400)
+    os.fsync(descriptor)
+    opened=os.fstat(descriptor)
+    if identity(os.lstat(source)) != identity(opened):
+        raise RuntimeError("staged receipt pathname no longer names retained bytes")
+    os.link(source, destination, follow_symlinks=False)
+    if identity(os.lstat(destination)) != identity(opened):
+        raise RuntimeError("published receipt is not the retained inode")
+    directory_fd=os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try: os.fsync(directory_fd)
+    finally: os.close(directory_fd)
+except BaseException:
+    try: os.unlink(destination)
+    except FileNotFoundError: pass
+    raise
+' "$TEMPORARY" "$RECEIPT" "$(dirname "$RECEIPT")"
+
+remote_helper release --receipt "$REMOTE_RECEIPT" \
+  --receipt-sha256 "$RECEIPT_SHA256" >/dev/null
+STAGED=0
+exec 16<&-
 rm -f "$TEMPORARY"
-trap - EXIT
+trap - EXIT HUP INT TERM
 cat "$RECEIPT"

@@ -10,7 +10,24 @@
 
 set -euo pipefail
 
-[ "$#" -eq 8 ] || { echo "expected exact root/ref contract arguments" >&2; exit 2; }
+[ "$#" -eq 10 ] || { echo "expected exact root/ref/receipt arguments" >&2; exit 2; }
+EXPECTED_WRAPPER_SHA256="${10}"
+if [ "${EUF_VIPER_T1_WRAPPER_BOUND:-}" != "$EXPECTED_WRAPPER_SHA256" ]; then
+  exec 30<"${BASH_SOURCE[0]}"
+  [ "$(/usr/bin/sha256sum /proc/self/fd/30 | /usr/bin/awk '{print $1}')" = "$EXPECTED_WRAPPER_SHA256" ] || {
+    echo "spooled prepare wrapper hash mismatch" >&2
+    exit 2
+  }
+  /usr/bin/python3 -I -B -c 'import os; os.lseek(30, 0, os.SEEK_SET)'
+  export EUF_VIPER_T1_WRAPPER_BOUND="$EXPECTED_WRAPPER_SHA256"
+  exec /bin/bash /proc/self/fd/30 "$@"
+fi
+unset EUF_VIPER_T1_WRAPPER_BOUND
+/usr/bin/python3 -I -B -c 'import os; os.lseek(30, 0, os.SEEK_SET)'
+[ "$(/usr/bin/sha256sum /proc/self/fd/30 | /usr/bin/awk '{print $1}')" = "$EXPECTED_WRAPPER_SHA256" ] || {
+  echo "retained prepare wrapper hash mismatch" >&2
+  exit 2
+}
 T1_JOB_ROOT="$1"
 EXPECTED_REVISION="$2"
 PUBLISHED_REF="$3"
@@ -19,6 +36,7 @@ EXPECTED_CONTRACT_SHA256="$5"
 EXPECTED_MANIFEST_SHA256="$6"
 EXPECTED_RECEIPT_SHA256="$7"
 EXPECTED_PARITY_RECEIPT_SHA256="$8"
+SUBMISSION_RECEIPT="$9"
 case "$T1_JOB_ROOT" in /*) ;; *) echo "T1 execution root must be absolute" >&2; exit 2 ;; esac
 [ "${#EXPECTED_REVISION}" -eq 40 ] || { echo "T1 revision length is invalid" >&2; exit 2; }
 case "$EXPECTED_REVISION" in *[!0-9a-f]*) echo "T1 revision is malformed" >&2; exit 2 ;; esac
@@ -55,6 +73,17 @@ exec 18<"$COMMON_PATH"
 source /proc/self/fd/18
 exec 18<&-
 t1_reject_ambient_influence
+EXPECTED_JOB_PREFIX="euf-t1-prepare-"
+case "${SLURM_JOB_NAME:-}" in
+  "$EXPECTED_JOB_PREFIX"*) EXPECTED_SUBMISSION_RECEIPT_SHA256="${SLURM_JOB_NAME#"$EXPECTED_JOB_PREFIX"}" ;;
+  *) echo "prepare job name does not bind a submission receipt" >&2; exit 2 ;;
+esac
+t1_require_sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" "submission receipt SHA-256"
+exec 6<"$SUBMISSION_RECEIPT"
+[ "$(sha256sum /proc/self/fd/6 | awk '{print $1}')" = "$EXPECTED_SUBMISSION_RECEIPT_SHA256" ] || {
+  echo "opened submission receipt hash mismatch" >&2
+  exit 2
+}
 cd "$T1_JOB_ROOT"
 umask 077
 export LANG=C LC_ALL=C TZ=UTC OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1
@@ -89,6 +118,7 @@ BUILD_HOME="$RUN_ROOT/build-home"
 DEPENDENCY_ROOT="$RUN_ROOT/dependencies"
 VENDOR_DIR="$DEPENDENCY_ROOT/vendor"
 VENDOR_CONFIG="$DEPENDENCY_ROOT/cargo-vendor-config.toml"
+TARGET_TRIPLE="x86_64-unknown-linux-gnu"
 DEPENDENCY_PRE_INVENTORY="$RUN_ROOT/pre-build-dependency-inventory.json"
 DEPENDENCY_POST_INVENTORY="$RUN_ROOT/post-build-dependency-inventory.json"
 DEPENDENCY_MONITOR_READY="$RUN_ROOT/dependency-mutation-monitor-ready.json"
@@ -143,6 +173,11 @@ exec 18<"$BUILD_GUARD" 19<"$HARNESS" 20<"$EUF_VIPER_PYTHON"
 BUILD_GUARD_EXEC=/proc/self/fd/18
 HARNESS_EXEC=/proc/self/fd/19
 PYTHON_EXEC=/proc/self/fd/20
+"$PYTHON_EXEC" -I -B "$HARNESS_EXEC" verify-submission-receipt \
+  --submission-receipt "$SUBMISSION_RECEIPT" --submission-receipt-fd 6 \
+  --expected-submission-receipt-sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" \
+  --revision "$EXPECTED_REVISION" --submission-mode "$SUBMISSION_MODE" \
+  --role prepare --expected-wrapper-sha256 "$EXPECTED_WRAPPER_SHA256" >/dev/null
 
 MONITOR_PID=""
 DEPENDENCY_MONITOR_PID=""
@@ -320,10 +355,10 @@ env -i \
   CC="$EUF_VIPER_CC" \
   LD="$EUF_VIPER_LD" \
   AR="$EUF_VIPER_AR" \
-  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
   "$EUF_VIPER_CARGO" build \
     --manifest-path "$SOURCE_SNAPSHOT/Cargo.toml" \
-    --release --locked --offline \
+    --release --locked --offline --target "$TARGET_TRIPLE" \
     --config "source.crates-io.replace-with='vendored-sources'" \
     --config "source.vendored-sources.directory='$VENDOR_DIR'" \
     3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- \
@@ -362,7 +397,7 @@ kill -0 "$DEPENDENCY_MONITOR_PID" 2>/dev/null || {
   echo "dependency monitor exited during build" >&2
   exit 2
 }
-BINARY="$CARGO_TARGET_DIR/release/euf-viper"
+BINARY="$CARGO_TARGET_DIR/$TARGET_TRIPLE/release/euf-viper"
 [ -f "$BINARY" ] && [ -x "$BINARY" ] && [ ! -L "$BINARY" ] || {
   echo "release binary is missing, linked, or nonexecutable" >&2
   exit 2
@@ -462,6 +497,11 @@ cd "$CONTROL_REPO"
   --expected-checkout-receipt-sha256 "$EXPECTED_RECEIPT_SHA256" \
   --expected-contract-sha256 "$EXPECTED_CONTRACT_SHA256" \
   --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
+  --submission-receipt "$SUBMISSION_RECEIPT" \
+  --submission-receipt-fd 6 \
+  --expected-submission-receipt-sha256 "$EXPECTED_SUBMISSION_RECEIPT_SHA256" \
+  --submission-mode "$SUBMISSION_MODE" \
+  --expected-wrapper-sha256 "$EXPECTED_WRAPPER_SHA256" \
   --output-root "$CAMPAIGN_ROOT" \
   3>&- 4>&- 5>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&- 16>&-
 

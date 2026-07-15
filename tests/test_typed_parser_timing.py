@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -159,7 +160,7 @@ def valid_worker() -> dict[str, object]:
         "core_id": 0,
         "thread_siblings_list": "0",
         "numa_node": 0,
-        "scaling_governor": "performance",
+        "scaling_governor": "userspace",
         "scaling_driver": "fixture",
         "scaling_min_khz": 1000,
         "scaling_max_khz": 1000,
@@ -174,11 +175,22 @@ def valid_worker() -> dict[str, object]:
         "slurm_job_cpus_per_node": 64,
         "slurm_job_num_nodes": 1,
         "slurm_cpu_freq_req": "high:UserSpace",
+        "slurm_job_id": "201",
+        "slurm_job_name": "euf-t1-array-" + "4" * 64,
+        "slurm_array_job_id": "200",
+        "slurm_array_task_id": 0,
+        "slurm_array_task_min": 0,
+        "slurm_array_task_max": 127,
+        "slurm_array_task_step": 1,
+        "slurm_array_task_count": 128,
+        "slurm_array_throttle": 1,
         "physical_cores_on_node": 64,
         "submission_mode": "full",
+        "submission_receipt_sha256": "4" * 64,
         "placement_contract": "slurm-serial-exclusive-core-local-high-userspace.v1",
         "governor_control": True,
-        "exclusive_control": False,
+        "exclusive_control": True,
+        "whole_node_control": True,
         "libc": {
             "path": "/usr/lib/libc.so.6",
             "sha256": "3" * 64,
@@ -188,6 +200,99 @@ def valid_worker() -> dict[str, object]:
         },
         "allocator": "rust-system-allocator-static-runtime",
         "backend": "auto",
+    }
+
+
+def valid_submission_receipt(mode: str = "full") -> dict[str, object]:
+    full = mode == "full"
+    array = (
+        {"min": 0, "max": 127, "step": 1, "count": 128, "throttle": 1, "spec": "0-127%1"}
+        if full
+        else {"min": 0, "max": 0, "step": 1, "count": 1, "throttle": 1, "spec": "0-0%1"}
+    )
+
+    def held(*, array_job: bool, exclusive: bool = False) -> dict[str, object]:
+        return {
+            "array_task_id": array["spec"] if array_job else None,
+            "array_task_throttle": "1" if array_job else None,
+            "job_state": "PENDING",
+            "reason": "JobHeldUser",
+            "oversubscribe": "NO",
+            "exclusive": "NODE" if exclusive else "NO",
+            "user": "fixture-user",
+            "work_dir": "/tmp/t1/repo",
+        }
+
+    tools = {
+        name: {
+            "path": f"/usr/bin/{name}",
+            "sha256": str(index) * 64,
+            "bytes": 1,
+            "version": f"{name} 1.0",
+        }
+        for index, name in enumerate(("ar", "cargo", "cc", "ld", "python", "rustc"), 1)
+    }
+    return {
+        "schema": TIMING.SUBMISSION_RECEIPT_SCHEMA,
+        "status": "held_receipt_persisted",
+        "revision": "a" * 40,
+        "published_ref": "origin/research-typed-parser-timing",
+        "mode": mode,
+        "remote_run": "/tmp/t1",
+        "remote_worktree": "/tmp/t1/repo",
+        "campaign_root": "/tmp/t1/artifacts",
+        "receipt_path": "/tmp/t1/submission-receipt.json",
+        "contract_sha256": "1" * 64,
+        "manifest_sha256": "2" * 64,
+        "accepted_parity_receipt_sha256": "3" * 64,
+        "checkout_receipt_sha256": "4" * 64,
+        "dependency": None,
+        "partition": "cpu_idle",
+        "nodelist": "c1n1",
+        "contract_max_parallel": 1,
+        "shards": 128,
+        "scheduled_shards": array["count"],
+        "scheduled_max_parallel": 1,
+        "array": array,
+        "placement": {
+            "cpu_binding": "cores",
+            "memory_binding": "local",
+            "threads_per_core": 1,
+            "exclusive_requested": full,
+            "whole_node_exclusive": full,
+            "frequency_request": "high:UserSpace" if full else None,
+            "schedule": "serial-exclusive-array.v2" if full else "single-shard-canary.v2",
+        },
+        "jobs": {
+            "prepare": {
+                "id": "100",
+                "role": "prepare",
+                "wrapper_sha256": "5" * 64,
+                "dependencies": [],
+                "held_state": held(array_job=False),
+            },
+            "array": {
+                "id": "200",
+                "role": "array",
+                "wrapper_sha256": "6" * 64,
+                "dependencies": ["100"],
+                "held_state": held(array_job=True, exclusive=full),
+            },
+            "audit": {
+                "id": "300",
+                "role": "audit",
+                "wrapper_sha256": "7" * 64,
+                "dependencies": ["200"],
+                "held_state": held(array_job=False),
+            }
+            if full
+            else None,
+        },
+        "tools": tools,
+        "promotable": False,
+        "promotion_reasons": [
+            "T1 timing evidence is permanently nonpromotable research evidence"
+        ],
     }
 
 
@@ -230,6 +335,7 @@ def valid_record(*, result_mismatch: bool = False, parse_mismatch: bool = False)
         "revision": "a" * 40,
         "prepare_sha256": ZERO_SHA256,
         "contract_sha256": ZERO_SHA256,
+        "submission_receipt_sha256": "4" * 64,
         "python": {
             "path": "/usr/bin/python3",
             "sha256": ZERO_SHA256,
@@ -368,6 +474,27 @@ class RawEvidenceBindingTests(unittest.TestCase):
         with self.assertRaises(TIMING.CampaignError):
             TIMING.assert_complete_record_sequences([{"sequence": 0}], 2)
 
+    def test_inherited_artifact_descriptor_rejects_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            path = root / "receipt.json"
+            path.write_bytes(b"original\n")
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                alias = root / "durable-receipt.json"
+                os.link(path, alias)
+                artifact = TIMING.open_inherited_artifact(alias, descriptor)
+                self.assertEqual(artifact.content, b"original\n")
+                replacement = root / "replacement.json"
+                replacement.write_bytes(b"replacement\n")
+                os.replace(replacement, path)
+                with self.assertRaisesRegex(
+                    TIMING.CampaignError, "does not name its supplied path"
+                ):
+                    TIMING.open_inherited_artifact(path, descriptor)
+            finally:
+                os.close(descriptor)
+
     def test_sealed_shard_receipt_precedes_audit_and_detects_post_close_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name)
@@ -380,6 +507,8 @@ class RawEvidenceBindingTests(unittest.TestCase):
                     "revision": "a" * 40,
                     "contract": {"sha256": "b" * 64},
                     "shard_count": 1,
+                    "submission_mode": "full",
+                    "submission_receipt": {"sha256": "4" * 64},
                 },
                 prepare_artifact=artifact,
                 contract=CONTRACT,
@@ -414,6 +543,8 @@ class RawEvidenceBindingTests(unittest.TestCase):
                     "revision": "a" * 40,
                     "contract": {"sha256": "b" * 64},
                     "shard_count": 1,
+                    "submission_mode": "full",
+                    "submission_receipt": {"sha256": "4" * 64},
                 },
                 prepare_artifact=artifact,
                 contract=CONTRACT,
@@ -552,11 +683,23 @@ class ScheduleTests(unittest.TestCase):
                     altered, contract=CONTRACT, where="altered parity receipt"
                 )
 
-    def test_worker_identity_rejects_missing_state_but_allows_unenforced_control(self) -> None:
+    def test_worker_identity_requires_full_controls_but_allows_uncontrolled_canary(self) -> None:
         worker = valid_worker()
         worker["governor_control"] = False
         worker["exclusive_control"] = False
-        TIMING.validate_worker(worker, where="research-only worker")
+        worker["whole_node_control"] = False
+        with self.assertRaisesRegex(TIMING.CampaignError, "exact placement controls"):
+            TIMING.validate_worker(worker, where="uncontrolled full worker")
+        worker.update(
+            {
+                "submission_mode": "canary",
+                "placement_contract": "bounded-canary-uncontrolled.v1",
+                "slurm_array_task_max": 0,
+                "slurm_array_task_count": 1,
+                "slurm_cpu_freq_req": "unavailable",
+            }
+        )
+        TIMING.validate_worker(worker, where="research-only canary worker")
         for key, value in (
             ("scaling_governor", "unavailable"),
             ("turbo_state", "unavailable"),
@@ -684,6 +827,228 @@ class ParityAndGateTests(unittest.TestCase):
         self.assertFalse(gates["passed"])
 
 
+class SubmissionReceiptTests(unittest.TestCase):
+    def _publish(
+        self, root: Path, receipt: dict[str, object], name: str
+    ) -> TIMING.CapturedArtifact:
+        return TIMING.publish_json(root / name, receipt)
+
+    def test_canary_is_exactly_shard_zero_and_cannot_be_complete_or_audited(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            receipt = valid_submission_receipt("canary")
+            artifact = self._publish(root, receipt, "canary.json")
+            TIMING.validate_submission_receipt(
+                artifact,
+                revision="a" * 40,
+                expected_sha256=artifact.sha256,
+                expected_mode="canary",
+                where="valid canary",
+            )
+
+            complete = copy.deepcopy(receipt)
+            complete["scheduled_shards"] = 128
+            complete["array"] = {
+                "min": 0,
+                "max": 127,
+                "step": 1,
+                "count": 128,
+                "throttle": 1,
+                "spec": "0-127%1",
+            }
+            complete["jobs"]["array"]["held_state"]["array_task_id"] = "0-127%1"
+            complete_artifact = self._publish(root, complete, "complete-canary.json")
+            with self.assertRaisesRegex(TIMING.CampaignError, "exact serial schedule"):
+                TIMING.validate_submission_receipt(
+                    complete_artifact,
+                    revision="a" * 40,
+                    expected_sha256=complete_artifact.sha256,
+                    expected_mode="canary",
+                    where="128-shard canary",
+                )
+
+            with_audit = copy.deepcopy(receipt)
+            with_audit["jobs"]["audit"] = valid_submission_receipt("full")["jobs"][
+                "audit"
+            ]
+            audit_artifact = self._publish(root, with_audit, "audited-canary.json")
+            with self.assertRaisesRegex(TIMING.CampaignError, "must not contain an audit"):
+                TIMING.validate_submission_receipt(
+                    audit_artifact,
+                    revision="a" * 40,
+                    expected_sha256=audit_artifact.sha256,
+                    expected_mode="canary",
+                    where="audited canary",
+                )
+
+            worker = valid_worker()
+            worker.update(
+                {
+                    "submission_mode": "canary",
+                    "placement_contract": "bounded-canary-uncontrolled.v1",
+                    "slurm_array_task_max": 0,
+                    "slurm_array_task_count": 1,
+                    "slurm_cpu_freq_req": "unavailable",
+                    "governor_control": False,
+                    "exclusive_control": False,
+                    "whole_node_control": False,
+                }
+            )
+            TIMING.validate_worker(worker, where="canary shard zero")
+            worker["slurm_array_task_id"] = 1
+            with self.assertRaisesRegex(TIMING.CampaignError, "exactly shard 0"):
+                TIMING.validate_worker(worker, where="arbitrary canary shard")
+
+            with self.assertRaisesRegex(TIMING.CampaignError, "full-mode only"):
+                TIMING.audit_campaign(SimpleNamespace(root=root, submission_mode="canary"))
+
+    def test_full_receipt_and_workers_require_every_placement_control(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            receipt = valid_submission_receipt("full")
+            artifact = self._publish(root, receipt, "full.json")
+            TIMING.validate_submission_receipt(
+                artifact,
+                revision="a" * 40,
+                expected_sha256=artifact.sha256,
+                expected_mode="full",
+                where="valid full receipt",
+            )
+            for field in ("exclusive_requested", "whole_node_exclusive"):
+                broken = copy.deepcopy(receipt)
+                broken["placement"][field] = False
+                broken_artifact = self._publish(root, broken, f"missing-{field}.json")
+                with self.subTest(receipt_field=field), self.assertRaisesRegex(
+                    TIMING.CampaignError, "placement controls"
+                ):
+                    TIMING.validate_submission_receipt(
+                        broken_artifact,
+                        revision="a" * 40,
+                        expected_sha256=broken_artifact.sha256,
+                        expected_mode="full",
+                        where=f"full receipt missing {field}",
+                    )
+            broken = copy.deepcopy(receipt)
+            broken["jobs"]["array"]["held_state"]["exclusive"] = "NO"
+            broken_artifact = self._publish(root, broken, "missing-held-exclusive.json")
+            with self.assertRaisesRegex(TIMING.CampaignError, "whole-node exclusive"):
+                TIMING.validate_submission_receipt(
+                    broken_artifact,
+                    revision="a" * 40,
+                    expected_sha256=broken_artifact.sha256,
+                    expected_mode="full",
+                    where="full receipt missing held exclusivity",
+                )
+            for field in (
+                "governor_control",
+                "exclusive_control",
+                "whole_node_control",
+            ):
+                worker = valid_worker()
+                worker[field] = False
+                with self.subTest(worker_field=field), self.assertRaisesRegex(
+                    TIMING.CampaignError, "exact placement controls"
+                ):
+                    TIMING.validate_worker(worker, where=f"full worker missing {field}")
+            worker = valid_worker()
+            worker["slurm_job_name"] = "euf-t1-array-" + "0" * 64
+            with self.assertRaisesRegex(TIMING.CampaignError, "receipt hash"):
+                TIMING.validate_worker(worker, where="wrong receipt job name")
+            worker = valid_worker()
+            worker["slurm_array_job_id"] = "not-a-job"
+            with self.assertRaisesRegex(TIMING.CampaignError, "canonical Slurm job id"):
+                TIMING.validate_worker(worker, where="wrong array job id")
+            record = valid_record()
+            record["worker"]["slurm_array_task_id"] = 1
+            with self.assertRaisesRegex(TIMING.CampaignError, "differs from record"):
+                TIMING.validate_record(record, contract=CONTRACT, where="wrong worker shard")
+
+            first = valid_worker()
+            second = valid_worker()
+            second["slurm_array_task_id"] = 1
+            with self.assertRaisesRegex(TIMING.CampaignError, "reused"):
+                TIMING.require_unique_slurm_worker_jobs([first, second])
+
+    def test_runtime_rejects_array_job_geometry_name_wrapper_and_throttle_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            receipt = valid_submission_receipt("full")
+            artifact = self._publish(root, receipt, "full-runtime.json")
+            environment = {
+                "SLURM_JOB_NAME": f"euf-t1-array-{artifact.sha256}",
+                "SLURM_JOB_ID": "201",
+                "SLURM_ARRAY_JOB_ID": "200",
+                "SLURM_ARRAY_TASK_ID": "0",
+                "SLURM_ARRAY_TASK_MIN": "0",
+                "SLURM_ARRAY_TASK_MAX": "127",
+                "SLURM_ARRAY_TASK_STEP": "1",
+                "SLURM_ARRAY_TASK_COUNT": "128",
+            }
+            with patch.dict(os.environ, environment, clear=True):
+                TIMING.validate_submission_runtime(
+                    artifact,
+                    revision="a" * 40,
+                    expected_sha256=artifact.sha256,
+                    expected_mode="full",
+                    role="array",
+                    expected_wrapper_sha256="6" * 64,
+                    expected_shard=0,
+                    where="valid full runtime",
+                )
+                for name, value in (
+                    ("SLURM_JOB_NAME", "euf-t1-array-" + "0" * 64),
+                    ("SLURM_JOB_ID", "not-a-job"),
+                    ("SLURM_JOB_ID", "201_0"),
+                    ("SLURM_ARRAY_JOB_ID", "999"),
+                    ("SLURM_ARRAY_TASK_ID", "1"),
+                    ("SLURM_ARRAY_TASK_MIN", "1"),
+                    ("SLURM_ARRAY_TASK_MAX", "126"),
+                    ("SLURM_ARRAY_TASK_STEP", "2"),
+                    ("SLURM_ARRAY_TASK_COUNT", "127"),
+                ):
+                    with self.subTest(environment=name):
+                        original = os.environ[name]
+                        os.environ[name] = value
+                        try:
+                            with self.assertRaises(TIMING.CampaignError):
+                                TIMING.validate_submission_runtime(
+                                    artifact,
+                                    revision="a" * 40,
+                                    expected_sha256=artifact.sha256,
+                                    expected_mode="full",
+                                    role="array",
+                                    expected_wrapper_sha256="6" * 64,
+                                    expected_shard=0,
+                                    where=f"runtime drift {name}",
+                                )
+                        finally:
+                            os.environ[name] = original
+                with self.assertRaisesRegex(TIMING.CampaignError, "spooled wrapper bytes"):
+                    TIMING.validate_submission_runtime(
+                        artifact,
+                        revision="a" * 40,
+                        expected_sha256=artifact.sha256,
+                        expected_mode="full",
+                        role="array",
+                        expected_wrapper_sha256="0" * 64,
+                        expected_shard=0,
+                        where="wrapper drift",
+                    )
+
+            throttle = copy.deepcopy(receipt)
+            throttle["array"]["throttle"] = 2
+            throttle["jobs"]["array"]["held_state"]["array_task_throttle"] = "2"
+            throttle_artifact = self._publish(root, throttle, "throttle-drift.json")
+            with self.assertRaisesRegex(TIMING.CampaignError, "exact serial schedule"):
+                TIMING.validate_submission_receipt(
+                    throttle_artifact,
+                    revision="a" * 40,
+                    expected_sha256=throttle_artifact.sha256,
+                    expected_mode="full",
+                    where="throttle drift",
+                )
+
+
 class IdentityAndExecutionTests(unittest.TestCase):
     def test_child_environment_is_an_exact_allowlist(self) -> None:
         with patch.dict(
@@ -702,7 +1067,9 @@ class IdentityAndExecutionTests(unittest.TestCase):
         )
         self.assertNotIn("LD_PRELOAD", child)
 
-    def test_full_placement_accepts_coded_slurm_frequency_after_kernel_proof(self) -> None:
+    def test_full_placement_rejects_coded_frequency_and_requires_exact_request(self) -> None:
+        receipt = valid_submission_receipt("full")
+        receipt_sha256 = "4" * 64
         environment = {
             "SLURM_JOB_CPUS_PER_NODE": "8",
             "SLURM_JOB_NUM_NODES": "1",
@@ -711,6 +1078,16 @@ class IdentityAndExecutionTests(unittest.TestCase):
             "SLURM_THREADS_PER_CORE": "1",
             "SLURM_CPU_BIND_TYPE": "cores",
             "SLURM_MEM_BIND_TYPE": "local",
+            "SLURM_JOB_PARTITION": "cpu_idle",
+            "SLURM_JOB_NODELIST": "c1n1",
+            "SLURM_JOB_ID": "201",
+            "SLURM_JOB_NAME": f"euf-t1-array-{receipt_sha256}",
+            "SLURM_ARRAY_JOB_ID": "200",
+            "SLURM_ARRAY_TASK_ID": "0",
+            "SLURM_ARRAY_TASK_MIN": "0",
+            "SLURM_ARRAY_TASK_MAX": "127",
+            "SLURM_ARRAY_TASK_STEP": "1",
+            "SLURM_ARRAY_TASK_COUNT": "128",
         }
 
         def one_line(path: Path, *, unavailable: str = "unavailable") -> str:
@@ -745,14 +1122,28 @@ class IdentityAndExecutionTests(unittest.TestCase):
                 TIMING, "loaded_libc_identity", return_value=valid_worker()["libc"]
             ),
         ):
+            with self.assertRaisesRegex(TIMING.CampaignError, "frequency request differs"):
+                TIMING.bind_worker(
+                    contract=CONTRACT,
+                    require_linux_affinity=False,
+                    submission_mode="full",
+                    require_placement_controls=True,
+                    submission_receipt=receipt,
+                    submission_receipt_sha256=receipt_sha256,
+                    shard=0,
+                )
+            os.environ["SLURM_CPU_FREQ_REQ"] = "high:UserSpace"
             worker = TIMING.bind_worker(
                 contract=CONTRACT,
                 require_linux_affinity=False,
                 submission_mode="full",
                 require_placement_controls=True,
+                submission_receipt=receipt,
+                submission_receipt_sha256=receipt_sha256,
+                shard=0,
             )
 
-        self.assertEqual(worker["slurm_cpu_freq_req"], "4294967294")
+        self.assertEqual(worker["slurm_cpu_freq_req"], "high:UserSpace")
         self.assertTrue(worker["governor_control"])
         self.assertTrue(worker["exclusive_control"])
 
@@ -788,7 +1179,12 @@ class IdentityAndExecutionTests(unittest.TestCase):
             source.write_text("(check-sat)\n", encoding="utf-8")
             artifact = TIMING.open_regular_artifact(source)
             prepared = TIMING.PreparedCampaign(
-                metadata={"revision": "a" * 40, "contract": {"sha256": ZERO_SHA256}},
+                metadata={
+                    "revision": "a" * 40,
+                    "contract": {"sha256": ZERO_SHA256},
+                    "submission_mode": "full",
+                    "submission_receipt": {"sha256": "4" * 64},
+                },
                 prepare_artifact=artifact,
                 contract=CONTRACT,
                 workset=[],
@@ -901,6 +1297,8 @@ class IdentityAndExecutionTests(unittest.TestCase):
                 metadata={
                     "revision": "a" * 40,
                     "contract": {"sha256": ZERO_SHA256},
+                    "submission_mode": "full",
+                    "submission_receipt": {"sha256": "4" * 64},
                     "python": {
                         "path": str(python_path),
                         "sha256": python_artifact.sha256,
@@ -989,26 +1387,32 @@ class BuildReceiptValidationTests(unittest.TestCase):
             pre = TIMING.publish_json(root / "pre.json", inventory)
             post = TIMING.publish_json(root / "post.json", inventory)
             events = TIMING.publish_new(root / "events.jsonl", b"")
+            source_watch_set = BUILD_GUARD.scan_watch_set(snapshot)
             ready_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+                "schema": BUILD_GUARD.READY_SCHEMA,
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 101,
                 "parent_pid": 100,
                 "snapshot": str(snapshot),
                 "watch_setup_complete": True,
+                "setup_event_count": 0,
+                "setup_scans": 2,
                 "watched_directories": 1,
-                "watch_mask": 1,
+                "watch_mask": BUILD_GUARD.WATCH_MASK,
+                "watch_set": source_watch_set,
             }
             ready = TIMING.publish_json(root / "ready.json", ready_payload)
             monitor_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
+                "schema": BUILD_GUARD.MONITOR_RECEIPT_SCHEMA,
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 101,
                 "parent_pid": 100,
                 "poll_cycles": 2,
                 "snapshot": str(snapshot),
+                "setup_scans": 2,
                 "watched_directories": 1,
-                "watch_mask": 1,
+                "watch_mask": BUILD_GUARD.WATCH_MASK,
+                "watch_set": source_watch_set,
                 "event_count": 0,
                 "ready": TIMING.file_binding(ready),
                 "events": TIMING.file_binding(events),
@@ -1019,31 +1423,52 @@ class BuildReceiptValidationTests(unittest.TestCase):
             vendor_dir = dependency_root / "vendor"
             vendor_dir.mkdir(parents=True)
             (vendor_dir / "crate").write_bytes(b"x")
+            dependency_watch_set = BUILD_GUARD.scan_watch_set(dependency_root)
+            omitted_vendor = BUILD_GUARD.watch_set_payload(
+                [dependency_watch_set["entries"][0]]
+            )
+            with self.assertRaisesRegex(SystemExit, "current tree"):
+                BUILD_GUARD.validate_watch_set(
+                    omitted_vendor,
+                    snapshot=dependency_root,
+                    verify_current=True,
+                )
+            with self.assertRaisesRegex(TIMING.CampaignError, "omitted or misbound"):
+                TIMING.validate_exact_directory_watch_set(
+                    omitted_vendor,
+                    root=dependency_root,
+                    where="incomplete dependency watch set",
+                )
             dependency_events = TIMING.publish_new(
                 root / "dependency-events.jsonl", b""
             )
             dependency_ready_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+                "schema": BUILD_GUARD.READY_SCHEMA,
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 102,
                 "parent_pid": 100,
                 "snapshot": str(dependency_root),
                 "watch_setup_complete": True,
+                "setup_event_count": 0,
+                "setup_scans": 2,
                 "watched_directories": 2,
-                "watch_mask": 1,
+                "watch_mask": BUILD_GUARD.WATCH_MASK,
+                "watch_set": dependency_watch_set,
             }
             dependency_ready = TIMING.publish_json(
                 root / "dependency-ready.json", dependency_ready_payload
             )
             dependency_monitor_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
+                "schema": BUILD_GUARD.MONITOR_RECEIPT_SCHEMA,
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 102,
                 "parent_pid": 100,
                 "poll_cycles": 2,
                 "snapshot": str(dependency_root),
+                "setup_scans": 2,
                 "watched_directories": 2,
-                "watch_mask": 1,
+                "watch_mask": BUILD_GUARD.WATCH_MASK,
+                "watch_set": dependency_watch_set,
                 "event_count": 0,
                 "ready": TIMING.file_binding(dependency_ready),
                 "events": TIMING.file_binding(dependency_events),
@@ -1164,10 +1589,12 @@ class BuildReceiptValidationTests(unittest.TestCase):
                     "locked": True,
                     "native_linkage": "crt-static-no-interpreter-no-needed.v1",
                     "offline": True,
-                    "rustflags": (
+                    "host_rustflags": None,
+                    "target_rustflags": (
                         f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
                         "-C target-feature=+crt-static"
                     ),
+                    "target_triple": "x86_64-unknown-linux-gnu",
                     "target_dir": str(root / "target"),
                     "vendor_dir": str(vendor_dir),
                 },
@@ -1181,9 +1608,8 @@ class BuildReceiptValidationTests(unittest.TestCase):
                 build_tools=tools,
                 where="build receipt fixture",
             )
-            (snapshot / "target").mkdir()
             inside = copy.deepcopy(receipt)
-            inside["build"]["target_dir"] = str(snapshot / "target")
+            inside["build"]["target_dir"] = str(snapshot)
             inside_artifact = TIMING.publish_json(root / "inside-build-receipt.json", inside)
             with self.assertRaisesRegex(TIMING.CampaignError, "inside the watched source"):
                 TIMING.validate_build_receipt(
@@ -1293,6 +1719,7 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             "scripts/wmi/t1_timing_build_guard.py",
             "scripts/wmi/t1_timing_checkout_receipt.py",
             "scripts/wmi/t1_timing_common.sh",
+            "scripts/wmi/t1_timing_remote_submit.py",
             "scripts/wmi/euf_viper_t1_timing_prepare.sbatch",
             "scripts/wmi/euf_viper_t1_timing_array.sbatch",
             "scripts/wmi/euf_viper_t1_timing_audit.sbatch",
@@ -1371,6 +1798,7 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
                     "scripts/wmi/t1_timing_build_guard.py",
                     "scripts/wmi/t1_timing_checkout_receipt.py",
                     "scripts/wmi/t1_timing_common.sh",
+                    "scripts/wmi/t1_timing_remote_submit.py",
                     "src/main.rs",
                     "src/smt2_stream.rs",
                 },
@@ -1645,6 +2073,39 @@ class LinuxStaticElfTests(unittest.TestCase):
         )
         return identity + header + program
 
+    @staticmethod
+    def _elf_with_program(segment_type: int, payload: bytes) -> bytes:
+        identity = b"\x7fELF\x02\x01\x01\x00\x00" + b"\x00" * 7
+        header = struct.pack(
+            "<HHIQQQIHHHHHH",
+            2,
+            62,
+            1,
+            0x400000,
+            64,
+            0,
+            0,
+            64,
+            56,
+            1,
+            0,
+            0,
+            0,
+        )
+        offset = 120 if payload else 0
+        program = struct.pack(
+            "<IIQQQQQQ",
+            segment_type,
+            4,
+            offset,
+            0x400000,
+            0x400000,
+            len(payload),
+            len(payload),
+            8,
+        )
+        return identity + header + program + payload
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "static ELF gate is Linux-only")
     def test_minimal_static_elf_is_independently_attested(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
@@ -1683,6 +2144,21 @@ class LinuxStaticElfTests(unittest.TestCase):
             BUILD_GUARD.attest_static_linux_elf(binary_path, content, binding)
         with self.assertRaisesRegex(TIMING.CampaignError, "PT_INTERP|DT_NEEDED"):
             TIMING.inspect_static_linux_elf(content, digest=binding["sha256"])
+
+    def test_synthetic_loader_and_needed_runtime_are_rejected_without_claiming_closure(self) -> None:
+        dynamic_entries = struct.pack("<qQqQ", 1, 0, 0, 0)
+        cases = (
+            ("PT_INTERP", self._elf_with_program(3, b"")),
+            ("DT_NEEDED", self._elf_with_program(2, dynamic_entries)),
+        )
+        with patch.object(TIMING.sys, "platform", "linux"):
+            for expected, content in cases:
+                with self.subTest(expected=expected), self.assertRaisesRegex(
+                    TIMING.CampaignError, expected
+                ):
+                    TIMING.inspect_static_linux_elf(
+                        content, digest=hashlib.sha256(content).hexdigest()
+                    )
 
     def test_attestation_cannot_claim_loader_or_dependency_counts(self) -> None:
         binary = {"sha256": "a" * 64, "bytes": 10}

@@ -29,17 +29,22 @@ from typing import Any, Iterable, Iterator, NamedTuple
 
 
 CONTRACT_SCHEMA = "euf-viper.typed-parser-timing-contract.v3"
-PREPARE_SCHEMA = "euf-viper.typed-parser-timing-prepare.v2"
+PREPARE_SCHEMA = "euf-viper.typed-parser-timing-prepare.v3"
 WORK_SCHEMA = "euf-viper.typed-parser-timing-work.v2"
 BINARY_OBSERVATION_SCHEMA = "euf-viper.typed-parser-timing-observation.v1"
 SEMANTIC_ATTESTATION_SCHEMA = "euf-viper.typed-parser-semantics.v1"
 PREFLIGHT_SCHEMA = "euf-viper.typed-parser-timing-preflight.v2"
-RECORD_SCHEMA = "euf-viper.typed-parser-timing-record.v2"
-SHARD_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-receipt.v1"
+RECORD_SCHEMA = "euf-viper.typed-parser-timing-record.v3"
+SHARD_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-receipt.v2"
 SHARD_SET_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-set-receipt.v1"
 HASH_CHAIN_SCHEMA = "euf-viper.sha256-record-chain.v1"
-BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v3"
-AUDIT_SCHEMA = "euf-viper.typed-parser-timing-audit.v2"
+BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v4"
+AUDIT_SCHEMA = "euf-viper.typed-parser-timing-audit.v3"
+SUBMISSION_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-submission.v4"
+WATCH_SET_SCHEMA = "euf-viper.t1-directory-watch-set.v1"
+MUTATION_READY_SCHEMA = "euf-viper.t1-mutation-monitor-ready.v4"
+MUTATION_RECEIPT_SCHEMA = "euf-viper.t1-mutation-monitor-receipt.v4"
+MUTATION_WATCH_MASK = 0x00000FCE
 BYTE_BINDING = "single-open-descriptor-buffer-replay.v1"
 EXECUTABLE_BINDING = "inherited-descriptor-static-elf.v1"
 PRIVATE_COPY_BINDING = "private-byte-copy.v1"
@@ -52,6 +57,7 @@ LOCKED_MAX_PARALLEL = 1
 LOCKED_WARMUP_ROUNDS = 1
 LOCKED_MEASURED_ROUNDS = 5
 LOCKED_TIMEOUT_SECONDS = 2
+LOCKED_FREQUENCY_REQUEST = "high:UserSpace"
 ACCEPTED_MANIFEST_SHA256 = "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
 ACCEPTED_PARITY_RECEIPT_SHA256 = "c0c9c1879c9ac2da524c69f07affa991626c326ac0837f8f8066fde708d8482c"
 ACCEPTED_WORKSET_SHA256 = "35127766939028747b170b2dc26ca74b78a89c39833c37cd6961146b09cbb7a3"
@@ -212,6 +218,7 @@ RECORD_KEYS = frozenset(
         "revision",
         "prepare_sha256",
         "contract_sha256",
+        "submission_receipt_sha256",
         "python",
         "binary",
         "runtime_environment",
@@ -249,6 +256,8 @@ PREPARE_KEYS = frozenset(
         "accepted_parity_receipt",
         "checkout_receipt",
         "build_receipt",
+        "submission_mode",
+        "submission_receipt",
     }
 )
 AUDIT_KEYS = frozenset(
@@ -260,6 +269,8 @@ AUDIT_KEYS = frozenset(
         "expected_sources",
         "shard_count",
         "contract_sha256",
+        "submission_mode",
+        "submission_receipt_sha256",
         "python",
         "build_tools",
         "binary",
@@ -282,6 +293,8 @@ SHARD_RECEIPT_KEYS = frozenset(
         "revision",
         "prepare_sha256",
         "contract_sha256",
+        "submission_mode",
+        "submission_receipt_sha256",
         "record_count",
         "records",
         "records_chain",
@@ -472,20 +485,25 @@ def open_regular_artifact(path: Path, *, executable: bool = False) -> CapturedAr
 
 
 def open_inherited_artifact(path: Path, descriptor: int) -> CapturedArtifact:
-    if not sys.platform.startswith("linux"):
-        raise CampaignError("inherited artifact descriptors require Linux procfs")
     canonical = path.resolve(strict=True)
     try:
         duplicate = os.dup(descriptor)
     except OSError as error:
         raise CampaignError(f"cannot duplicate inherited artifact descriptor: {error}") from error
     try:
-        target = Path(f"/proc/self/fd/{duplicate}").resolve(strict=True)
-        if target != canonical:
-            raise CampaignError("inherited artifact descriptor does not name its supplied path")
         before = file_fingerprint(duplicate)
         if not stat.S_ISREG(before.mode):
             raise CampaignError("inherited artifact descriptor is not regular")
+        named_descriptor = os.open(
+            canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+        )
+        try:
+            if file_fingerprint(named_descriptor) != before:
+                raise CampaignError(
+                    "inherited artifact descriptor does not name its supplied path"
+                )
+        finally:
+            os.close(named_descriptor)
         content = read_descriptor(duplicate, before.size)
         if file_fingerprint(duplicate) != before:
             raise CampaignError("inherited artifact descriptor changed while read")
@@ -1012,6 +1030,323 @@ def require_revision(value: Any) -> str:
     return value
 
 
+def require_job_id(value: Any, *, where: str) -> str:
+    value = require_string(value, where=where)
+    if re.fullmatch(r"[1-9][0-9]*", value) is None:
+        raise CampaignError(f"{where}: expected a canonical Slurm job id")
+    return value
+
+
+def require_absolute_lexical_path(value: Any, *, where: str) -> Path:
+    path = Path(require_string(value, where=where))
+    if (
+        not path.is_absolute()
+        or path != Path(os.path.normpath(str(path)))
+        or ".." in path.parts
+    ):
+        raise CampaignError(f"{where}: expected an absolute lexical canonical path")
+    return path
+
+
+def validate_submission_tool(value: Any, *, where: str) -> None:
+    value = require_exact_keys(
+        value, frozenset({"path", "sha256", "bytes", "version"}), where=where
+    )
+    require_absolute_lexical_path(value["path"], where=f"{where}.path")
+    require_sha256(value["sha256"], where=f"{where}.sha256")
+    require_integer(value["bytes"], where=f"{where}.bytes", minimum=1)
+    version = require_string(value["version"], where=f"{where}.version")
+    if not version.isascii() or "\n" in version or "\r" in version:
+        raise CampaignError(f"{where}.version must be one ASCII line")
+
+
+def validate_submission_job(value: Any, *, role: str, where: str) -> dict[str, Any]:
+    value = require_exact_keys(
+        value,
+        frozenset({"id", "role", "wrapper_sha256", "dependencies", "held_state"}),
+        where=where,
+    )
+    require_job_id(value["id"], where=f"{where}.id")
+    if value["role"] != role:
+        raise CampaignError(f"{where}: Slurm role mismatch")
+    require_sha256(value["wrapper_sha256"], where=f"{where}.wrapper_sha256")
+    dependencies = value["dependencies"]
+    if not isinstance(dependencies, list) or len(dependencies) != len(set(dependencies)):
+        raise CampaignError(f"{where}.dependencies must be a unique job-id list")
+    for index, dependency in enumerate(dependencies):
+        require_job_id(dependency, where=f"{where}.dependencies[{index}]")
+    held = require_exact_keys(
+        value["held_state"],
+        frozenset(
+            {
+                "array_task_id",
+                "array_task_throttle",
+                "job_state",
+                "reason",
+                "oversubscribe",
+                "exclusive",
+                "user",
+                "work_dir",
+            }
+        ),
+        where=f"{where}.held_state",
+    )
+    if held["job_state"] != "PENDING" or held["reason"] != "JobHeldUser":
+        raise CampaignError(f"{where}: job was not durably observed held")
+    oversubscribe = require_string(
+        held["oversubscribe"], where=f"{where}.held_state.oversubscribe"
+    )
+    if not oversubscribe.isascii() or "\n" in oversubscribe or "\r" in oversubscribe:
+        raise CampaignError(f"{where}.held_state.oversubscribe must be one ASCII line")
+    if held["exclusive"] not in {"NO", "NODE", "USER", "MCS", "TOPO"}:
+        raise CampaignError(f"{where}.held_state.exclusive is not a Slurm exclusive state")
+    require_string(held["user"], where=f"{where}.held_state.user")
+    require_absolute_lexical_path(held["work_dir"], where=f"{where}.held_state.work_dir")
+    for key in ("array_task_id", "array_task_throttle"):
+        if held[key] is not None:
+            require_string(held[key], where=f"{where}.held_state.{key}")
+    return value
+
+
+def validate_submission_receipt(
+    artifact: CapturedArtifact,
+    *,
+    revision: str,
+    expected_sha256: str,
+    expected_mode: str,
+    where: str,
+) -> dict[str, Any]:
+    expected_sha256 = require_sha256(expected_sha256, where=f"{where} expected SHA-256")
+    if artifact.sha256 != expected_sha256:
+        raise CampaignError(f"{where}: submission receipt hash mismatch")
+    try:
+        text = artifact.content.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise CampaignError(f"{where}: submission receipt is not ASCII") from error
+    value = require_exact_keys(
+        strict_json(text, where=where),
+        frozenset(
+            {
+                "schema",
+                "status",
+                "revision",
+                "published_ref",
+                "mode",
+                "remote_run",
+                "remote_worktree",
+                "campaign_root",
+                "receipt_path",
+                "contract_sha256",
+                "manifest_sha256",
+                "accepted_parity_receipt_sha256",
+                "checkout_receipt_sha256",
+                "dependency",
+                "partition",
+                "nodelist",
+                "contract_max_parallel",
+                "shards",
+                "scheduled_shards",
+                "scheduled_max_parallel",
+                "array",
+                "placement",
+                "jobs",
+                "tools",
+                "promotable",
+                "promotion_reasons",
+            }
+        ),
+        where=where,
+    )
+    if canonical_bytes(value) != artifact.content:
+        raise CampaignError(f"{where}: submission receipt is not canonical JSON")
+    if (
+        value["schema"] != SUBMISSION_RECEIPT_SCHEMA
+        or value["status"] != "held_receipt_persisted"
+        or value["revision"] != require_revision(revision)
+        or value["mode"] != expected_mode
+        or expected_mode not in {"canary", "full"}
+        or value["promotable"] is not False
+    ):
+        raise CampaignError(f"{where}: submission identity or permanent nonpromotion drifted")
+    published_ref = require_string(value["published_ref"], where=f"{where}.published_ref")
+    if not published_ref.startswith("origin/") or re.fullmatch(
+        r"[A-Za-z0-9._/-]+", published_ref
+    ) is None:
+        raise CampaignError(f"{where}: published ref is unsafe")
+    for key in ("remote_run", "remote_worktree", "campaign_root", "receipt_path"):
+        require_absolute_lexical_path(value[key], where=f"{where}.{key}")
+    if Path(value["remote_worktree"]).parent != Path(value["remote_run"]):
+        raise CampaignError(f"{where}: remote worktree is outside its run root")
+    if Path(value["campaign_root"]).parent != Path(value["remote_run"]):
+        raise CampaignError(f"{where}: campaign root is outside its run root")
+    if Path(value["receipt_path"]).parent != Path(value["remote_run"]):
+        raise CampaignError(f"{where}: receipt is outside its run root")
+    for key in (
+        "contract_sha256",
+        "manifest_sha256",
+        "accepted_parity_receipt_sha256",
+        "checkout_receipt_sha256",
+    ):
+        require_sha256(value[key], where=f"{where}.{key}")
+    if value["dependency"] is not None:
+        require_job_id(value["dependency"], where=f"{where}.dependency")
+    require_string(value["partition"], where=f"{where}.partition")
+    require_string(value["nodelist"], where=f"{where}.nodelist")
+    if (
+        value["contract_max_parallel"] != LOCKED_MAX_PARALLEL
+        or value["shards"] != LOCKED_SHARDS
+        or value["scheduled_max_parallel"] != 1
+    ):
+        raise CampaignError(f"{where}: immutable campaign scheduling dimensions drifted")
+    expected_array = (
+        {"min": 0, "max": 127, "step": 1, "count": 128, "throttle": 1, "spec": "0-127%1"}
+        if expected_mode == "full"
+        else {"min": 0, "max": 0, "step": 1, "count": 1, "throttle": 1, "spec": "0-0%1"}
+    )
+    if value["array"] != expected_array or value["scheduled_shards"] != expected_array["count"]:
+        raise CampaignError(f"{where}: array placement is not the exact serial schedule")
+    placement = require_exact_keys(
+        value["placement"],
+        frozenset(
+            {
+                "cpu_binding",
+                "memory_binding",
+                "threads_per_core",
+                "exclusive_requested",
+                "whole_node_exclusive",
+                "frequency_request",
+                "schedule",
+            }
+        ),
+        where=f"{where}.placement",
+    )
+    expected_placement = {
+        "cpu_binding": "cores",
+        "memory_binding": "local",
+        "threads_per_core": 1,
+        "exclusive_requested": expected_mode == "full",
+        "whole_node_exclusive": expected_mode == "full",
+        "frequency_request": LOCKED_FREQUENCY_REQUEST if expected_mode == "full" else None,
+        "schedule": "serial-exclusive-array.v2" if expected_mode == "full" else "single-shard-canary.v2",
+    }
+    if placement != expected_placement:
+        raise CampaignError(f"{where}: placement controls differ from the receipt contract")
+    jobs = require_exact_keys(
+        value["jobs"], frozenset({"prepare", "array", "audit"}), where=f"{where}.jobs"
+    )
+    prepare = validate_submission_job(jobs["prepare"], role="prepare", where=f"{where}.jobs.prepare")
+    array = validate_submission_job(jobs["array"], role="array", where=f"{where}.jobs.array")
+    if array["dependencies"] != [prepare["id"]]:
+        raise CampaignError(f"{where}: array dependency is not exactly the prepare job")
+    if array["held_state"]["array_task_id"] != expected_array["spec"]:
+        raise CampaignError(f"{where}: held array task range differs from the exact schedule")
+    if array["held_state"]["array_task_throttle"] != "1":
+        raise CampaignError(f"{where}: held array throttle is not one")
+    if expected_mode == "full":
+        if array["held_state"]["exclusive"] != "NODE":
+            raise CampaignError(f"{where}: full array is not observed whole-node exclusive")
+        audit = validate_submission_job(
+            jobs["audit"], role="audit", where=f"{where}.jobs.audit"
+        )
+        if audit["dependencies"] != [array["id"]]:
+            raise CampaignError(f"{where}: audit dependency is not exactly the full array")
+    elif jobs["audit"] is not None:
+        raise CampaignError(f"{where}: canary receipt must not contain an audit job")
+    expected_prepare_dependencies = [] if value["dependency"] is None else [value["dependency"]]
+    if prepare["dependencies"] != expected_prepare_dependencies:
+        raise CampaignError(f"{where}: prepare dependency binding differs")
+    tools = require_exact_keys(
+        value["tools"],
+        frozenset({"ar", "cargo", "cc", "ld", "python", "rustc"}),
+        where=f"{where}.tools",
+    )
+    for name, binding in tools.items():
+        validate_submission_tool(binding, where=f"{where}.tools.{name}")
+    reasons = value["promotion_reasons"]
+    if not isinstance(reasons, list) or not reasons:
+        raise CampaignError(f"{where}: permanent nonpromotion reasons are missing")
+    for index, reason in enumerate(reasons):
+        require_string(reason, where=f"{where}.promotion_reasons[{index}]")
+    return value
+
+
+def open_submission_receipt(
+    path: Path, descriptor: int | None
+) -> CapturedArtifact:
+    return (
+        open_inherited_artifact(path, descriptor)
+        if descriptor is not None
+        else open_regular_artifact(path)
+    )
+
+
+def validate_submission_runtime(
+    artifact: CapturedArtifact,
+    *,
+    revision: str,
+    expected_sha256: str,
+    expected_mode: str,
+    role: str,
+    expected_wrapper_sha256: str,
+    expected_shard: int | None,
+    where: str,
+) -> dict[str, Any]:
+    receipt = validate_submission_receipt(
+        artifact,
+        revision=revision,
+        expected_sha256=expected_sha256,
+        expected_mode=expected_mode,
+        where=where,
+    )
+    job = receipt["jobs"][role]
+    if not isinstance(job, dict):
+        raise CampaignError(f"{where}: role {role} has no receipt-bound job")
+    wrapper_sha256 = require_sha256(
+        expected_wrapper_sha256, where=f"{where} expected wrapper SHA-256"
+    )
+    if job["wrapper_sha256"] != wrapper_sha256:
+        raise CampaignError(f"{where}: spooled wrapper bytes differ from the receipt")
+    expected_name = f"euf-t1-{role}-{artifact.sha256}"
+    if os.environ.get("SLURM_JOB_NAME") != expected_name:
+        raise CampaignError(f"{where}: Slurm job name does not bind the receipt hash")
+    if role == "array":
+        array = receipt["array"]
+        environment = {
+            "SLURM_ARRAY_JOB_ID": job["id"],
+            "SLURM_ARRAY_TASK_MIN": str(array["min"]),
+            "SLURM_ARRAY_TASK_MAX": str(array["max"]),
+            "SLURM_ARRAY_TASK_STEP": str(array["step"]),
+            "SLURM_ARRAY_TASK_COUNT": str(array["count"]),
+        }
+        for name, expected in environment.items():
+            if os.environ.get(name) != expected:
+                raise CampaignError(f"{where}: {name} differs from exact array receipt")
+        task = _environment_integer("SLURM_ARRAY_TASK_ID")
+        if expected_shard is None or task != expected_shard:
+            raise CampaignError(f"{where}: array task id differs from requested shard")
+        if expected_mode == "canary" and task != 0:
+            raise CampaignError("bounded canary permits exactly shard 0")
+        if expected_mode == "full" and not (0 <= task < LOCKED_SHARDS):
+            raise CampaignError("full T1 shard is outside the immutable array")
+        require_job_id(
+            os.environ.get("SLURM_JOB_ID"), where=f"{where}.SLURM_JOB_ID"
+        )
+    else:
+        if os.environ.get("SLURM_JOB_ID") != job["id"]:
+            raise CampaignError(f"{where}: Slurm job id differs from the receipt")
+        for name in (
+            "SLURM_ARRAY_JOB_ID",
+            "SLURM_ARRAY_TASK_ID",
+            "SLURM_ARRAY_TASK_MIN",
+            "SLURM_ARRAY_TASK_MAX",
+            "SLURM_ARRAY_TASK_STEP",
+            "SLURM_ARRAY_TASK_COUNT",
+        ):
+            if name in os.environ:
+                raise CampaignError(f"{where}: non-array role has array metadata")
+    return receipt
+
+
 def validate_file_binding(value: Any, *, where: str) -> None:
     value = require_exact_keys(value, frozenset({"path", "sha256", "bytes"}), where=where)
     path = require_string(value["path"], where=f"{where}.path")
@@ -1109,6 +1444,122 @@ def validate_embedded_json_artifact(
     return parsed
 
 
+def validate_directory_watch_set(value: Any, *, where: str) -> dict[str, Any]:
+    value = require_exact_keys(
+        value,
+        frozenset({"schema", "algorithm", "count", "entries", "entries_sha256"}),
+        where=where,
+    )
+    if (
+        value["schema"] != WATCH_SET_SCHEMA
+        or value["algorithm"] != "sha256-canonical-directory-identities.v1"
+    ):
+        raise CampaignError(f"{where}: directory watch-set schema drifted")
+    entries = value["entries"]
+    if not isinstance(entries, list) or not entries:
+        raise CampaignError(f"{where}: directory watch set is empty")
+    normalized: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        entry = require_exact_keys(
+            entry,
+            frozenset({"device", "inode", "mode", "path"}),
+            where=f"{where}.entries[{index}]",
+        )
+        require_integer(entry["device"], where=f"{where}.entries[{index}].device")
+        require_integer(
+            entry["inode"], where=f"{where}.entries[{index}].inode", minimum=1
+        )
+        mode = require_string(entry["mode"], where=f"{where}.entries[{index}].mode")
+        if len(mode) != 4 or any(character not in "01234567" for character in mode):
+            raise CampaignError(f"{where}: directory watch-set mode is malformed")
+        path = require_string(entry["path"], where=f"{where}.entries[{index}].path")
+        relative = PurePosixPath(path)
+        if path != "." and (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or "." in relative.parts
+            or not relative.parts
+        ):
+            raise CampaignError(f"{where}: directory watch-set path is not canonical")
+        normalized.append(entry)
+    normalized.sort(key=lambda entry: entry["path"])
+    if normalized[0]["path"] != "." or len({entry["path"] for entry in normalized}) != len(
+        normalized
+    ):
+        raise CampaignError(f"{where}: directory watch-set paths are incomplete or duplicated")
+    expected_sha256 = sha256_bytes(
+        b"".join(canonical_bytes(entry) for entry in normalized)
+    )
+    if (
+        entries != normalized
+        or value["count"] != len(normalized)
+        or value["entries_sha256"] != expected_sha256
+    ):
+        raise CampaignError(f"{where}: directory watch-set digest or ordering is invalid")
+    return value
+
+
+def directory_watch_identity(root: Path, directory: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError as error:
+        raise CampaignError(f"cannot open watched directory {directory}: {error}") from error
+    try:
+        opened = os.fstat(descriptor)
+        named = directory.lstat()
+    finally:
+        os.close(descriptor)
+    opened_identity = (opened.st_dev, opened.st_ino, opened.st_mode)
+    named_identity = (named.st_dev, named.st_ino, named.st_mode)
+    if not stat.S_ISDIR(opened.st_mode) or opened_identity != named_identity:
+        raise CampaignError(f"watched directory identity changed: {directory}")
+    return {
+        "device": opened.st_dev,
+        "inode": opened.st_ino,
+        "mode": f"{stat.S_IMODE(opened.st_mode):04o}",
+        "path": "." if directory == root else directory.relative_to(root).as_posix(),
+    }
+
+
+def scan_directory_watch_set(root: Path) -> dict[str, Any]:
+    root = root.resolve(strict=True)
+    pending = [root]
+    entries: list[dict[str, Any]] = []
+    while pending:
+        directory = pending.pop(0)
+        entries.append(directory_watch_identity(root, directory))
+        children: list[Path] = []
+        try:
+            with os.scandir(directory) as iterator:
+                for entry in iterator:
+                    if entry.is_dir(follow_symlinks=False):
+                        children.append(directory / entry.name)
+        except OSError as error:
+            raise CampaignError(f"cannot scan watched directory {directory}: {error}") from error
+        pending[0:0] = sorted(children, key=lambda path: os.fsencode(path.name))
+    ordered = sorted(entries, key=lambda entry: entry["path"])
+    return {
+        "schema": WATCH_SET_SCHEMA,
+        "algorithm": "sha256-canonical-directory-identities.v1",
+        "count": len(ordered),
+        "entries": ordered,
+        "entries_sha256": sha256_bytes(
+            b"".join(canonical_bytes(entry) for entry in ordered)
+        ),
+    }
+
+
+def validate_exact_directory_watch_set(
+    value: Any, *, root: Path, where: str
+) -> dict[str, Any]:
+    watch_set = validate_directory_watch_set(value, where=where)
+    if scan_directory_watch_set(root) != watch_set:
+        raise CampaignError(f"{where}: omitted or misbound a directory watch")
+    return watch_set
+
+
 def validate_clean_mutation_monitor(
     value: Any, *, expected_root: Path, where: str, verify_paths: bool = True
 ) -> dict[str, Any]:
@@ -1123,8 +1574,10 @@ def validate_clean_mutation_monitor(
                 "parent_pid",
                 "poll_cycles",
                 "snapshot",
+                "setup_scans",
                 "watched_directories",
                 "watch_mask",
+                "watch_set",
                 "event_count",
                 "ready",
                 "events",
@@ -1134,7 +1587,7 @@ def validate_clean_mutation_monitor(
         where=f"{where}.payload",
     )
     if (
-        monitor["schema"] != "euf-viper.t1-mutation-monitor-receipt.v3"
+        monitor["schema"] != MUTATION_RECEIPT_SCHEMA
         or monitor["control"] != "parent-owned-pipe-eof.v1"
         or require_integer(monitor["monitor_pid"], where=f"{where}.monitor_pid", minimum=2)
         < 2
@@ -1142,6 +1595,8 @@ def validate_clean_mutation_monitor(
         < 2
         or require_integer(monitor["poll_cycles"], where=f"{where}.poll_cycles", minimum=1)
         < 1
+        or require_integer(monitor["setup_scans"], where=f"{where}.setup_scans", minimum=2)
+        < 2
         or monitor["status"] != "clean"
         or monitor["event_count"] != 0
         or monitor["snapshot"] != str(expected_root)
@@ -1152,9 +1607,20 @@ def validate_clean_mutation_monitor(
         )
         < 1
         or require_integer(monitor["watch_mask"], where=f"{where}.watch_mask", minimum=1)
-        < 1
+        != MUTATION_WATCH_MASK
     ):
         raise CampaignError(f"{where}: mutation monitor is not clean and root-bound")
+    watch_set = (
+        validate_exact_directory_watch_set(
+            monitor["watch_set"], root=expected_root, where=f"{where}.watch_set"
+        )
+        if verify_paths
+        else validate_directory_watch_set(
+            monitor["watch_set"], where=f"{where}.watch_set"
+        )
+    )
+    if monitor["watched_directories"] != watch_set["count"]:
+        raise CampaignError(f"{where}: mutation monitor watch count differs from exact set")
     ready = require_exact_keys(
         monitor["ready"],
         frozenset({"path", "sha256", "bytes"}),
@@ -1180,14 +1646,17 @@ def validate_clean_mutation_monitor(
         except UnicodeDecodeError as error:
             raise CampaignError(f"{where}: mutation readiness is not ASCII") from error
         expected_ready = {
-            "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+            "schema": MUTATION_READY_SCHEMA,
             "control": monitor["control"],
             "monitor_pid": monitor["monitor_pid"],
             "parent_pid": monitor["parent_pid"],
             "snapshot": monitor["snapshot"],
             "watch_setup_complete": True,
+            "setup_event_count": 0,
+            "setup_scans": monitor["setup_scans"],
             "watched_directories": monitor["watched_directories"],
             "watch_mask": monitor["watch_mask"],
+            "watch_set": monitor["watch_set"],
         }
         if (
             ready_artifact.sha256 != expected_ready_sha
@@ -1456,7 +1925,9 @@ def validate_build_receipt(
                 "locked",
                 "native_linkage",
                 "offline",
-                "rustflags",
+                "host_rustflags",
+                "target_rustflags",
+                "target_triple",
                 "target_dir",
                 "vendor_dir",
             }
@@ -1472,6 +1943,8 @@ def validate_build_receipt(
         or build["locked"] is not True
         or build["native_linkage"] != "crt-static-no-interpreter-no-needed.v1"
         or build["offline"] is not True
+        or build["host_rustflags"] is not None
+        or build["target_triple"] != "x86_64-unknown-linux-gnu"
         or not Path(build["cargo_home"]).is_absolute()
         or not Path(build["fetch_cargo_home"]).is_absolute()
         or not Path(build["target_dir"]).is_absolute()
@@ -1510,8 +1983,8 @@ def validate_build_receipt(
         f"-C linker={build_tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
         "-C target-feature=+crt-static"
     )
-    if build["rustflags"] != expected_rustflags:
-        raise CampaignError(f"{where}: linker flags drifted")
+    if build["target_rustflags"] != expected_rustflags:
+        raise CampaignError(f"{where}: target-scoped linker flags drifted")
     return value
 
 
@@ -1675,11 +2148,22 @@ def validate_worker(value: Any, *, where: str) -> None:
                 "slurm_job_cpus_per_node",
                 "slurm_job_num_nodes",
                 "slurm_cpu_freq_req",
+                "slurm_job_id",
+                "slurm_job_name",
+                "slurm_array_job_id",
+                "slurm_array_task_id",
+                "slurm_array_task_min",
+                "slurm_array_task_max",
+                "slurm_array_task_step",
+                "slurm_array_task_count",
+                "slurm_array_throttle",
                 "physical_cores_on_node",
                 "submission_mode",
+                "submission_receipt_sha256",
                 "placement_contract",
                 "governor_control",
                 "exclusive_control",
+                "whole_node_control",
                 "libc",
                 "allocator",
                 "backend",
@@ -1703,7 +2187,11 @@ def validate_worker(value: Any, *, where: str) -> None:
         "slurm_cpu_bind",
         "slurm_mem_bind",
         "slurm_cpu_freq_req",
+        "slurm_job_id",
+        "slurm_job_name",
+        "slurm_array_job_id",
         "submission_mode",
+        "submission_receipt_sha256",
         "placement_contract",
         "allocator",
         "backend",
@@ -1723,10 +2211,16 @@ def validate_worker(value: Any, *, where: str) -> None:
         "slurm_threads_per_core",
         "slurm_job_cpus_per_node",
         "slurm_job_num_nodes",
+        "slurm_array_task_id",
+        "slurm_array_task_min",
+        "slurm_array_task_max",
+        "slurm_array_task_step",
+        "slurm_array_task_count",
+        "slurm_array_throttle",
         "physical_cores_on_node",
     ):
         require_integer(value[key], where=f"{where}.{key}")
-    for key in ("governor_control", "exclusive_control"):
+    for key in ("governor_control", "exclusive_control", "whole_node_control"):
         if type(value[key]) is not bool:
             raise CampaignError(f"{where}.{key} must be Boolean")
     expected_placement = {
@@ -1739,6 +2233,41 @@ def validate_worker(value: Any, *, where: str) -> None:
         != expected_placement[value["submission_mode"]]
     ):
         raise CampaignError(f"{where}: submission mode and placement contract differ")
+    require_sha256(
+        value["submission_receipt_sha256"],
+        where=f"{where}.submission_receipt_sha256",
+    )
+    if value["slurm_job_name"] != (
+        f"euf-t1-array-{value['submission_receipt_sha256']}"
+    ):
+        raise CampaignError(f"{where}: array job name does not bind the receipt hash")
+    require_job_id(value["slurm_array_job_id"], where=f"{where}.slurm_array_job_id")
+    require_job_id(value["slurm_job_id"], where=f"{where}.slurm_job_id")
+    if value["submission_mode"] == "canary":
+        if (
+            value["slurm_array_task_id"] != 0
+            or value["slurm_array_task_min"] != 0
+            or value["slurm_array_task_max"] != 0
+            or value["slurm_array_task_step"] != 1
+            or value["slurm_array_task_count"] != 1
+            or value["slurm_array_throttle"] != 1
+        ):
+            raise CampaignError(f"{where}: canary worker is not exactly shard 0")
+    else:
+        if (
+            value["slurm_array_task_min"] != 0
+            or value["slurm_array_task_max"] != LOCKED_SHARDS - 1
+            or value["slurm_array_task_step"] != 1
+            or value["slurm_array_task_count"] != LOCKED_SHARDS
+            or value["slurm_array_throttle"] != LOCKED_MAX_PARALLEL
+            or not (0 <= value["slurm_array_task_id"] < LOCKED_SHARDS)
+            or value["slurm_cpu_freq_req"] != LOCKED_FREQUENCY_REQUEST
+            or value["affinity"] != "sched_setaffinity-singleton.v1"
+            or not value["governor_control"]
+            or not value["exclusive_control"]
+            or not value["whole_node_control"]
+        ):
+            raise CampaignError(f"{where}: full worker lacks exact placement controls")
     for key in (
         "cpu_model",
         "microcode",
@@ -1882,11 +2411,20 @@ def worker_homogeneous_identity(worker: dict[str, Any]) -> dict[str, Any]:
             "slurm_job_cpus_per_node",
             "slurm_job_num_nodes",
             "slurm_cpu_freq_req",
+            "slurm_job_name",
+            "slurm_array_job_id",
+            "slurm_array_task_min",
+            "slurm_array_task_max",
+            "slurm_array_task_step",
+            "slurm_array_task_count",
+            "slurm_array_throttle",
             "physical_cores_on_node",
             "submission_mode",
+            "submission_receipt_sha256",
             "placement_contract",
             "governor_control",
             "exclusive_control",
+            "whole_node_control",
             "libc",
             "allocator",
             "backend",
@@ -1903,12 +2441,24 @@ def require_homogeneous_workers(workers: Iterable[dict[str, Any]]) -> None:
         raise CampaignError("timing shards have mixed hardware or runtime identities")
 
 
+def require_unique_slurm_worker_jobs(workers: Iterable[dict[str, Any]]) -> None:
+    job_ids = [
+        require_job_id(worker["slurm_job_id"], where="worker.slurm_job_id")
+        for worker in workers
+    ]
+    if len(job_ids) != len(set(job_ids)):
+        raise CampaignError("timing shards reused a controller-assigned Slurm job id")
+
+
 def bind_worker(
     *,
     contract: dict[str, Any],
     require_linux_affinity: bool,
     submission_mode: str,
     require_placement_controls: bool,
+    submission_receipt: dict[str, Any],
+    submission_receipt_sha256: str,
+    shard: int,
 ) -> dict[str, Any]:
     cpu_id = 0
     affinity = "unavailable-nonlinux"
@@ -1961,14 +2511,23 @@ def bind_worker(
     ):
         frequency_request = "unavailable"
     fixed_frequency = (
-        governor.lower() == "userspace" and minimum > 0 and minimum == maximum
+        governor.lower() == "userspace"
+        and minimum > 0
+        and minimum == maximum
+        and current == minimum
     )
+    array = submission_receipt["array"]
+    array_job = submission_receipt["jobs"]["array"]
+    array_job_id = os.environ.get("SLURM_ARRAY_JOB_ID", "unavailable")
+    job_id = os.environ.get("SLURM_JOB_ID", "unavailable")
+    job_name = os.environ.get("SLURM_JOB_NAME", "unavailable")
     exclusive = (
         submission_mode == "full"
         and job_num_nodes == 1
-        and physical_cores > 0
-        and job_cpus_per_node == physical_cores
+        and submission_receipt["placement"]["exclusive_requested"] is True
+        and array_job["held_state"]["exclusive"] == "NODE"
     )
+    whole_node = exclusive and submission_receipt["placement"]["whole_node_exclusive"] is True
     worker = {
         "hostname": hostname,
         "platform": platform.system(),
@@ -2000,8 +2559,18 @@ def bind_worker(
         "slurm_job_cpus_per_node": job_cpus_per_node,
         "slurm_job_num_nodes": job_num_nodes,
         "slurm_cpu_freq_req": frequency_request,
+        "slurm_job_id": job_id,
+        "slurm_job_name": job_name,
+        "slurm_array_job_id": array_job_id,
+        "slurm_array_task_id": shard,
+        "slurm_array_task_min": array["min"],
+        "slurm_array_task_max": array["max"],
+        "slurm_array_task_step": array["step"],
+        "slurm_array_task_count": array["count"],
+        "slurm_array_throttle": array["throttle"],
         "physical_cores_on_node": physical_cores,
         "submission_mode": submission_mode,
+        "submission_receipt_sha256": submission_receipt_sha256,
         "placement_contract": (
             "slurm-serial-exclusive-core-local-high-userspace.v1"
             if submission_mode == "full"
@@ -2009,6 +2578,7 @@ def bind_worker(
         ),
         "governor_control": fixed_frequency,
         "exclusive_control": exclusive,
+        "whole_node_control": whole_node,
         "libc": loaded_libc_identity(),
         "allocator": "rust-system-allocator-static-runtime",
         "backend": "auto",
@@ -2033,12 +2603,14 @@ def bind_worker(
     if require_placement_controls:
         if submission_mode != "full":
             raise CampaignError("placement controls can only be required for a full campaign")
-        if frequency_request == "unavailable":
-            raise CampaignError("SLURM did not propagate the frequency request")
+        if frequency_request != LOCKED_FREQUENCY_REQUEST:
+            raise CampaignError("SLURM frequency request differs from high:UserSpace")
         if not worker["exclusive_control"]:
             raise CampaignError("SLURM allocation does not prove exclusive node control")
         if not worker["governor_control"]:
             raise CampaignError("SLURM frequency request did not produce fixed userspace control")
+        if not worker["whole_node_control"]:
+            raise CampaignError("SLURM allocation does not prove whole-node control")
     validate_worker(worker, where="worker")
     return worker
 
@@ -2914,6 +3486,8 @@ def validate_prepare(value: Any, *, contract: dict[str, Any], where: str) -> Non
         raise CampaignError(f"{where}: source cardinality violates contract")
     if value["shard_count"] != contract["campaign"]["shards"]:
         raise CampaignError(f"{where}: shard count violates contract")
+    if value["submission_mode"] not in {"canary", "full"}:
+        raise CampaignError(f"{where}: submission mode is invalid")
     if value["expected_contract_sha256"] != value["contract"]["sha256"]:
         raise CampaignError(f"{where}: expected contract hash binding differs")
     if value["expected_manifest_sha256"] != value["manifest"]["sha256"]:
@@ -2943,6 +3517,7 @@ def validate_prepare(value: Any, *, contract: dict[str, Any], where: str) -> Non
         "accepted_parity_receipt",
         "checkout_receipt",
         "build_receipt",
+        "submission_receipt",
     ):
         validate_file_binding(value[key], where=f"{where}.{key}")
 
@@ -2958,10 +3533,20 @@ def validate_record(value: Any, *, contract: dict[str, Any], where: str) -> None
     require_revision(value["revision"])
     require_sha256(value["prepare_sha256"], where=f"{where}.prepare_sha256")
     require_sha256(value["contract_sha256"], where=f"{where}.contract_sha256")
+    require_sha256(
+        value["submission_receipt_sha256"],
+        where=f"{where}.submission_receipt_sha256",
+    )
     validate_python_binding(value["python"], where=f"{where}.python")
     validate_binary_binding(value["binary"], where=f"{where}.binary")
     validate_runtime_environment(value["runtime_environment"], where=f"{where}.runtime_environment")
     validate_worker(value["worker"], where=f"{where}.worker")
+    if (
+        value["worker"]["slurm_array_task_id"] != value["shard"]
+        or value["worker"]["submission_receipt_sha256"]
+        != value["submission_receipt_sha256"]
+    ):
+        raise CampaignError(f"{where}: worker task or receipt binding differs from record")
     safe_relative_path(value["relative_path"], where=f"{where}.relative_path")
     require_string(value["family"], where=f"{where}.family")
     if value["expected_status"] not in DECISIVE_RESULTS:
@@ -3062,6 +3647,8 @@ def publish_sealed_shard(
         "revision": prepared.metadata["revision"],
         "prepare_sha256": prepared.prepare_artifact.sha256,
         "contract_sha256": prepared.metadata["contract"]["sha256"],
+        "submission_mode": prepared.metadata["submission_mode"],
+        "submission_receipt_sha256": prepared.metadata["submission_receipt"]["sha256"],
         "record_count": len(records),
         "records": file_binding(rebound),
         "records_chain": record_hash_chain(rebound.content),
@@ -3098,6 +3685,9 @@ def load_sealed_shard(
         receipt["revision"] != prepared.metadata["revision"]
         or receipt["prepare_sha256"] != prepared.prepare_artifact.sha256
         or receipt["contract_sha256"] != prepared.metadata["contract"]["sha256"]
+        or receipt["submission_mode"] != prepared.metadata["submission_mode"]
+        or receipt["submission_receipt_sha256"]
+        != prepared.metadata["submission_receipt"]["sha256"]
     ):
         raise CampaignError(f"shard {shard}: receipt campaign binding mismatch")
     records_binding = receipt["records"]
@@ -3430,6 +4020,19 @@ def verify_build_receipt_command(args: argparse.Namespace) -> None:
 
 def prepare_campaign(args: argparse.Namespace) -> None:
     revision = require_revision(args.revision)
+    submission_artifact = open_submission_receipt(
+        args.submission_receipt, args.submission_receipt_fd
+    )
+    submission = validate_submission_runtime(
+        submission_artifact,
+        revision=revision,
+        expected_sha256=args.expected_submission_receipt_sha256,
+        expected_mode=args.submission_mode,
+        role="prepare",
+        expected_wrapper_sha256=args.expected_wrapper_sha256,
+        expected_shard=None,
+        where="prepare submission receipt",
+    )
     python_identity = validate_python_identity()
     build_tools = {
         name: validate_external_tool_identity(name)
@@ -3442,6 +4045,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     )
     if contract_artifact.sha256 != expected_contract_sha256:
         raise CampaignError("contract hash differs from submitted expectation")
+    if submission["contract_sha256"] != expected_contract_sha256:
+        raise CampaignError("submission receipt contract hash differs")
     accepted_receipt = load_accepted_parity_receipt(
         args.accepted_parity_receipt,
         contract=contract,
@@ -3453,6 +4058,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     )
     if accepted_receipt.sha256 != expected_accepted_receipt_sha256:
         raise CampaignError("accepted parity receipt differs from submitted expectation")
+    if submission["accepted_parity_receipt_sha256"] != expected_accepted_receipt_sha256:
+        raise CampaignError("submission receipt accepted parity hash differs")
     expected_sources = contract["campaign"]["expected_sources"]
     source_root = args.source_root.resolve(strict=True)
     rows, manifest_artifact = load_manifest(args.manifest, source_root)
@@ -3463,6 +4070,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
         raise CampaignError("submitted manifest hash is not the preregistered accepted digest")
     if manifest_artifact.sha256 != expected_manifest_sha256:
         raise CampaignError("manifest hash differs from submitted expectation")
+    if submission["manifest_sha256"] != expected_manifest_sha256:
+        raise CampaignError("submission receipt manifest hash differs")
     checkout_receipt = open_regular_artifact(args.checkout_receipt)
     expected_checkout_receipt_sha256 = require_sha256(
         args.expected_checkout_receipt_sha256,
@@ -3470,6 +4079,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     )
     if checkout_receipt.sha256 != expected_checkout_receipt_sha256:
         raise CampaignError("checkout receipt hash differs from submitted expectation")
+    if submission["checkout_receipt_sha256"] != expected_checkout_receipt_sha256:
+        raise CampaignError("submission receipt checkout hash differs")
     validate_checkout_receipt(
         checkout_receipt,
         repository_root=repository_root,
@@ -3572,6 +4183,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
             "accepted_parity_receipt": file_binding(accepted_receipt),
             "checkout_receipt": file_binding(checkout_receipt),
             "build_receipt": file_binding(build_receipt),
+            "submission_mode": args.submission_mode,
+            "submission_receipt": file_binding(submission_artifact),
         }
         validate_prepare(prepare, contract=contract, where="generated prepare")
         publish_json(args.output_root / "prepare.json", prepare)
@@ -3584,6 +4197,9 @@ def load_prepared(
     expected_contract_sha256: str,
     expected_manifest_sha256: str,
     expected_checkout_receipt_sha256: str,
+    expected_submission_receipt_sha256: str,
+    expected_submission_mode: str,
+    submission_receipt_artifact: CapturedArtifact | None = None,
 ) -> PreparedCampaign:
     revision = require_revision(revision)
     root = root.resolve(strict=True)
@@ -3613,6 +4229,8 @@ def load_prepared(
             raise CampaignError(f"prepared {label} hash differs from submitted expectation")
     if prepare["revision"] != revision:
         raise CampaignError("prepare revision differs from executing revision")
+    if prepare["submission_mode"] != expected_submission_mode:
+        raise CampaignError("prepared submission mode differs from executing mode")
     if prepare["python"] != validate_python_identity():
         raise CampaignError("prepared Python identity drift")
     for name, binding in prepare["build_tools"].items():
@@ -3650,6 +4268,19 @@ def load_prepared(
         repository_root=Path(prepare["repository_root"]),
         revision=revision,
         where="prepared checkout receipt",
+    )
+    if submission_receipt_artifact is None:
+        submission_receipt_artifact = verify_file_binding(
+            prepare["submission_receipt"], where="prepared submission receipt"
+        )
+    elif file_binding(submission_receipt_artifact) != prepare["submission_receipt"]:
+        raise CampaignError("prepared submission receipt descriptor binding differs")
+    validate_submission_receipt(
+        submission_receipt_artifact,
+        revision=revision,
+        expected_sha256=expected_submission_receipt_sha256,
+        expected_mode=expected_submission_mode,
+        where="prepared submission receipt",
     )
     preflight, preflight_artifact = load_object(Path(prepare["preflight"]["path"]))
     if file_binding(preflight_artifact) != prepare["preflight"]:
@@ -3704,6 +4335,7 @@ def run_work_item(
         "revision": prepared.metadata["revision"],
         "prepare_sha256": prepared.prepare_artifact.sha256,
         "contract_sha256": prepared.metadata["contract"]["sha256"],
+        "submission_receipt_sha256": prepared.metadata["submission_receipt"]["sha256"],
         "python": prepared.metadata["python"],
         "binary": executable.binding,
         "runtime_environment": RUNTIME_ENVIRONMENT,
@@ -3727,16 +4359,39 @@ def run_work_item(
 
 def run_shard(args: argparse.Namespace) -> None:
     root = args.root.resolve(strict=True)
+    submission_artifact = open_submission_receipt(
+        args.submission_receipt, args.submission_receipt_fd
+    )
+    submission = validate_submission_runtime(
+        submission_artifact,
+        revision=args.revision,
+        expected_sha256=args.expected_submission_receipt_sha256,
+        expected_mode=args.submission_mode,
+        role="array",
+        expected_wrapper_sha256=args.expected_wrapper_sha256,
+        expected_shard=args.shard,
+        where="array submission receipt",
+    )
     prepared = load_prepared(
         root,
         args.revision,
         expected_contract_sha256=args.expected_contract_sha256,
         expected_manifest_sha256=args.expected_manifest_sha256,
         expected_checkout_receipt_sha256=args.expected_checkout_receipt_sha256,
+        expected_submission_receipt_sha256=args.expected_submission_receipt_sha256,
+        expected_submission_mode=args.submission_mode,
+        submission_receipt_artifact=submission_artifact,
     )
     shard_count = prepared.metadata["shard_count"]
     if args.shard >= shard_count:
         raise CampaignError(f"shard {args.shard} is outside [0, {shard_count})")
+    if args.submission_mode == "canary" and args.shard != 0:
+        raise CampaignError("bounded canary permits exactly shard 0")
+    if args.submission_mode == "full":
+        if not args.require_linux_affinity or not args.require_placement_controls:
+            raise CampaignError("full shards require affinity and placement controls")
+    elif args.require_placement_controls:
+        raise CampaignError("canary shards cannot claim full placement controls")
     output = shard_directory(root, args.shard)
     if output.exists():
         raise CampaignError(f"refusing to replace shard artifact {output}")
@@ -3746,6 +4401,9 @@ def run_shard(args: argparse.Namespace) -> None:
         require_linux_affinity=args.require_linux_affinity,
         submission_mode=args.submission_mode,
         require_placement_controls=args.require_placement_controls,
+        submission_receipt=submission,
+        submission_receipt_sha256=submission_artifact.sha256,
+        shard=args.shard,
     )
     with open_verified_executable(
         Path(prepared.metadata["binary"]["path"]),
@@ -4024,6 +4682,12 @@ def validate_audit(value: Any, *, where: str) -> None:
     require_integer(value["expected_sources"], where=f"{where}.expected_sources", minimum=1)
     require_integer(value["shard_count"], where=f"{where}.shard_count", minimum=1)
     require_sha256(value["contract_sha256"], where=f"{where}.contract_sha256")
+    if value["submission_mode"] != "full":
+        raise CampaignError(f"{where}: complete audit is full-mode only")
+    require_sha256(
+        value["submission_receipt_sha256"],
+        where=f"{where}.submission_receipt_sha256",
+    )
     validate_python_binding(value["python"], where=f"{where}.python")
     validate_build_tools(value["build_tools"], where=f"{where}.build_tools")
     validate_binary_binding(value["binary"], where=f"{where}.binary")
@@ -4048,12 +4712,30 @@ def validate_audit(value: Any, *, where: str) -> None:
 
 def audit_campaign(args: argparse.Namespace) -> bool:
     root = args.root.resolve(strict=True)
+    if args.submission_mode != "full":
+        raise CampaignError("the complete T1 audit is full-mode only")
+    submission_artifact = open_submission_receipt(
+        args.submission_receipt, args.submission_receipt_fd
+    )
+    submission_receipt = validate_submission_runtime(
+        submission_artifact,
+        revision=args.revision,
+        expected_sha256=args.expected_submission_receipt_sha256,
+        expected_mode="full",
+        role="audit",
+        expected_wrapper_sha256=args.expected_wrapper_sha256,
+        expected_shard=None,
+        where="audit submission receipt",
+    )
     prepared = load_prepared(
         root,
         args.revision,
         expected_contract_sha256=args.expected_contract_sha256,
         expected_manifest_sha256=args.expected_manifest_sha256,
         expected_checkout_receipt_sha256=args.expected_checkout_receipt_sha256,
+        expected_submission_receipt_sha256=args.expected_submission_receipt_sha256,
+        expected_submission_mode="full",
+        submission_receipt_artifact=submission_artifact,
     )
     prepare = prepared.metadata
     with open_verified_executable(
@@ -4094,6 +4776,8 @@ def audit_campaign(args: argparse.Namespace) -> bool:
                 raise CampaignError(f"shard {shard}: prepare binding mismatch")
             if record["contract_sha256"] != prepare["contract"]["sha256"]:
                 raise CampaignError(f"shard {shard}: contract binding mismatch")
+            if record["submission_receipt_sha256"] != submission_artifact.sha256:
+                raise CampaignError(f"shard {shard}: submission receipt binding mismatch")
             if record["python"] != prepare["python"] or record["binary"] != prepare["binary"]:
                 raise CampaignError(f"shard {shard}: executable identity mismatch")
             shard_key = f"{shard:05d}"
@@ -4106,7 +4790,27 @@ def audit_campaign(args: argparse.Namespace) -> bool:
             raise CampaignError(f"shard {shard}: sealed shard has no worker-bound records")
         if sha256_bytes(canonical_bytes(worker)) != receipt["worker_sha256"]:
             raise CampaignError(f"shard {shard}: worker identity differs from close receipt")
+        if (
+            worker["slurm_array_task_id"] != shard
+            or worker["slurm_array_job_id"]
+            != submission_receipt["jobs"]["array"]["id"]
+        ):
+            raise CampaignError(f"shard {shard}: worker array identity differs from submission")
     require_homogeneous_workers(shard_workers.values())
+    require_unique_slurm_worker_jobs(shard_workers.values())
+    for shard, worker in shard_workers.items():
+        if (
+            worker["submission_mode"] != "full"
+            or worker["submission_receipt_sha256"] != submission_artifact.sha256
+            or worker["placement_contract"]
+            != "slurm-serial-exclusive-core-local-high-userspace.v1"
+            or worker["affinity"] != "sched_setaffinity-singleton.v1"
+            or worker["slurm_cpu_freq_req"] != LOCKED_FREQUENCY_REQUEST
+            or not worker["governor_control"]
+            or not worker["exclusive_control"]
+            or not worker["whole_node_control"]
+        ):
+            raise CampaignError(f"shard {shard}: full worker control evidence is incomplete")
     build_receipt, _ = load_object(Path(prepare["build_receipt"]["path"]))
     for worker in shard_workers.values():
         if (
@@ -4187,6 +4891,8 @@ def audit_campaign(args: argparse.Namespace) -> bool:
         "expected_sources": prepare["expected_sources"],
         "shard_count": shard_count,
         "contract_sha256": prepare["contract"]["sha256"],
+        "submission_mode": "full",
+        "submission_receipt_sha256": submission_artifact.sha256,
         "python": prepare["python"],
         "build_tools": prepare["build_tools"],
         "binary": prepare["binary"],
@@ -4203,6 +4909,7 @@ def audit_campaign(args: argparse.Namespace) -> bool:
             "contract_sha256": prepare["contract"]["sha256"],
             "manifest_sha256": prepare["manifest"]["sha256"],
             "checkout_receipt_sha256": prepare["checkout_receipt"]["sha256"],
+            "submission_receipt_sha256": submission_artifact.sha256,
             "workset_sha256": prepared.workset_artifact.sha256,
             "records_sha256": records_artifact.sha256,
             "shard_set_receipt_sha256": shard_set_artifact.sha256,
@@ -4234,6 +4941,56 @@ def nonnegative_integer(value: str) -> int:
     return positive_integer(value)
 
 
+def verify_submission_receipt_command(args: argparse.Namespace) -> None:
+    if (args.role == "array") != (args.expected_shard is not None):
+        raise CampaignError("only array receipt verification requires an expected shard")
+    artifact = open_submission_receipt(args.submission_receipt, args.submission_receipt_fd)
+    receipt = validate_submission_runtime(
+        artifact,
+        revision=args.revision,
+        expected_sha256=args.expected_submission_receipt_sha256,
+        expected_mode=args.submission_mode,
+        role=args.role,
+        expected_wrapper_sha256=args.expected_wrapper_sha256,
+        expected_shard=args.expected_shard,
+        where="runtime submission receipt",
+    )
+    sys.stdout.buffer.write(
+        canonical_bytes(
+            {
+                "job_id": receipt["jobs"][args.role]["id"],
+                "mode": receipt["mode"],
+                "receipt_sha256": artifact.sha256,
+                "role": args.role,
+                "schema": "euf-viper.typed-parser-timing-submission-runtime.v1",
+            }
+        )
+    )
+
+
+def verify_submission_receipt_file_command(args: argparse.Namespace) -> None:
+    artifact = open_submission_receipt(
+        args.submission_receipt, args.submission_receipt_fd
+    )
+    receipt = validate_submission_receipt(
+        artifact,
+        revision=args.revision,
+        expected_sha256=args.expected_submission_receipt_sha256,
+        expected_mode=args.submission_mode,
+        where="submission receipt file",
+    )
+    sys.stdout.buffer.write(
+        canonical_bytes(
+            {
+                "prepare_job": receipt["jobs"]["prepare"]["id"],
+                "receipt_path": receipt["receipt_path"],
+                "receipt_sha256": artifact.sha256,
+                "schema": "euf-viper.typed-parser-timing-submission-file.v1",
+            }
+        )
+    )
+
+
 def argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -4254,6 +5011,27 @@ def argument_parser() -> argparse.ArgumentParser:
     verify_build.add_argument("--binary", type=Path, required=True)
     verify_build.add_argument("--binary-fd", type=nonnegative_integer)
     verify_build.add_argument("--revision", required=True)
+
+    verify_submission = commands.add_parser("verify-submission-receipt")
+    verify_submission.add_argument("--submission-receipt", type=Path, required=True)
+    verify_submission.add_argument("--submission-receipt-fd", type=nonnegative_integer)
+    verify_submission.add_argument("--expected-submission-receipt-sha256", required=True)
+    verify_submission.add_argument("--revision", required=True)
+    verify_submission.add_argument("--submission-mode", choices=("canary", "full"), required=True)
+    verify_submission.add_argument("--role", choices=("prepare", "array", "audit"), required=True)
+    verify_submission.add_argument("--expected-wrapper-sha256", required=True)
+    verify_submission.add_argument("--expected-shard", type=nonnegative_integer)
+
+    verify_submission_file = commands.add_parser("verify-submission-receipt-file")
+    verify_submission_file.add_argument("--submission-receipt", type=Path, required=True)
+    verify_submission_file.add_argument(
+        "--submission-receipt-fd", type=nonnegative_integer
+    )
+    verify_submission_file.add_argument("--expected-submission-receipt-sha256", required=True)
+    verify_submission_file.add_argument("--revision", required=True)
+    verify_submission_file.add_argument(
+        "--submission-mode", choices=("canary", "full"), required=True
+    )
 
     verify_corpus = commands.add_parser("verify-corpus")
     verify_corpus.add_argument("--manifest", type=Path, required=True)
@@ -4281,6 +5059,11 @@ def argument_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--expected-checkout-receipt-sha256", required=True)
     prepare.add_argument("--expected-contract-sha256", required=True)
     prepare.add_argument("--expected-manifest-sha256", required=True)
+    prepare.add_argument("--submission-receipt", type=Path, required=True)
+    prepare.add_argument("--submission-receipt-fd", type=nonnegative_integer)
+    prepare.add_argument("--expected-submission-receipt-sha256", required=True)
+    prepare.add_argument("--submission-mode", choices=("canary", "full"), required=True)
+    prepare.add_argument("--expected-wrapper-sha256", required=True)
 
     shard = commands.add_parser("run-shard")
     shard.add_argument("--root", type=Path, required=True)
@@ -4292,6 +5075,10 @@ def argument_parser() -> argparse.ArgumentParser:
     shard.add_argument("--expected-checkout-receipt-sha256", required=True)
     shard.add_argument("--expected-contract-sha256", required=True)
     shard.add_argument("--expected-manifest-sha256", required=True)
+    shard.add_argument("--submission-receipt", type=Path, required=True)
+    shard.add_argument("--submission-receipt-fd", type=nonnegative_integer)
+    shard.add_argument("--expected-submission-receipt-sha256", required=True)
+    shard.add_argument("--expected-wrapper-sha256", required=True)
 
     audit = commands.add_parser("audit")
     audit.add_argument("--root", type=Path, required=True)
@@ -4299,6 +5086,11 @@ def argument_parser() -> argparse.ArgumentParser:
     audit.add_argument("--expected-checkout-receipt-sha256", required=True)
     audit.add_argument("--expected-contract-sha256", required=True)
     audit.add_argument("--expected-manifest-sha256", required=True)
+    audit.add_argument("--submission-receipt", type=Path, required=True)
+    audit.add_argument("--submission-receipt-fd", type=nonnegative_integer)
+    audit.add_argument("--expected-submission-receipt-sha256", required=True)
+    audit.add_argument("--submission-mode", choices=("full",), required=True)
+    audit.add_argument("--expected-wrapper-sha256", required=True)
     return parser
 
 
@@ -4310,6 +5102,12 @@ def main() -> int:
             return 0
         if args.command == "verify-build-receipt":
             verify_build_receipt_command(args)
+            return 0
+        if args.command == "verify-submission-receipt":
+            verify_submission_receipt_command(args)
+            return 0
+        if args.command == "verify-submission-receipt-file":
+            verify_submission_receipt_file_command(args)
             return 0
         if args.command == "verify-corpus":
             verify_corpus_command(args)

@@ -264,6 +264,19 @@ independent evidence checks, and a frozen family holdout.
   mutation, and Rust feature matrices. No WMI job has been submitted from this
   branch, and the first campaign is research-only/nonpromotable regardless of
   timing outcome.
+- [x] Repair the T1 evidence boundary after hosted diagnostics and independent
+  review. Run `29389308332` on `7a278b79f3f3038e9ae18f5a218836a6211b4b54`
+  exposed mutate-then-restore readiness races. Run `29392563168` on
+  `ea28651c16bbe7f57f0675660d9c8c6aea9efaf4` then exposed global static flags
+  infecting host proc-macro compilation. The local repair now requires exact
+  parent-first watch sets with stable rescan/event reconciliation, descriptor-
+  spooled self-validating wrappers, held submission with an fsynced immutable
+  receipt before release, exact canary shard 0, exact serial full placement and
+  runtime identity, target-scoped `+crt-static`, and independent zero-`PT_INTERP`/
+  zero-`DT_NEEDED` checks. All evidence remains permanently nonpromotable.
+- [ ] Obtain an independently reviewed hosted green run for the repaired target-
+  scoped release and Linux-only mutation tests. The two red runs above are
+  diagnostics only; they authorize neither WMI nor a performance claim.
 - [ ] Execute the fixed WMI contract. Require parse and end-to-end aggregate and
   paired improvement plus all-source nearest-rank p95 overhead strictly below 1%; otherwise stop
   T1. Passing authorizes review, not automatic production promotion.

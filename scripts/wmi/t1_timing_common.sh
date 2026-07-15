@@ -147,6 +147,7 @@ t1_verify_checkout() {
     scripts/wmi/t1_timing_build_guard.py
     scripts/wmi/t1_timing_checkout_receipt.py
     scripts/wmi/t1_timing_common.sh
+    scripts/wmi/t1_timing_remote_submit.py
     scripts/wmi/euf_viper_t1_timing_prepare.sbatch
     scripts/wmi/euf_viper_t1_timing_array.sbatch
     scripts/wmi/euf_viper_t1_timing_audit.sbatch

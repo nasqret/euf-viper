@@ -149,10 +149,13 @@ The WMI wrappers independently verify:
   campaign parent/tag, dependency, and path-selection `EUF_VIPER_*` variables
   are rejected rather than used;
 - a private `git archive` snapshot of the exact revision, with Cargo home and
-  target outside it; a recursive inotify monitor publishes parsed, nonempty,
-  PID/root-bound readiness after every watch is installed and before the pre-build
-  all-blob inventory and rejects every create, write, attribute, move, or delete
-  event through the repeated post-build inventory; shutdown is parent-owned pipe
+  target outside it; a recursive inotify monitor installs each parent watch before
+  traversing children, reconciles events across two stable scans, and publishes
+  parsed nonempty PID/root-bound readiness only for the exact canonical set of
+  relative path/device/inode/mode identities; the guard and harness independently
+  require the same set, exact mask, two setup scans, zero setup events, and a
+  quiescent 200 ms close drain; every create, write, attribute, move, or delete
+  event rejects through the repeated post-build inventory; shutdown is parent-owned pipe
   EOF after the FIFO pathname is unlinked, and a watchdog proves both monitor
   PIDs remain live throughout compilation; non-owner children inherit neither
   control nor writable monitor-evidence descriptors;
@@ -170,7 +173,9 @@ The WMI wrappers independently verify:
   including canonical path, bytes, SHA-256, and version; the C driver's
   `-fuse-ld=bfd` selection must resolve to that linker, and the receipt also
   binds allocator/backend, linker flags, and final release bytes; the release
-  uses `+crt-static` and independent ELF inspections reject any `PT_INTERP` or
+  uses an explicit `x86_64-unknown-linux-gnu` target with `+crt-static` scoped to
+  target artifacts so host build scripts and proc macros remain executable;
+  independent ELF inspections reject any `PT_INTERP` or
   `DT_NEEDED` instead of claiming a reconstructed loader closure;
 - descriptor-retained guard and harness scripts, readiness artifacts,
   source/dependency inventories, event logs, monitor receipts, build receipt,
@@ -181,17 +186,30 @@ The WMI wrappers independently verify:
   hashes. Before any `sbatch`, the remote preflight verifies the accepted
   manifest bytes and all 7,503 path, source SHA-256, and byte-count bindings.
 
-The Slurm submission additionally fixes `cpu_idle`, node `c1n1`, singleton
-physical-core affinity, one hardware thread per core, and `--mem-bind=local`.
+The Slurm transaction spools each exact retained wrapper descriptor under user
+hold, observes every dependency, job identity, wrapper digest, array bound,
+throttle, and separate Slurm sharing/exclusivity state, and fsyncs a canonical
+receipt before release. Full mode requires the held array to report exact
+`Exclusive=NODE`; `OverSubscribe` is retained as distinct evidence and is not
+misused as an exclusivity flag.
+The local submitter validates the retained receipt descriptor, hard-links and
+fsyncs that same inode, then receipt-hash-names and releases the held jobs. Any
+failure cancels only matching owned jobs. The submission additionally fixes
+`cpu_idle`, node `c1n1`, singleton physical-core affinity, one hardware thread
+per core, and `--mem-bind=local`.
 `--full` serializes the 128 array elements, requests the sole allowed node
 exclusively for each element, and runs each shard step with
 `--cpu-freq=high:UserSpace`; runtime evidence must prove whole-node allocation,
 singleton affinity, propagation of that checked-in request, and fixed userspace
-bounds. `--canary`
-can schedule only shard 0 and has no audit job. Both modes remain nonpromotable.
+bounds. `--canary` has exact array `0-0%1`, can schedule only shard 0, and has no
+audit job or complete-audit eligibility. Both modes remain nonpromotable.
 
-Full mode forms an `afterok` prepare-array-audit chain; canary mode forms only
-prepare plus one array task. This research branch does not push or submit either.
+Full mode forms a held `afterok` prepare-array-audit chain; canary mode forms only
+prepare plus task 0. Hosted runs `29389308332` and `29392563168` are diagnostic
+failures, not evidence: the first exposed readiness races, and the second showed
+global `+crt-static` infecting host proc-macro compilation at
+`ea28651c16bbe7f57f0675660d9c8c6aea9efaf4`. The
+target-scoped repair has not been hosted, pushed, or submitted to WMI.
 `.github/workflows/campaign-contract.yml` initializes isolated paths from
 `RUNNER_TEMP` through `GITHUB_ENV`, runs the
 focused timing/receipt/build-guard Python tests, syntax-checks every T1

@@ -53,6 +53,9 @@ EVENT_NAMES = {
     IN_IGNORED: "IGNORED",
 }
 REVISION_CHARS = frozenset("0123456789abcdef")
+WATCH_SET_SCHEMA = "euf-viper.t1-directory-watch-set.v1"
+READY_SCHEMA = "euf-viper.t1-mutation-monitor-ready.v4"
+MONITOR_RECEIPT_SCHEMA = "euf-viper.t1-mutation-monitor-receipt.v4"
 
 
 def die(message: str) -> None:
@@ -387,17 +390,100 @@ def external_tree_inventory_command(args: argparse.Namespace) -> None:
     publish(args.output, canonical_bytes(external_tree_inventory(args.root)))
 
 
-def all_directories(snapshot: Path) -> list[Path]:
-    directories = [snapshot]
-    for root, names, _ in os.walk(snapshot, topdown=True, followlinks=False):
-        root_path = Path(root)
-        for name in list(names):
-            path = root_path / name
-            if path.is_symlink():
-                names.remove(name)
-            else:
-                directories.append(path)
-    return sorted(set(directories))
+def directory_identity(snapshot: Path, directory: Path) -> dict[str, Any]:
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    flags |= getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(directory, flags)
+    try:
+        opened = os.fstat(descriptor)
+        named = directory.lstat()
+    finally:
+        os.close(descriptor)
+    identity = lambda value: (value.st_dev, value.st_ino, value.st_mode)
+    if not stat.S_ISDIR(opened.st_mode) or identity(opened) != identity(named):
+        die(f"watched directory identity changed during setup: {directory}")
+    relative = "." if directory == snapshot else directory.relative_to(snapshot).as_posix()
+    return {
+        "device": opened.st_dev,
+        "inode": opened.st_ino,
+        "mode": f"{stat.S_IMODE(opened.st_mode):04o}",
+        "path": relative,
+    }
+
+
+def watch_set_payload(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    ordered = sorted(entries, key=lambda entry: entry["path"])
+    paths = [entry["path"] for entry in ordered]
+    if not ordered or len(paths) != len(set(paths)) or paths[0] != ".":
+        die("directory watch set is empty, duplicated, or lacks its root")
+    return {
+        "schema": WATCH_SET_SCHEMA,
+        "algorithm": "sha256-canonical-directory-identities.v1",
+        "count": len(ordered),
+        "entries": ordered,
+        "entries_sha256": sha256(b"".join(canonical_bytes(entry) for entry in ordered)),
+    }
+
+
+def scan_watch_set(snapshot: Path) -> dict[str, Any]:
+    pending = [snapshot]
+    entries: list[dict[str, Any]] = []
+    while pending:
+        directory = pending.pop(0)
+        entries.append(directory_identity(snapshot, directory))
+        children: list[Path] = []
+        with os.scandir(directory) as iterator:
+            for entry in iterator:
+                if entry.is_dir(follow_symlinks=False):
+                    children.append(directory / entry.name)
+        pending[0:0] = sorted(children, key=lambda path: os.fsencode(path.name))
+    return watch_set_payload(entries)
+
+
+def validate_watch_set(
+    value: Any, *, snapshot: Path, verify_current: bool
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "schema",
+        "algorithm",
+        "count",
+        "entries",
+        "entries_sha256",
+    }:
+        die("directory watch-set fields are incomplete or unexpected")
+    entries = value["entries"]
+    if not isinstance(entries, list):
+        die("directory watch-set entries must be a list")
+    normalized: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"device", "inode", "mode", "path"}:
+            die("directory watch-set identity is malformed")
+        if (
+            type(entry["device"]) is not int
+            or entry["device"] < 0
+            or type(entry["inode"]) is not int
+            or entry["inode"] < 1
+            or not isinstance(entry["mode"], str)
+            or len(entry["mode"]) != 4
+            or any(character not in "01234567" for character in entry["mode"])
+            or not isinstance(entry["path"], str)
+        ):
+            die("directory watch-set identity has invalid values")
+        relative = PurePosixPath(entry["path"])
+        if entry["path"] != "." and (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or "." in relative.parts
+            or not relative.parts
+        ):
+            die("directory watch-set path is not canonical and relative")
+        normalized.append(entry)
+    expected = watch_set_payload(normalized)
+    if value != expected:
+        die("directory watch-set digest or ordering is invalid")
+    if verify_current and value != scan_watch_set(snapshot):
+        die("directory watch-set does not exactly identify the current tree")
+    return value
 
 
 def event_labels(mask: int) -> list[str]:
@@ -430,15 +516,8 @@ def monitor_command(args: argparse.Namespace) -> None:
         die("monitor control descriptor must be an anonymous pipe or socket")
     os.set_blocking(control_descriptor, False)
     watches: dict[int, Path] = {}
+    watches_by_path: dict[str, int] = {}
     try:
-        for directory in all_directories(snapshot):
-            watch = inotify_add_watch(
-                inotify_descriptor, os.fsencode(directory), WATCH_MASK
-            )
-            if watch < 0:
-                error = ctypes.get_errno()
-                die(f"inotify_add_watch failed for {directory}: {os.strerror(error)}")
-            watches[watch] = directory
         require_descriptor_path(args.ready_fd, args.ready, "monitor ready output")
         require_descriptor_path(args.events_fd, args.events, "monitor event output")
         require_descriptor_path(args.receipt_fd, args.receipt, "monitor receipt output")
@@ -449,20 +528,8 @@ def monitor_command(args: argparse.Namespace) -> None:
         events_digest = hashlib.sha256()
         event_count = 0
         poll_cycles = 0
-        ready = {
-            "schema": "euf-viper.t1-mutation-monitor-ready.v3",
-            "control": "parent-owned-pipe-eof.v1",
-            "monitor_pid": os.getpid(),
-            "parent_pid": os.getppid(),
-            "snapshot": str(snapshot),
-            "watch_setup_complete": True,
-            "watched_directories": len(watches),
-            "watch_mask": WATCH_MASK,
-        }
-        ready_content = canonical_bytes(ready)
-        publish_descriptor(
-            args.ready_fd, args.ready, ready_content, "monitor ready output"
-        )
+        setup_scans = 0
+        watch_set: dict[str, Any] | None = None
         poller = select.poll()
         poller.register(inotify_descriptor, select.POLLIN | select.POLLERR)
         poller.register(
@@ -470,8 +537,14 @@ def monitor_command(args: argparse.Namespace) -> None:
             select.POLLIN | select.POLLHUP | select.POLLERR | select.POLLNVAL,
         )
 
-        def consume_events(data: bytes) -> None:
+        def record_event(event: dict[str, Any]) -> None:
             nonlocal event_count
+            rendered = canonical_bytes(event)
+            write_all(events_descriptor, rendered)
+            events_digest.update(rendered)
+            event_count += 1
+
+        def consume_events(data: bytes) -> None:
             offset = 0
             while offset < len(data):
                 if len(data) - offset < 16:
@@ -485,23 +558,103 @@ def monitor_command(args: argparse.Namespace) -> None:
                 directory = watches.get(watch)
                 name = os.fsdecode(raw_name) if raw_name else ""
                 path = directory / name if directory is not None and name else directory
-                event = {
-                    "cookie": cookie,
-                    "events": event_labels(mask),
-                    "mask": mask,
-                    "path": None
-                    if path is None
-                    else path.relative_to(snapshot).as_posix()
-                    if path != snapshot
-                    else ".",
-                }
-                rendered = canonical_bytes(event)
-                write_all(events_descriptor, rendered)
-                events_digest.update(rendered)
-                event_count += 1
+                record_event(
+                    {
+                        "cookie": cookie,
+                        "events": event_labels(mask),
+                        "mask": mask,
+                        "path": None
+                        if path is None
+                        else path.relative_to(snapshot).as_posix()
+                        if path != snapshot
+                        else ".",
+                    }
+                )
 
+        def drain_inotify(timeout_ms: int) -> bool:
+            consumed = False
+            for ready_descriptor, mask in poller.poll(timeout_ms):
+                if ready_descriptor != inotify_descriptor:
+                    continue
+                if mask & select.POLLERR:
+                    die("inotify monitor descriptor reported an error")
+                data = os.read(inotify_descriptor, 1024 * 1024)
+                if data:
+                    consume_events(data)
+                    consumed = True
+            return consumed
+
+        def install_parent_first() -> dict[str, Any]:
+            pending = [snapshot]
+            identities: list[dict[str, Any]] = []
+            while pending:
+                directory = pending.pop(0)
+                identity = directory_identity(snapshot, directory)
+                relative = identity["path"]
+                prior_watch = watches_by_path.get(relative)
+                if prior_watch is None:
+                    watch = inotify_add_watch(
+                        inotify_descriptor, os.fsencode(directory), WATCH_MASK
+                    )
+                    if watch < 0:
+                        error = ctypes.get_errno()
+                        die(
+                            f"inotify_add_watch failed for {directory}: "
+                            f"{os.strerror(error)}"
+                        )
+                    if watch in watches and watches[watch] != directory:
+                        die("inotify reused a watch descriptor for a different directory")
+                    watches[watch] = directory
+                    watches_by_path[relative] = watch
+                elif watches.get(prior_watch) != directory:
+                    die("directory watch mapping changed during setup")
+                identities.append(identity)
+                children: list[Path] = []
+                with os.scandir(directory) as iterator:
+                    for entry in iterator:
+                        if entry.is_dir(follow_symlinks=False):
+                            children.append(directory / entry.name)
+                pending[0:0] = sorted(children, key=lambda path: os.fsencode(path.name))
+            return watch_set_payload(identities)
+
+        # The root is watched before its children are discovered. Two identical scans,
+        # with event reconciliation between them, close every creation window.
+        first_watch_set = install_parent_first()
+        setup_scans += 1
+        drain_inotify(0)
+        second_watch_set = install_parent_first()
+        setup_scans += 1
+        drain_inotify(0)
+        if first_watch_set != second_watch_set:
+            record_event(
+                {
+                    "cookie": 0,
+                    "events": ["WATCH_SET_DRIFT"],
+                    "mask": 0,
+                    "path": None,
+                }
+            )
+        watch_set = second_watch_set
+        validate_watch_set(watch_set, snapshot=snapshot, verify_current=True)
+        ready = {
+            "schema": READY_SCHEMA,
+            "control": "parent-owned-pipe-eof.v1",
+            "monitor_pid": os.getpid(),
+            "parent_pid": os.getppid(),
+            "snapshot": str(snapshot),
+            "watch_setup_complete": True,
+            "setup_event_count": event_count,
+            "setup_scans": setup_scans,
+            "watched_directories": watch_set["count"],
+            "watch_mask": WATCH_MASK,
+            "watch_set": watch_set,
+        }
+        ready_content = canonical_bytes(ready)
+        publish_descriptor(
+            args.ready_fd, args.ready, ready_content, "monitor ready output"
+        )
         try:
-            shutdown = False
+            shutdown = event_count > 0
             while not shutdown:
                 poll_cycles += 1
                 for ready_descriptor, mask in poller.poll(50):
@@ -516,35 +669,54 @@ def monitor_command(args: argparse.Namespace) -> None:
                     if control:
                         die("monitor control protocol accepts EOF only")
                     shutdown = True
-            while True:
-                ready_events = poller.poll(25)
-                if not ready_events:
-                    break
-                consumed = False
-                for ready_descriptor, mask in ready_events:
-                    if ready_descriptor != inotify_descriptor:
-                        continue
-                    if mask & select.POLLERR:
-                        die("inotify monitor descriptor reported an error while draining")
-                    data = os.read(inotify_descriptor, 1024 * 1024)
-                    if data:
-                        consume_events(data)
-                        consumed = True
-                if not consumed:
-                    break
+            poller.unregister(control_descriptor)
+            # Require 200 ms of quiescence after EOF. A single short empty poll can
+            # race delayed writeback notifications in mutate-then-restore attacks.
+            idle_polls = 0
+            drain_polls = 0
+            while idle_polls < 4 and drain_polls < 100:
+                drain_polls += 1
+                if drain_inotify(50):
+                    idle_polls = 0
+                else:
+                    idle_polls += 1
+            if idle_polls < 4:
+                record_event(
+                    {
+                        "cookie": 0,
+                        "events": ["DRAIN_LIMIT"],
+                        "mask": 0,
+                        "path": None,
+                    }
+                )
+            try:
+                final_watch_set = scan_watch_set(snapshot)
+            except (OSError, SystemExit):
+                final_watch_set = None
+            if final_watch_set != watch_set:
+                record_event(
+                    {
+                        "cookie": 0,
+                        "events": ["WATCH_SET_DRIFT"],
+                        "mask": 0,
+                        "path": None,
+                    }
+                )
             os.fchmod(events_descriptor, 0o400)
             os.fsync(events_descriptor)
         finally:
             pass
         receipt = {
-            "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
+            "schema": MONITOR_RECEIPT_SCHEMA,
             "control": "parent-owned-pipe-eof.v1",
             "monitor_pid": os.getpid(),
             "parent_pid": os.getppid(),
             "poll_cycles": poll_cycles,
             "snapshot": str(snapshot),
-            "watched_directories": len(watches),
+            "setup_scans": setup_scans,
+            "watched_directories": watch_set["count"],
             "watch_mask": WATCH_MASK,
+            "watch_set": watch_set,
             "event_count": event_count,
             "ready": {
                 "path": str(args.ready),
@@ -586,24 +758,35 @@ def validate_monitor_ready(
         "parent_pid",
         "snapshot",
         "watch_setup_complete",
+        "setup_event_count",
+        "setup_scans",
         "watched_directories",
         "watch_mask",
+        "watch_set",
     }
     if set(ready) != expected_keys:
         die("monitor readiness fields are incomplete or unexpected")
     if (
-        ready["schema"] != "euf-viper.t1-mutation-monitor-ready.v3"
+        ready["schema"] != READY_SCHEMA
         or ready["control"] != "parent-owned-pipe-eof.v1"
         or ready["monitor_pid"] != expected_monitor_pid
         or ready["parent_pid"] != expected_parent_pid
         or ready["snapshot"] != str(expected_snapshot.resolve(strict=True))
         or ready["watch_setup_complete"] is not True
+        or ready["setup_event_count"] != 0
+        or type(ready["setup_scans"]) is not int
+        or ready["setup_scans"] < 2
         or type(ready["watched_directories"]) is not int
         or ready["watched_directories"] < 1
         or type(ready["watch_mask"]) is not int
         or ready["watch_mask"] != WATCH_MASK
     ):
         die("monitor readiness is not PID-bound to a completed watch setup")
+    watch_set = validate_watch_set(
+        ready["watch_set"], snapshot=expected_snapshot.resolve(strict=True), verify_current=True
+    )
+    if ready["watched_directories"] != watch_set["count"]:
+        die("monitor readiness watch count differs from its exact watch set")
     return ready, content
 
 
@@ -943,8 +1126,25 @@ def validate_clean_monitor(
     monitor, receipt_content = load_canonical_descriptor(
         receipt_descriptor, receipt_path, f"{label} monitor receipt"
     )
+    expected_fields = {
+        "schema",
+        "control",
+        "monitor_pid",
+        "parent_pid",
+        "poll_cycles",
+        "snapshot",
+        "setup_scans",
+        "watched_directories",
+        "watch_mask",
+        "watch_set",
+        "event_count",
+        "ready",
+        "events",
+        "status",
+    }
     if (
-        monitor.get("schema") != "euf-viper.t1-mutation-monitor-receipt.v3"
+        set(monitor) != expected_fields
+        or monitor.get("schema") != MONITOR_RECEIPT_SCHEMA
         or monitor.get("control") != "parent-owned-pipe-eof.v1"
         or not isinstance(monitor.get("monitor_pid"), int)
         or monitor.get("monitor_pid", 0) <= 1
@@ -952,12 +1152,22 @@ def validate_clean_monitor(
         or monitor.get("parent_pid", 0) <= 1
         or not isinstance(monitor.get("poll_cycles"), int)
         or monitor.get("poll_cycles", 0) < 1
+        or not isinstance(monitor.get("setup_scans"), int)
+        or monitor.get("setup_scans", 0) < 2
         or monitor.get("status") != "clean"
         or monitor.get("event_count") != 0
     ):
         die(f"{label} mutation monitor did not close cleanly")
     if monitor.get("snapshot") != expected_root:
         die(f"{label} monitor and inventory root identities differ")
+    watch_set = validate_watch_set(
+        monitor["watch_set"], snapshot=Path(expected_root), verify_current=True
+    )
+    if (
+        monitor.get("watched_directories") != watch_set["count"]
+        or monitor.get("watch_mask") != WATCH_MASK
+    ):
+        die(f"{label} monitor watch-set binding differs")
     ready, ready_content = validate_monitor_ready(
         ready_descriptor,
         ready_path,
@@ -974,6 +1184,8 @@ def validate_clean_monitor(
         or ready_binding["bytes"] != len(ready_content)
         or ready["watched_directories"] != monitor.get("watched_directories")
         or ready["watch_mask"] != monitor.get("watch_mask")
+        or ready["watch_set"] != monitor.get("watch_set")
+        or ready["setup_scans"] != monitor.get("setup_scans")
     ):
         die(f"{label} mutation monitor readiness binding differs")
     events = monitor.get("events")
@@ -1070,7 +1282,7 @@ def receipt_command(args: argparse.Namespace) -> None:
     binary, binary_content = inherited_executable_binding(args.binary_fd, args.binary)
     static_elf = attest_static_linux_elf(args.binary, binary_content, binary)
     payload = {
-        "schema": "euf-viper.t1-guarded-release-build.v3",
+        "schema": "euf-viper.t1-guarded-release-build.v4",
         "status": "clean",
         "revision": valid_revision(args.revision),
         "source_snapshot": pre["snapshot"],
@@ -1120,10 +1332,12 @@ def receipt_command(args: argparse.Namespace) -> None:
             "locked": True,
             "native_linkage": "crt-static-no-interpreter-no-needed.v1",
             "offline": True,
-            "rustflags": (
+            "host_rustflags": None,
+            "target_rustflags": (
                 f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
                 "-C target-feature=+crt-static"
             ),
+            "target_triple": "x86_64-unknown-linux-gnu",
             "target_dir": str(target_dir),
             "vendor_dir": str(vendor_dir),
         },

@@ -109,14 +109,20 @@ before the pre-build all-blob inventory, and keeps Cargo homes, dependencies,
 and target outside the watched tree. Under a sanitized environment, Cargo first
 materializes the locked registry dependency set into a fresh versioned vendor
 tree. That tree receives exact pre/post file, mode, size, and SHA-256 inventory
-receipts, and a second recursive monitor publishes canonical, nonempty,
-PID/root-bound readiness only after all watches are installed and before its pre-build
-inventory. The release compile then runs from `/` with a separate fresh Cargo
+receipts. A second recursive monitor watches each parent before traversing its
+children, performs two stable scans with event reconciliation, and publishes
+canonical, nonempty, PID/root-bound readiness only after the exact directory set
+is installed and before its pre-build inventory. Each readiness and close receipt
+binds the sorted relative path, device, inode, and mode of every watched directory,
+plus a canonical watch-set digest and the exact inotify mask. Both the guard and
+the later harness rescan and require equality with that set. The release compile
+then runs from `/` with a separate fresh Cargo
 home, `--locked --offline`, an explicit vendor source replacement, and no
 network. Any source or dependency create, write, attribute, move, or delete
 event rejects the build even if bytes are restored before the repeated
-post-build inventory. Readiness is a canonical, nonempty artifact bound to the
-monitor PID, parent PID, watched root, watch count, and mask after watch setup.
+post-build inventory. Readiness also requires two completed setup scans and zero
+setup events; monitor close drains a quiescent 200 ms interval so mutate-then-
+restore notifications cannot race a single empty poll.
 Monitor shutdown is EOF on a parent-owned pipe opened
 through a mode-`0600` FIFO and then unlinked; creating a sentinel pathname cannot
 end it. A watchdog proves both monitor processes remain non-zombie children for
@@ -130,17 +136,22 @@ new code.
 
 The guarded build receipt binds Python, Cargo, Rust, the native C compiler,
 the exact linker selected by that driver, archiver, allocator/backend, linker
-flags, and final release bytes. The release is compiled with `+crt-static` and
-is rejected unless independent ELF inspections prove zero `PT_INTERP` and zero
+flags, and final release bytes. Cargo receives an explicit
+`--target x86_64-unknown-linux-gnu`; `+crt-static` is scoped only through that
+target's `CARGO_TARGET_*_RUSTFLAGS`, while host build scripts and proc macros
+retain host linkage. The release is rejected unless independent ELF inspections
+prove zero `PT_INTERP` and zero
 `DT_NEEDED`; the campaign makes no hand-written dynamic-loader-closure claim.
 Linux observations execute the same descriptor whose bytes were attested. WMI placement
 is fixed to `cpu_idle` and `c1n1`, one non-SMT physical core and Slurm-local NUMA
 memory placement per task. Full mode serializes all 128 array elements with
 `0-127%1`; each element requests the sole allowed node exclusively and runs the
 shard step with `--cpu-freq=high:UserSpace`. The worker must prove a
-whole-node CPU allocation, singleton affinity, a propagated Slurm frequency
+held Slurm `Exclusive=NODE` state, whole-node CPU allocation, singleton
+affinity, a propagated Slurm frequency
 request, and fixed userspace governor bounds or fail before recording timing evidence. The
-bounded canary schedules only shard 0 and never submits the complete audit.
+bounded canary schedules exactly `0-0%1`, accepts only shard 0 in its receipt,
+worker, and runtime environment, and never submits or admits a complete audit.
 Both modes are permanently nonpromotable research evidence.
 
 All JSON is duplicate-key rejecting and finite. A value such as `1e999` is
@@ -149,11 +160,26 @@ artifacts use checked-inode, fsynced, mode-`0400`, atomic no-replace publication
 Each shard closes with a pre-audit receipt binding its exact raw records, count,
 worker, and SHA-256 chain. Audit seals the shard directory, publishes a separate
 no-replace shard-set receipt before metrics, and revalidates every receipt and
-records file both before metrics and after analysis. Full WMI jobs form a
-prepare-array-audit `afterok` chain; canary mode forms only prepare plus one array
-task. Hosted Linux CI reproduces the monitored exact locked release,
-executes the real Rust ELF through the descriptor harness, and runs default and
-all-feature Rust runtime matrices.
+records file both before metrics and after analysis. Submission spools each exact
+Git-blob-checked wrapper from its retained descriptor under a user hold. Only
+after all held job identities, dependencies, exact array geometry and throttle,
+separate `OverSubscribe` and `Exclusive=NODE` states, wrapper digests, and tools
+are captured does the remote
+side fsync a canonical receipt. The local side retains those exact bytes by
+descriptor, validates them, hard-links and fsyncs the same inode, then names every
+job with the receipt SHA-256 and releases it. Any stage, publication, validation,
+rename, or release failure cancels only matching owner/work-directory/job-name
+identities. Full mode forms the held prepare-array-audit `afterok` chain; canary
+forms only prepare plus task 0. Each worker binds the exact array ID and task;
+the audit additionally requires a distinct canonical controller job ID for every
+one of the 128 elements.
+
+Hosted diagnostics are not green evidence for this repair. Run `29389308332` on
+`7a278b79f3f3038e9ae18f5a218836a6211b4b54` exposed mutate-then-restore
+readiness failures. Run `29392563168` on
+`ea28651c16bbe7f57f0675660d9c8c6aea9efaf4` then failed because global
+`+crt-static` reached host proc-macro
+compilation. The target-scoped repair has not been rerun in hosted CI here.
 
 No WMI measurement belongs to this implementation commit. Every campaign is
 unconditionally research-only and permanently nonpromotable. Noncompliant or canary evidence

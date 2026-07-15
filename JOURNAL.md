@@ -1237,6 +1237,45 @@
   strata, and an unsubmitted prepare-array-audit chain. A two-source miniature
   campaign completed and accepted locally; no WMI evidence or speed claim yet.
 
+## 2026-07-15 T1 Evidence-Boundary Repair
+
+- Continued from exact `ea28651c16bbe7f57f0675660d9c8c6aea9efaf4` without
+  touching main or using GitHub/WMI. Diagnostic hosted run `29392563168` was red
+  only in the guarded release build because global `+crt-static` reached host
+  units and Cargo could not produce `partial_ref_derive` as a proc macro. It is
+  diagnostic evidence, not authorization.
+- Closed the four follow-up review classes locally. Canary submission, workers,
+  resume, and audit are restricted to exact shard 0 and cannot form a complete
+  audit. Full evidence requires every shard to bind full mode, receipt SHA-256,
+  serial `0-127%1` geometry, throttle one, receipt-hash job identity, singleton
+  affinity, fixed userspace frequency, and exact held `Exclusive=NODE`
+  whole-node control. The receipt keeps Slurm `OverSubscribe` as a distinct
+  field instead of treating it as exclusivity evidence. Runtime binds each
+  receipt array ID/task pair and full audit requires 128 distinct canonical
+  controller-assigned job IDs.
+- The submitter now streams retained helper bytes, descriptor-spools exact
+  self-validating wrappers under user hold, captures exact dependencies and held
+  state, fsyncs a canonical receipt before release, hard-links the same locally
+  retained inode, and cancels only matching owned jobs on any stage/publication/
+  rename/release failure.
+- Mutation readiness now binds an exact canonical directory watch set with
+  per-directory path/device/inode/mode identities. Watches are parent-first; two
+  scans and event reconciliation close traversal setup; both guard and harness
+  require the current exact set; close drains 200 ms before a clean receipt and
+  fails mutated after a bounded event-flood drain.
+- Static linkage now uses explicit target `x86_64-unknown-linux-gnu` and
+  target-scoped Cargo flags so host build scripts/proc macros remain dynamic.
+  Independent parsers still reject any final `PT_INTERP` or `DT_NEEDED` and make
+  no dynamic-loader closure claim. Focused Python/WMI tests pass `61` with six
+  Linux-only cases skipped on macOS; full Python discovery passes `403` with the
+  same six skips. Explicit `cargo +1.96.0` default/all-feature runs pass
+  `239`/`245` tests with `3`/`4` ignored. Repository shell syntax, Python compile,
+  strict YAML/JSON, diff, formatting, and warning-as-error Jupyter Book checks
+  pass locally.
+- This campaign remains permanently nonpromotable. No hosted rerun, broad corpus,
+  push, WMI inspection, submission, cancellation, or performance claim belongs
+  to this repair.
+
 ## Next Entry Template
 
 - Benchmark corpus:

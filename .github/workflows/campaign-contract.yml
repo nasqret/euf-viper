@@ -39,7 +39,8 @@ jobs:
           python3 -m py_compile \
             scripts/bench/typed_parser_timing.py \
             scripts/wmi/t1_timing_build_guard.py \
-            scripts/wmi/t1_timing_checkout_receipt.py
+            scripts/wmi/t1_timing_checkout_receipt.py \
+            scripts/wmi/t1_timing_remote_submit.py
       - name: Test campaign validator
         run: |
           python3 -m unittest \

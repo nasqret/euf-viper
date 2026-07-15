@@ -12,6 +12,7 @@ BUILD_HOME="$CI_ROOT/build-home"
 DEPENDENCY_ROOT="$CI_ROOT/dependencies"
 VENDOR_DIR="$DEPENDENCY_ROOT/vendor"
 VENDOR_CONFIG="$DEPENDENCY_ROOT/cargo-vendor-config.toml"
+TARGET_TRIPLE="x86_64-unknown-linux-gnu"
 GUARD="$SOURCE/scripts/wmi/t1_timing_build_guard.py"
 HARNESS="$SOURCE/scripts/bench/typed_parser_timing.py"
 PRE="$CI_ROOT/pre-build-inventory.json"
@@ -228,10 +229,10 @@ env -i \
   CARGO_HOME="$CARGO_HOME" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
   CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true \
   RUSTC="$EUF_VIPER_RUSTC" CC="$EUF_VIPER_CC" LD="$EUF_VIPER_LD" AR="$EUF_VIPER_AR" \
-  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
   "$EUF_VIPER_CARGO" build \
     --manifest-path "$SOURCE/Cargo.toml" \
-    --release --locked --offline \
+    --release --locked --offline --target "$TARGET_TRIPLE" \
     --config "source.crates-io.replace-with='vendored-sources'" \
     --config "source.vendored-sources.directory='$VENDOR_DIR'" \
     3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- \
@@ -268,7 +269,7 @@ kill -0 "$DEPENDENCY_MONITOR_PID" 2>/dev/null || {
   echo "dependency monitor exited during build" >&2
   exit 2
 }
-BINARY="$CARGO_TARGET_DIR/release/euf-viper"
+BINARY="$CARGO_TARGET_DIR/$TARGET_TRIPLE/release/euf-viper"
 [ -f "$BINARY" ] && [ -x "$BINARY" ] && [ ! -L "$BINARY" ] || {
   echo "hosted release binary is missing, linked, or nonexecutable" >&2
   exit 2

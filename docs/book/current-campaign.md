@@ -206,6 +206,13 @@ parse-plus-solve clocks, singleton CPU affinity, and per-process RSS. Both
 phases must improve aggregate and paired metrics, preserve solved count and
 exact results, and keep p95 overhead on miss rows below 1%. No WMI job has been
 submitted and the production tree-parser route remains unchanged.
+Hosted diagnostics `29389308332` and `29392563168` are red: they exposed first a
+mutation-readiness race and then global static flags breaking host proc-macro
+compilation at `ea28651c16bbe7f57f0675660d9c8c6aea9efaf4`. The local repair uses
+exact watch-set identities, held
+descriptor-spooled jobs with a durable receipt, exact shard-0 canaries and serial
+exclusive full placement, and target-scoped static linkage. It has not received
+a hosted green run and does not authorize WMI.
 
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,

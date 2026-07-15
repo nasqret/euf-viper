@@ -883,3 +883,17 @@
   regression. Source bytes are opened once and replayed; binary execution is
   descriptor-bound on Linux; Cargo/rustc/Python and all artifacts are hash-bound.
   The WMI chain is implemented but deliberately unsubmitted and unpushed.
+- T1 timing repair checkpoint `ea28651c16bbe7f57f0675660d9c8c6aea9efaf4`
+  is not hosted-green. Diagnostic run `29392563168` failed because global
+  `+crt-static` infected host proc-macro compilation; the repair now uses an
+  explicit Linux target and target-scoped flags. Run `29389308332` is likewise
+  diagnostic-only for the earlier mutation-readiness race.
+- The current T1 evidence contract requires exact parent-first directory watch
+  identities and stable setup reconciliation, descriptor-spooled self-validating
+  wrappers, held jobs plus a durably persisted receipt before release, receipt-
+  scoped owned-job cancellation, exact `0-0%1` canary shard 0, exact serial
+  exclusive `0-127%1` full placement with held `Exclusive=NODE`, distinct
+  `OverSubscribe` evidence, exact Slurm/job/frequency evidence, and a
+  final static ELF with no `PT_INTERP` or `DT_NEEDED`. It never claims a dynamic
+  loader closure and remains permanently nonpromotable. No hosted rerun or WMI
+  action is authorized by local repair tests.
