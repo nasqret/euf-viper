@@ -6653,8 +6653,9 @@ fn normalized_certificate_path(path: &Path) -> Result<PathBuf, String> {
             .map_err(|error| format!("failed to resolve current directory: {error}"))?
             .join(path)
     };
-    let normalized = lexically_normalize_absolute(&absolute);
-    let mut existing = normalized.as_path();
+    // Preserve pathname resolution order: a symlink followed by `..` is not
+    // equivalent to lexically removing both components before canonicalizing.
+    let mut existing = absolute.as_path();
     let mut suffix = Vec::<std::ffi::OsString>::new();
     loop {
         match fs::canonicalize(existing) {
@@ -10107,6 +10108,53 @@ mod tests {
             assert!(output.exists());
             assert_eq!(fs::read(&source_path).unwrap(), original_source);
         }
+    }
+
+    #[cfg(all(feature = "certificates", unix))]
+    #[test]
+    fn certificate_symlink_parent_path_does_not_create_false_alias() {
+        use std::os::unix::fs::symlink;
+
+        let directory = CertificateTestDirectory::new("certificate-symlink-parent");
+        let source_parent = directory.path("source-parent");
+        let target_parent = directory.path("target-parent");
+        let target_child = target_parent.join("child");
+        fs::create_dir(&source_parent).expect("create source parent");
+        fs::create_dir(&target_parent).expect("create target parent");
+        fs::create_dir(&target_child).expect("create target child");
+        symlink(&target_child, source_parent.join("link")).expect("create directory symlink");
+
+        let source_path = source_parent.join("collision.cnf");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write distinct source");
+        let prefix = source_parent.join("link").join("..").join("collision");
+        let output = path_with_suffix(&prefix, ".cnf");
+        let normalized_output = normalized_certificate_path(&output).unwrap();
+
+        assert_ne!(
+            normalized_certificate_path(&source_path).unwrap(),
+            normalized_output
+        );
+        assert_eq!(
+            normalized_output,
+            fs::canonicalize(&target_parent)
+                .unwrap()
+                .join("collision.cnf")
+        );
+        ensure_distinct_certificate_paths(&source_path, &[&output])
+            .expect("symlink-parent output is a distinct pathname");
+        assert_eq!(
+            certify_file_with_seed_budget(
+                source_path.to_str().unwrap(),
+                prefix.to_str().unwrap(),
+                0,
+                CertificateSeedBudget::default(),
+            ),
+            Err("--max-theory-rounds must be at least 1".to_owned())
+        );
+        assert_eq!(
+            fs::read(&source_path).unwrap(),
+            MIXED_CERTIFICATE_SOURCE.as_bytes()
+        );
     }
 
     #[cfg(all(feature = "certificates", unix))]
