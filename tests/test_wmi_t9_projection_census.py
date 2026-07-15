@@ -24,9 +24,11 @@ class T9ProjectionWmiContractTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_EXPECTED_REVISION:?", self.text)
         self.assertIn("EUF_VIPER_T9_EXPECTED_MANIFEST_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_CARGO_SHA256:?", self.text)
+        self.assertIn("EUF_VIPER_RUSTC_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_PYTHON_SHA256:?", self.text)
         self.assertIn("git status --porcelain=v1 --untracked-files=no", self.text)
         self.assertIn("manifest SHA-256 mismatch", self.text)
+        self.assertIn("rustc version mismatch", self.text)
 
     def test_census_is_no_sat_and_requires_independent_audit(self) -> None:
         self.assertIn("run_t9_projection_census.py", self.text)

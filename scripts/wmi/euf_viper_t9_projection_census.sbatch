@@ -25,6 +25,9 @@ EXPECTED_SOURCES="${EUF_VIPER_T9_EXPECTED_SOURCES:-7503}"
 CARGO="${EUF_VIPER_CARGO:?set absolute cargo path}"
 CARGO_SHA256="${EUF_VIPER_CARGO_SHA256:?set cargo SHA-256}"
 CARGO_VERSION="${EUF_VIPER_CARGO_VERSION:?set exact cargo version}"
+RUSTC="${EUF_VIPER_RUSTC:?set absolute rustc path}"
+RUSTC_SHA256="${EUF_VIPER_RUSTC_SHA256:?set rustc SHA-256}"
+RUSTC_VERSION="${EUF_VIPER_RUSTC_VERSION:?set exact rustc version}"
 PYTHON="${EUF_VIPER_PYTHON:?set absolute Python path}"
 PYTHON_SHA256="${EUF_VIPER_PYTHON_SHA256:?set Python SHA-256}"
 PYTHON_VERSION="${EUF_VIPER_PYTHON_VERSION:?set exact Python version}"
@@ -55,6 +58,10 @@ canonical_sha256 "$CARGO_SHA256" || {
   echo "EUF_VIPER_CARGO_SHA256 is not canonical" >&2
   exit 2
 }
+canonical_sha256 "$RUSTC_SHA256" || {
+  echo "EUF_VIPER_RUSTC_SHA256 is not canonical" >&2
+  exit 2
+}
 canonical_sha256 "$PYTHON_SHA256" || {
   echo "EUF_VIPER_PYTHON_SHA256 is not canonical" >&2
   exit 2
@@ -65,14 +72,14 @@ case "$EXPECTED_SOURCES" in
     exit 2
     ;;
 esac
-case "$CARGO:$PYTHON" in
-  /*:/*) ;;
+case "$CARGO:$RUSTC:$PYTHON" in
+  /*:/*:/*) ;;
   *)
-    echo "cargo and Python paths must be absolute" >&2
+    echo "cargo, rustc, and Python paths must be absolute" >&2
     exit 2
     ;;
 esac
-for tool in "$CARGO" "$PYTHON"; do
+for tool in "$CARGO" "$RUSTC" "$PYTHON"; do
   if [ ! -x "$tool" ]; then
     echo "required executable is missing: $tool" >&2
     exit 2
@@ -82,12 +89,20 @@ if [ "$(sha256sum "$CARGO" | awk '{print $1}')" != "$CARGO_SHA256" ]; then
   echo "cargo SHA-256 mismatch" >&2
   exit 2
 fi
+if [ "$(sha256sum "$RUSTC" | awk '{print $1}')" != "$RUSTC_SHA256" ]; then
+  echo "rustc SHA-256 mismatch" >&2
+  exit 2
+fi
 if [ "$(sha256sum "$PYTHON" | awk '{print $1}')" != "$PYTHON_SHA256" ]; then
   echo "Python SHA-256 mismatch" >&2
   exit 2
 fi
 if [ "$($CARGO --version)" != "$CARGO_VERSION" ]; then
   echo "cargo version mismatch" >&2
+  exit 2
+fi
+if [ "$($RUSTC --version)" != "$RUSTC_VERSION" ]; then
+  echo "rustc version mismatch" >&2
   exit 2
 fi
 if [ "$($PYTHON --version 2>&1)" != "$PYTHON_VERSION" ]; then
@@ -121,6 +136,7 @@ fi
 RUN_ROOT="$PWD/results/t9-projection-census-${SLURM_JOB_ID}"
 mkdir -p "$RUN_ROOT"
 export CARGO_TARGET_DIR="$RUN_ROOT/target"
+export RUSTC
 "$CARGO" build --locked --all-features --release
 BINARY="$CARGO_TARGET_DIR/release/euf-viper"
 if [ ! -x "$BINARY" ]; then
@@ -196,6 +212,9 @@ payload = {
         "cargo_path": os.environ["EUF_VIPER_CARGO"],
         "cargo_sha256": os.environ["EUF_VIPER_CARGO_SHA256"],
         "cargo_version": os.environ["EUF_VIPER_CARGO_VERSION"],
+        "rustc_path": os.environ["EUF_VIPER_RUSTC"],
+        "rustc_sha256": os.environ["EUF_VIPER_RUSTC_SHA256"],
+        "rustc_version": os.environ["EUF_VIPER_RUSTC_VERSION"],
         "python_path": os.environ["EUF_VIPER_PYTHON"],
         "python_sha256": os.environ["EUF_VIPER_PYTHON_SHA256"],
         "python_version": os.environ["EUF_VIPER_PYTHON_VERSION"],
