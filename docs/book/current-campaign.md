@@ -482,6 +482,17 @@ constants, corpus-manifest regeneration embeds checkout paths, and the exact
 Rust/Slurm consumer still requires manifest v1, 10 sources, and an 8-source
 gate. A separate reviewed v2 consumer revision is required before WMI.
 
+Successor `58aee6e9` generates portable artifact `33a9f001...07c78` and an
+independent review proved that it represents the same exact 12 sources as the
+accepted predecessor. Overrides and non-finite JSON are closed, manifest v2 is
+consumed, and the threshold is mechanically 10-of-12. The commit is published
+only as a diagnostic. Exact-head run `29397378080` is green but supplemental:
+the workflow omits the new T6 Python modules and explicit locked Rust 1.96.
+WMI currently has Rust 1.93 and its attempted 1.96 rustup fetch fails quota;
+toolchain/environment identity, runtime no-follow source opening, and complete
+independent report recomputation also remain open. No projection has run and no
+WMI or promotion decision is authorized.
+
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or
 their oracle headroom is below 10%. The qg7-specific backup is a scalar,

@@ -580,6 +580,15 @@ independent evidence checks, and a frozen family holdout.
   Rust/Slurm consumer still hardcodes manifest v1, 10 sources, and an 8-source
   gate. Do not publish or submit this revision. A separate reviewed consumer
   repair must support v2 and the derived 10-of-12 gate.
+  Successor `58aee6e9` independently reproduces the same 12 sources in portable
+  artifact `33a9f001...07c78`; it removes contract overrides, rejects strict
+  JSON violations, supports manifest v2, and binds the 10-of-12 consumer.
+  Diagnostic publication is allowed and supplemental exact-head run
+  `29397378080` is green, but WMI remains NO-GO. The workflow omits exact T6
+  modules/toolchain pinning; WMI has only Rust 1.93 and a 1.96 rustup install
+  fails quota; ambient build/toolchain identity is underbound; Rust runtime
+  opening follows joined paths; and the final report is not independently
+  recomputed. Projection is still `not_executed` and promotion is false.
 - [ ] Require at least 25% projected CNF reduction on `ceil(4N/5)` frozen
   hard-table cases, which is 10/12 for the current population, and more benefit
   than rejected unconditional quotienting. Derive both `N` and the threshold

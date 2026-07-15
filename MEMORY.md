@@ -1051,3 +1051,11 @@
   and automatically requeued (`Restarts=1`); the first attempt left no final or
   temporary analysis artifact. Accept only a complete restarted audit with
   duplicate-aware accounting. Do not count or reuse the preempted computation.
+- Accept T6 `58aee6e9` artifact
+  `33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78`
+  as the portable representation of the same exact 12-source population; it
+  supersedes `1b3f4e52...05c21` operationally. Projection is not executed and
+  WMI remains NO-GO. Hosted run `29397378080` is green but omits exact T6 tests
+  and locked Rust 1.96. WMI has Rust 1.93 and quota blocks a rustup 1.96 fetch;
+  direct toolchain/environment binding, Rust no-follow opening, and independent
+  report recomputation remain required. Job `146075` is historical hard-10.

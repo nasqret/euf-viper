@@ -1523,6 +1523,15 @@
   stdout is empty and stderr contains only the 97-byte preemption message. The
   preempted attempt is administrative provenance, and all rows remain sealed
   pending complete restarted audit `147308` and official audit `147310`.
+- Independent review accepts T6 diagnostic `58aee6e9`'s portable artifact
+  `33a9f001...07c78` as the same 12-source population as `1b3f4e52...05c21`.
+  Relocated 7,503-row descriptors and physical derivations were byte-identical,
+  while path/source/structure digests stayed fixed. Exact hosted run
+  `29397378080` passed but omits the exact T6 modules and locked 1.96 toolchain.
+  WMI exposes 1.93 and a 1.96 rustup fetch fails quota; toolchain/environment
+  binding, Rust no-follow opening, and report recomputation also block WMI.
+  No projection ran; repair resumed locally and old job `146075` remains
+  historical hard-10 only.
 
 ## Next Entry Template
 
