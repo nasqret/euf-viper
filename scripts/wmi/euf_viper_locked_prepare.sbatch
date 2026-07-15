@@ -393,7 +393,7 @@ python_clean - "$RUN_ROOT/prepare.json" "$VERIFIED_PROVENANCE" \
   "$VIPER_BINARY" "$VIPER_BUILD_FEATURES" "$VIPER_FEATURE_REPORT" "$SLURM_JOB_ID" \
   "${SLURM_SUBMIT_DIR:-}" "$SHARDS" "$SEALED_BUILD_MANIFEST" \
   "$SEALED_BUILD_ATTESTATION" "$SEALED_BUILD_RECEIPT" \
-  "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
+  "$EXECUTION_CLOSURE_MANIFEST" <<'PY_PREPARE_RECEIPT'
 import hashlib
 import json
 import os
@@ -508,7 +508,16 @@ payload = {
     "submission_manifest_sha256": provenance["manifest_sha256"],
     "viper": executable(raw_viper),
 }
-encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+encoded = (
+    json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    + "\n"
+).encode("utf-8")
 descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 try:
     with os.fdopen(descriptor, "wb", closefd=False) as handle:
@@ -522,7 +531,7 @@ try:
     os.fsync(directory)
 finally:
     os.close(directory)
-PY
+PY_PREPARE_RECEIPT
 
 printf 'attempt_id=%s\n' "$ATTEMPT_ID"
 printf 'run_root=%s\n' "$RUN_ROOT"

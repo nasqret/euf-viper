@@ -213,6 +213,11 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                     [1, 1],
                 )
 
+    def test_release_smoke_canonical_json_is_literal_utf8(self) -> None:
+        encoded = SMOKE_MODULE.canonical({"label": "zażółć-α"})
+        self.assertEqual(encoded, b'{"label":"za\xc5\xbc\xc3\xb3\xc5\x82\xc4\x87-\xce\xb1"}\n')
+        self.assertNotIn(b"\\u", encoded)
+
     def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")
         case_text = CLI_CASES.read_text(encoding="ascii")

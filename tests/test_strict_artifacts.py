@@ -133,6 +133,49 @@ class StrictArtifactPublicationTests(unittest.TestCase):
         self.assertFalse(output.exists())
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
 
+    def test_idempotent_post_publish_replacement_is_rejected_without_cleanup(self) -> None:
+        output = self.root / "evidence.json"
+        output.write_bytes(b"publisher\n")
+        output.chmod(0o600)
+
+        def replace() -> None:
+            output.unlink()
+            output.write_bytes(b"replacement\n")
+            output.chmod(0o600)
+
+        with self.assertRaisesRegex(
+            STRICT.StrictArtifactError, "checked staging inode"
+        ):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "idempotent replacement",
+                immutable=True,
+                post_publish=replace,
+            )
+        self.assertEqual(output.read_bytes(), b"replacement\n")
+        self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
+    def test_idempotent_callbacks_preserve_checked_inode(self) -> None:
+        output = self.root / "evidence.json"
+        output.write_bytes(b"publisher\n")
+        output.chmod(0o600)
+        callbacks: list[str] = []
+
+        result = STRICT.atomic_write_nofollow(
+            output,
+            b"publisher\n",
+            "idempotent callbacks",
+            immutable=True,
+            pre_publish=lambda: callbacks.append("before"),
+            post_publish=lambda: callbacks.append("after"),
+        )
+
+        self.assertEqual(result, output.resolve())
+        self.assertEqual(callbacks, ["before", "after"])
+        self.assertEqual(output.read_bytes(), b"publisher\n")
+        self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
     def test_concurrent_immutable_publish_has_one_inode_winner(self) -> None:
         output = self.root / "evidence.json"
         barrier = threading.Barrier(2)

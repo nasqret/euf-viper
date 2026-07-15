@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -470,31 +471,62 @@ def atomic_write_nofollow(
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     descriptor = -1
+    existing_descriptor = -1
     published = False
     complete = False
     staging_metadata: os.stat_result | None = None
     try:
         if immutable:
             try:
-                existing = os.stat(
-                    absolute.name, dir_fd=parent_fd, follow_symlinks=False
+                read_flags = os.O_RDONLY | os.O_NOFOLLOW
+                if hasattr(os, "O_CLOEXEC"):
+                    read_flags |= os.O_CLOEXEC
+                existing_descriptor = os.open(
+                    absolute.name, read_flags, dir_fd=parent_fd
                 )
             except FileNotFoundError:
-                existing = None
-            if existing is not None:
-                if not stat.S_ISREG(existing.st_mode):
+                existing_descriptor = -1
+            except OSError as error:
+                if error.errno == errno.ELOOP:
                     raise StrictArtifactError(
-                        f"{context}: existing artifact is not a regular file"
-                    )
-                if stat.S_IMODE(existing.st_mode) != mode:
+                        f"{context}: existing artifact is a symlink"
+                    ) from error
+                raise
+            if existing_descriptor >= 0:
+                existing_bytes, existing_metadata = read_open_descriptor(
+                    existing_descriptor, f"{context} existing artifact"
+                )
+                if stat.S_IMODE(existing_metadata.st_mode) != mode:
                     raise StrictArtifactError(f"{context}: immutable artifact mode drift")
-                _, existing_bytes = read_regular_nofollow(absolute, context)
                 if existing_bytes != content:
                     raise StrictArtifactError(f"{context}: immutable artifact drift")
+                _require_same_regular_identity(
+                    parent_fd, absolute.name, existing_metadata, context
+                )
                 if pre_publish is not None:
                     pre_publish()
+                _require_same_regular_identity(
+                    parent_fd, absolute.name, existing_metadata, context
+                )
                 if post_publish is not None:
                     post_publish()
+                _require_same_regular_identity(
+                    parent_fd, absolute.name, existing_metadata, context
+                )
+                post_fd, post_fingerprints = _open_directory_chain(
+                    absolute.parent, f"{context} existing parent recheck", create=False
+                )
+                try:
+                    if post_fingerprints != fingerprints:
+                        raise StrictArtifactError(
+                            f"{context}: parent path changed during idempotent publish"
+                        )
+                    _require_same_regular_identity(
+                        post_fd, absolute.name, existing_metadata, context
+                    )
+                finally:
+                    os.close(post_fd)
+                complete = True
                 return absolute
 
         descriptor = os.open(temporary_name, flags, mode, dir_fd=parent_fd)
@@ -593,6 +625,8 @@ def atomic_write_nofollow(
                 pass
         if descriptor >= 0:
             os.close(descriptor)
+        if existing_descriptor >= 0:
+            os.close(existing_descriptor)
         os.close(parent_fd)
 
 

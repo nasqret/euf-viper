@@ -52,6 +52,14 @@ class WmiCertificateScriptTests(unittest.TestCase):
         self.assertLess(text.index("euf-viper-build-features"), text.index("install_solvers.sh"))
         self.assertIn(".certificates-production-evidence", text)
 
+    def test_p0_preparation_receipt_uses_canonical_utf8(self) -> None:
+        text = self.text(P0_PREPARE)
+        self.assertIn("ensure_ascii=False", text)
+        self.assertIn('.encode("utf-8")', text)
+        self.assertNotIn(
+            'json.dumps(payload, sort_keys=True, separators=(",", ":"))', text
+        )
+
     def test_p0_dependents_strictly_revalidate_the_preparation_receipt(self) -> None:
         for path in (P0_SHARD, P0_AUDIT):
             text = self.text(path)
