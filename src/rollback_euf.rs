@@ -6,9 +6,10 @@
 //! parent-use indexing and explanation minimization can be optimized after the
 //! differential gate passes.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use rustc_hash::FxHashSet as HashSet;
+use serde::Serialize;
 
 use super::{SortId, TermArena, TermId, UnionFind, congruence_closure};
 
@@ -75,6 +76,7 @@ pub(crate) enum RollbackEufError {
         left: TermId,
         right: TermId,
     },
+    FactOrdinalOverflow,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,11 +97,15 @@ enum ActiveFact {
         left: TermId,
         right: TermId,
         literal: i32,
+        decision_level: usize,
+        ordinal: u64,
     },
     Disequality {
         left: TermId,
         right: TermId,
         literal: Option<i32>,
+        decision_level: usize,
+        ordinal: u64,
     },
 }
 
@@ -108,6 +114,44 @@ impl ActiveFact {
         match self {
             Self::Equality { literal, .. } => Some(*literal),
             Self::Disequality { literal, .. } => *literal,
+        }
+    }
+
+    fn decision_level(&self) -> usize {
+        match self {
+            Self::Equality { decision_level, .. } | Self::Disequality { decision_level, .. } => {
+                *decision_level
+            }
+        }
+    }
+
+    fn ordinal(&self) -> u64 {
+        match self {
+            Self::Equality { ordinal, .. } | Self::Disequality { ordinal, .. } => *ordinal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct ActiveFactRecord {
+    kind: &'static str,
+    left: TermId,
+    right: TermId,
+    literal: Option<i32>,
+    decision_level: usize,
+    ordinal: u64,
+}
+
+#[cfg(test)]
+impl ActiveFactRecord {
+    pub(crate) fn for_test(literal: i32, decision_level: usize, ordinal: u64) -> Self {
+        Self {
+            kind: "equality",
+            left: 0,
+            right: 1,
+            literal: Some(literal),
+            decision_level,
+            ordinal,
         }
     }
 }
@@ -136,6 +180,66 @@ impl EufConflict {
     pub(crate) fn clause(&self) -> &[i32] {
         &self.clause
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(antecedents: Vec<i32>, clause: Vec<i32>) -> Self {
+        Self {
+            left: 0,
+            right: 0,
+            disequality_literal: None,
+            antecedents,
+            clause,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExplanationForestOrder {
+    Trail,
+    ReverseTrail,
+    IncreasingDecisionLevel,
+    DecreasingDecisionLevel,
+}
+
+impl ExplanationForestOrder {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Trail => "trail",
+            Self::ReverseTrail => "reverse-trail",
+            Self::IncreasingDecisionLevel => "increasing-decision-level",
+            Self::DecreasingDecisionLevel => "decreasing-decision-level",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExplanationCandidate {
+    conflict: EufConflict,
+    forests: Vec<ExplanationForestOrder>,
+}
+
+impl ExplanationCandidate {
+    pub(crate) fn conflict(&self) -> &EufConflict {
+        &self.conflict
+    }
+
+    pub(crate) fn forests(&self) -> &[ExplanationForestOrder] {
+        &self.forests
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(conflict: EufConflict, forest: ExplanationForestOrder) -> Self {
+        Self {
+            conflict,
+            forests: vec![forest],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExplanationCandidatePool {
+    pub(crate) candidates: Vec<ExplanationCandidate>,
+    pub(crate) duplicates: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -187,6 +291,7 @@ pub(crate) struct RollbackEuf<'arena> {
     conflicting_disequalities: Vec<usize>,
     undo: Vec<Undo>,
     levels: Vec<Snapshot>,
+    next_ordinal: u64,
 }
 
 impl<'arena> RollbackEuf<'arena> {
@@ -236,6 +341,7 @@ impl<'arena> RollbackEuf<'arena> {
             conflicting_disequalities: Vec::new(),
             undo: Vec::new(),
             levels: vec![initial],
+            next_ordinal: 0,
         })
     }
 
@@ -279,11 +385,15 @@ impl<'arena> RollbackEuf<'arena> {
     ) -> Result<Option<EufConflict>, RollbackEufError> {
         self.validate_pair(left, right)?;
         self.validate_fact_capacity()?;
+        let ordinal = self.next_fact_ordinal()?;
         self.active_facts.push(ActiveFact::Disequality {
             left,
             right,
             literal: None,
+            decision_level: self.level(),
+            ordinal: self.next_ordinal,
         });
+        self.next_ordinal = ordinal;
         self.register_disequality(left, right, None);
         self.current_conflict()
     }
@@ -297,17 +407,21 @@ impl<'arena> RollbackEuf<'arena> {
         self.validate_pair(left, right)?;
         self.validate_fact_capacity()?;
         self.validate_new_literal(literal)?;
+        let ordinal = self.next_fact_ordinal()?;
         let snapshot = self.snapshot();
         self.literal_variables.insert(literal.unsigned_abs());
         self.active_facts.push(ActiveFact::Equality {
             left,
             right,
             literal,
+            decision_level: self.level(),
+            ordinal: self.next_ordinal,
         });
         if let Err(error) = self.merge_closure(left, right, EqualityReason::Literal(literal)) {
             self.restore(snapshot);
             return Err(error);
         }
+        self.next_ordinal = ordinal;
         self.current_conflict()
     }
 
@@ -320,12 +434,16 @@ impl<'arena> RollbackEuf<'arena> {
         self.validate_pair(left, right)?;
         self.validate_fact_capacity()?;
         self.validate_new_literal(literal)?;
+        let ordinal = self.next_fact_ordinal()?;
         self.literal_variables.insert(literal.unsigned_abs());
         self.active_facts.push(ActiveFact::Disequality {
             left,
             right,
             literal: Some(literal),
+            decision_level: self.level(),
+            ordinal: self.next_ordinal,
         });
+        self.next_ordinal = ordinal;
         self.register_disequality(left, right, Some(literal));
         self.current_conflict()
     }
@@ -393,6 +511,132 @@ impl<'arena> RollbackEuf<'arena> {
         }
         congruence_closure(self.arena, &mut uf);
         uf.find(selected_disequality.left) == uf.find(selected_disequality.right)
+    }
+
+    pub(crate) fn active_fact_records(&self) -> Vec<ActiveFactRecord> {
+        self.active_facts
+            .iter()
+            .map(|fact| match fact {
+                ActiveFact::Equality {
+                    left,
+                    right,
+                    literal,
+                    decision_level,
+                    ordinal,
+                } => ActiveFactRecord {
+                    kind: "equality",
+                    left: *left,
+                    right: *right,
+                    literal: Some(*literal),
+                    decision_level: *decision_level,
+                    ordinal: *ordinal,
+                },
+                ActiveFact::Disequality {
+                    left,
+                    right,
+                    literal,
+                    decision_level,
+                    ordinal,
+                } => ActiveFactRecord {
+                    kind: "disequality",
+                    left: *left,
+                    right: *right,
+                    literal: *literal,
+                    decision_level: *decision_level,
+                    ordinal: *ordinal,
+                },
+            })
+            .collect()
+    }
+
+    pub(crate) fn literal_decision_level(&self, literal: i32) -> Option<usize> {
+        self.active_facts
+            .iter()
+            .find(|fact| fact.literal() == Some(literal))
+            .map(ActiveFact::decision_level)
+    }
+
+    pub(crate) fn explanation_candidates(
+        &self,
+        conflict: &EufConflict,
+    ) -> Result<ExplanationCandidatePool, RollbackEufError> {
+        let target = self
+            .disequalities
+            .iter()
+            .find(|disequality| {
+                disequality.left == conflict.left
+                    && disequality.right == conflict.right
+                    && disequality.literal == conflict.disequality_literal
+            })
+            .ok_or(RollbackEufError::MissingExplanationPath {
+                left: conflict.left,
+                right: conflict.right,
+            })?;
+        let equality_facts: Vec<&ActiveFact> = self
+            .active_facts
+            .iter()
+            .filter(|fact| matches!(fact, ActiveFact::Equality { .. }))
+            .collect();
+        let orders = [
+            ExplanationForestOrder::Trail,
+            ExplanationForestOrder::ReverseTrail,
+            ExplanationForestOrder::IncreasingDecisionLevel,
+            ExplanationForestOrder::DecreasingDecisionLevel,
+        ];
+        let mut candidates = Vec::<ExplanationCandidate>::new();
+        let mut by_clause = BTreeMap::<Vec<i32>, usize>::new();
+        let mut duplicates = 0usize;
+        for order in orders {
+            let mut ordered = equality_facts.clone();
+            match order {
+                ExplanationForestOrder::Trail => {
+                    ordered.sort_by_key(|fact| fact.ordinal());
+                }
+                ExplanationForestOrder::ReverseTrail => {
+                    ordered.sort_by(|left, right| right.ordinal().cmp(&left.ordinal()));
+                }
+                ExplanationForestOrder::IncreasingDecisionLevel => {
+                    ordered.sort_by_key(|fact| (fact.decision_level(), fact.ordinal()));
+                }
+                ExplanationForestOrder::DecreasingDecisionLevel => {
+                    ordered.sort_by(|left, right| {
+                        right
+                            .decision_level()
+                            .cmp(&left.decision_level())
+                            .then_with(|| left.ordinal().cmp(&right.ordinal()))
+                    });
+                }
+            }
+            let mut forest = RollbackEuf::new(self.arena, self.limits)?;
+            for fact in ordered {
+                let ActiveFact::Equality {
+                    left,
+                    right,
+                    literal,
+                    ..
+                } = fact
+                else {
+                    unreachable!("equality facts were filtered")
+                };
+                forest.assert_equality(*left, *right, *literal)?;
+            }
+            let reconstructed = forest.make_conflict(target)?;
+            if let Some(&index) = by_clause.get(reconstructed.clause()) {
+                candidates[index].forests.push(order);
+                duplicates = duplicates.saturating_add(1);
+            } else {
+                let index = candidates.len();
+                by_clause.insert(reconstructed.clause().to_vec(), index);
+                candidates.push(ExplanationCandidate {
+                    conflict: reconstructed,
+                    forests: vec![order],
+                });
+            }
+        }
+        Ok(ExplanationCandidatePool {
+            candidates,
+            duplicates,
+        })
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -500,6 +744,12 @@ impl<'arena> RollbackEuf<'arena> {
             return Err(RollbackEufError::DuplicateLiteralVariable(variable));
         }
         Ok(())
+    }
+
+    fn next_fact_ordinal(&self) -> Result<u64, RollbackEufError> {
+        self.next_ordinal
+            .checked_add(1)
+            .ok_or(RollbackEufError::FactOrdinalOverflow)
     }
 
     fn root(&self, mut term: TermId) -> TermId {
@@ -952,6 +1202,106 @@ mod tests {
                 current: 0
             })
         ));
+    }
+
+    fn diamond_arena() -> (TermArena, [TermId; 4]) {
+        let mut arena = TermArena::default();
+        let sort = SortId(1);
+        let terms = [
+            arena.intern_typed(1, vec![], sort),
+            arena.intern_typed(2, vec![], sort),
+            arena.intern_typed(3, vec![], sort),
+            arena.intern_typed(4, vec![], sort),
+        ];
+        (arena, terms)
+    }
+
+    #[test]
+    fn four_reconstructed_forests_deduplicate_to_equivalent_clauses() {
+        let (arena, [a, b, c, d]) = diamond_arena();
+        let mut euf = RollbackEuf::new(&arena, RollbackEufLimits::default()).unwrap();
+        euf.push_level();
+        assert_eq!(euf.assert_equality(a, b, 1).unwrap(), None);
+        assert_eq!(euf.assert_equality(b, d, 2).unwrap(), None);
+        euf.push_level();
+        assert_eq!(euf.assert_equality(a, c, 3).unwrap(), None);
+        assert_eq!(euf.assert_equality(c, d, 4).unwrap(), None);
+        let conflict = euf.assert_disequality(a, d, -5).unwrap().unwrap();
+
+        let pool = euf.explanation_candidates(&conflict).unwrap();
+        assert_eq!(pool.candidates.len(), 2);
+        assert_eq!(pool.duplicates, 2);
+        assert_eq!(
+            pool.candidates
+                .iter()
+                .map(|candidate| candidate.conflict().clause().to_vec())
+                .collect::<Vec<_>>(),
+            vec![vec![-2, -1, 5], vec![-4, -3, 5]]
+        );
+        assert_eq!(
+            pool.candidates
+                .iter()
+                .map(|candidate| candidate.forests().len())
+                .sum::<usize>(),
+            4
+        );
+        assert!(
+            pool.candidates
+                .iter()
+                .all(|candidate| euf.replay_conflict(candidate.conflict()))
+        );
+    }
+
+    #[test]
+    fn generated_level_splits_preserve_candidate_equivalence_and_width_bounds() {
+        for split in 0..=4 {
+            let (arena, [a, b, c, d]) = diamond_arena();
+            let facts = [(a, b, 1), (b, d, 2), (a, c, 3), (c, d, 4)];
+            let mut euf = RollbackEuf::new(&arena, RollbackEufLimits::default()).unwrap();
+            euf.push_level();
+            for (index, &(left, right, literal)) in facts.iter().enumerate() {
+                if index == split {
+                    euf.push_level();
+                }
+                assert_eq!(euf.assert_equality(left, right, literal).unwrap(), None);
+            }
+            let conflict = euf.assert_disequality(a, d, -5).unwrap().unwrap();
+            let pool = euf.explanation_candidates(&conflict).unwrap();
+            assert!(!pool.candidates.is_empty(), "split={split}");
+            assert!(pool.candidates.len() <= 4, "split={split}");
+            for candidate in &pool.candidates {
+                assert!(euf.replay_conflict(candidate.conflict()), "split={split}");
+                assert!(candidate.conflict().clause().len() <= 3, "split={split}");
+            }
+        }
+    }
+
+    #[test]
+    fn rollback_removes_stale_fact_metadata_without_reusing_ordinals() {
+        let (arena, [a, b, c, _d]) = diamond_arena();
+        let mut euf = RollbackEuf::new(&arena, RollbackEufLimits::default()).unwrap();
+        euf.push_level();
+        assert_eq!(euf.assert_equality(a, b, 1).unwrap(), None);
+        euf.push_level();
+        assert_eq!(euf.assert_equality(b, c, 2).unwrap(), None);
+        euf.rollback_to(1).unwrap();
+        assert_eq!(euf.assert_equality(a, c, 3).unwrap(), None);
+
+        assert_eq!(euf.active_facts.len(), 2);
+        assert_eq!(euf.active_facts[0].literal(), Some(1));
+        assert_eq!(euf.active_facts[0].decision_level(), 1);
+        assert_eq!(euf.active_facts[0].ordinal(), 0);
+        assert_eq!(euf.active_facts[1].literal(), Some(3));
+        assert_eq!(euf.active_facts[1].decision_level(), 1);
+        assert_eq!(euf.active_facts[1].ordinal(), 2);
+        assert_eq!(euf.literal_decision_level(2), None);
+
+        let conflict = euf.assert_disequality(b, c, -4).unwrap().unwrap();
+        let pool = euf.explanation_candidates(&conflict).unwrap();
+        assert!(pool.candidates.iter().all(|candidate| {
+            !candidate.conflict().antecedents().contains(&2)
+                && euf.replay_conflict(candidate.conflict())
+        }));
     }
 
     #[derive(Clone, Copy)]

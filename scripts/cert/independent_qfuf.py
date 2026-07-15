@@ -1046,8 +1046,16 @@ class _Builder:
 
 
 class _Encoder:
-    def __init__(self, builder: _Builder) -> None:
+    def __init__(
+        self,
+        builder: _Builder,
+        *,
+        direct_root_cnf: bool = False,
+        direct_negated_root: bool = False,
+    ) -> None:
         self.builder = builder
+        self.direct_root_cnf = direct_root_cnf
+        self.direct_negated_root = direct_negated_root
         self.clauses: list[tuple[int, ...]] = []
         self.var_atoms: list[_AtomKey | None] = [None]
         self.atom_vars: dict[_AtomKey, int] = {}
@@ -1156,12 +1164,103 @@ class _Encoder:
             return variable
         raise IndependentQfufError(f"unknown internal Boolean operator `{expression.op}`")
 
+    def _add_direct_assertion(
+        self, expression: BoolExpr, *, direct_negated_root: bool
+    ) -> None:
+        if expression.op == "const":
+            if expression.arguments[0] is False:
+                self.clauses.append(())
+            return
+        if expression.op == "atom":
+            self.clauses.append((self._encode(expression),))
+            return
+        if expression.op == "not":
+            child = expression.arguments[0]
+            if not isinstance(child, BoolExpr):
+                raise IndependentQfufError("internal not expression is malformed")
+            if direct_negated_root:
+                self._add_direct_negated_assertion(child)
+            else:
+                self.clauses.append((-self._encode(child),))
+            return
+        children = expression.arguments
+        if not all(isinstance(child, BoolExpr) for child in children):
+            raise IndependentQfufError(
+                f"internal `{expression.op}` expression is malformed"
+            )
+        typed_children = tuple(child for child in children if isinstance(child, BoolExpr))
+        if expression.op == "and":
+            for child in typed_children:
+                self._add_direct_assertion(
+                    child, direct_negated_root=direct_negated_root
+                )
+            return
+        if expression.op == "or":
+            self.clauses.append(tuple(self._encode(child) for child in typed_children))
+            return
+        if expression.op == "iff":
+            if not typed_children:
+                return
+            first = self._encode(typed_children[0])
+            for child in typed_children[1:]:
+                other = self._encode(child)
+                self.clauses.append((-first, other))
+                self.clauses.append((first, -other))
+            return
+        if expression.op == "ite":
+            if len(typed_children) != 3:
+                raise IndependentQfufError("internal ite expression has invalid arity")
+            condition = self._encode(typed_children[0])
+            then_lit = self._encode(typed_children[1])
+            else_lit = self._encode(typed_children[2])
+            self.clauses.append((-condition, then_lit))
+            self.clauses.append((condition, else_lit))
+            return
+        raise IndependentQfufError(f"unknown internal Boolean operator `{expression.op}`")
+
+    def _add_direct_negated_assertion(self, expression: BoolExpr) -> None:
+        if expression.op == "const":
+            if expression.arguments[0] is True:
+                self.clauses.append(())
+            return
+        if expression.op == "atom":
+            self.clauses.append((-self._encode(expression),))
+            return
+        if expression.op == "not":
+            child = expression.arguments[0]
+            if not isinstance(child, BoolExpr):
+                raise IndependentQfufError("internal not expression is malformed")
+            self._add_direct_assertion(child, direct_negated_root=True)
+            return
+        children = expression.arguments
+        if not all(isinstance(child, BoolExpr) for child in children):
+            raise IndependentQfufError(
+                f"internal `{expression.op}` expression is malformed"
+            )
+        typed_children = tuple(child for child in children if isinstance(child, BoolExpr))
+        if expression.op == "and":
+            self.clauses.append(tuple(-self._encode(child) for child in typed_children))
+            return
+        if expression.op == "or":
+            for child in typed_children:
+                self._add_direct_negated_assertion(child)
+            return
+        if expression.op in {"iff", "ite"}:
+            self.clauses.append((-self._encode(expression),))
+            return
+        raise IndependentQfufError(f"unknown internal Boolean operator `{expression.op}`")
+
     def finish(self) -> EncodedProblem:
         for term in sorted(self.builder.bool_data_terms):
             self._atom_lit(_AtomKey("bool_term", term=term))
         for assertion in self.builder.assertions:
-            root = self._encode(assertion)
-            self.clauses.append((root,))
+            if self.direct_root_cnf:
+                self._add_direct_assertion(
+                    assertion, direct_negated_root=self.direct_negated_root
+                )
+            else:
+                root = self._encode(assertion)
+                self.clauses.append((root,))
 
         atoms: list[Atom] = []
         for variable, key in enumerate(self.var_atoms[1:], start=1):
@@ -1188,7 +1287,12 @@ class _Encoder:
         )
 
 
-def parse_and_encode(source: str) -> EncodedProblem:
+def parse_and_encode(
+    source: str,
+    *,
+    direct_root_cnf: bool = False,
+    direct_negated_root: bool = False,
+) -> EncodedProblem:
     """Parse one QF_UF query and reconstruct its canonical base CNF."""
 
     if not isinstance(source, str):
@@ -1196,7 +1300,11 @@ def parse_and_encode(source: str) -> EncodedProblem:
     try:
         builder = _Builder()
         builder.parse(_parse_sexps(source))
-        return _Encoder(builder).finish()
+        return _Encoder(
+            builder,
+            direct_root_cnf=direct_root_cnf,
+            direct_negated_root=direct_negated_root,
+        ).finish()
     except IndependentQfufError:
         raise
     except RecursionError as error:

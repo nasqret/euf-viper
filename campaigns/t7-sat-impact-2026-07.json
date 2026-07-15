@@ -1,0 +1,86 @@
+{
+  "arms": {
+    "off": {
+      "EUF_VIPER_BACKEND": "cadical-rollback",
+      "EUF_VIPER_T7_EXPLANATION": "off"
+    },
+    "on": {
+      "EUF_VIPER_BACKEND": "cadical-rollback",
+      "EUF_VIPER_T7_EXPLANATION": "on"
+    }
+  },
+  "base_revision": "6e402f0a9595bd3f9c1ba99ea193bf237474d9f7",
+  "candidate_pool": {
+    "forests": [
+      "trail",
+      "reverse-trail",
+      "increasing-decision-level",
+      "decreasing-decision-level"
+    ],
+    "maximum_forests": 4,
+    "width_policy": "shared-minimum-width"
+  },
+  "gates": {
+    "a12_no_coverage_loss": true,
+    "a12_p95_on_over_off_max": 1.1,
+    "forbidden_counts": [
+      "wrong",
+      "error",
+      "missing",
+      "replay_failure",
+      "certificate_failure",
+      "fallback",
+      "off_only_solve"
+    ],
+    "m3_min_reduction": 0.2,
+    "m3_reduction_metrics_any": [
+      "validations",
+      "propagations"
+    ],
+    "minimum_disagreements": 1,
+    "selector_total_fraction_max_exclusive": 0.05,
+    "t9_geometric_speed_min": 1.1,
+    "t9_paired_correct_required": true
+  },
+  "opportunity_gate": {
+    "minimum_qualifying_sources": 2,
+    "one_pass": true,
+    "population": "M3",
+    "qualification": "conflict with at least two distinct replay-valid minimum-width candidates and off/on disagreement",
+    "sources": [
+      "QF_UF/2018-Goel-hwbench/QF_UF_peg_solitaire.2.prop1_ab_br_max.smt2",
+      "QF_UF/2018-Goel-hwbench/QF_UF_peg_solitaire.4.prop1_ab_br_max.smt2",
+      "QF_UF/2018-Goel-hwbench/QF_UF_sokoban.3.prop1_ab_reg_max.smt2"
+    ]
+  },
+  "ordering": "ABBA",
+  "proof_contract": {
+    "sat": "independent direct base-CNF and EUF model validation",
+    "unsat": "independent EUF validation for every candidate plus per-distinct base-CNF-selected-suffix DRAT"
+  },
+  "repeats_per_arm": 4,
+  "schema_version": "t7-sat-impact-contract-v1",
+  "selectors": {
+    "historical_reuse": "sum of prior on-shadow selections of each signed candidate literal",
+    "off": ["lexical_clause"],
+    "on": [
+      "lbd",
+      "current_level_literal_count",
+      "second_highest_level",
+      "negative_historical_reuse",
+      "lexical_clause"
+    ]
+  },
+  "stages": {
+    "canary": {
+      "expected_observations": 32,
+      "selection": "all M3 plus lexical-min A12",
+      "sources": 4
+    },
+    "full": {
+      "expected_observations": 192,
+      "selection": "complete fresh T7 manifest",
+      "sources": 24
+    }
+  }
+}

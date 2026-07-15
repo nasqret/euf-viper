@@ -8,6 +8,9 @@ use std::time::Instant;
 use super::{
     BoolAtomKey, CnfProblem, TermArena, TermId, UnionFind, congruence_closure,
     rollback_euf::{EufConflict, RollbackEuf, RollbackEufError, RollbackEufLimits},
+    t7_explanation::{
+        T7ExperimentConfig, T7RunSummary, T7Selector, T7Telemetry, TranscriptReceipt,
+    },
 };
 
 const DEFAULT_MAX_CONFLICTS: usize = 10_000;
@@ -25,10 +28,12 @@ pub(crate) enum RollbackPropagatorBuildError {
     ObservedVariableLimitExceeded { variables: usize, limit: usize },
     Core(RollbackEufError),
     InitialTheoryConflict,
+    T7Telemetry(String),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RollbackPropagatorStats {
+    pub(crate) t7_enabled: bool,
     pub(crate) assignments: usize,
     pub(crate) decision_levels: usize,
     pub(crate) backtracks: usize,
@@ -36,6 +41,19 @@ pub(crate) struct RollbackPropagatorStats {
     pub(crate) repeated_assignment_conflicts: usize,
     pub(crate) model_checks: usize,
     pub(crate) model_check_time_ns: u128,
+    pub(crate) theory_conflicts: usize,
+    pub(crate) candidate_duplicates: usize,
+    pub(crate) disagreements: usize,
+    pub(crate) candidate_replays: usize,
+    pub(crate) replay_failures: usize,
+    pub(crate) candidate_build_time_ns: u128,
+    pub(crate) candidate_score_time_ns: u128,
+    pub(crate) candidate_replay_time_ns: u128,
+}
+
+struct T7State {
+    selector: T7Selector,
+    telemetry: T7Telemetry,
 }
 
 pub(crate) struct RollbackEufPropagator<'arena> {
@@ -44,10 +62,11 @@ pub(crate) struct RollbackEufPropagator<'arena> {
     observed: Vec<Var>,
     true_term: TermId,
     false_term: TermId,
-    pending_clause: Option<(Vec<i32>, ExternalClause)>,
+    pending_clause: Option<(Vec<i32>, ExternalClause, Option<usize>)>,
     emitted_clauses: HashSet<Vec<i32>>,
     max_conflicts: usize,
     stats: RollbackPropagatorStats,
+    t7: Option<T7State>,
 }
 
 impl<'arena> RollbackEufPropagator<'arena> {
@@ -57,6 +76,28 @@ impl<'arena> RollbackEufPropagator<'arena> {
         true_term: TermId,
         false_term: TermId,
         limits: RollbackEufLimits,
+    ) -> Result<Self, RollbackPropagatorBuildError> {
+        Self::from_cnf_internal(arena, cnf, true_term, false_term, limits, None)
+    }
+
+    pub(crate) fn from_cnf_with_t7(
+        arena: &'arena TermArena,
+        cnf: &CnfProblem,
+        true_term: TermId,
+        false_term: TermId,
+        limits: RollbackEufLimits,
+        config: T7ExperimentConfig,
+    ) -> Result<Self, RollbackPropagatorBuildError> {
+        Self::from_cnf_internal(arena, cnf, true_term, false_term, limits, Some(config))
+    }
+
+    fn from_cnf_internal(
+        arena: &'arena TermArena,
+        cnf: &CnfProblem,
+        true_term: TermId,
+        false_term: TermId,
+        limits: RollbackEufLimits,
+        t7_config: Option<T7ExperimentConfig>,
     ) -> Result<Self, RollbackPropagatorBuildError> {
         let observed_count = cnf.var_atoms.iter().flatten().count();
         if observed_count > DEFAULT_MAX_OBSERVED_VARIABLES {
@@ -100,6 +141,20 @@ impl<'arena> RollbackEufPropagator<'arena> {
         {
             return Err(RollbackPropagatorBuildError::InitialTheoryConflict);
         }
+        let t7 = if let Some(config) = t7_config {
+            let clauses: Vec<Vec<i32>> = cnf.clauses.iter().map(<[i32]>::to_vec).collect();
+            Some(T7State {
+                selector: T7Selector::new(config.mode),
+                telemetry: T7Telemetry::new(&config, cnf.var_count(), &clauses)
+                    .map_err(RollbackPropagatorBuildError::T7Telemetry)?,
+            })
+        } else {
+            None
+        };
+        let stats = RollbackPropagatorStats {
+            t7_enabled: t7.is_some(),
+            ..RollbackPropagatorStats::default()
+        };
         Ok(Self {
             engine,
             atoms,
@@ -109,7 +164,8 @@ impl<'arena> RollbackEufPropagator<'arena> {
             pending_clause: None,
             emitted_clauses: HashSet::default(),
             max_conflicts: DEFAULT_MAX_CONFLICTS,
-            stats: RollbackPropagatorStats::default(),
+            stats,
+            t7,
         })
     }
 
@@ -119,6 +175,16 @@ impl<'arena> RollbackEufPropagator<'arena> {
 
     pub(crate) fn stats(&self) -> RollbackPropagatorStats {
         self.stats
+    }
+
+    pub(crate) fn finish_t7(
+        &self,
+        summary: &T7RunSummary,
+    ) -> Result<Option<TranscriptReceipt>, String> {
+        match &self.t7 {
+            Some(t7) => t7.telemetry.finish(summary),
+            None => Ok(None),
+        }
     }
 
     fn atom(&self, literal: Lit) -> PropagatorResult<TheoryAtom> {
@@ -138,16 +204,20 @@ impl<'arena> RollbackEufPropagator<'arena> {
         conflict: EufConflict,
         assignment_callback: bool,
     ) -> PropagatorResult<()> {
-        if self.pending_clause.is_some() {
+        if self.t7.is_none() && self.pending_clause.is_some() {
             return Ok(());
         }
-        if !self.engine.replay_conflict(&conflict) {
-            return Err(PropagatorAbort::new(
-                "rollback EUF conflict failed independent replay",
-            ));
+        if self.t7.is_some() {
+            self.stats.theory_conflicts = self.stats.theory_conflicts.saturating_add(1);
         }
+        let (conflict, event) = self.select_conflict(conflict)?;
         let clause = conflict.clause().to_vec();
+        if self.pending_clause.is_some() {
+            self.set_t7_disposition(event, "pending-occupied")?;
+            return Ok(());
+        }
         if self.emitted_clauses.contains(&clause) {
+            self.set_t7_disposition(event, "persistent-duplicate")?;
             if assignment_callback {
                 if self.stats.repeated_assignment_conflicts >= self.max_conflicts {
                     return Err(PropagatorAbort::new(format!(
@@ -179,8 +249,112 @@ impl<'arena> RollbackEufPropagator<'arena> {
         let literals = literals.map_err(|_| {
             PropagatorAbort::new("rollback EUF replay produced an invalid DIMACS literal")
         })?;
-        self.pending_clause = Some((clause, ExternalClause::new(literals)));
+        self.set_t7_disposition(event, "queued")?;
+        self.pending_clause = Some((clause, ExternalClause::new(literals), event));
         Ok(())
+    }
+
+    fn select_conflict(
+        &mut self,
+        conflict: EufConflict,
+    ) -> PropagatorResult<(EufConflict, Option<usize>)> {
+        if self.t7.is_none() {
+            if !self.engine.replay_conflict(&conflict) {
+                return Err(PropagatorAbort::new(
+                    "rollback EUF conflict failed independent replay",
+                ));
+            }
+            return Ok((conflict, None));
+        }
+
+        let build_started = Instant::now();
+        let pool = self
+            .engine
+            .explanation_candidates(&conflict)
+            .map_err(core_abort)?;
+        let build_ns = build_started.elapsed().as_nanos();
+        let replay_started = Instant::now();
+        let replay_valid: Vec<bool> = pool
+            .candidates
+            .iter()
+            .map(|candidate| self.engine.replay_conflict(candidate.conflict()))
+            .collect();
+        let replay_ns = replay_started.elapsed().as_nanos();
+        let replay_failures = replay_valid.iter().filter(|&&valid| !valid).count();
+        self.stats.replay_failures = self.stats.replay_failures.saturating_add(replay_failures);
+        if replay_failures != 0 {
+            return Err(PropagatorAbort::new(format!(
+                "T7 reconstructed {replay_failures} explanation candidates that failed replay"
+            )));
+        }
+
+        let score_started = Instant::now();
+        let current_level = self.engine.level();
+        let selection = self
+            .t7
+            .as_mut()
+            .expect("T7 state was checked")
+            .selector
+            .select(
+                &pool.candidates,
+                |literal| self.engine.literal_decision_level(literal),
+                current_level,
+            )
+            .map_err(PropagatorAbort::new)?;
+        let score_ns = score_started.elapsed().as_nanos();
+        let facts = self.engine.active_fact_records();
+        let selected = pool.candidates[selection.selected_index].conflict().clone();
+        let event = self
+            .t7
+            .as_mut()
+            .expect("T7 state was checked")
+            .telemetry
+            .record_conflict(
+                &facts,
+                current_level,
+                &pool.candidates,
+                &replay_valid,
+                &selection,
+                pool.duplicates,
+                build_ns,
+                score_ns,
+                replay_ns,
+            )
+            .map_err(PropagatorAbort::new)?;
+        self.stats.candidate_duplicates = self
+            .stats
+            .candidate_duplicates
+            .saturating_add(pool.duplicates);
+        self.stats.disagreements = self
+            .stats
+            .disagreements
+            .saturating_add(usize::from(selection.disagreement));
+        self.stats.candidate_replays = self
+            .stats
+            .candidate_replays
+            .saturating_add(pool.candidates.len());
+        self.stats.candidate_build_time_ns =
+            self.stats.candidate_build_time_ns.saturating_add(build_ns);
+        self.stats.candidate_score_time_ns =
+            self.stats.candidate_score_time_ns.saturating_add(score_ns);
+        self.stats.candidate_replay_time_ns = self
+            .stats
+            .candidate_replay_time_ns
+            .saturating_add(replay_ns);
+        Ok((selected, Some(event)))
+    }
+
+    fn set_t7_disposition(
+        &mut self,
+        event: Option<usize>,
+        disposition: &'static str,
+    ) -> PropagatorResult<()> {
+        let (Some(t7), Some(event)) = (&mut self.t7, event) else {
+            return Ok(());
+        };
+        t7.telemetry
+            .set_disposition(event, disposition)
+            .map_err(PropagatorAbort::new)
     }
 
     fn apply_literal(&mut self, literal: Lit) -> PropagatorResult<()> {
@@ -259,7 +433,9 @@ impl ExternalPropagator for RollbackEufPropagator<'_> {
 
     fn notify_backtrack(&mut self, new_level: usize) -> PropagatorResult<()> {
         self.engine.rollback_to(new_level).map_err(core_abort)?;
-        self.pending_clause = None;
+        if let Some((_, _, event)) = self.pending_clause.take() {
+            self.set_t7_disposition(event, "preempted")?;
+        }
         self.stats.backtracks = self.stats.backtracks.saturating_add(1);
         Ok(())
     }
@@ -287,14 +463,16 @@ impl ExternalPropagator for RollbackEufPropagator<'_> {
     }
 
     fn external_clause(&mut self) -> PropagatorResult<Option<ExternalClause>> {
-        let Some((key, clause)) = self.pending_clause.take() else {
+        let Some((key, clause, event)) = self.pending_clause.take() else {
             return Ok(None);
         };
         if !self.emitted_clauses.insert(key) {
+            self.set_t7_disposition(event, "handoff-duplicate")?;
             return Err(PropagatorAbort::new(
                 "rollback EUF emitted a duplicate no-progress conflict",
             ));
         }
+        self.set_t7_disposition(event, "emitted")?;
         self.stats.conflicts = self.stats.conflicts.saturating_add(1);
         Ok(Some(clause))
     }

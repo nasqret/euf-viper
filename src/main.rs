@@ -29,6 +29,7 @@ mod rollback_euf;
 mod rollback_propagator;
 #[cfg(test)]
 mod stabilizer_order;
+mod t7_explanation;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
@@ -39,7 +40,9 @@ use rustsat::solvers::{
 use rustsat::types::{Clause as RustSatClause, Lit as RustSatLit, TernaryVal};
 #[cfg(feature = "certificates")]
 use rustsat_cadical::ProofFormat as CadicalProofFormat;
-use rustsat_cadical::{CaDiCaL as CadicalSolver, Config as CadicalConfig};
+use rustsat_cadical::{
+    CaDiCaL as CadicalSolver, Config as CadicalConfig, Statistic as CadicalStatistic,
+};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver};
 #[cfg(feature = "certificates")]
@@ -4834,6 +4837,7 @@ fn solve_cadical_rollback_euf(
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
+    t7_config: Option<t7_explanation::T7ExperimentConfig>,
 ) -> Result<(SolveResult, rollback_propagator::RollbackPropagatorStats), String> {
     let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
@@ -4847,13 +4851,23 @@ fn solve_cadical_rollback_euf(
     profile_phase("cadical_rollback_base_load", load_start, cnf.clauses.len());
 
     let build_start = Instant::now();
-    let mut propagator = rollback_propagator::RollbackEufPropagator::from_cnf(
-        arena,
-        cnf,
-        true_term,
-        false_term,
-        rollback_euf::RollbackEufLimits::default(),
-    )
+    let mut propagator = match t7_config {
+        Some(config) => rollback_propagator::RollbackEufPropagator::from_cnf_with_t7(
+            arena,
+            cnf,
+            true_term,
+            false_term,
+            rollback_euf::RollbackEufLimits::default(),
+            config,
+        ),
+        None => rollback_propagator::RollbackEufPropagator::from_cnf(
+            arena,
+            cnf,
+            true_term,
+            false_term,
+            rollback_euf::RollbackEufLimits::default(),
+        ),
+    }
     .map_err(|error| format!("failed to build rollback propagator: {error:?}"))?;
     let observed = propagator.observed_variables().to_vec();
     profile_phase("cadical_rollback_build", build_start, observed.len());
@@ -4885,7 +4899,25 @@ fn solve_cadical_rollback_euf(
         .map_err(|error| format!("CaDiCaL rollback solve failed: {error}"))?;
     profile_phase("cadical_rollback_solve", solve_start, 1);
     let stats = propagator.stats();
+    let (sat_decisions, sat_propagations, sat_conflicts) = if stats.t7_enabled {
+        (
+            solver.get_statistic(CadicalStatistic::Decisions),
+            solver.get_statistic(CadicalStatistic::Propagations),
+            solver.get_statistic(CadicalStatistic::Conflicts),
+        )
+    } else {
+        (0, 0, 0)
+    };
     profile_cadical_rollback_stats(stats);
+    if stats.t7_enabled {
+        profile_measurement("cadical_rollback_sat_decisions", 0, sat_decisions as usize);
+        profile_measurement(
+            "cadical_rollback_sat_propagations",
+            0,
+            sat_propagations as usize,
+        );
+        profile_measurement("cadical_rollback_sat_conflicts", 0, sat_conflicts as usize);
+    }
     match result {
         RustSatResult::Unsat => {
             profile_measurement(
@@ -4893,6 +4925,17 @@ fn solve_cadical_rollback_euf(
                 stats.model_check_time_ns,
                 stats.model_checks,
             );
+            if stats.t7_enabled {
+                finish_t7_run(
+                    &propagator,
+                    "unsat",
+                    sat_decisions,
+                    sat_propagations,
+                    sat_conflicts,
+                    stats.model_checks,
+                    None,
+                )?;
+            }
             Ok((SolveResult::Unsat, stats))
         }
         RustSatResult::Interrupted => Err("CaDiCaL rollback solve was interrupted".to_owned()),
@@ -4913,6 +4956,29 @@ fn solve_cadical_rollback_euf(
                 stats.model_checks.saturating_add(1),
             );
             if conflicts.is_empty() {
+                if stats.t7_enabled {
+                    let final_model = assignment
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .map(|(variable, &value)| {
+                            if value > 0 {
+                                variable as i32
+                            } else {
+                                -(variable as i32)
+                            }
+                        })
+                        .collect();
+                    finish_t7_run(
+                        &propagator,
+                        "sat",
+                        sat_decisions,
+                        sat_propagations,
+                        sat_conflicts,
+                        stats.model_checks.saturating_add(1),
+                        Some(final_model),
+                    )?;
+                }
                 Ok((SolveResult::Sat, stats))
             } else {
                 Err(format!(
@@ -4922,6 +4988,36 @@ fn solve_cadical_rollback_euf(
             }
         }
     }
+}
+
+fn finish_t7_run(
+    propagator: &rollback_propagator::RollbackEufPropagator<'_>,
+    result: &'static str,
+    decisions: u64,
+    propagations: u64,
+    sat_conflicts: u64,
+    validations: usize,
+    final_model: Option<Vec<i32>>,
+) -> Result<(), String> {
+    let stats = propagator.stats();
+    let summary = t7_explanation::T7RunSummary {
+        result,
+        decisions,
+        propagations,
+        sat_conflicts,
+        backtracks: stats.backtracks,
+        theory_conflicts: stats.theory_conflicts,
+        model_checks: stats.model_checks,
+        validations,
+        persistent_duplicates: stats.repeated_assignment_conflicts,
+        fallbacks: 0,
+        final_model,
+    };
+    if let Some(receipt) = propagator.finish_t7(&summary)? {
+        eprintln!("t7_transcript={}", receipt.path.display());
+        eprintln!("t7_chain_sha256={}", receipt.chain_sha256);
+    }
+    Ok(())
 }
 
 fn profile_cadical_rollback_stats(stats: rollback_propagator::RollbackPropagatorStats) {
@@ -4939,6 +5035,39 @@ fn profile_cadical_rollback_stats(stats: rollback_propagator::RollbackPropagator
         stats.model_check_time_ns,
         stats.model_checks,
     );
+    if stats.t7_enabled {
+        profile_measurement(
+            "cadical_rollback_theory_conflicts",
+            0,
+            stats.theory_conflicts,
+        );
+        profile_measurement(
+            "cadical_rollback_t7_candidate_duplicates",
+            0,
+            stats.candidate_duplicates,
+        );
+        profile_measurement("cadical_rollback_t7_disagreements", 0, stats.disagreements);
+        profile_measurement(
+            "cadical_rollback_t7_candidate_build",
+            stats.candidate_build_time_ns,
+            stats.theory_conflicts,
+        );
+        profile_measurement(
+            "cadical_rollback_t7_candidate_score",
+            stats.candidate_score_time_ns,
+            stats.theory_conflicts,
+        );
+        profile_measurement(
+            "cadical_rollback_t7_candidate_replay",
+            stats.candidate_replay_time_ns,
+            stats.candidate_replays,
+        );
+        profile_measurement(
+            "cadical_rollback_t7_replay_failures",
+            0,
+            stats.replay_failures,
+        );
+    }
 }
 
 fn solve_explicit_rollback_backend(
@@ -4947,13 +5076,14 @@ fn solve_explicit_rollback_backend(
     arena: &TermArena,
     true_term: TermId,
     false_term: TermId,
+    t7_config: Option<t7_explanation::T7ExperimentConfig>,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     if backend != "cadical-rollback" {
         return None;
     }
 
     Some(
-        match solve_cadical_rollback_euf(cnf, arena, true_term, false_term) {
+        match solve_cadical_rollback_euf(cnf, arena, true_term, false_term, t7_config) {
             Ok((result, stats)) => (
                 result,
                 cnf.var_count(),
@@ -5515,6 +5645,84 @@ fn solve_dimacs_file(path: &str) -> Result<i32, String> {
     eprintln!("clauses={}", clauses.len());
     eprintln!("elapsed_ns={}", elapsed.as_nanos());
     Ok(exit_code)
+}
+
+#[cfg(feature = "certificates")]
+fn prove_dimacs_file(path: &str, proof: &str) -> Result<i32, String> {
+    let input =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let mut clauses = Vec::new();
+    let mut current_clause = Vec::new();
+    for (line_index, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('c') || line.starts_with('p') {
+            continue;
+        }
+        for token in line.split_whitespace() {
+            if token == "%" {
+                break;
+            }
+            let literal = token.parse::<i32>().map_err(|error| {
+                format!(
+                    "invalid DIMACS token `{token}` on line {}: {error}",
+                    line_index + 1
+                )
+            })?;
+            if literal == 0 {
+                clauses.push(std::mem::take(&mut current_clause));
+            } else {
+                current_clause.push(literal);
+            }
+        }
+    }
+    if !current_clause.is_empty() {
+        return Err("DIMACS input ends before a clause-terminating zero".to_owned());
+    }
+    let proof = Path::new(proof);
+    if proof.exists() {
+        return Err(format!(
+            "refusing to overwrite existing proof {}",
+            proof.display()
+        ));
+    }
+    if let Some(parent) = proof.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    let result = (|| -> Result<RustSatResult, String> {
+        let mut solver = CadicalSolver::default();
+        solver
+            .set_configuration(CadicalConfig::Plain)
+            .map_err(|error| format!("failed to configure proof solver: {error}"))?;
+        solver
+            .trace_proof(proof, CadicalProofFormat::Drat { binary: false })
+            .map_err(|error| format!("failed to open {}: {error}", proof.display()))?;
+        for clause in &clauses {
+            solver
+                .add_clause(rustsat_clause(clause))
+                .map_err(|error| format!("failed to load proof CNF: {error}"))?;
+        }
+        solver
+            .solve()
+            .map_err(|error| format!("CaDiCaL proof run failed: {error}"))
+    })();
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            let _ = fs::remove_file(proof);
+            return Err(error);
+        }
+    };
+    if result != RustSatResult::Unsat {
+        let _ = fs::remove_file(proof);
+        return Err(format!(
+            "proof CNF was expected UNSAT but CaDiCaL returned {result:?}"
+        ));
+    }
+    println!("unsat");
+    eprintln!("proof={}", proof.display());
+    eprintln!("clauses={}", clauses.len());
+    Ok(0)
 }
 
 #[cfg(feature = "certificates")]
@@ -6401,16 +6609,96 @@ fn solve_bool_problem(
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let backend = env::var("EUF_VIPER_BACKEND").unwrap_or_else(|_| "auto".to_owned());
-    solve_bool_problem_with_backend(
+    let t7_mode = match env::var(t7_explanation::T7_EXPLANATION_ENV) {
+        Ok(value) => t7_explanation::parse_explanation_mode(Some(&value)),
+        Err(env::VarError::NotPresent) => t7_explanation::parse_explanation_mode(None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!(
+            "{} must be off or on",
+            t7_explanation::T7_EXPLANATION_ENV
+        )),
+    };
+    let t7_mode = match t7_mode {
+        Ok(mode) => mode,
+        Err(error) => {
+            return Some((
+                SolveResult::Unsupported(vec![format!(
+                    "T7 explanation experiment failed closed: {error}"
+                )]),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ));
+        }
+    };
+    let (selected_backend, t7_config) = if let Some(mode) = t7_mode {
+        if !matches!(backend.as_str(), "auto" | "cadical-rollback") {
+            return Some((
+                SolveResult::Unsupported(vec![format!(
+                    "T7 explanation experiment requires cadical-rollback, not {backend}"
+                )]),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ));
+        }
+        let transcript_path = match env::var(t7_explanation::T7_TRANSCRIPT_ENV) {
+            Ok(path) if !path.is_empty() => Some(std::path::PathBuf::from(path)),
+            Ok(_) => {
+                return Some((
+                    SolveResult::Unsupported(vec![format!(
+                        "{} cannot be empty",
+                        t7_explanation::T7_TRANSCRIPT_ENV
+                    )]),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ));
+            }
+            Err(env::VarError::NotPresent) => None,
+            Err(env::VarError::NotUnicode(_)) => {
+                return Some((
+                    SolveResult::Unsupported(vec![format!(
+                        "{} must be a valid path",
+                        t7_explanation::T7_TRANSCRIPT_ENV
+                    )]),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ));
+            }
+        };
+        (
+            "cadical-rollback",
+            Some(t7_explanation::T7ExperimentConfig {
+                mode,
+                transcript_path,
+                direct_root_cnf: root_cnf_options.direct_root_cnf,
+                direct_negated_root: root_cnf_options.direct_negated_root,
+            }),
+        )
+    } else {
+        (backend.as_str(), None)
+    };
+    solve_bool_problem_with_backend_and_t7(
         arena,
         bool_problem,
         root_cnf_options,
         requested_eq_abstraction_mode,
         finite_context,
-        &backend,
+        selected_backend,
+        t7_config,
     )
 }
 
+#[cfg(test)]
 fn solve_bool_problem_with_backend(
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -6418,6 +6706,26 @@ fn solve_bool_problem_with_backend(
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
     backend: &str,
+) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
+    solve_bool_problem_with_backend_and_t7(
+        arena,
+        bool_problem,
+        root_cnf_options,
+        requested_eq_abstraction_mode,
+        finite_context,
+        backend,
+        None,
+    )
+}
+
+fn solve_bool_problem_with_backend_and_t7(
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    root_cnf_options: RootCnfOptions,
+    requested_eq_abstraction_mode: EqAbstractionMode,
+    finite_context: &mut finite_analysis::FiniteAnalysisContext,
+    backend: &str,
+    t7_config: Option<t7_explanation::T7ExperimentConfig>,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
@@ -6441,6 +6749,7 @@ fn solve_bool_problem_with_backend(
         arena,
         bool_problem.true_term,
         bool_problem.false_term,
+        t7_config,
     ) {
         return Some(result);
     }
@@ -7363,6 +7672,7 @@ fn usage() -> &'static str {
   euf-viper stats FILE
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
+  euf-viper prove-dimacs FILE --proof PATH
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -7405,6 +7715,12 @@ fn run() -> Result<i32, String> {
         "solve-dimacs" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             solve_dimacs_file(file)
+        }
+        #[cfg(feature = "certificates")]
+        "prove-dimacs" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            let proof = parse_required_flag(&args[3..], "--proof")?;
+            prove_dimacs_file(file, proof)
         }
         #[cfg(feature = "certificates")]
         "certify" => {
@@ -9645,6 +9961,7 @@ mod tests {
             &problem.arena,
             bool_problem.true_term,
             bool_problem.false_term,
+            None,
         )
         .unwrap_or_else(|error| panic!("rollback control failed: {error}"))
     }
@@ -9712,6 +10029,7 @@ mod tests {
                 &problem.arena,
                 bool_problem.true_term,
                 bool_problem.false_term,
+                None,
             )
             .is_none()
         );
@@ -9770,7 +10088,7 @@ mod tests {
     fn explicit_rollback_backend_fails_closed_on_internal_errors() {
         let arena = TermArena::default();
         let cnf = CnfProblem::new();
-        let result = solve_explicit_rollback_backend("cadical-rollback", &cnf, &arena, 0, 1)
+        let result = solve_explicit_rollback_backend("cadical-rollback", &cnf, &arena, 0, 1, None)
             .expect("explicit rollback backend must not fall through");
         let SolveResult::Unsupported(errors) = result.0 else {
             panic!("rollback backend error must be unsupported");
@@ -9879,7 +10197,7 @@ mod tests {
                 cnf.add_clause(clause);
             }
 
-            let rollback = solve_cadical_rollback_euf(&cnf, &arena, true_term, false_term)
+            let rollback = solve_cadical_rollback_euf(&cnf, &arena, true_term, false_term, None)
                 .unwrap_or_else(|error| panic!("case {case} rollback failed: {error}"))
                 .0;
             let reference = solve_varisat_euf(&cnf, &arena, true_term, false_term).0;
