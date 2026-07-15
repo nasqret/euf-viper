@@ -704,9 +704,15 @@ class _Builder:
         if macro is not None:
             if function_id in expansion_stack:
                 _reject(location, f"recursive expansion of define-fun `{head.text}`")
-            local = dict(env)
-            for (name, _), value in zip(macro.parameters, values):
-                local[name] = value
+            # Macro parameters form the complete local scope of the stored
+            # body.  Unbound atoms resolve through top-level declarations;
+            # bindings from the invocation site are deliberately excluded.
+            local = {
+                parameter_name: argument_value
+                for (parameter_name, _), argument_value in zip(
+                    macro.parameters, values
+                )
+            }
             expanded = self._parse_value(
                 macro.body, local, (*expansion_stack, function_id)
             )

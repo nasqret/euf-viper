@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import copy
 import errno
 import hashlib
@@ -24,6 +25,7 @@ from scripts.bench import component_quotient_contract as contract
 from scripts.bench import independent_component_quotient_verifier as independent
 from scripts.bench import t5_linux_publication as publication
 from scripts.bench import t5_runtime_environment as runtime_environment
+from scripts.bench import t5_submission_receipt as submission_receipt
 from scripts.bench import verify_component_quotient_publication as consumer
 
 
@@ -144,6 +146,7 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
 
     def test_submitter_exports_only_explicit_bindings_and_writes_pending_receipt(self) -> None:
         text = SUBMIT.read_text()
+        handoff_text = (ROOT / "scripts/bench/t5_submission_receipt.py").read_text()
         self.assertNotIn("--export=ALL", text)
         self.assertNotIn("ALL,EUF_", text)
         self.assertIn('--export="$export_list"', text)
@@ -154,14 +157,30 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         self.assertIn("submission_nonce", text)
         self.assertIn("namespace_id", text)
         self.assertIn("--hold", text)
-        self.assertIn('scontrol --clusters="$cluster" --quiet release', text)
         self.assertIn("cancel_held_job", text)
         self.assertIn('scancel --clusters="$cluster" "$job_id"', text)
         self.assertIn("trap cancel_held_job EXIT", text)
+        self.assertIn("trap cancel_local_held_job EXIT", text)
+        self.assertIn("LOCAL_SUBMISSION_ACTIVE=1", text)
+        self.assertIn("squeue --clusters=", text)
+        self.assertIn("--job-name=", text)
+        self.assertIn("scripts/bench/t5_submission_receipt.py", text)
+        self.assertIn('scontrol --clusters="$cluster" --quiet release', handoff_text)
+        self.assertIn("guarded_handoff", handoff_text)
         self.assertIn("trap 'exit 129' HUP", text)
         self.assertLess(text.index("trap cancel_held_job EXIT"), text.index("pending_path="))
-        self.assertLess(text.index("trap cancel_held_job EXIT"), text.index("scontrol --clusters="))
-        self.assertLess(text.index("scontrol --clusters="), text.index("released=1"))
+        self.assertLess(
+            text.index("trap cancel_held_job EXIT"),
+            text.index('sbatch "${args[@]}"'),
+        )
+        self.assertLess(
+            text.index("trap cancel_local_held_job EXIT"),
+            text.index("SUBMISSION_RAW="),
+        )
+        self.assertLess(
+            text.index("scripts/bench/t5_submission_receipt.py"),
+            text.index("LOCAL_RELEASED=1"),
+        )
         self.assertIn('printf \'%s\\n%s\\n\' "$submission" "$payload"', text)
         self.assertNotIn("git clean", text)
         self.assertNotIn("git reset", text)
@@ -333,6 +352,157 @@ class FixedLockTests(unittest.TestCase):
         )
 
 
+class LocalSubmissionHandoffTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.expected = submission_receipt.ExpectedSubmission(
+            revision="1" * 40,
+            published_ref="origin/reviewed",
+            remote_host="wmicluster",
+            namespace_path="/remote/t5-attempt",
+            namespace_id="3" * 64,
+            namespace_device=1,
+            namespace_inode=2,
+            results_device=1,
+            results_inode=3,
+            attempt_id="component-quotient-111111111111-attempt.ABCDEFGH",
+            submission_nonce="2" * 64,
+            dependency=None,
+            job_id=987654,
+            cluster="wmi-test",
+            job_name="euf-cqram-" + "3" * 20,
+            job_user="reviewer",
+            python_realpath="/usr/bin/python3",
+            python_version="3.12.0",
+            python_sha256="4" * 64,
+        )
+
+    def payload(self) -> bytes:
+        expected = self.expected
+        value = {
+            "schema": contract.SUBMISSION_SCHEMA,
+            "status": "submitted_pending_nondecisive",
+            "decisive": False,
+            "authoritative": False,
+            "revision": expected.revision,
+            "published_ref": expected.published_ref,
+            "remote_host": expected.remote_host,
+            "remote_namespace": {
+                "id": expected.namespace_id,
+                "path": expected.namespace_path,
+                "device": expected.namespace_device,
+                "inode": expected.namespace_inode,
+                "results_path": f"{expected.namespace_path}/results",
+                "results_device": expected.results_device,
+                "results_inode": expected.results_inode,
+            },
+            "attempt_id": expected.attempt_id,
+            "submission_nonce": expected.submission_nonce,
+            "dependency": expected.dependency,
+            "job_id": expected.job_id,
+            "scheduler_submission": {
+                "sbatch_parsable": f"{expected.job_id};{expected.cluster}",
+                "job_id": expected.job_id,
+                "cluster": expected.cluster,
+                "job_name": expected.job_name,
+                "user": expected.job_user,
+                "workdir": expected.namespace_path,
+            },
+            "expected_marker_name": (
+                f"component-quotient-census-{expected.job_id}.current"
+            ),
+            "contract": {
+                "expected_sources": contract.EXPECTED_SOURCES,
+                "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
+                "lock_sha256": contract.LOCK_SHA256,
+                "manifest_sha256": contract.MANIFEST_SHA256,
+                "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
+            },
+            "python": {
+                "realpath": expected.python_realpath,
+                "version": expected.python_version,
+                "sha256": expected.python_sha256,
+            },
+        }
+        value["receipt_sha256"] = digest(contract.canonical_json_bytes(value))
+        return contract.canonical_json_bytes(value)
+
+    def run_failure(
+        self,
+        path: Path,
+        payload: bytes,
+        patcher: object | None = None,
+    ) -> list[str]:
+        events: list[str] = []
+        context = patcher if patcher is not None else contextlib.nullcontext()
+        with context:
+            with self.assertRaises(Exception):
+                submission_receipt.guarded_handoff(
+                    path=path,
+                    payload=payload,
+                    expected=self.expected,
+                    release=lambda: events.append("release"),
+                    cancel=lambda: events.append("cancel"),
+                )
+        return events
+
+    def test_parse_failure_cancels_without_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = self.run_failure(Path(temporary) / "receipt.json", b"{\n")
+        self.assertEqual(events, ["cancel"])
+
+    def test_local_o_excl_failure_cancels_without_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "receipt.json"
+            path.write_bytes(b"occupied")
+            events = self.run_failure(path, self.payload())
+        self.assertEqual(events, ["cancel"])
+
+    def test_prebound_submission_identity_drift_cancels_without_release(self) -> None:
+        value = json.loads(self.payload())
+        value["scheduler_submission"]["job_name"] = "wrong-job"
+        value.pop("receipt_sha256")
+        value["receipt_sha256"] = digest(contract.canonical_json_bytes(value))
+        with tempfile.TemporaryDirectory() as temporary:
+            events = self.run_failure(
+                Path(temporary) / "receipt.json",
+                contract.canonical_json_bytes(value),
+            )
+        self.assertEqual(events, ["cancel"])
+
+    def test_local_persist_failure_cancels_without_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            events = self.run_failure(
+                Path(temporary) / "receipt.json",
+                self.payload(),
+                mock.patch.object(
+                    submission_receipt.os,
+                    "fsync",
+                    side_effect=OSError(errno.EIO, "forced fsync failure"),
+                ),
+            )
+        self.assertEqual(events, ["cancel"])
+
+    def test_release_observes_fully_persisted_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "receipt.json"
+            events: list[str] = []
+
+            def release() -> None:
+                persisted = consumer.read_pending_submission(path)
+                self.assertEqual(persisted["job_id"], self.expected.job_id)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+                events.append("release")
+
+            submission_receipt.guarded_handoff(
+                path=path,
+                payload=self.payload(),
+                expected=self.expected,
+                release=release,
+                cancel=lambda: events.append("cancel"),
+            )
+        self.assertEqual(events, ["release"])
+
+
 class IndependentSemanticDifferentialTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -395,6 +565,23 @@ class IndependentSemanticDifferentialTests(unittest.TestCase):
         self.assertEqual(receipt["counts"]["graph_cases"], 75)
         self.assertEqual(receipt["counts"]["functionality_cases"], 255)
         self.assertEqual(receipt["counts"]["restricted_growth_cases"], 326)
+
+    def test_t5_parser_define_fun_cannot_capture_caller_let_binding(self) -> None:
+        source = (
+            ROOT / "tests/fixtures/define_fun_caller_shadow_unsat.smt2"
+        ).read_text(encoding="ascii")
+        problem = independent.audit_smtlib.parse_qfuf_for_audit(source)
+        names = {
+            term: problem.signatures[function].name
+            for term, function in enumerate(problem.term_functions)
+        }
+        global_term = next(term for term, name in names.items() if name == "global")
+        other_term = next(term for term, name in names.items() if name == "other")
+        self.assertEqual(
+            problem.equality_pairs,
+            ((min(global_term, other_term), max(global_term, other_term)),),
+        )
+        self.assertNotIn((other_term, other_term), problem.equality_pairs)
 
     def test_exhaustive_small_equality_graphs_match_analyzer(self) -> None:
         cases = 0

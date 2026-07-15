@@ -246,11 +246,19 @@ exit, so an fsync-failure orphan cannot self-certify.
 The bundle also binds the Python executable, aggregate stdlib tree hashes,
 every mapped shared-library digest, kernel/OS/libc identity, os-release digest,
 repository/manifest/namespace/result mount and statfs properties, and
-`scontrol`/`sacct` versions plus Slurm cluster. A held job remains protected by
-an EXIT/signal cancellation trap until both the pending receipt and release
-succeed. An opt-in Linux integration test clones the exact commit, mounts the
-real 7,503-source corpus, and executes prepare, analyze, independent verify,
-finalize, and consumer with the real semantic verifier.
+`scontrol`/`sacct` versions plus Slurm cluster. The census job remains held while
+the remote receipt is returned. A local EXIT/signal cancellation trap owns the
+job from submission through local strict parsing, no-replace fsynced receipt
+persistence, revalidation, and a separate SSH release operation.
+
+CI keeps two roles distinct. The mandatory ordinary-Linux diagnostic exercises
+publication/procfs behavior and records runner and Python identities, but is
+non-evidence and does not claim a hosted `sacct` query. The separately
+provisioned, opt-in 7,503-source integration runs the semantic pipeline only
+when the exact corpus is explicitly supplied; its scheduler evidence is labeled
+synthetic. A two-minute, 256 MiB, non-corpus WMI canary can independently record
+procfs/fd, capability, mount/statfs, O_TMPFILE, runtime, and Slurm command
+semantics while preserving its submitted `job;cluster` and root `sacct` row.
 
 ## Preregistered Decision
 

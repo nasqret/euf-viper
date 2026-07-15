@@ -310,10 +310,13 @@ class _AuditBuilder:
         if macro is not None:
             if function in expansion:
                 raise AuditParseError(f"recursive macro {head.text!r}")
-            local = dict(environment)
-            local.update(
-                (name, value) for (name, _), value in zip(macro.parameters, values)
-            )
+            # A define-fun body is closed over the global namespace.  The
+            # caller environment contains only lexical let/macro bindings and
+            # must not cross the macro boundary.
+            local = {
+                name: value
+                for (name, _), value in zip(macro.parameters, values)
+            }
             expanded = self._value(macro.body, local, (*expansion, function))
             if expanded[0] != signature.result_sort:
                 raise AuditParseError(f"macro result drift for {head.text!r}")

@@ -257,6 +257,22 @@ independent evidence checks, and a frozen family holdout.
 - [x] Implement the fixed source projection, separate source-to-decision
   verifier, captured-source archive, hermetic provenance guard, unnamed-inode
   Linux publisher, immutable content marker, and scheduler-gated consumer.
+- [x] Repair both independent `define-fun` implementations so stored bodies
+  receive only their own parameter bindings and global declarations. Add the
+  bounded unsatisfiable caller-shadow fixture and a no-solve lexical scan
+  schema bound to the future exact 7,503-source input.
+- [x] Keep the full census held through returned-receipt parsing and immutable
+  local `O_EXCL` persistence, then release over a separate SSH operation. Local
+  cancellation is armed before remote `sbatch`; fault tests cover parse,
+  collision, and fsync failure with no release.
+- [x] Split CI into a mandatory ordinary Linux procfs/publication diagnostic
+  with zero permitted skips and a separately provisioned 7,503-source semantic
+  integration using explicitly synthetic scheduler evidence. Pin all actions
+  by commit and record runner-image/Python identities as non-evidence.
+- [x] Add the shard-free two-minute/256 MiB WMI environment-canary
+  emitter/validator and dry-run helper. It has no source-set decision path and
+  preserves full `job;cluster` plus the post-job root `sacct` row. It has not
+  been submitted.
 - [ ] Obtain real Linux CI GO for capability-free `O_TMPFILE` publication via
   verified procfs `/proc/self/fd/<fd>` plus `linkat(AT_SYMLINK_FOLLOW)`, all
   race/fsync regressions, the exact capability inventory, and the clean

@@ -4,18 +4,23 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      t5_corpus_path:
+        description: Absolute path to an explicitly provisioned 7,503-source corpus
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
       - name: Validate campaign specification
@@ -41,7 +46,10 @@ jobs:
             tests.test_audit_shadow_campaign \
             tests.test_audit_staged_shadow_campaign \
             tests.test_wmi_continuation_scripts \
-            tests.test_wmi_certificate_scripts
+            tests.test_wmi_certificate_scripts \
+            tests.test_define_fun_shadow_scan \
+            tests.test_t5_ci_contract \
+            tests.test_t5_environment_canary
       - name: Check campaign scripts
         run: |
           bash -n scripts/bench/install_solvers.sh
@@ -60,22 +68,90 @@ jobs:
           bash -n scripts/wmi/submit_certificate_shadow.sh
           bash -n scripts/wmi/euf_viper_certificate_staged_audit.sbatch
           bash -n scripts/wmi/submit_staged_certificate_audit.sh
-      - name: Test T5 component quotient publication on Linux
+      - name: Test portable T5 component quotient contracts
         run: |
           PYTHON="$(command -v python3)"
           CLEAN_PATH="$(dirname "$PYTHON"):/usr/bin:/bin"
           env -i PATH="$CLEAN_PATH" HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
             "$PYTHON" -B -m unittest -v \
               tests.test_census_component_quotient_ram \
-              tests.test_wmi_component_quotient_census \
-              tests.test_t5_linux_end_to_end
+              tests.test_wmi_component_quotient_census
           env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
             bash -n \
               scripts/wmi/check_component_quotient_checkout.sh \
               scripts/wmi/euf_viper_component_quotient_census.sbatch \
-              scripts/wmi/submit_component_quotient_census.sh
+              scripts/wmi/submit_component_quotient_census.sh \
+              scripts/wmi/euf_viper_t5_environment_canary.sbatch \
+              scripts/wmi/submit_t5_environment_canary.sh \
+              scripts/wmi/validate_t5_environment_canary.sh
           REVISION="$(git rev-parse HEAD)"
           env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
             scripts/wmi/check_component_quotient_checkout.sh "$REVISION"
       - name: Test Rust solver
         run: cargo test --all-features
+
+  t5-linux-publication-diagnostic:
+    name: Mandatory ordinary Linux publication/procfs diagnostic
+    runs-on: ubuntu-24.04
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Run mandatory diagnostic with no permitted skips
+        run: >-
+          python3 -B scripts/bench/run_t5_linux_diagnostic.py
+          --identity-output "$RUNNER_TEMP/t5-linux-publication-identity.json"
+          --require-hosted-image
+      - name: Check mandatory diagnostic shell and checkout surface
+        run: |
+          bash -n \
+            scripts/wmi/check_component_quotient_checkout.sh \
+            scripts/wmi/euf_viper_component_quotient_census.sbatch \
+            scripts/wmi/submit_component_quotient_census.sh
+          REVISION="$(git rev-parse HEAD)"
+          env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
+            scripts/wmi/check_component_quotient_checkout.sh "$REVISION"
+      - name: Upload non-evidence runner identity
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t5-linux-publication-identity
+          path: ${{ runner.temp }}/t5-linux-publication-identity.json
+          if-no-files-found: error
+
+  t5-semantic-pipeline-integration:
+    name: Provisioned 7,503 semantic pipeline using synthetic scheduler evidence
+    if: github.event_name == 'workflow_dispatch' && inputs.t5_corpus_path != ''
+    runs-on: [self-hosted, linux, t5-corpus]
+    env:
+      EUF_VIPER_T5_E2E_CORPUS: ${{ inputs.t5_corpus_path }}
+      EUF_VIPER_T5_E2E_SCHEDULER_EVIDENCE: synthetic_injected_root_row
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Require explicit corpus and record provisioned runtime identity
+        run: |
+          test "$(uname -s)" = Linux
+          case "$EUF_VIPER_T5_E2E_CORPUS" in
+            /*) ;;
+            *) echo "T5 corpus path must be explicitly supplied and absolute" >&2; exit 2 ;;
+          esac
+          test -f "$EUF_VIPER_T5_E2E_CORPUS/qf_uf_manifest.jsonl"
+          python3 -B scripts/bench/record_t5_ci_identity.py \
+            --output "$RUNNER_TEMP/t5-semantic-pipeline-identity.json" \
+            --scope provisioned_7503_semantic_pipeline_integration \
+            --scheduler-evidence synthetic_injected_root_row
+      - name: Run exact semantic pipeline with synthetic scheduler evidence
+        run: >-
+          python3 -B -m unittest -v
+          tests.test_t5_linux_end_to_end
+      - name: Upload provisioned integration identity
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t5-semantic-pipeline-identity
+          path: ${{ runner.temp }}/t5-semantic-pipeline-identity.json
+          if-no-files-found: error

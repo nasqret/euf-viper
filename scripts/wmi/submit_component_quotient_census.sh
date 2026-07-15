@@ -248,18 +248,29 @@ if [ "$reported_realpath" != "$python_realpath" ]; then
   echo "remote Python sys.executable does not match its realpath" >&2
   exit 2
 fi
+slurm_cluster="$(
+  env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+    scontrol show config | awk '$1 == "ClusterName" && $2 == "=" { print $3 }'
+)"
+job_user="$(id -un)"
+if [[ ! "$slurm_cluster" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ ! "$job_user" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "remote Slurm cluster/user identity is malformed" >&2
+  exit 2
+fi
 printf '%s\n' \
   "$submission_nonce" "$namespace_id" \
   "$namespace_device" "$namespace_inode" \
   "$results_device" "$results_inode" \
-  "$manifest_sha256" "$python_realpath" "$python_version" "$python_sha256"
+  "$manifest_sha256" "$python_realpath" "$python_version" "$python_sha256" \
+  "$slurm_cluster" "$job_user"
 REMOTE_BINDINGS
 )"
 REMOTE_BINDINGS=()
 while IFS= read -r field; do
   REMOTE_BINDINGS+=("$field")
 done <<< "$REMOTE_BINDINGS_RAW"
-if [ "${#REMOTE_BINDINGS[@]}" -ne 10 ]; then
+if [ "${#REMOTE_BINDINGS[@]}" -ne 12 ]; then
   echo "remote identity response is malformed" >&2
   exit 2
 fi
@@ -273,6 +284,8 @@ MANIFEST_SHA256="${REMOTE_BINDINGS[6]}"
 REMOTE_PYTHON_REALPATH="${REMOTE_BINDINGS[7]}"
 REMOTE_PYTHON_VERSION="${REMOTE_BINDINGS[8]}"
 REMOTE_PYTHON_SHA256="${REMOTE_BINDINGS[9]}"
+REMOTE_SLURM_CLUSTER="${REMOTE_BINDINGS[10]}"
+REMOTE_JOB_USER="${REMOTE_BINDINGS[11]}"
 for digest in "$SUBMISSION_NONCE" "$NAMESPACE_ID" "$MANIFEST_SHA256" "$REMOTE_PYTHON_SHA256"; do
   if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
     echo "remote digest/nonce binding is malformed" >&2
@@ -291,10 +304,108 @@ for identity in "$NAMESPACE_DEVICE" "$NAMESPACE_INODE" "$RESULTS_DEVICE" "$RESUL
 done
 if [[ "$REMOTE_PYTHON_REALPATH" != /* ]] || \
    [[ ! "$REMOTE_PYTHON_REALPATH" =~ ^[A-Za-z0-9_./+-]+$ ]] || \
-   [[ ! "$REMOTE_PYTHON_VERSION" =~ ^[A-Za-z0-9_.+-]+$ ]]; then
-  echo "remote Python identity is malformed" >&2
+   [[ ! "$REMOTE_PYTHON_VERSION" =~ ^[A-Za-z0-9_.+-]+$ ]] || \
+   [[ ! "$REMOTE_SLURM_CLUSTER" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ ! "$REMOTE_JOB_USER" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "remote Python/Slurm identity is malformed" >&2
   exit 2
 fi
+LOCAL_JOB_NAME="euf-cqram-${NAMESPACE_ID:0:20}"
+if [[ ! "$LOCAL_JOB_NAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "per-attempt Slurm job name is malformed" >&2
+  exit 2
+fi
+
+LOCAL_JOB_ID=""
+LOCAL_SLURM_CLUSTER="$REMOTE_SLURM_CLUSTER"
+LOCAL_SUBMISSION_ACTIVE=0
+LOCAL_RELEASED=0
+
+cancel_local_held_job() {
+  local status="$?"
+  trap - EXIT HUP INT TERM
+  if [ "$LOCAL_SUBMISSION_ACTIVE" -eq 1 ] && [ "$LOCAL_RELEASED" -eq 0 ]; then
+    if ! ssh "$REMOTE_HOST" bash -s -- \
+      "$REMOTE_WORK" "$REMOTE_ATTEMPT_ID" \
+      "$LOCAL_JOB_ID" "$LOCAL_SLURM_CLUSTER" \
+      "$LOCAL_JOB_NAME" "$REMOTE_JOB_USER" <<'REMOTE_CANCEL_LOCAL_HANDOFF'
+set -euo pipefail
+export PATH=/usr/bin:/bin
+work="$1"
+attempt_id="$2"
+job_id="$3"
+cluster="$4"
+job_name="$5"
+job_user="$6"
+bound_cluster="$cluster"
+if [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ ! "$job_name" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ ! "$job_user" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "held census fallback identity is malformed" >&2
+  exit 2
+fi
+if [ -z "$job_id" ] || [ -z "$cluster" ]; then
+  held_path="$work/results/component-quotient-census-held-${attempt_id}.txt"
+  if [ -s "$held_path" ]; then
+    submission="$(cat -- "$held_path")"
+    if [[ ! "$submission" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
+      echo "held census identity file is malformed" >&2
+      exit 2
+    fi
+    job_id="${BASH_REMATCH[1]}"
+    cluster="${BASH_REMATCH[2]}"
+    if [ "$cluster" != "$bound_cluster" ]; then
+      echo "held census identity cluster differs from the prebound cluster" >&2
+      exit 2
+    fi
+  else
+    queue="$(
+      env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+        squeue --clusters="$cluster" --noheader --user="$job_user" \
+          --name="$job_name" --format='%A'
+    )"
+    candidates=()
+    while IFS= read -r candidate; do
+      candidate="${candidate//[[:space:]]/}"
+      if [ -z "$candidate" ]; then
+        continue
+      fi
+      if [[ ! "$candidate" =~ ^[1-9][0-9]*$ ]]; then
+        echo "held census fallback query returned a malformed job id" >&2
+        exit 2
+      fi
+      candidates+=("$candidate")
+    done <<< "$queue"
+    if [ "${#candidates[@]}" -eq 0 ]; then
+      exit 0
+    fi
+    if [ "${#candidates[@]}" -ne 1 ]; then
+      echo "held census fallback query is not unique" >&2
+      exit 2
+    fi
+    job_id="${candidates[0]}"
+  fi
+fi
+if [[ ! "$job_id" =~ ^[1-9][0-9]*$ ]] || \
+   [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "held census cancellation identity is malformed" >&2
+  exit 2
+fi
+env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+  scancel --clusters="$cluster" "$job_id"
+REMOTE_CANCEL_LOCAL_HANDOFF
+    then
+      echo "failed to cancel census during local receipt handoff" >&2
+    fi
+  fi
+  exit "$status"
+}
+
+LOCAL_SUBMISSION_ACTIVE=1
+trap cancel_local_held_job EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 SUBMISSION_RAW="$(
   ssh "$REMOTE_HOST" bash -s -- \
@@ -303,6 +414,7 @@ SUBMISSION_RAW="$(
     "$NAMESPACE_DEVICE" "$NAMESPACE_INODE" "$RESULTS_DEVICE" "$RESULTS_INODE" \
     "$MANIFEST_SHA256" "$REMOTE_SHARED_CORPUS" \
     "$REMOTE_PYTHON_REALPATH" "$REMOTE_PYTHON_VERSION" "$REMOTE_PYTHON_SHA256" \
+    "$REMOTE_SLURM_CLUSTER" "$REMOTE_JOB_USER" "$LOCAL_JOB_NAME" \
     <<'REMOTE_SUBMIT_ATTEMPT'
 set -euo pipefail
 while IFS= read -r entry; do
@@ -332,7 +444,9 @@ shared_corpus="${14}"
 python_realpath="${15}"
 python_version="${16}"
 python_sha256="${17}"
-job_name="euf-cqram-census"
+expected_cluster="${18}"
+expected_user="${19}"
+job_name="${20}"
 job_user="$(id -un)"
 cluster="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
@@ -342,7 +456,12 @@ if [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   echo "Slurm ClusterName is malformed: $cluster" >&2
   exit 2
 fi
-args=(--parsable --hold)
+if [ "$cluster" != "$expected_cluster" ] || [ "$job_user" != "$expected_user" ] || \
+   [[ ! "$job_name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "Slurm cluster/user/job-name binding drifted before submission" >&2
+  exit 2
+fi
+args=(--parsable --hold --job-name="$job_name")
 if [ -n "$dependency" ]; then
   args+=(--dependency="afterok:$dependency")
 fi
@@ -364,32 +483,47 @@ export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_SLURM_CLUSTER=$cluster"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_JOB_NAME=$job_name"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_JOB_USER=$job_user"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_WORKDIR=$work"
+submission=""
+job_id=""
+held_path="$work/results/component-quotient-census-held-${attempt_id}.txt"
+remote_handoff_complete=0
+cancel_held_job() {
+  local status="$?"
+  local candidate=""
+  local cancel_job="$job_id"
+  local cancel_cluster="$cluster"
+  trap - EXIT
+  if [[ ! "$cancel_job" =~ ^[1-9][0-9]*$ ]] && \
+     [[ "$submission" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
+    cancel_job="${BASH_REMATCH[1]}"
+    cancel_cluster="${BASH_REMATCH[2]}"
+  fi
+  if [[ ! "$cancel_job" =~ ^[1-9][0-9]*$ ]] && [ -s "$held_path" ]; then
+    candidate="$(cat -- "$held_path")"
+    if [[ "$candidate" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
+      cancel_job="${BASH_REMATCH[1]}"
+      cancel_cluster="${BASH_REMATCH[2]}"
+    fi
+  fi
+  if [ "$remote_handoff_complete" -eq 0 ] && \
+     [[ "$cancel_job" =~ ^[1-9][0-9]*$ ]] && \
+     [[ "$cancel_cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    if ! env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+      scancel --clusters="$cancel_cluster" "$cancel_job"; then
+      echo "failed to cancel held job $cancel_job on cluster $cancel_cluster" >&2
+    fi
+  fi
+  exit "$status"
+}
+trap cancel_held_job EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 submission="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
     sbatch "${args[@]}" --export="$export_list" \
     scripts/wmi/euf_viper_component_quotient_census.sbatch
 )"
-job_id="${submission%%;*}"
-held_job=0
-released=0
-cancel_held_job() {
-  local status="$?"
-  trap - EXIT
-  if [ "$held_job" -eq 1 ] && [ "$released" -eq 0 ]; then
-    if ! env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-      scancel --clusters="$cluster" "$job_id"; then
-      echo "failed to cancel held job $job_id on cluster $cluster" >&2
-    fi
-  fi
-  exit "$status"
-}
-if [[ "$job_id" =~ ^[1-9][0-9]*$ ]]; then
-  held_job=1
-  trap cancel_held_job EXIT
-  trap 'exit 129' HUP
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-fi
 if [[ ! "$submission" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
   echo "invalid full census job/cluster identity: $submission" >&2
   exit 2
@@ -400,6 +534,31 @@ if [ "$submitted_cluster" != "$cluster" ]; then
   echo "sbatch --parsable cluster differs from Slurm ClusterName" >&2
   exit 2
 fi
+env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+  "$python_realpath" -I -B -S -c '
+import os, sys
+path, submission = sys.argv[1:]
+data = (submission + "\n").encode("ascii")
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+fd = os.open(path, flags, 0o600)
+try:
+    offset = 0
+    while offset < len(data):
+        written = os.write(fd, data[offset:])
+        if written <= 0:
+            raise OSError("held-job identity write made no progress")
+        offset += written
+    os.fsync(fd)
+    os.fchmod(fd, 0o444)
+    os.fsync(fd)
+finally:
+    os.close(fd)
+directory = os.open(os.path.dirname(path), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0))
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+' "$held_path" "$submission"
 pending_path="$work/results/component-quotient-census-submission-${attempt_id}-${job_id}.json"
 payload="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
@@ -508,11 +667,9 @@ finally:
 sys.stdout.buffer.write(data)
 PY
 )"
-env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-  scontrol --clusters="$cluster" --quiet release "$job_id"
-released=1
-trap - EXIT HUP INT TERM
 printf '%s\n%s\n' "$submission" "$payload"
+remote_handoff_complete=1
+trap - EXIT HUP INT TERM
 REMOTE_SUBMIT_ATTEMPT
 )"
 
@@ -526,6 +683,12 @@ if [[ ! "$SBATCH_PARSABLE" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]] || \
 fi
 JOB_ID="${BASH_REMATCH[1]}"
 SLURM_CLUSTER="${BASH_REMATCH[2]}"
+if [ "$SLURM_CLUSTER" != "$REMOTE_SLURM_CLUSTER" ]; then
+  echo "returned census cluster differs from the prebound Slurm cluster" >&2
+  exit 2
+fi
+LOCAL_JOB_ID="$JOB_ID"
+LOCAL_SLURM_CLUSTER="$SLURM_CLUSTER"
 
 mkdir -p "$ROOT/results"
 RECEIPT_PATH="$ROOT/results/component-quotient-census-submission-${REMOTE_ATTEMPT_ID}-${JOB_ID}.json"
@@ -542,32 +705,42 @@ if [[ "$LOCAL_PYTHON" != /* ]] || [ ! -x "$LOCAL_PYTHON" ]; then
   echo "local Python realpath is not an absolute executable" >&2
   exit 2
 fi
-env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-  "$LOCAL_PYTHON" -I -B -S -c '
-import os, sys
-path, text = sys.argv[1:]
-data = (text + "\n").encode("ascii")
-fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0), 0o600)
-try:
-    offset = 0
-    while offset < len(data):
-        written = os.write(fd, data[offset:])
-        if written <= 0:
-            raise OSError("local pending receipt write made no progress")
-        offset += written
-    os.fsync(fd)
-    os.fchmod(fd, 0o444)
-    os.fsync(fd)
-finally:
-    os.close(fd)
-directory = os.open(os.path.dirname(path), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0))
-try:
-    os.fsync(directory)
-finally:
-    os.close(directory)
-' "$RECEIPT_PATH" "$PENDING_JSON"
+if ! SSH_BIN="$(command -v ssh)" || [[ "$SSH_BIN" != /* ]] || [ ! -x "$SSH_BIN" ]; then
+  echo "an absolute local SSH executable is required for held-job handoff" >&2
+  exit 2
+fi
+HANDOFF_JSON="$(
+  printf '%s\n' "$PENDING_JSON" | \
+    env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+      "$LOCAL_PYTHON" -I -B -S scripts/bench/t5_submission_receipt.py \
+        --receipt "$RECEIPT_PATH" \
+        --revision "$REVISION" \
+        --published-ref "$PUBLISHED_REF" \
+        --remote-host "$REMOTE_HOST" \
+        --namespace-path "$REMOTE_WORK" \
+        --namespace-id "$NAMESPACE_ID" \
+        --namespace-device "$NAMESPACE_DEVICE" \
+        --namespace-inode "$NAMESPACE_INODE" \
+        --results-device "$RESULTS_DEVICE" \
+        --results-inode "$RESULTS_INODE" \
+        --attempt-id "$REMOTE_ATTEMPT_ID" \
+        --submission-nonce "$SUBMISSION_NONCE" \
+        --dependency "$DEPENDENCY" \
+        --job-id "$JOB_ID" \
+        --cluster "$SLURM_CLUSTER" \
+        --job-name "$LOCAL_JOB_NAME" \
+        --job-user "$REMOTE_JOB_USER" \
+        --python-realpath "$REMOTE_PYTHON_REALPATH" \
+        --python-version "$REMOTE_PYTHON_VERSION" \
+        --python-sha256 "$REMOTE_PYTHON_SHA256" \
+        --ssh "$SSH_BIN"
+)"
+LOCAL_RELEASED=1
+LOCAL_SUBMISSION_ACTIVE=0
+trap - EXIT HUP INT TERM
 
 printf '%s\n' "$PENDING_JSON"
+printf '%s\n' "$HANDOFF_JSON"
 printf 'sbatch_parsable=%s job_id=%s cluster=%s remote_pending_receipt=%s local_pending_receipt=%s\n' \
   "$SBATCH_PARSABLE" "$JOB_ID" "$SLURM_CLUSTER" \
   "$REMOTE_WORK/results/component-quotient-census-submission-${REMOTE_ATTEMPT_ID}-${JOB_ID}.json" \

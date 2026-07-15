@@ -14,23 +14,32 @@ from scripts.bench import component_quotient_contract as contract
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@unittest.skipUnless(sys.platform.startswith("linux"), "real Linux required")
 class T5LinuxEndToEndTests(unittest.TestCase):
-    def test_prepare_analyze_finalize_consume_real_7503_manifest(self) -> None:
+    def test_prepare_analyze_finalize_consume_with_synthetic_scheduler_evidence(self) -> None:
         corpus_text = os.environ.get("EUF_VIPER_T5_E2E_CORPUS")
         if not corpus_text:
             self.skipTest(
                 "set EUF_VIPER_T5_E2E_CORPUS to the extracted smtlib-2025 corpus"
+            )
+        if not sys.platform.startswith("linux"):
+            self.fail("a supplied T5 semantic corpus requires real Linux")
+        if (
+            os.environ.get("EUF_VIPER_T5_E2E_SCHEDULER_EVIDENCE")
+            != "synthetic_injected_root_row"
+        ):
+            self.fail(
+                "the provisioned integration must explicitly label its synthetic "
+                "scheduler evidence"
             )
         corpus = Path(corpus_text)
         manifest = corpus / "qf_uf_manifest.jsonl"
         if not manifest.is_file():
             self.fail(f"external T5 manifest is absent: {manifest}")
         contract.require_campaign_manifest_bytes(manifest.read_bytes())
-        for command in ("git", "scontrol", "sacct"):
+        for command in ("git",):
             resolved = shutil.which(command, path="/usr/bin:/bin")
             if resolved is None:
-                self.fail(f"real Linux end-to-end requires /usr/bin/{command}")
+                self.fail(f"provisioned Linux integration requires /usr/bin/{command}")
 
         with tempfile.TemporaryDirectory() as temporary:
             clone = Path(temporary) / "t5-e2e-clone"
@@ -61,6 +70,9 @@ class T5LinuxEndToEndTests(unittest.TestCase):
                     "LANG": "C",
                     "LC_ALL": "C",
                     "TZ": "UTC",
+                    "EUF_VIPER_T5_E2E_SCHEDULER_EVIDENCE": (
+                        "synthetic_injected_root_row"
+                    ),
                 },
                 check=False,
                 capture_output=True,

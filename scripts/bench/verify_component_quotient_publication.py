@@ -164,7 +164,10 @@ def query_successful_job(job_id: int, cluster: str) -> SchedulerEvidence:
 
 
 def _strict_canonical_object(payload: bytes, context: str) -> dict[str, object]:
-    value = independent.strict_json(payload, context)
+    try:
+        value = independent.strict_json(payload, context)
+    except independent.IndependentVerificationError as error:
+        raise ConsumerVerificationError(str(error)) from error
     if type(value) is not dict:
         raise ConsumerVerificationError(f"{context} is not an object")
     if contract.canonical_json_bytes(value) != payload:
@@ -205,11 +208,12 @@ def _require_self_digest(value: Mapping[str, object], context: str) -> None:
         raise ConsumerVerificationError(f"{context} self-digest mismatch")
 
 
-def read_pending_submission(path: Path) -> dict[str, object]:
-    receipt = _strict_canonical_object(
-        _read_path_no_follow(path, "pending submission receipt", 128 * 1024),
-        "pending submission receipt",
-    )
+def validate_pending_submission_bytes(payload: bytes) -> dict[str, object]:
+    if type(payload) is not bytes or len(payload) > 128 * 1024:
+        raise ConsumerVerificationError(
+            "pending submission receipt bytes exceed their strict bound"
+        )
+    receipt = _strict_canonical_object(payload, "pending submission receipt")
     _require_self_digest(receipt, "pending submission receipt")
     required = {
         "schema",
@@ -327,6 +331,12 @@ def read_pending_submission(path: Path) -> dict[str, object]:
         raise ConsumerVerificationError("submission Python identity field type drift")
     contract.require_lower_sha256(python_identity["sha256"], "submission Python digest")
     return receipt
+
+
+def read_pending_submission(path: Path) -> dict[str, object]:
+    return validate_pending_submission_bytes(
+        _read_path_no_follow(path, "pending submission receipt", 128 * 1024)
+    )
 
 
 def _identity_tuple(value: object, context: str) -> tuple[int, int]:

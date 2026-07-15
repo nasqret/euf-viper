@@ -59,6 +59,11 @@ def main() -> int:
     hostile = contract.hostile_environment_names(dict(os.environ))
     if hostile:
         raise SystemExit("hostile driver environment: " + ", ".join(hostile))
+    if (
+        os.environ.get("EUF_VIPER_T5_E2E_SCHEDULER_EVIDENCE")
+        != "synthetic_injected_root_row"
+    ):
+        raise SystemExit("end-to-end driver requires explicit synthetic scheduler evidence")
     manifest = ROOT / contract.MANIFEST_RELATIVE_PATH
     contract.require_campaign_manifest_path(ROOT, manifest)
     manifest_bytes = manifest.read_bytes()
@@ -297,6 +302,8 @@ def main() -> int:
                 "manifest_sha256": contract.MANIFEST_SHA256,
                 "receipt": published.name,
                 "receipt_sha256": published.sha256,
+                "scheduler_evidence": "synthetic_injected_root_row",
+                "sacct_queried": False,
             },
             sort_keys=True,
         )

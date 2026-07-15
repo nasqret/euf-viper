@@ -1057,6 +1057,42 @@
 - No branch was pushed and no WMI job was submitted. Linux GO remains pending
   a hosted rerun plus the real-corpus end-to-end prerequisites.
 
+## 2026-07-15: T5 independent-review blocker repair
+
+- Repair started from exact commit
+  `446b424ae270735f1296a40d3d8c21286de0d611` in the isolated recovered
+  worktree. Neither `main` nor another worktree was touched.
+- Corrected `define-fun` lexical boundaries independently in the certificate
+  parser and T5 audit parser. Stored bodies now receive fresh parameter maps;
+  free atoms resolve globally and cannot capture caller `let` or outer-macro
+  locals. The bounded caller-shadow fixture has true result `unsat` and each
+  implementation has a parser-specific regression.
+- Added a standalone lexical source scanner and strict report validator for the
+  exact external 7,503-source manifest. It records candidate/affected
+  definitions and colliding calls with `solving_performed=false`; no corpus
+  scan was run.
+- The census remains held while its remote pending receipt is returned. A local
+  cancellation trap is armed before the remote submit operation; local code
+  strictly parses, verifies, creates with `O_EXCL`, fsyncs, seals, directory
+  fsyncs, and revalidates the receipt before a separate SSH release. Before the
+  response is parseable, a unique prebound Slurm job name provides the local
+  cancellation fallback. Forced
+  parse, existing-path, and fsync failures all cancel and never release.
+- CI now separates the mandatory ordinary Linux procfs/publication diagnostic
+  from the explicitly provisioned 7,503-source semantic integration. Mandatory
+  skips fail. Hosted image and Python identities are immutable per-run records
+  labeled non-evidence; all actions are commit-pinned. The semantic integration
+  is labeled as using a synthetic injected scheduler row, and no hosted-CI
+  `sacct` query is claimed.
+- Added a non-corpus, shard-free WMI environment canary with fixed two-minute,
+  256 MiB resources. It records procfs fd semantics, capability sets,
+  filesystem mount/statfs identity, one-link mode-0444 `O_TMPFILE` publication,
+  digests/fsync, Python/runtime, and Slurm-tool availability. Its post-job
+  validator preserves `job;cluster` and requires a unique successful root
+  `sacct` row. The canary was not submitted.
+- No branch was pushed, no artifact was published, no WMI job was submitted,
+  and the external 7,503-source pipeline was not run.
+
 ## Next Entry Template
 
 - Benchmark corpus:

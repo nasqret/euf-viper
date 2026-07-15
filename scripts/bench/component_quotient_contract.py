@@ -71,6 +71,7 @@ RUNTIME_PROJECT_FILES: Final = (
     "scripts/bench/t5_independent_smtlib.py",
     "scripts/bench/t5_linux_publication.py",
     "scripts/bench/t5_runtime_environment.py",
+    "scripts/bench/t5_submission_receipt.py",
     "scripts/bench/verify_component_quotient_publication.py",
     "scripts/bench/verify_component_quotient_ram_bundle.py",
     "scripts/cert/independent_qfuf.py",
