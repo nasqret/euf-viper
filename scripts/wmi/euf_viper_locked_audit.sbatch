@@ -234,13 +234,29 @@ for KIND in full official; do
       --bootstrap-replicates 10000 \
       --confidence-level 0.95 \
       --out "$RUN_ROOT/audit/$KIND/global.json"; then
-    :
+    ANALYSIS_STATUS=0
   else
-    STATUS=$?
-    if [ "$STATUS" -ne 1 ]; then
-      exit "$STATUS"
-    fi
+    ANALYSIS_STATUS=$?
   fi
+  case "$ANALYSIS_STATUS" in
+    0) ;;
+    1)
+      printf '%s analysis completed with statistical rejection\n' "$KIND" >&2
+      ;;
+    2)
+      printf '%s analysis rejected its lock/raw input\n' "$KIND" >&2
+      exit 2
+      ;;
+    3)
+      printf '%s analysis could not publish its output\n' "$KIND" >&2
+      exit 3
+      ;;
+    *)
+      printf '%s analysis returned unexpected status %s\n' \
+        "$KIND" "$ANALYSIS_STATUS" >&2
+      exit "$ANALYSIS_STATUS"
+      ;;
+  esac
 done
 
 FINAL_PROVENANCE="$(python_bound_bootstrap "$PROVENANCE_HELPER" \

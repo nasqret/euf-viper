@@ -1,0 +1,148 @@
+{
+  "assumptions": {
+    "coverage_precedes_speed": true,
+    "family_identity_source": "hash_bound_campaign_lock",
+    "holm_scope": "all_named_comparator_budget_status_family_coverage_hypotheses",
+    "mcnemar": "exact_conditional_two_sided_on_discordant_solve_pairs",
+    "pairing_key": [
+      "instance_id",
+      "budget_s",
+      "solver_id"
+    ],
+    "par2_penalty": 2.0,
+    "promotion_requires_stratum_non_regression": true,
+    "ratio_direction": "baseline_comparator_over_candidate",
+    "repetition_aggregation": "per_instance_median_after_status_consistency_check",
+    "speed_time_basis": "wall_time_s",
+    "timeout_charge_penalty": 1.0,
+    "wrong_answers": "rejected_as_invalid_input_before_analysis"
+  },
+  "comparisons": {
+    "z3": {
+      "baseline_id": "z3",
+      "budgets": {
+        "2": {
+          "aggregate": {
+            "arms": {
+              "baseline": {
+                "solved": 2,
+                "statuses": {
+                  "sat": 1,
+                  "unsat": 1
+                }
+              },
+              "candidate": {
+                "solved": 1,
+                "statuses": {
+                  "sat": 1,
+                  "unsupported": 1
+                }
+              }
+            },
+            "coverage": {
+              "baseline_only": 1,
+              "candidate_only": 0
+            }
+          },
+          "bootstrap": {},
+          "budget_s": 2.0,
+          "families": {},
+          "family_macro": {},
+          "promotion": {
+            "checks": {
+              "zero_coverage_loss": {
+                "passed": false
+              }
+            },
+            "passed": false,
+            "status": "rejected"
+          },
+          "statuses": {
+            "sat": {},
+            "unsat": {
+              "candidate_result": "unsupported",
+              "production_evidence_decisive": false
+            }
+          }
+        }
+      },
+      "candidate_id": "euf-viper",
+      "promotion": {
+        "failed_budgets": [
+          "2"
+        ],
+        "passed": false,
+        "status": "rejected"
+      }
+    }
+  },
+  "configuration": {
+    "bootstrap_replicates": 10000,
+    "confidence_level": 0.95,
+    "holm_alpha": 0.05,
+    "minimum_speedup": 1.0,
+    "required_promotion_metrics": [
+      "timeout_charged_wall",
+      "common_wall_total",
+      "common_wall_geometric"
+    ],
+    "seed": 20260712
+  },
+  "hypotheses": {},
+  "input_hashes": {
+    "lock_file_sha256": "@PARENT_LOCK_FILE_SHA256@",
+    "lock_sha256": "@PARENT_LOCK_SHA256@",
+    "manifest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "shard_bundle_sha256": "@SHARD_BUNDLE_SHA256@",
+    "shard_lock_file_sha256": {
+      "0": "@SHARD_LOCK_FILE_SHA256@"
+    },
+    "shard_raw_sha256": {
+      "0": "@SHARD_RAW_SHA256@"
+    },
+    "solver_binary_sha256": {
+      "euf-viper": "2222222222222222222222222222222222222222222222222222222222222222",
+      "z3": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "taxonomy_sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "inputs": {
+    "baseline_ids": [
+      "z3"
+    ],
+    "budgets_s": [
+      2.0
+    ],
+    "campaign_id": "production-p0-fixture",
+    "candidate_id": "euf-viper",
+    "families": 1,
+    "instances": 2,
+    "parent_lock": "@PARENT_LOCK@",
+    "raw_records": 2,
+    "shards": [
+      {
+        "cpu_ids": [
+          7
+        ],
+        "index": 0,
+        "lock": "@SHARD_LOCK@",
+        "lock_file_sha256": "@SHARD_LOCK_FILE_SHA256@",
+        "lock_sha256": "@SHARD_LOCK_SHA256@",
+        "raw": "@SHARD_RAW@",
+        "raw_records": 2,
+        "raw_sha256": "@SHARD_RAW_SHA256@"
+      }
+    ]
+  },
+  "promoted": false,
+  "promotion": {
+    "failed_comparisons": [
+      "z3"
+    ],
+    "lock_promotion_eligible": true,
+    "passed": false,
+    "status": "rejected"
+  },
+  "schema_version": 1,
+  "status": "rejected"
+}

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -735,6 +736,220 @@ class LockedArtifactTests(unittest.TestCase):
                 ANALYZER.CampaignInputError, "budget-dependent"
             ):
                 ANALYZER._load_lock(parent_path)
+
+
+class ProductionRecordContractTests(unittest.TestCase):
+    def production_record(
+        self, directory: Path
+    ) -> tuple[dict[str, object], dict[str, object], dict[str, object], str]:
+        lock_path, _, _ = write_locked_fixture(directory)
+        lock = json.loads(lock_path.read_text(encoding="ascii"))
+        receipt_sha256 = "c" * 64
+        lock["repository"] = {"commit": "d" * 40}
+        candidate = next(
+            solver for solver in lock["solvers"] if solver["id"] == "euf-viper"
+        )
+        candidate["evidence"] = {
+            "schema": "euf-viper.production-evidence.v4",
+            "argv_flag": "--evidence-out",
+            "accepted_decisive_statuses": ["sat"],
+        }
+        candidate["environment"] = {
+            "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": receipt_sha256
+        }
+        lock["lock_sha256"] = ANALYZER._lock_sha256(lock)
+        item = next(
+            scheduled
+            for scheduled in ANALYZER._locked_schedule(lock)
+            if scheduled["solver"]["id"] == "euf-viper"
+            and scheduled["instance"]["status"] == "sat"
+        )
+        runtime_config_sha256 = "e" * 64
+        evidence_sha256 = "f" * 64
+        evidence = {
+            "path": item["evidence_path"].relative_to(directory).as_posix(),
+            "sha256": evidence_sha256,
+            "bytes": 4096,
+            "schema": "euf-viper.production-evidence.v4",
+            "source_sha256": item["instance"]["sha256"],
+            "solver_revision": lock["repository"]["commit"],
+            "solver_executable_sha256": candidate["sha256"],
+            "solver_configuration": candidate["configuration"],
+            "solver_config_sha256": hashlib.sha256(
+                ANALYZER._canonical_json_bytes(candidate)
+            ).hexdigest(),
+            "solver_runtime_config_sha256": runtime_config_sha256,
+            "solver_build_sha256": "1" * 64,
+            "sealed_build_receipt_sha256": receipt_sha256,
+            "run_nonce": "2" * 64,
+            "status": "sat",
+            "backend_status": "sat",
+        }
+        record: dict[str, object] = {
+            "record_type": "run",
+            "schema_version": 1,
+            "lock_sha256": lock["lock_sha256"],
+            "invocation": 0,
+            "sequence": item["sequence"],
+            "key": item["key"],
+            "instance_id": item["instance"]["id"],
+            "relative_path": item["instance"]["relative_path"],
+            "instance_sha256": item["instance"]["sha256"],
+            "expected_status": "sat",
+            "family": item["instance"]["family"],
+            "solver_id": "euf-viper",
+            "solver_sha256": candidate["sha256"],
+            "solver_version": candidate["version"],
+            "budget_s": item["budget_s"],
+            "repetition": item["repetition"],
+            "cpu_id": item["cpu_id"],
+            "argv": item["argv"],
+            "descriptor_binding": {
+                "mechanism": "linux_procfd",
+                "solver_sha256": candidate["sha256"],
+                "source_sha256": item["instance"]["sha256"],
+                "sealed_build_receipt_sha256": receipt_sha256,
+            },
+            "environment_sha256": item["environment_sha256"],
+            "pid": 1234,
+            "started_at": "2026-07-15T00:00:00+00:00",
+            "finished_at": "2026-07-15T00:00:01+00:00",
+            "wall_time_s": 0.5,
+            "child_user_time_s": 0.3,
+            "child_system_time_s": 0.1,
+            "child_cpu_time_s": 0.4,
+            "max_rss_bytes": 4096,
+            "exit_code": 0,
+            "termination_cause": "exit",
+            "termination_signal": None,
+            "timed_out": False,
+            "spawn_error": None,
+            "stdout_sha256": digest("sat\n"),
+            "stdout_bytes": 4,
+            "stderr_sha256": digest(""),
+            "stderr_bytes": 0,
+            "result_token": "sat",
+            "result_token_status": "valid",
+            "production_evidence": evidence,
+            "previous_record_sha256": "3" * 64,
+            "record_sha256": "",
+        }
+        record["record_sha256"] = ANALYZER._record_digest(record)
+        checked = {
+            "schema": evidence["schema"],
+            "status": evidence["status"],
+            "backend_status": evidence["backend_status"],
+            "run_nonce": evidence["run_nonce"],
+            "evidence_sha256": evidence_sha256,
+            "evidence_bytes": evidence["bytes"],
+            "source_sha256": evidence["source_sha256"],
+            "solver_revision": evidence["solver_revision"],
+            "solver_executable_sha256": evidence["solver_executable_sha256"],
+            "solver_config_sha256": runtime_config_sha256,
+            "solver_build_sha256": evidence["solver_build_sha256"],
+            "sealed_build_receipt_sha256": receipt_sha256,
+        }
+        return record, item, checked, receipt_sha256
+
+    def test_real_evidence_row_receipt_binding_is_accepted_and_cross_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            record, expected, checked, receipt_sha256 = self.production_record(
+                Path(temporary)
+            )
+            with mock.patch.object(
+                ANALYZER, "validate_production_evidence", return_value=checked
+            ) as checker:
+                result = ANALYZER._validate_locked_record(
+                    record,
+                    expected,
+                    record["lock_sha256"],
+                    "fixture row",
+                )
+        self.assertEqual(result, "sat")
+        self.assertEqual(
+            checker.call_args.kwargs["expected_sealed_build_receipt_sha256"],
+            receipt_sha256,
+        )
+
+    def test_descriptor_receipt_drift_is_rejected_before_checker_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            record, expected, checked, _ = self.production_record(Path(temporary))
+            record["descriptor_binding"]["sealed_build_receipt_sha256"] = "9" * 64
+            record["record_sha256"] = ANALYZER._record_digest(record)
+            with mock.patch.object(
+                ANALYZER, "validate_production_evidence", return_value=checked
+            ) as checker, self.assertRaisesRegex(
+                ANALYZER.CampaignInputError, "sealed build receipt hash mismatch"
+            ):
+                ANALYZER._validate_locked_record(
+                    record,
+                    expected,
+                    record["lock_sha256"],
+                    "fixture row",
+                )
+        checker.assert_not_called()
+
+
+class AnalyzerExitContractTests(unittest.TestCase):
+    def run_analyzer(
+        self, csv_path: Path, manifest_path: Path, output: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                str(SCRIPT),
+                str(csv_path),
+                "--manifest",
+                str(manifest_path),
+                "--bootstrap-replicates",
+                "16",
+                "--out",
+                str(output),
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_rejection_input_failure_and_publication_failure_have_distinct_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_path, manifest_path, rows = write_fixture(
+                root,
+                [case("alpha", "sat", 1.0, 2.0)],
+            )
+            rejected_output = root / "rejected.json"
+            rejected = self.run_analyzer(csv_path, manifest_path, rejected_output)
+            self.assertEqual(rejected.returncode, ANALYZER.EXIT_STATISTICALLY_REJECTED)
+            self.assertEqual(
+                json.loads(rejected_output.read_text(encoding="ascii"))["status"],
+                "rejected",
+            )
+
+            rows[1]["result"] = "unsat"
+            write_csv(csv_path, rows)
+            invalid_output = root / "invalid.json"
+            invalid = self.run_analyzer(csv_path, manifest_path, invalid_output)
+            self.assertEqual(invalid.returncode, ANALYZER.EXIT_INVALID_INPUT)
+            self.assertEqual(
+                json.loads(invalid_output.read_text(encoding="ascii"))["status"],
+                "invalid_input",
+            )
+
+            publication_output = root / "existing.json"
+            publication_output.write_text("do not replace\n", encoding="ascii")
+            publication_output.chmod(0o400)
+            publication = self.run_analyzer(
+                csv_path, manifest_path, publication_output
+            )
+            self.assertEqual(
+                publication.returncode, ANALYZER.EXIT_PUBLICATION_FAILED
+            )
+            self.assertIn("publication failed", publication.stderr)
+            self.assertEqual(
+                publication_output.read_text(encoding="ascii"), "do not replace\n"
+            )
 
 
 class ResamplingAndMultiplicityTests(unittest.TestCase):

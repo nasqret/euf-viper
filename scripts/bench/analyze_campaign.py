@@ -75,6 +75,11 @@ DEFAULT_BOOTSTRAP_REPLICATES = 10_000
 DEFAULT_CONFIDENCE_LEVEL = 0.95
 DEFAULT_MINIMUM_SPEEDUP = 1.0
 
+EXIT_PROMOTED = 0
+EXIT_STATISTICALLY_REJECTED = 1
+EXIT_INVALID_INPUT = 2
+EXIT_PUBLICATION_FAILED = 3
+
 BOOTSTRAP_METRICS = (
     "timeout_charged_wall",
     "par2_wall",
@@ -242,6 +247,10 @@ class CampaignInputError(ValueError):
         if not self.errors:
             raise ValueError("CampaignInputError requires at least one error")
         super().__init__(self.errors[0])
+
+
+class CampaignPublicationError(RuntimeError):
+    """Raised when a completed analysis cannot be published unambiguously."""
 
 
 def sha256_file(path: Path) -> str:
@@ -1939,6 +1948,7 @@ def _validate_locked_production_evidence(
     value: object,
     record: Mapping[str, Any],
     expected: Mapping[str, Any],
+    expected_receipt_sha256: str,
     context: str,
 ) -> dict[str, Any] | None:
     solver = expected["solver"]
@@ -2017,6 +2027,7 @@ def _validate_locked_production_evidence(
             expected_runtime_config=expected_runtime,
             expected_evidence_sha256=evidence_sha256,
             expected_run_nonce=binding["run_nonce"],
+            expected_sealed_build_receipt_sha256=expected_receipt_sha256,
         )
     except (OSError, ProductionEvidenceError) as error:
         raise CampaignInputError(
@@ -2104,9 +2115,16 @@ def _validate_locked_record(
         if not _same_json(record[field], value):
             raise CampaignInputError([f"{context}: locked field {field!r} mismatch"])
 
+    descriptor_binding_keys = {
+        "mechanism",
+        "solver_sha256",
+        "source_sha256",
+    }
+    if "evidence" in solver:
+        descriptor_binding_keys.add("sealed_build_receipt_sha256")
     descriptor_binding = _require_exact_keys(
         record["descriptor_binding"],
-        {"mechanism", "solver_sha256", "source_sha256"},
+        descriptor_binding_keys,
         f"{context}.descriptor_binding",
     )
     if descriptor_binding["mechanism"] not in {
@@ -2135,6 +2153,27 @@ def _validate_locked_record(
         raise CampaignInputError(
             [f"{context}.descriptor_binding: production execution was not descriptor-bound"]
         )
+    receipt_sha256 = ""
+    if "evidence" in solver:
+        receipt_sha256 = _require_hash_value(
+            descriptor_binding["sealed_build_receipt_sha256"],
+            f"{context}.descriptor_binding.sealed_build_receipt_sha256",
+        )
+        locked_receipt_sha256 = expected["environment"].get(
+            "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
+        )
+        if locked_receipt_sha256 is None:
+            raise CampaignInputError(
+                [f"{context}: locked environment lacks a sealed build receipt binding"]
+            )
+        _require_hash_value(
+            locked_receipt_sha256,
+            f"{context}.locked_environment.EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256",
+        )
+        if receipt_sha256 != locked_receipt_sha256:
+            raise CampaignInputError(
+                [f"{context}.descriptor_binding: sealed build receipt hash mismatch"]
+            )
 
     for field in ("started_at", "finished_at"):
         _require_string_value(record[field], f"{context}.{field}")
@@ -2196,12 +2235,20 @@ def _validate_locked_record(
             ]
         )
     if "evidence" in solver:
-        _validate_locked_production_evidence(
+        production_evidence = _validate_locked_production_evidence(
             record["production_evidence"],
             record,
             expected,
+            receipt_sha256,
             f"{context}.production_evidence",
         )
+        if (
+            production_evidence is not None
+            and production_evidence["sealed_build_receipt_sha256"] != receipt_sha256
+        ):
+            raise CampaignInputError(
+                [f"{context}: evidence and descriptor receipt bindings differ"]
+            )
     return _classify_locked_record(record)
 
 
@@ -2858,10 +2905,10 @@ def _json_text(payload: Mapping[str, Any]) -> str:
 
 def _emit_json(payload: Mapping[str, Any], output: Path | None) -> None:
     text = _json_text(payload)
-    if output is None:
-        sys.stdout.write(text)
-        return
     try:
+        if output is None:
+            sys.stdout.write(text)
+            return
         atomic_write_nofollow(
             output,
             text.encode("ascii"),
@@ -2869,8 +2916,8 @@ def _emit_json(payload: Mapping[str, Any], output: Path | None) -> None:
             immutable=True,
             mode=0o400,
         )
-    except StrictArtifactError as error:
-        raise CampaignInputError(str(error)) from error
+    except (OSError, StrictArtifactError) as error:
+        raise CampaignPublicationError(str(error)) from error
 
 
 def _safe_hash(path: Path) -> str | None:
@@ -3051,10 +3098,17 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             },
         }
+        exit_code = EXIT_INVALID_INPUT
+    else:
+        exit_code = (
+            EXIT_PROMOTED if payload["promoted"] else EXIT_STATISTICALLY_REJECTED
+        )
+    try:
         _emit_json(payload, args.out)
-        return 2
-    _emit_json(payload, args.out)
-    return 0 if payload["promoted"] else 1
+    except CampaignPublicationError as error:
+        print(f"campaign analysis publication failed: {error}", file=sys.stderr)
+        return EXIT_PUBLICATION_FAILED
+    return exit_code
 
 
 if __name__ == "__main__":
