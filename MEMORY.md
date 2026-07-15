@@ -949,3 +949,11 @@
   is incomplete, and the CLI baseline oracle is candidate-controlled. Continue
   only through the isolated phase-separated immutable-snapshot v4 repair; no
   corpus run exists.
+- T5 recovered commit `0ad8431` is valid Git but WMI NO-GO. It selects the
+  tracked 3,521-row official manifest while requiring 7,503, uses a
+  capability-dependent empty-path publication contract for a claimed
+  unprivileged gate, underbinds Slurm allocation identity, and has only a
+  closely mirrored projection verifier. Diagnostic hosted run `29385400195`
+  failed two Linux consumer-test contracts; its one-link test passed without an
+  effective-capability record. Repair all four boundaries and rerun independent
+  review before any WMI action. No T5 WMI submission exists.

@@ -467,7 +467,18 @@ independent evidence checks, and a frozen family holdout.
   not a valid Git artifact: its isolated clone lost required objects and failed
   `git fsck`. Only the physical files were copied into a fresh valid clone at
   `/private/tmp/euf-viper-t5-recovered`; the corrupt object database will never
-  be pushed, cited as evidence, or repaired in place.
+  be pushed, cited as evidence, or repaired in place. Valid recovered commit
+  `0ad8431` passed local object/test checks but remains WMI NO-GO. Independent
+  review reproduced a deterministic 3,521-row official-manifest selection
+  against a required 7,503 rows, found the claimed unprivileged
+  `linkat(AT_EMPTY_PATH)` gate capability-dependent, found Slurm identity bound
+  only to a recyclable numeric job ID, and judged the projection verifier only
+  implementation-separated. Diagnostic-only hosted run `29385400195` then
+  failed two Linux consumer-test contracts; its one-link syscall test passed,
+  but effective capabilities were not recorded. Repair the manifest,
+  capability-free procfs publication, full Slurm allocation identity,
+  independent oracle, runtime inventory, and end-to-end Linux tests before a
+  new review. No T5 WMI submission exists.
 
 ### T6: Theory-Conditioned Boolean DAG
 

@@ -299,6 +299,17 @@ Linux tests emulated pathname linking, and the verifier reused the candidate
 projection implementation. An unnamed one-link archive, content-bearing
 completion receipt, hermetic exact-blob guard, real Linux race tests, and an
 independent projection checker are required before WMI.
+Recovered valid commit `0ad8431` implemented that shape locally but failed the
+next independent review. Its WMI script selects the tracked 3,521-row official
+manifest while the analyzer requires 7,503 rows, so execution aborts before the
+census. Its empty-path link policy is capability-dependent despite an
+unprivileged requirement; scheduler evidence drops the cluster component and
+does not bind `SLUID`, submit time, user, job name, or work directory; and the
+second projection remains structurally close to the first. Exact SHA was
+published only for diagnostic hosted execution. Run `29385400195` failed two
+Linux consumer-test contracts after 88 tests. The one-link test passed on that
+runner, but effective capabilities were not recorded, so it proves no
+capability-free path. T5 remains WMI NO-GO and under repair.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit.

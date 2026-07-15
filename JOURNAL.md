@@ -1364,6 +1364,23 @@
   production-evidence, combined, all-feature, real comparator, CLI, and locked
   release-smoke steps. This is hosted smoke evidence only, not provenance or
   merge acceptance. Production-evidence v4 repair is isolated and active.
+- Independent review rejected valid recovered T5 commit `0ad8431` for WMI. The
+  fixed contract selects tracked SMT-COMP manifest bytes with 3,521 rows while
+  requiring 7,503, so the exact WMI command deterministically aborts before
+  source processing. The publication route requires
+  `linkat(..., AT_EMPTY_PATH)` while declaring an unprivileged gate; Slurm
+  terminal evidence drops the `sbatch --parsable` cluster and binds only a
+  numeric job ID; the projection verifier closely mirrors the candidate; and
+  Python/OS/filesystem/Slurm runtime closure is incomplete. Review allowed only
+  diagnostic branch publication, never merge or WMI.
+- Pushed exact `0ad84317b5cf714785e6129d8403772c813e7758` to
+  `research-t5-component-quotient-census-recovered`. Hosted Linux run
+  `29385400195` failed in 28 seconds after 88 tests: an archive replacement was
+  rejected earlier by inode mismatch than the test's expected digest mismatch,
+  and another swap test tried to parse a deliberately replaced empty receipt.
+  The real one-link test passed on that runner, so the repair must inventory
+  effective capabilities rather than infer an unprivileged environment. No WMI
+  job was submitted; a manifest/procfs/Slurm/oracle repair is active locally.
 
 ## Next Entry Template
 
