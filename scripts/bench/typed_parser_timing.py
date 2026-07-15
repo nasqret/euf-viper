@@ -18,6 +18,7 @@ import selectors
 import signal
 import stat
 import statistics
+import struct
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,7 @@ RECORD_SCHEMA = "euf-viper.typed-parser-timing-record.v2"
 SHARD_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-receipt.v1"
 SHARD_SET_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-set-receipt.v1"
 HASH_CHAIN_SCHEMA = "euf-viper.sha256-record-chain.v1"
-BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v1"
+BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v2"
 AUDIT_SCHEMA = "euf-viper.typed-parser-timing-audit.v2"
 BYTE_BINDING = "single-open-descriptor-buffer-replay.v1"
 EXECUTABLE_BINDING = "inherited-descriptor.v1"
@@ -324,6 +325,7 @@ class OpenedExecutable(NamedTuple):
     binding: dict[str, Any]
     fingerprint: FileFingerprint
     cleanup_directory: Path | None
+    linux_elf: dict[str, Any] | None
 
 
 class Execution(NamedTuple):
@@ -469,6 +471,29 @@ def open_regular_artifact(path: Path, *, executable: bool = False) -> CapturedAr
         os.close(descriptor)
 
 
+def open_inherited_artifact(path: Path, descriptor: int) -> CapturedArtifact:
+    if not sys.platform.startswith("linux"):
+        raise CampaignError("inherited artifact descriptors require Linux procfs")
+    canonical = path.resolve(strict=True)
+    try:
+        duplicate = os.dup(descriptor)
+    except OSError as error:
+        raise CampaignError(f"cannot duplicate inherited artifact descriptor: {error}") from error
+    try:
+        target = Path(f"/proc/self/fd/{duplicate}").resolve(strict=True)
+        if target != canonical:
+            raise CampaignError("inherited artifact descriptor does not name its supplied path")
+        before = file_fingerprint(duplicate)
+        if not stat.S_ISREG(before.mode):
+            raise CampaignError("inherited artifact descriptor is not regular")
+        content = read_descriptor(duplicate, before.size)
+        if file_fingerprint(duplicate) != before:
+            raise CampaignError("inherited artifact descriptor changed while read")
+        return CapturedArtifact(canonical, content, sha256_bytes(content))
+    finally:
+        os.close(duplicate)
+
+
 def write_all(descriptor: int, content: bytes) -> None:
     offset = 0
     while offset < len(content):
@@ -589,10 +614,33 @@ def private_execution_copy(descriptor: int, size: int, digest: str) -> tuple[str
 
 @contextlib.contextmanager
 def open_verified_executable(
-    path: Path, expected: dict[str, Any] | None = None
+    path: Path,
+    expected: dict[str, Any] | None = None,
+    *,
+    inherited_descriptor: int | None = None,
+    require_linux_elf: bool = False,
 ) -> Iterator[OpenedExecutable]:
     canonical = path.resolve(strict=True)
-    descriptor = os.open(canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    if inherited_descriptor is None:
+        descriptor = os.open(canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    else:
+        try:
+            descriptor = os.dup(inherited_descriptor)
+        except OSError as error:
+            raise CampaignError(f"cannot duplicate inherited timing binary: {error}") from error
+        if sys.platform.startswith("linux"):
+            try:
+                descriptor_target = Path(f"/proc/self/fd/{descriptor}").resolve(strict=True)
+            except OSError as error:
+                os.close(descriptor)
+                raise CampaignError(
+                    f"cannot resolve inherited timing descriptor: {error}"
+                ) from error
+            if descriptor_target != canonical:
+                os.close(descriptor)
+                raise CampaignError(
+                    "inherited timing descriptor does not name the supplied binary path"
+                )
     cleanup_directory: Path | None = None
     try:
         before = file_fingerprint(descriptor)
@@ -600,6 +648,23 @@ def open_verified_executable(
             raise CampaignError("timing binary is not a regular executable")
         content = read_descriptor(descriptor, before.size)
         digest = sha256_bytes(content)
+        linux_elf = None
+        if require_linux_elf:
+            if not sys.platform.startswith("linux"):
+                raise CampaignError("guarded release ELF verification requires Linux")
+            if len(content) < 64 or content[:4] != b"\x7fELF":
+                raise CampaignError("guarded release is not an ELF image")
+            if content[4:7] != b"\x02\x01\x01":
+                raise CampaignError("guarded release is not little-endian ELF64 version 1")
+            elf_type, machine, version = struct.unpack_from("<HHI", content, 16)
+            if elf_type not in {2, 3} or machine not in {62, 183} or version != 1:
+                raise CampaignError("guarded release ELF identity is unsupported")
+            linux_elf = {
+                "class": "ELF64",
+                "endianness": "little",
+                "machine": {62: "x86_64", 183: "aarch64"}[machine],
+                "type": {2: "executable", 3: "shared-or-pie"}[elf_type],
+            }
         if file_fingerprint(descriptor) != before:
             raise CampaignError("timing binary changed while hashed")
         binding = {
@@ -626,6 +691,7 @@ def open_verified_executable(
             binding,
             before,
             cleanup_directory,
+            linux_elf,
         )
         yield opened
         assert_executable_unchanged(opened)
@@ -944,12 +1010,19 @@ def validate_checkout_receipt(
             raise CampaignError(f"{where}: unsupported runtime blob mode")
 
 
-def validate_embedded_json_artifact(value: Any, *, where: str) -> dict[str, Any]:
+def validate_embedded_json_artifact(
+    value: Any, *, where: str, verify_path: bool = True
+) -> dict[str, Any]:
     value = require_exact_keys(value, frozenset({"path", "sha256", "payload"}), where=where)
     path = Path(require_string(value["path"], where=f"{where}.path"))
     if not path.is_absolute():
         raise CampaignError(f"{where}.path must be absolute")
     expected = require_sha256(value["sha256"], where=f"{where}.sha256")
+    if not verify_path:
+        parsed = value["payload"]
+        if not isinstance(parsed, dict) or sha256_bytes(canonical_bytes(parsed)) != expected:
+            raise CampaignError(f"{where}: descriptor-sealed embedded payload mismatch")
+        return parsed
     artifact = open_regular_artifact(path)
     if stat.S_IMODE(path.stat().st_mode) != 0o400:
         raise CampaignError(f"{where}: embedded artifact is not sealed mode 0400")
@@ -968,14 +1041,18 @@ def validate_embedded_json_artifact(value: Any, *, where: str) -> dict[str, Any]
 
 
 def validate_clean_mutation_monitor(
-    value: Any, *, expected_root: Path, where: str
+    value: Any, *, expected_root: Path, where: str, verify_paths: bool = True
 ) -> dict[str, Any]:
-    monitor = validate_embedded_json_artifact(value, where=where)
+    monitor = validate_embedded_json_artifact(value, where=where, verify_path=verify_paths)
     monitor = require_exact_keys(
         monitor,
         frozenset(
             {
                 "schema",
+                "control",
+                "monitor_pid",
+                "parent_pid",
+                "poll_cycles",
                 "snapshot",
                 "watched_directories",
                 "watch_mask",
@@ -987,7 +1064,14 @@ def validate_clean_mutation_monitor(
         where=f"{where}.payload",
     )
     if (
-        monitor["schema"] != "euf-viper.t1-mutation-monitor-receipt.v1"
+        monitor["schema"] != "euf-viper.t1-mutation-monitor-receipt.v2"
+        or monitor["control"] != "parent-owned-pipe-eof.v1"
+        or require_integer(monitor["monitor_pid"], where=f"{where}.monitor_pid", minimum=2)
+        < 2
+        or require_integer(monitor["parent_pid"], where=f"{where}.parent_pid", minimum=2)
+        < 2
+        or require_integer(monitor["poll_cycles"], where=f"{where}.poll_cycles", minimum=1)
+        < 1
         or monitor["status"] != "clean"
         or monitor["event_count"] != 0
         or monitor["snapshot"] != str(expected_root)
@@ -1009,18 +1093,188 @@ def validate_clean_mutation_monitor(
     events_path = Path(require_string(events["path"], where=f"{where}.events.path"))
     if not events_path.is_absolute():
         raise CampaignError(f"{where}: mutation event log path is not absolute")
-    event_artifact = open_regular_artifact(events_path)
-    if stat.S_IMODE(events_path.stat().st_mode) != 0o400:
-        raise CampaignError(f"{where}: mutation event log is not sealed mode 0400")
-    if (
-        event_artifact.sha256
-        != require_sha256(events["sha256"], where=f"{where}.events.sha256")
-        or len(event_artifact.content)
-        != require_integer(events["bytes"], where=f"{where}.events.bytes")
-        or event_artifact.content != b""
-    ):
-        raise CampaignError(f"{where}: clean mutation event log is not empty and bound")
+    expected_event_sha = require_sha256(
+        events["sha256"], where=f"{where}.events.sha256"
+    )
+    expected_event_bytes = require_integer(
+        events["bytes"], where=f"{where}.events.bytes"
+    )
+    if verify_paths:
+        event_artifact = open_regular_artifact(events_path)
+        if stat.S_IMODE(events_path.stat().st_mode) != 0o400:
+            raise CampaignError(f"{where}: mutation event log is not sealed mode 0400")
+        if (
+            event_artifact.sha256 != expected_event_sha
+            or len(event_artifact.content) != expected_event_bytes
+            or event_artifact.content != b""
+        ):
+            raise CampaignError(f"{where}: clean mutation event log is not empty and bound")
+    elif expected_event_sha != EMPTY_SHA256 or expected_event_bytes != 0:
+        raise CampaignError(f"{where}: descriptor-sealed clean event binding is not empty")
     return monitor
+
+
+def validate_linux_elf_provenance(
+    value: Any,
+    *,
+    binary: dict[str, Any],
+    where: str,
+    verify_runtime_paths: bool,
+) -> dict[str, Any]:
+    value = require_exact_keys(
+        value,
+        frozenset(
+            {
+                "schema",
+                "binary_sha256",
+                "closure_sha256",
+                "default_search",
+                "edges",
+                "interpreter",
+                "objects",
+            }
+        ),
+        where=where,
+    )
+    if value["schema"] != "euf-viper.t1-linux-elf-provenance.v1":
+        raise CampaignError(f"{where}: Linux ELF provenance schema drifted")
+    if value["binary_sha256"] != binary["sha256"]:
+        raise CampaignError(f"{where}: ELF root differs from the attested binary")
+    require_sha256(value["closure_sha256"], where=f"{where}.closure_sha256")
+    if not isinstance(value["default_search"], list) or not value["default_search"]:
+        raise CampaignError(f"{where}: ELF default search path is empty")
+    search_paths: list[str] = []
+    for index, item in enumerate(value["default_search"]):
+        path = require_string(item, where=f"{where}.default_search[{index}]")
+        if not Path(path).is_absolute() or path in search_paths:
+            raise CampaignError(f"{where}: ELF default search path is malformed")
+        search_paths.append(path)
+    interpreter = require_exact_keys(
+        value["interpreter"],
+        frozenset({"bytes", "path", "requested", "sha256"}),
+        where=f"{where}.interpreter",
+    )
+    interpreter_path = require_string(
+        interpreter["path"], where=f"{where}.interpreter.path"
+    )
+    requested_interpreter = require_string(
+        interpreter["requested"], where=f"{where}.interpreter.requested"
+    )
+    if not Path(interpreter_path).is_absolute() or not Path(requested_interpreter).is_absolute():
+        raise CampaignError(f"{where}: ELF interpreter paths must be absolute")
+    require_sha256(interpreter["sha256"], where=f"{where}.interpreter.sha256")
+    require_integer(interpreter["bytes"], where=f"{where}.interpreter.bytes", minimum=1)
+
+    if not isinstance(value["objects"], list) or len(value["objects"]) < 2:
+        raise CampaignError(f"{where}: native runtime closure is incomplete")
+    objects: dict[str, dict[str, Any]] = {}
+    root_objects = 0
+    interpreter_objects = 0
+    for index, item in enumerate(value["objects"]):
+        item_where = f"{where}.objects[{index}]"
+        item = require_exact_keys(
+            item,
+            frozenset({"bytes", "elf", "path", "role", "sha256"}),
+            where=item_where,
+        )
+        path = require_string(item["path"], where=f"{item_where}.path")
+        if not Path(path).is_absolute() or path in objects:
+            raise CampaignError(f"{item_where}: native object path is invalid or duplicated")
+        require_sha256(item["sha256"], where=f"{item_where}.sha256")
+        require_integer(item["bytes"], where=f"{item_where}.bytes", minimum=1)
+        if item["role"] not in {"binary", "interpreter", "dependency"}:
+            raise CampaignError(f"{item_where}: native object role is invalid")
+        elf = require_exact_keys(
+            item["elf"],
+            frozenset(
+                {
+                    "abi_version",
+                    "class",
+                    "endianness",
+                    "interpreter",
+                    "machine",
+                    "needed",
+                    "osabi",
+                    "rpath",
+                    "runpath",
+                    "soname",
+                    "type",
+                }
+            ),
+            where=f"{item_where}.elf",
+        )
+        if (
+            elf["class"] != "ELF64"
+            or elf["endianness"] != "little"
+            or elf["machine"] not in {"x86_64", "aarch64"}
+            or elf["type"] not in {"executable", "shared-or-pie"}
+        ):
+            raise CampaignError(f"{item_where}: unsupported ELF identity")
+        require_integer(elf["abi_version"], where=f"{item_where}.elf.abi_version")
+        require_integer(elf["osabi"], where=f"{item_where}.elf.osabi")
+        for field in ("needed", "rpath", "runpath"):
+            if not isinstance(elf[field], list):
+                raise CampaignError(f"{item_where}.elf.{field} must be a list")
+            for entry in elf[field]:
+                require_string(entry, where=f"{item_where}.elf.{field}")
+        for field in ("interpreter", "soname"):
+            if elf[field] is not None:
+                require_string(elf[field], where=f"{item_where}.elf.{field}")
+        root_objects += item["role"] == "binary"
+        interpreter_objects += item["role"] == "interpreter"
+        objects[path] = item
+        if verify_runtime_paths and item["role"] != "binary":
+            artifact = open_regular_artifact(
+                Path(path), executable=item["role"] == "interpreter"
+            )
+            if artifact.sha256 != item["sha256"] or len(artifact.content) != item["bytes"]:
+                raise CampaignError(f"{item_where}: native runtime object changed")
+    if root_objects != 1 or interpreter_objects != 1:
+        raise CampaignError(f"{where}: ELF closure roles are incomplete or duplicated")
+    root = next(item for item in objects.values() if item["role"] == "binary")
+    if {key: root[key] for key in ("path", "sha256", "bytes")} != {
+        key: binary[key] for key in ("path", "sha256", "bytes")
+    }:
+        raise CampaignError(f"{where}: ELF root object binding mismatch")
+    interpreter_object = objects.get(interpreter_path)
+    if (
+        interpreter_object is None
+        or interpreter_object["role"] != "interpreter"
+        or interpreter_object["sha256"] != interpreter["sha256"]
+        or interpreter_object["bytes"] != interpreter["bytes"]
+        or root["elf"]["interpreter"] != requested_interpreter
+    ):
+        raise CampaignError(f"{where}: ELF interpreter binding mismatch")
+
+    if not isinstance(value["edges"], list):
+        raise CampaignError(f"{where}: ELF dependency edges must be a list")
+    observed_edges: set[tuple[str, str, str]] = set()
+    for index, edge in enumerate(value["edges"]):
+        edge = require_exact_keys(
+            edge,
+            frozenset({"needed", "resolved", "source"}),
+            where=f"{where}.edges[{index}]",
+        )
+        source = require_string(edge["source"], where=f"{where}.edges[{index}].source")
+        needed = require_string(edge["needed"], where=f"{where}.edges[{index}].needed")
+        resolved = require_string(
+            edge["resolved"], where=f"{where}.edges[{index}].resolved"
+        )
+        coordinate = (source, needed, resolved)
+        if source not in objects or resolved not in objects or coordinate in observed_edges:
+            raise CampaignError(f"{where}: ELF dependency edge is dangling or duplicated")
+        observed_edges.add(coordinate)
+    expected_dependencies = {
+        (path, needed)
+        for path, item in objects.items()
+        for needed in item["elf"]["needed"]
+    }
+    if {(source, needed) for source, needed, _ in observed_edges} != expected_dependencies:
+        raise CampaignError(f"{where}: recursive DT_NEEDED closure is incomplete")
+    closure = {"edges": value["edges"], "objects": value["objects"]}
+    if sha256_bytes(canonical_bytes(closure)) != value["closure_sha256"]:
+        raise CampaignError(f"{where}: native runtime closure digest mismatch")
+    return value
 
 
 def validate_build_receipt(
@@ -1031,6 +1285,8 @@ def validate_build_receipt(
     python_identity: dict[str, Any],
     build_tools: dict[str, Any],
     where: str,
+    verify_linux_runtime: bool = False,
+    verify_embedded_paths: bool = True,
 ) -> dict[str, Any]:
     try:
         text = artifact.content.decode("ascii")
@@ -1051,6 +1307,8 @@ def validate_build_receipt(
                 "dependency_post_inventory",
                 "dependency_mutation_monitor",
                 "binary",
+                "linux_elf",
+                "linker_selection",
                 "python",
                 "tools",
                 "libc",
@@ -1068,26 +1326,40 @@ def validate_build_receipt(
     snapshot = Path(require_string(value["source_snapshot"], where=f"{where}.source_snapshot"))
     if not snapshot.is_absolute():
         raise CampaignError(f"{where}: source snapshot is not absolute")
-    resolved_snapshot = snapshot.resolve(strict=True)
-    if snapshot != resolved_snapshot or snapshot.is_symlink() or not snapshot.is_dir():
-        raise CampaignError(f"{where}: source snapshot is not a canonical directory")
-    snapshot = resolved_snapshot
-    pre = validate_embedded_json_artifact(value["pre_inventory"], where=f"{where}.pre_inventory")
-    post = validate_embedded_json_artifact(value["post_inventory"], where=f"{where}.post_inventory")
+    if verify_embedded_paths:
+        resolved_snapshot = snapshot.resolve(strict=True)
+        if snapshot != resolved_snapshot or snapshot.is_symlink() or not snapshot.is_dir():
+            raise CampaignError(f"{where}: source snapshot is not a canonical directory")
+        snapshot = resolved_snapshot
+    elif Path(os.path.normpath(str(snapshot))) != snapshot or ".." in snapshot.parts:
+        raise CampaignError(f"{where}: source snapshot path is not lexically canonical")
+    pre = validate_embedded_json_artifact(
+        value["pre_inventory"],
+        where=f"{where}.pre_inventory",
+        verify_path=verify_embedded_paths,
+    )
+    post = validate_embedded_json_artifact(
+        value["post_inventory"],
+        where=f"{where}.post_inventory",
+        verify_path=verify_embedded_paths,
+    )
     if pre != post or pre.get("revision") != revision or pre.get("snapshot") != str(snapshot):
         raise CampaignError(f"{where}: pre/post source inventory mismatch")
     validate_clean_mutation_monitor(
         value["mutation_monitor"],
         expected_root=snapshot,
         where=f"{where}.mutation_monitor",
+        verify_paths=verify_embedded_paths,
     )
     dependency_pre = validate_embedded_json_artifact(
         value["dependency_pre_inventory"],
         where=f"{where}.dependency_pre_inventory",
+        verify_path=verify_embedded_paths,
     )
     dependency_post = validate_embedded_json_artifact(
         value["dependency_post_inventory"],
         where=f"{where}.dependency_post_inventory",
+        verify_path=verify_embedded_paths,
     )
     if dependency_pre != dependency_post:
         raise CampaignError(f"{where}: dependency inventory changed during offline build")
@@ -1110,12 +1382,18 @@ def validate_build_receipt(
     dependency_root = Path(
         require_string(dependency_pre["root"], where=f"{where}.dependency_inventory.root")
     )
-    if not dependency_root.is_absolute() or dependency_root != dependency_root.resolve(strict=True):
+    if not dependency_root.is_absolute():
         raise CampaignError(f"{where}: dependency inventory root is not canonical")
+    if verify_embedded_paths:
+        if dependency_root != dependency_root.resolve(strict=True):
+            raise CampaignError(f"{where}: dependency inventory root is not canonical")
+    elif Path(os.path.normpath(str(dependency_root))) != dependency_root or ".." in dependency_root.parts:
+        raise CampaignError(f"{where}: dependency inventory root is not lexically canonical")
     validate_clean_mutation_monitor(
         value["dependency_mutation_monitor"],
         expected_root=dependency_root,
         where=f"{where}.dependency_mutation_monitor",
+        verify_paths=verify_embedded_paths,
     )
     require_integer(
         dependency_pre["directories"],
@@ -1131,10 +1409,22 @@ def validate_build_receipt(
         where=f"{where}.dependency_inventory.entries_sha256",
     )
     build_binary = require_exact_keys(
-        value["binary"], frozenset({"path", "sha256", "bytes"}), where=f"{where}.binary"
+        value["binary"],
+        frozenset({"path", "sha256", "bytes", "attestation"}),
+        where=f"{where}.binary",
     )
-    if build_binary != {key: binary[key] for key in ("path", "sha256", "bytes")}:
+    if build_binary["attestation"] != "inherited-open-descriptor.v1":
+        raise CampaignError(f"{where}: release binary was not descriptor-attested")
+    if {key: build_binary[key] for key in ("path", "sha256", "bytes")} != {
+        key: binary[key] for key in ("path", "sha256", "bytes")
+    }:
         raise CampaignError(f"{where}: release binary identity mismatch")
+    validate_linux_elf_provenance(
+        value["linux_elf"],
+        binary=build_binary,
+        where=f"{where}.linux_elf",
+        verify_runtime_paths=verify_linux_runtime,
+    )
     build_python = require_exact_keys(
         value["python"],
         frozenset({"path", "sha256", "bytes", "version"}),
@@ -1145,6 +1435,27 @@ def validate_build_receipt(
     validate_build_tools(value["tools"], where=f"{where}.tools")
     if value["tools"] != build_tools:
         raise CampaignError(f"{where}: compiler or linker identity mismatch")
+    linker_selection = require_exact_keys(
+        value["linker_selection"],
+        frozenset(
+            {
+                "driver_path",
+                "driver_sha256",
+                "request",
+                "resolved_path",
+                "resolved_sha256",
+            }
+        ),
+        where=f"{where}.linker_selection",
+    )
+    if linker_selection != {
+        "driver_path": build_tools["cc"]["path"],
+        "driver_sha256": build_tools["cc"]["sha256"],
+        "request": "-fuse-ld=bfd",
+        "resolved_path": build_tools["ld"]["path"],
+        "resolved_sha256": build_tools["ld"]["sha256"],
+    }:
+        raise CampaignError(f"{where}: selected linker is not the pinned linker")
     libc = require_exact_keys(
         value["libc"],
         frozenset({"path", "sha256", "bytes", "name", "version"}),
@@ -1156,6 +1467,15 @@ def validate_build_receipt(
     require_integer(libc["bytes"], where=f"{where}.libc.bytes", minimum=1)
     require_string(libc["name"], where=f"{where}.libc.name")
     require_string(libc["version"], where=f"{where}.libc.version")
+    libc_objects = [
+        item
+        for item in value["linux_elf"]["objects"]
+        if (item["elf"]["soname"] or Path(item["path"]).name).startswith("libc.so")
+    ]
+    if len(libc_objects) != 1 or any(
+        libc[key] != libc_objects[0][key] for key in ("path", "sha256", "bytes")
+    ):
+        raise CampaignError(f"{where}: libc is not bound to the native runtime closure")
     build = require_exact_keys(
         value["build"],
         frozenset(
@@ -1194,10 +1514,16 @@ def validate_build_receipt(
     fetch_cargo_home_path = Path(build["fetch_cargo_home"])
     target_dir_path = Path(build["target_dir"])
     vendor_dir_path = Path(build["vendor_dir"])
-    cargo_home = cargo_home_path.resolve(strict=True)
-    fetch_cargo_home = fetch_cargo_home_path.resolve(strict=True)
-    target_dir = target_dir_path.resolve(strict=True)
-    vendor_dir = vendor_dir_path.resolve(strict=True)
+    if verify_embedded_paths:
+        cargo_home = cargo_home_path.resolve(strict=True)
+        fetch_cargo_home = fetch_cargo_home_path.resolve(strict=True)
+        target_dir = target_dir_path.resolve(strict=True)
+        vendor_dir = vendor_dir_path.resolve(strict=True)
+    else:
+        cargo_home = Path(os.path.normpath(str(cargo_home_path)))
+        fetch_cargo_home = Path(os.path.normpath(str(fetch_cargo_home_path)))
+        target_dir = Path(os.path.normpath(str(target_dir_path)))
+        vendor_dir = Path(os.path.normpath(str(vendor_dir_path)))
     if (
         cargo_home_path != cargo_home
         or fetch_cargo_home_path != fetch_cargo_home
@@ -1377,6 +1703,12 @@ def validate_worker(value: Any, *, where: str) -> None:
                 "slurm_cpu_bind",
                 "slurm_mem_bind",
                 "slurm_threads_per_core",
+                "slurm_job_cpus_per_node",
+                "slurm_job_num_nodes",
+                "slurm_cpu_freq_req",
+                "physical_cores_on_node",
+                "submission_mode",
+                "placement_contract",
                 "governor_control",
                 "exclusive_control",
                 "libc",
@@ -1401,6 +1733,9 @@ def validate_worker(value: Any, *, where: str) -> None:
         "slurm_nodelist",
         "slurm_cpu_bind",
         "slurm_mem_bind",
+        "slurm_cpu_freq_req",
+        "submission_mode",
+        "placement_contract",
         "allocator",
         "backend",
     ):
@@ -1417,11 +1752,24 @@ def validate_worker(value: Any, *, where: str) -> None:
         "scaling_current_khz",
         "slurm_cpus_per_task",
         "slurm_threads_per_core",
+        "slurm_job_cpus_per_node",
+        "slurm_job_num_nodes",
+        "physical_cores_on_node",
     ):
         require_integer(value[key], where=f"{where}.{key}")
     for key in ("governor_control", "exclusive_control"):
         if type(value[key]) is not bool:
             raise CampaignError(f"{where}.{key} must be Boolean")
+    expected_placement = {
+        "full": "slurm-exclusive-core-local-high-userspace.v1",
+        "canary": "bounded-canary-uncontrolled.v1",
+    }
+    if (
+        value["submission_mode"] not in expected_placement
+        or value["placement_contract"]
+        != expected_placement[value["submission_mode"]]
+    ):
+        raise CampaignError(f"{where}: submission mode and placement contract differ")
     for key in (
         "cpu_model",
         "microcode",
@@ -1498,6 +1846,24 @@ def _environment_integer(name: str) -> int:
     return int(value)
 
 
+def _slurm_single_node_cpu_count() -> int:
+    value = os.environ.get("SLURM_JOB_CPUS_PER_NODE", "0")
+    match = re.fullmatch(r"([1-9][0-9]*)(?:\(x1\))?", value)
+    return int(match.group(1)) if match else 0
+
+
+def _physical_core_count() -> int:
+    cores: set[tuple[int, int]] = set()
+    for cpu in Path("/sys/devices/system/cpu").glob("cpu[0-9]*"):
+        package = _read_integer(cpu / "topology/physical_package_id")
+        core = _read_integer(cpu / "topology/core_id")
+        if (cpu / "topology/physical_package_id").is_file() and (
+            cpu / "topology/core_id"
+        ).is_file():
+            cores.add((package, core))
+    return len(cores)
+
+
 def loaded_libc_identity() -> dict[str, Any]:
     candidates: set[Path] = set()
     maps = Path("/proc/self/maps")
@@ -1544,6 +1910,12 @@ def worker_homogeneous_identity(worker: dict[str, Any]) -> dict[str, Any]:
             "slurm_cpu_bind",
             "slurm_mem_bind",
             "slurm_threads_per_core",
+            "slurm_job_cpus_per_node",
+            "slurm_job_num_nodes",
+            "slurm_cpu_freq_req",
+            "physical_cores_on_node",
+            "submission_mode",
+            "placement_contract",
             "governor_control",
             "exclusive_control",
             "libc",
@@ -1563,7 +1935,11 @@ def require_homogeneous_workers(workers: Iterable[dict[str, Any]]) -> None:
 
 
 def bind_worker(
-    *, contract: dict[str, Any], require_linux_affinity: bool
+    *,
+    contract: dict[str, Any],
+    require_linux_affinity: bool,
+    submission_mode: str,
+    require_placement_controls: bool,
 ) -> dict[str, Any]:
     cpu_id = 0
     affinity = "unavailable-nonlinux"
@@ -1604,6 +1980,26 @@ def bind_worker(
     turbo = _read_one_line(Path("/sys/devices/system/cpu/intel_pstate/no_turbo"))
     if turbo == "unavailable":
         turbo = _read_one_line(Path("/sys/devices/system/cpu/cpufreq/boost"))
+    job_cpus_per_node = _slurm_single_node_cpu_count()
+    job_num_nodes = _environment_integer("SLURM_JOB_NUM_NODES")
+    physical_cores = _physical_core_count()
+    frequency_request = os.environ.get("SLURM_CPU_FREQ_REQ", "unavailable")
+    if (
+        not frequency_request
+        or not frequency_request.isascii()
+        or "\n" in frequency_request
+        or "\r" in frequency_request
+    ):
+        frequency_request = "unavailable"
+    fixed_frequency = (
+        governor.lower() == "userspace" and minimum > 0 and minimum == maximum
+    )
+    exclusive = (
+        submission_mode == "full"
+        and job_num_nodes == 1
+        and physical_cores > 0
+        and job_cpus_per_node == physical_cores
+    )
     worker = {
         "hostname": hostname,
         "platform": platform.system(),
@@ -1625,11 +2021,25 @@ def bind_worker(
         "slurm_partition": os.environ.get("SLURM_JOB_PARTITION", "unavailable"),
         "slurm_nodelist": os.environ.get("SLURM_JOB_NODELIST", "unavailable"),
         "slurm_cpus_per_task": _environment_integer("SLURM_CPUS_PER_TASK"),
-        "slurm_cpu_bind": os.environ.get("SLURM_CPU_BIND", "unavailable"),
-        "slurm_mem_bind": os.environ.get("SLURM_MEM_BIND", "unavailable"),
+        "slurm_cpu_bind": os.environ.get(
+            "SLURM_CPU_BIND_TYPE", os.environ.get("SLURM_CPU_BIND", "unavailable")
+        ),
+        "slurm_mem_bind": os.environ.get(
+            "SLURM_MEM_BIND_TYPE", os.environ.get("SLURM_MEM_BIND", "unavailable")
+        ),
         "slurm_threads_per_core": _environment_integer("SLURM_THREADS_PER_CORE"),
-        "governor_control": governor == "performance" and minimum > 0 and minimum == maximum,
-        "exclusive_control": False,
+        "slurm_job_cpus_per_node": job_cpus_per_node,
+        "slurm_job_num_nodes": job_num_nodes,
+        "slurm_cpu_freq_req": frequency_request,
+        "physical_cores_on_node": physical_cores,
+        "submission_mode": submission_mode,
+        "placement_contract": (
+            "slurm-exclusive-core-local-high-userspace.v1"
+            if submission_mode == "full"
+            else "bounded-canary-uncontrolled.v1"
+        ),
+        "governor_control": fixed_frequency,
+        "exclusive_control": exclusive,
         "libc": loaded_libc_identity(),
         "allocator": "system-libc",
         "backend": "auto",
@@ -1651,6 +2061,15 @@ def bind_worker(
             raise CampaignError("SLURM did not report core binding")
         if "local" not in worker["slurm_mem_bind"].split(","):
             raise CampaignError("SLURM did not report local NUMA memory binding")
+    if require_placement_controls:
+        if submission_mode != "full":
+            raise CampaignError("placement controls can only be required for a full campaign")
+        if frequency_request == "unavailable":
+            raise CampaignError("SLURM did not propagate the frequency request")
+        if not worker["exclusive_control"]:
+            raise CampaignError("SLURM allocation does not prove exclusive node control")
+        if not worker["governor_control"]:
+            raise CampaignError("SLURM frequency request did not produce fixed userspace control")
     validate_worker(worker, where="worker")
     return worker
 
@@ -1825,8 +2244,11 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
         frozenset(
             {
                 "allowed_hostnames",
+                "canary_shards",
                 "core_binding",
+                "exclusive_allocation",
                 "exclusive_control_required_for_promotion",
+                "frequency_control",
                 "governor_control_required_for_promotion",
                 "max_parallel",
                 "memory_binding",
@@ -1840,8 +2262,11 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
     )
     expected_timing_environment = {
         "allowed_hostnames": ["c1n1.cluster.wmi.amu.edu.pl"],
+        "canary_shards": 1,
         "core_binding": "slurm-cpu-bind-cores-singleton.v1",
+        "exclusive_allocation": "slurm-exclusive-node-runtime-verified.v1",
         "exclusive_control_required_for_promotion": True,
+        "frequency_control": "slurm-srun-high-userspace-runtime-verified.v1",
         "governor_control_required_for_promotion": True,
         "max_parallel": LOCKED_MAX_PARALLEL,
         "memory_binding": "slurm-mem-bind-local.v1",
@@ -3002,8 +3427,16 @@ def verify_build_receipt_command(args: argparse.Namespace) -> None:
         name: validate_external_tool_identity(name)
         for name in sorted(BUILD_TOOL_ENVIRONMENT)
     }
-    artifact = open_regular_artifact(args.build_receipt)
-    with open_verified_executable(args.binary) as executable:
+    artifact = (
+        open_inherited_artifact(args.build_receipt, args.build_receipt_fd)
+        if args.build_receipt_fd is not None
+        else open_regular_artifact(args.build_receipt)
+    )
+    with open_verified_executable(
+        args.binary,
+        inherited_descriptor=args.binary_fd,
+        require_linux_elf=True,
+    ) as executable:
         value = validate_build_receipt(
             artifact,
             revision=revision,
@@ -3011,6 +3444,8 @@ def verify_build_receipt_command(args: argparse.Namespace) -> None:
             python_identity=python_identity,
             build_tools=build_tools,
             where="guarded release build receipt",
+            verify_linux_runtime=True,
+            verify_embedded_paths=args.build_receipt_fd is None,
         )
     summary = {
         "schema": "euf-viper.t1-guarded-release-build-verification.v1",
@@ -3098,8 +3533,16 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     except UnicodeDecodeError as error:
         raise CampaignError(f"preflight source is not UTF-8: {error}") from error
     tool_artifact = open_regular_artifact(Path(__file__))
-    build_receipt = open_regular_artifact(args.build_receipt)
-    with open_verified_executable(args.binary) as executable:
+    build_receipt = (
+        open_inherited_artifact(args.build_receipt, args.build_receipt_fd)
+        if args.build_receipt_fd is not None
+        else open_regular_artifact(args.build_receipt)
+    )
+    with open_verified_executable(
+        args.binary,
+        inherited_descriptor=args.binary_fd,
+        require_linux_elf=True,
+    ) as executable:
         validate_build_receipt(
             build_receipt,
             revision=revision,
@@ -3107,6 +3550,8 @@ def prepare_campaign(args: argparse.Namespace) -> None:
             python_identity=python_identity,
             build_tools=build_tools,
             where="guarded release build receipt",
+            verify_linux_runtime=True,
+            verify_embedded_paths=args.build_receipt_fd is None,
         )
         semantic_attestations = collect_semantic_attestations(
             executable,
@@ -3215,6 +3660,7 @@ def load_prepared(
         python_identity=prepare["python"],
         build_tools=prepare["build_tools"],
         where="prepared build receipt",
+        verify_linux_runtime=True,
     )
     accepted_receipt = verify_file_binding(
         prepare["accepted_parity_receipt"], where="prepared accepted parity receipt"
@@ -3326,9 +3772,13 @@ def run_shard(args: argparse.Namespace) -> None:
     worker = bind_worker(
         contract=prepared.contract,
         require_linux_affinity=args.require_linux_affinity,
+        submission_mode=args.submission_mode,
+        require_placement_controls=args.require_placement_controls,
     )
     with open_verified_executable(
-        Path(prepared.metadata["binary"]["path"]), expected=prepared.metadata["binary"]
+        Path(prepared.metadata["binary"]["path"]),
+        expected=prepared.metadata["binary"],
+        require_linux_elf=True,
     ) as executable:
         for work in prepared.workset:
             if work["sequence"] % shard_count != args.shard:
@@ -3635,7 +4085,9 @@ def audit_campaign(args: argparse.Namespace) -> bool:
     )
     prepare = prepared.metadata
     with open_verified_executable(
-        Path(prepare["binary"]["path"]), expected=prepare["binary"]
+        Path(prepare["binary"]["path"]),
+        expected=prepare["binary"],
+        require_linux_elf=True,
     ):
         pass
     shard_count = prepare["shard_count"]
@@ -3828,7 +4280,9 @@ def argument_parser() -> argparse.ArgumentParser:
 
     verify_build = commands.add_parser("verify-build-receipt")
     verify_build.add_argument("--build-receipt", type=Path, required=True)
+    verify_build.add_argument("--build-receipt-fd", type=nonnegative_integer)
     verify_build.add_argument("--binary", type=Path, required=True)
+    verify_build.add_argument("--binary-fd", type=nonnegative_integer)
     verify_build.add_argument("--revision", required=True)
 
     verify_corpus = commands.add_parser("verify-corpus")
@@ -3844,6 +4298,7 @@ def argument_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--repository-root", type=Path, required=True)
     prepare.add_argument("--source-root", type=Path, required=True)
     prepare.add_argument("--binary", type=Path, required=True)
+    prepare.add_argument("--binary-fd", type=nonnegative_integer)
     prepare.add_argument("--preflight-source", type=Path, required=True)
     prepare.add_argument("--contract", type=Path, required=True)
     prepare.add_argument("--revision", required=True)
@@ -3852,6 +4307,7 @@ def argument_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--accepted-parity-receipt", type=Path, required=True)
     prepare.add_argument("--expected-accepted-parity-receipt-sha256", required=True)
     prepare.add_argument("--build-receipt", type=Path, required=True)
+    prepare.add_argument("--build-receipt-fd", type=nonnegative_integer)
     prepare.add_argument("--expected-checkout-receipt-sha256", required=True)
     prepare.add_argument("--expected-contract-sha256", required=True)
     prepare.add_argument("--expected-manifest-sha256", required=True)
@@ -3861,6 +4317,8 @@ def argument_parser() -> argparse.ArgumentParser:
     shard.add_argument("--revision", required=True)
     shard.add_argument("--shard", type=nonnegative_integer, required=True)
     shard.add_argument("--require-linux-affinity", action="store_true")
+    shard.add_argument("--submission-mode", choices=("canary", "full"), required=True)
+    shard.add_argument("--require-placement-controls", action="store_true")
     shard.add_argument("--expected-checkout-receipt-sha256", required=True)
     shard.add_argument("--expected-contract-sha256", required=True)
     shard.add_argument("--expected-manifest-sha256", required=True)

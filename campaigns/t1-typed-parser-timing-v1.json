@@ -75,8 +75,11 @@
       "c1n1.cluster.wmi.amu.edu.pl"
     ],
     "core_binding": "slurm-cpu-bind-cores-singleton.v1",
+    "canary_shards": 1,
+    "exclusive_allocation": "slurm-exclusive-node-runtime-verified.v1",
     "exclusive_control_required_for_promotion": true,
     "governor_control_required_for_promotion": true,
+    "frequency_control": "slurm-srun-high-userspace-runtime-verified.v1",
     "max_parallel": 32,
     "memory_binding": "slurm-mem-bind-local.v1",
     "partition": "cpu_idle",

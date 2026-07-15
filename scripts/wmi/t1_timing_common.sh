@@ -81,17 +81,40 @@ t1_verify_bound_file() {
   }
 }
 
+t1_reject_forbidden_euf_viper_environment() {
+  local name
+  local forbidden=(
+    EUF_VIPER_WMI_HOST
+    EUF_VIPER_EXPECTED_REVISION
+    EUF_VIPER_T1_PUBLISHED_REF
+    EUF_VIPER_T1_REMOTE_PARENT
+    EUF_VIPER_T1_CAMPAIGN_TAG
+    EUF_VIPER_T1_DEPENDENCY
+    EUF_VIPER_T1_PARTITION
+    EUF_VIPER_T1_NODELIST
+    EUF_VIPER_T1_TIMING_CONTRACT
+    EUF_VIPER_T1_TIMING_MANIFEST
+    EUF_VIPER_T1_TIMING_ROOT
+    EUF_VIPER_T1_TIMING_ACCEPTED_PARITY_RECEIPT
+    EUF_VIPER_T1_TIMING_BUILD_RECEIPT
+    EUF_VIPER_T1_EXPECTED_CONTRACT_SHA256
+    EUF_VIPER_T1_EXPECTED_MANIFEST_SHA256
+    EUF_VIPER_T1_EXPECTED_CHECKOUT_RECEIPT_SHA256
+    EUF_VIPER_T1_EXPECTED_PARITY_RECEIPT_SHA256
+    EUF_VIPER_T1_SOURCE_ROOT
+    EUF_VIPER_SHARED_CORPUS
+  )
+  for name in "${forbidden[@]}"; do
+    if [ -n "${!name+x}" ]; then
+      t1_die "ambient override is forbidden: $name"
+      return
+    fi
+  done
+}
+
 t1_reject_ambient_influence() {
   local name
-  unset EUF_VIPER_T1_TIMING_CONTRACT
-  unset EUF_VIPER_T1_TIMING_MANIFEST
-  unset EUF_VIPER_T1_TIMING_ROOT
-  unset EUF_VIPER_T1_TIMING_ACCEPTED_PARITY_RECEIPT
-  unset EUF_VIPER_T1_TIMING_BUILD_RECEIPT
-  unset EUF_VIPER_SHARED_CORPUS
-  unset EUF_VIPER_T1_SOURCE_ROOT
-  unset EUF_VIPER_T1_PARTITION
-  unset EUF_VIPER_T1_NODELIST
+  t1_reject_forbidden_euf_viper_environment || return
   for name in $(compgen -e); do
     case "$name" in
       PYTHON*|CARGO_*|RUSTFLAGS|RUSTDOCFLAGS|RUSTC|RUSTC_*|RUSTUP_*|\

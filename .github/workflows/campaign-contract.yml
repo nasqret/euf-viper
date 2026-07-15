@@ -11,15 +11,19 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    env:
-      T1_CI_ROOT: ${{ runner.temp }}/euf-viper-t1-locked-release
-      CARGO_HOME: ${{ runner.temp }}/euf-viper-t1-locked-release/cargo-home
-      CARGO_TARGET_DIR: ${{ runner.temp }}/euf-viper-t1-locked-release/target
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Initialize isolated T1 paths
+        shell: bash
+        run: |
+          t1_root="$RUNNER_TEMP/euf-viper-t1-locked-release"
+          printf '%s\n' \
+            "T1_CI_ROOT=$t1_root" \
+            "CARGO_HOME=$t1_root/cargo-home" \
+            "CARGO_TARGET_DIR=$t1_root/target" >> "$GITHUB_ENV"
       - name: Validate campaign specification
         run: |
           python3 scripts/bench/validate_campaign_spec.py \

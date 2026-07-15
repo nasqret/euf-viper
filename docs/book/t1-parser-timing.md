@@ -90,13 +90,21 @@ RSS.
 
 ## Reproducibility
 
-The submitter creates a unique fresh checkout. The immutable contract binds the
+The submitter accepts exactly one explicit mode, `--canary` or `--full`, and
+creates a unique fresh checkout. Remote host, published ref, campaign parent,
+and generated tag are fixed by checked-in code; the former `EUF_VIPER_*`
+selectors are rejected rather than read or silently cleared. The immutable contract binds the
 accepted parity manifest SHA-256, locally frozen decision receipt, and every
 frozen evidence artifact named by that receipt; before any job submission, the
 remote preflight rehashes all 7,503 manifest paths and source files. Prepare
 rejects tracked, untracked, ignored, hidden-index, Cargo-config,
-Python-shadow, compiler-wrapper, and ambient-selector influences. It extracts a
-private exact-revision source snapshot, starts a recursive Linux mutation monitor
+Python-shadow, compiler-wrapper, and ambient-selector influences. Every Slurm
+wrapper starts in an absolute `--chdir` root and validates its canonical path,
+exact HEAD, origin ref, and common-helper Git blob before sourcing any worktree
+file. Root, revision, ref, mode, and bound hashes are positional job arguments,
+not ambient environment selectors. `SLURM_SUBMIT_DIR` is never used. Prepare
+extracts a private exact-revision
+source snapshot and starts a recursive Linux mutation monitor
 before the pre-build all-blob inventory, and keeps Cargo homes, dependencies,
 and target outside the watched tree. Under a sanitized environment, Cargo first
 materializes the locked registry dependency set into a fresh versioned vendor
@@ -106,18 +114,28 @@ inventory. The release compile then runs from `/` with a separate fresh Cargo
 home, `--locked --offline`, an explicit vendor source replacement, and no
 network. Any source or dependency create, write, attribute, move, or delete
 event rejects the build even if bytes are restored before the repeated
-post-build inventory.
+post-build inventory. Monitor shutdown is EOF on a parent-owned pipe opened
+through a mode-`0600` FIFO and then unlinked; creating a sentinel pathname cannot
+end it. A watchdog proves both monitor processes remain non-zombie children for
+the entire compiler lifetime, and every non-owner child closes the control and
+evidence descriptors before execution. Inventories, event logs, monitor receipts, the
+build receipt, and the built executable remain open by descriptor across
+monitor closure, so receipt construction and the first execution do not reopen
+post-monitor pathnames.
 
 The guarded build receipt binds Python, Cargo, Rust, the native C compiler,
-the exact linker selected by that driver, archiver, libc, allocator/backend,
-linker flags, and final release ELF.
-Linux observations execute that already-hashed solver descriptor. WMI placement
+the exact linker selected by that driver, archiver, allocator/backend, linker
+flags, and final release bytes. On Linux it parses the ELF64 identity without
+`ldd`, binds `PT_INTERP`, recursively resolves every `DT_NEEDED` edge, hashes the
+complete native object closure, and derives libc from that closure. Linux
+observations execute the same descriptor whose bytes were attested. WMI placement
 is fixed to `cpu_idle` and `c1n1`, one non-SMT physical core and Slurm-local NUMA
-memory placement per task. Workers record CPU and memory binding, NUMA placement,
-CPU model, microcode, governor, turbo/frequency, libc, allocator, and backend;
-the audit rejects mixed identities and unavailable identity metadata. Recorded
-but unenforced governor/fixed-frequency or exclusive-node control instead keeps
-the campaign research-only.
+memory placement per task. Full mode additionally requests an exclusive node and
+runs the shard step with `--cpu-freq=high:UserSpace`; the worker must prove a
+whole-node CPU allocation, singleton affinity, a propagated Slurm frequency
+request, and fixed userspace governor bounds or fail before recording timing evidence. The
+bounded canary schedules only shard 0, never submits the complete audit, and is
+explicitly nonpromotable.
 
 All JSON is duplicate-key rejecting and finite. A value such as `1e999` is
 rejected after parsing even though its syntax is standard JSON. Generated
@@ -125,13 +143,15 @@ artifacts use checked-inode, fsynced, mode-`0400`, atomic no-replace publication
 Each shard closes with a pre-audit receipt binding its exact raw records, count,
 worker, and SHA-256 chain. Audit seals the shard directory, publishes a separate
 no-replace shard-set receipt before metrics, and revalidates every receipt and
-records file both before metrics and after analysis. WMI jobs form a prepare-array-audit
-`afterok` chain. Hosted Linux CI reproduces the monitored exact locked release,
+records file both before metrics and after analysis. Full WMI jobs form a
+prepare-array-audit `afterok` chain; canary mode forms only prepare plus one array
+task. Hosted Linux CI reproduces the monitored exact locked release,
 executes the real Rust ELF through the descriptor harness, and runs default and
 all-feature Rust runtime matrices.
 
 No WMI measurement belongs to this implementation commit. The first campaign is
-unconditionally research-only and nonpromotable. Unenforced fixed-frequency,
-governor, or exclusive-node control is an explicit nonpromotion reason. A pass
+unconditionally research-only and nonpromotable. Noncompliant or canary evidence
+cannot acquire a complete audit, and the audit schema still requires
+`promotable=false`. A pass
 would justify a controlled replication, not production routing and not a claim
 against Z3, Yices2, or cvc5.

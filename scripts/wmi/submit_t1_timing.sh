@@ -2,14 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-REMOTE_HOST="${EUF_VIPER_WMI_HOST:-wmicluster}"
-PUBLISHED_REF="${EUF_VIPER_T1_PUBLISHED_REF:-origin/research-typed-parser-timing}"
-REMOTE_PARENT="${EUF_VIPER_T1_REMOTE_PARENT:-}"
+REMOTE_HOST="wmicluster"
+PUBLISHED_REF="origin/research-typed-parser-timing"
 PARTITION="cpu_idle"
 NODELIST="c1n1"
-DEPENDENCY="${EUF_VIPER_T1_DEPENDENCY:-}"
+DEPENDENCY=""
+MODE=""
 SHARDS=128
 MAX_PARALLEL=32
+CANARY_SHARDS=1
 WARMUP_ROUNDS=1
 MEASURED_ROUNDS=5
 TIMEOUT_SECONDS=2
@@ -18,9 +19,30 @@ PARITY_RECEIPT_SHA256="c0c9c1879c9ac2da524c69f07affa991626c326ac0837f8f8066fde70
 
 cd "$ROOT"
 source scripts/wmi/t1_timing_common.sh
-unset EUF_VIPER_T1_PARTITION EUF_VIPER_T1_NODELIST
-unset EUF_VIPER_T1_TIMING_CONTRACT EUF_VIPER_T1_TIMING_MANIFEST
-unset EUF_VIPER_T1_TIMING_ACCEPTED_PARITY_RECEIPT EUF_VIPER_SHARED_CORPUS
+t1_reject_forbidden_euf_viper_environment
+
+usage() {
+  echo "usage: $0 (--canary | --full) [--dependency JOB_ID]" >&2
+  exit 2
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --canary|--full)
+      [ -z "$MODE" ] || usage
+      MODE="${1#--}"
+      shift
+      ;;
+    --dependency)
+      [ -z "$DEPENDENCY" ] && [ "$#" -ge 2 ] || usage
+      DEPENDENCY="$2"
+      shift 2
+      ;;
+    *) usage ;;
+  esac
+done
+[ -n "$MODE" ] || usage
+
 case "$PUBLISHED_REF" in
   origin/*) PUBLISHED_BRANCH="${PUBLISHED_REF#origin/}" ;;
   *) echo "published ref must name an origin branch" >&2; exit 2 ;;
@@ -56,9 +78,7 @@ case "$REMOTE_HOME" in
   /*) ;;
   *) echo "remote HOME is not absolute" >&2; exit 2 ;;
 esac
-if [ -z "$REMOTE_PARENT" ]; then
-  REMOTE_PARENT="$REMOTE_HOME/euf-viper-t1-timing-campaigns"
-fi
+REMOTE_PARENT="$REMOTE_HOME/euf-viper-t1-timing-campaigns"
 case "$REMOTE_PARENT" in
   /*) ;;
   *) echo "remote campaign parent must be absolute" >&2; exit 2 ;;
@@ -121,7 +141,7 @@ IFS=$'\t' read -r REMOTE_AR REMOTE_AR_SHA256 REMOTE_AR_VERSION < <(
   remote_tool_identity /usr/bin/ar AR
 )
 
-CAMPAIGN_TAG="${EUF_VIPER_T1_CAMPAIGN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+CAMPAIGN_TAG="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 case "$CAMPAIGN_TAG" in
   ''|*[!A-Za-z0-9._-]*) echo "campaign tag is unsafe" >&2; exit 2 ;;
 esac
@@ -138,24 +158,41 @@ CHECKOUT_RECEIPT_SHA256="$(ssh "$REMOTE_HOST" "sha256sum '$CHECKOUT_RECEIPT' | a
 t1_require_sha256 "$MANIFEST_SHA256" "remote manifest SHA-256"
 t1_require_sha256 "$CHECKOUT_RECEIPT_SHA256" "checkout receipt SHA-256"
 
-common_environment="EUF_VIPER_EXPECTED_REVISION='$REVISION' EUF_VIPER_T1_PUBLISHED_REF='$PUBLISHED_REF' EUF_VIPER_T1_EXPECTED_CONTRACT_SHA256='$CONTRACT_SHA256' EUF_VIPER_T1_EXPECTED_MANIFEST_SHA256='$MANIFEST_SHA256' EUF_VIPER_T1_EXPECTED_CHECKOUT_RECEIPT_SHA256='$CHECKOUT_RECEIPT_SHA256' EUF_VIPER_T1_EXPECTED_PARITY_RECEIPT_SHA256='$PARITY_RECEIPT_SHA256' EUF_VIPER_PYTHON='$REMOTE_PYTHON' EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256' EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION' EUF_VIPER_CARGO='$REMOTE_CARGO' EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256' EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION' EUF_VIPER_RUSTC='$REMOTE_RUSTC' EUF_VIPER_RUSTC_SHA256='$REMOTE_RUSTC_SHA256' EUF_VIPER_RUSTC_VERSION='$REMOTE_RUSTC_VERSION' EUF_VIPER_CC='$REMOTE_CC' EUF_VIPER_CC_SHA256='$REMOTE_CC_SHA256' EUF_VIPER_CC_VERSION='$REMOTE_CC_VERSION' EUF_VIPER_LD='$REMOTE_LD' EUF_VIPER_LD_SHA256='$REMOTE_LD_SHA256' EUF_VIPER_LD_VERSION='$REMOTE_LD_VERSION' EUF_VIPER_AR='$REMOTE_AR' EUF_VIPER_AR_SHA256='$REMOTE_AR_SHA256' EUF_VIPER_AR_VERSION='$REMOTE_AR_VERSION'"
+common_environment="EUF_VIPER_PYTHON='$REMOTE_PYTHON' EUF_VIPER_PYTHON_SHA256='$REMOTE_PYTHON_SHA256' EUF_VIPER_PYTHON_VERSION='$REMOTE_PYTHON_VERSION' EUF_VIPER_CARGO='$REMOTE_CARGO' EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256' EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION' EUF_VIPER_RUSTC='$REMOTE_RUSTC' EUF_VIPER_RUSTC_SHA256='$REMOTE_RUSTC_SHA256' EUF_VIPER_RUSTC_VERSION='$REMOTE_RUSTC_VERSION' EUF_VIPER_CC='$REMOTE_CC' EUF_VIPER_CC_SHA256='$REMOTE_CC_SHA256' EUF_VIPER_CC_VERSION='$REMOTE_CC_VERSION' EUF_VIPER_LD='$REMOTE_LD' EUF_VIPER_LD_SHA256='$REMOTE_LD_SHA256' EUF_VIPER_LD_VERSION='$REMOTE_LD_VERSION' EUF_VIPER_AR='$REMOTE_AR' EUF_VIPER_AR_SHA256='$REMOTE_AR_SHA256' EUF_VIPER_AR_VERSION='$REMOTE_AR_VERSION'"
 
 prepare_dependency=""
 if [ -n "$DEPENDENCY" ]; then
   prepare_dependency="--dependency=afterok:$DEPENDENCY"
 fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --partition='$PARTITION' --nodelist='$NODELIST' --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local $prepare_dependency --output='$REMOTE_LOGS/prepare-%j.out' --error='$REMOTE_LOGS/prepare-%j.err' --export=ALL scripts/wmi/euf_viper_t1_timing_prepare.sbatch")"
+PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local $prepare_dependency --output='$REMOTE_LOGS/prepare-%j.out' --error='$REMOTE_LOGS/prepare-%j.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_prepare.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256' '$PARITY_RECEIPT_SHA256'")"
 PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
 case "$PREPARE_JOB" in ''|*[!0-9]*) echo "invalid prepare job id: $PREPARE_SUBMISSION" >&2; exit 2 ;; esac
 
 LAST_SHARD="$((SHARDS - 1))"
-ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --partition='$PARTITION' --nodelist='$NODELIST' --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local --dependency=afterok:$PREPARE_JOB --array=0-$LAST_SHARD%$MAX_PARALLEL --output='$REMOTE_LOGS/array-%A_%a.out' --error='$REMOTE_LOGS/array-%A_%a.err' --export=ALL scripts/wmi/euf_viper_t1_timing_array.sbatch")"
+if [ "$MODE" = full ]; then
+  ARRAY_SPEC="0-$LAST_SHARD%$MAX_PARALLEL"
+  SCHEDULED_SHARDS="$SHARDS"
+  SCHEDULED_MAX_PARALLEL="$MAX_PARALLEL"
+  ARRAY_PLACEMENT="--exclusive"
+else
+  ARRAY_SPEC="0-$((CANARY_SHARDS - 1))%1"
+  SCHEDULED_SHARDS="$CANARY_SHARDS"
+  SCHEDULED_MAX_PARALLEL=1
+  ARRAY_PLACEMENT=""
+fi
+ARRAY_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local $ARRAY_PLACEMENT --dependency=afterok:$PREPARE_JOB --array='$ARRAY_SPEC' --output='$REMOTE_LOGS/array-%A_%a.out' --error='$REMOTE_LOGS/array-%A_%a.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_array.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256'")"
 ARRAY_JOB="${ARRAY_SUBMISSION%%;*}"
 case "$ARRAY_JOB" in ''|*[!0-9]*) echo "invalid array job id: $ARRAY_SUBMISSION" >&2; exit 2 ;; esac
 
-AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --partition='$PARTITION' --nodelist='$NODELIST' --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local --dependency=afterok:$ARRAY_JOB --output='$REMOTE_LOGS/audit-%j.out' --error='$REMOTE_LOGS/audit-%j.err' --export=ALL scripts/wmi/euf_viper_t1_timing_audit.sbatch")"
-AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
-case "$AUDIT_JOB" in ''|*[!0-9]*) echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
+AUDIT_JOB=""
+if [ "$MODE" = full ]; then
+  AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "env -i HOME='$REMOTE_HOME' PATH=/usr/bin:/bin $common_environment sbatch --parsable --chdir='$REMOTE_WORK' --partition='$PARTITION' --nodelist='$NODELIST' --nodes=1 --ntasks=1 --cpus-per-task=1 --hint=nomultithread --threads-per-core=1 --cpu-bind=cores --mem-bind=local --dependency=afterok:$ARRAY_JOB --output='$REMOTE_LOGS/audit-%j.out' --error='$REMOTE_LOGS/audit-%j.err' --export=ALL '$REMOTE_WORK/scripts/wmi/euf_viper_t1_timing_audit.sbatch' '$REMOTE_WORK' '$REVISION' '$PUBLISHED_REF' '$MODE' '$CONTRACT_SHA256' '$MANIFEST_SHA256' '$CHECKOUT_RECEIPT_SHA256'")"
+  AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
+  case "$AUDIT_JOB" in ''|*[!0-9]*) echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
+  AUDIT_JOB_PY="'$AUDIT_JOB'"
+else
+  AUDIT_JOB_PY=None
+fi
 
 mkdir -p results
 RECEIPT="results/t1-typed-parser-timing-submission-$PREPARE_JOB.json"
@@ -166,24 +203,37 @@ ssh "$REMOTE_HOST" "'$REMOTE_PYTHON' -" > "$TEMPORARY" <<PY
 import json
 payload = {
     "array_job": "$ARRAY_JOB",
-    "audit_job": "$AUDIT_JOB",
+    "array_spec": "$ARRAY_SPEC",
+    "audit_job": $AUDIT_JOB_PY,
     "campaign_root": "$CAMPAIGN_ROOT",
     "contract_sha256": "$CONTRACT_SHA256",
     "manifest_sha256": "$MANIFEST_SHA256",
     "accepted_parity_receipt_sha256": "$PARITY_RECEIPT_SHA256",
     "checkout_receipt_sha256": "$CHECKOUT_RECEIPT_SHA256",
     "dependency": "$DEPENDENCY" or None,
-    "max_parallel": $MAX_PARALLEL,
+    "contract_max_parallel": $MAX_PARALLEL,
     "partition": "$PARTITION",
     "nodelist": "$NODELIST",
-    "promotion_eligibility": "research-only-first-campaign",
+    "mode": "$MODE",
+    "placement": {
+        "cpu_binding": "cores",
+        "exclusive_requested": "$MODE" == "full",
+        "frequency_contract": "high:UserSpace" if "$MODE" == "full" else None,
+        "memory_binding": "local",
+        "threads_per_core": 1,
+    },
+    "promotable": False,
+    "promotion_reasons": ["T1 timing evidence is research-only"] +
+        (["bounded canary is incomplete"] if "$MODE" == "canary" else []),
     "prepare_job": "$PREPARE_JOB",
     "published_ref": "$PUBLISHED_REF",
     "remote_host": "$REMOTE_HOST",
     "remote_worktree": "$REMOTE_WORK",
     "remote_run": "$REMOTE_RUN",
     "revision": "$REVISION",
-    "schema": "euf-viper.typed-parser-timing-submission.v1",
+    "scheduled_max_parallel": $SCHEDULED_MAX_PARALLEL,
+    "scheduled_shards": $SCHEDULED_SHARDS,
+    "schema": "euf-viper.typed-parser-timing-submission.v2",
     "shards": $SHARDS,
     "status": "submitted",
     "tools": {

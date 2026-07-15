@@ -138,14 +138,22 @@ receipts therefore differ from the anchored shard set and reject.
 
 The WMI wrappers independently verify:
 
-- the exact 40-hex HEAD and its published origin ref;
+- an absolute Slurm `--chdir` root whose canonical path, exact 40-hex HEAD,
+  published origin ref, and common-helper Git blob are checked before any
+  worktree file is sourced; root/ref/mode/hash bindings are positional job
+  arguments and `SLURM_SUBMIT_DIR` is ignored;
 - a fresh unique checkout with a clean index and no tracked, untracked, or
   ignored state, hidden index flags, Cargo configuration, Python path injection,
-  compiler wrappers, or ambient contract/manifest selectors;
+  compiler wrappers, or ambient contract/manifest selectors; host, ref,
+  campaign parent/tag, dependency, and path-selection `EUF_VIPER_*` variables
+  are rejected rather than used;
 - a private `git archive` snapshot of the exact revision, with Cargo home and
   target outside it; a recursive inotify monitor is ready before the pre-build
   all-blob inventory and rejects every create, write, attribute, move, or delete
-  event through the repeated post-build inventory;
+  event through the repeated post-build inventory; shutdown is parent-owned pipe
+  EOF after the FIFO pathname is unlinked, and a watchdog proves both monitor
+  PIDs remain live throughout compilation; non-owner children inherit neither
+  control nor writable monitor-evidence descriptors;
 - raw Git blob, SHA-256, size, and executable-mode equality for every tracked
   source file before and after the locked release build;
 - Cargo runs from `/` with a fresh private `CARGO_HOME` and an explicit rejection
@@ -159,7 +167,12 @@ The WMI wrappers independently verify:
 - direct Cargo, Rust compiler, C compiler, linker, and archiver identities,
   including canonical path, bytes, SHA-256, and version; the C driver's
   `-fuse-ld=bfd` selection must resolve to that linker, and the receipt also
-  binds linked libc, allocator/backend, linker flags, and final release ELF;
+  binds allocator/backend, linker flags, and final release bytes; Linux evidence
+  parses ELF64 identity and `PT_INTERP`, recursively resolves and hashes every
+  `DT_NEEDED` object, and derives libc from that native closure without `ldd`;
+- descriptor-retained source/dependency inventories, event logs, monitor
+  receipts, build receipt, and binary close the post-monitor pathname-reopen
+  interval; the first real execution consumes the attested binary descriptor;
 - canonical Python path, bytes, SHA-256, and version; and
 - fixed contract, accepted-manifest, parity-receipt, and clean-checkout receipt
   hashes. Before any `sbatch`, the remote preflight verifies the accepted
@@ -167,10 +180,16 @@ The WMI wrappers independently verify:
 
 The Slurm submission additionally fixes `cpu_idle`, node `c1n1`, singleton
 physical-core affinity, one hardware thread per core, and `--mem-bind=local`.
-Worker evidence binds both CPU and memory policies plus the resulting NUMA node.
+`--full` requests an exclusive node and runs each shard step with
+`--cpu-freq=high:UserSpace`; runtime evidence must prove whole-node allocation,
+singleton affinity, propagation of that checked-in request, and fixed userspace
+bounds. `--canary`
+can schedule only shard 0 and has no audit job. Both modes remain nonpromotable.
 
-The submitter forms an `afterok` prepare-array-audit chain. This research branch
-does not push or submit it. `.github/workflows/campaign-contract.yml` runs the
+Full mode forms an `afterok` prepare-array-audit chain; canary mode forms only
+prepare plus one array task. This research branch does not push or submit either.
+`.github/workflows/campaign-contract.yml` initializes isolated paths from
+`RUNNER_TEMP` through `GITHUB_ENV`, runs the
 focused timing/receipt/build-guard Python tests, syntax-checks every T1
 WMI/submit/common/CI script, builds the real exact locked release under source
 and dependency monitors, invokes both research commands through the descriptor
@@ -186,10 +205,10 @@ harness, and runs default plus all-feature Rust runtime matrices on Linux.
   microcode, NUMA, governor, turbo/frequency, libc, allocator, and ABBA pairing
   expose rather than erase residual noise. Current-frequency values may vary.
 - The first campaign is unconditionally `research-only-first-campaign` and
-  nonpromotable. Missing enforced governor/fixed-frequency or exclusive-node
-  control is recorded as a nonpromotion reason; it cannot silently pass a 1%
-  production gate. Missing CPU, microcode, governor, turbo, or frequency-state
-  identity is rejected rather than treated as an unenforced control.
+  nonpromotable. Full mode rejects missing exclusive or fixed-frequency control
+  before recording shard evidence; bounded canaries cannot produce a complete
+  audit. Missing CPU, microcode, governor, turbo, or frequency-state identity is
+  rejected rather than treated as an unenforced control.
 - The gate concerns the exact compiled revision, default solver configuration,
   and frozen corpus. It does not prove benefit in incremental SMT workloads.
 - A timing pass remains research-only evidence and permits a separately reviewed
