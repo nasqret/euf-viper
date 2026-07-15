@@ -13,10 +13,13 @@ from pathlib import Path
 from independent_qfuf import (
     IndependentQfufError,
     V2_FORMAT,
+    V3_FORMAT,
     parse_and_encode,
     parse_dimacs as parse_dimacs_independent,
     validate_v2_sat_manifest,
     validate_v2_unsat_manifest,
+    validate_v3_manifest_shape,
+    validate_v3_unsat_manifest,
 )
 
 
@@ -266,12 +269,25 @@ def main() -> int:
         manifest = strict_json_loads(args.manifest.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         raise SystemExit(f"cannot read certificate manifest: {error}") from error
-    if type(manifest) is not dict or manifest.get("format") != V2_FORMAT:
+    if type(manifest) is not dict:
         raise SystemExit(
-            "independent checking requires euf-viper-euf-cnf-v2; "
+            "independent checking requires a certificate manifest object; "
             "legacy v1 trusts the solver-emitted base CNF"
         )
-    if manifest.get("encoding") != "canonical-tseitin-v1":
+    manifest_format = manifest.get("format")
+    if type(manifest_format) is not str or (
+        manifest_format != V2_FORMAT and manifest_format != V3_FORMAT
+    ):
+        raise SystemExit(
+            "independent checking requires euf-viper-euf-cnf-v2 or "
+            "euf-viper-euf-cnf-v3; legacy v1 trusts the solver-emitted base CNF"
+        )
+    if manifest_format == V3_FORMAT:
+        try:
+            validate_v3_manifest_shape(manifest)
+        except IndependentQfufError as error:
+            raise SystemExit(f"invalid v3 certificate manifest: {error}") from error
+    elif manifest.get("encoding") != "canonical-tseitin-v1":
         raise SystemExit("unsupported or missing independent encoding identifier")
 
     result = manifest.get("result")
@@ -349,9 +365,14 @@ def main() -> int:
         variables, clauses = parse_dimacs_independent(
             dimacs.read_text(encoding="ascii")
         )
-        replayed = validate_v2_unsat_manifest(
-            manifest, problem, variables, clauses
-        )
+        if manifest_format == V3_FORMAT:
+            replayed = validate_v3_unsat_manifest(
+                manifest, problem, variables, clauses
+            )
+        else:
+            replayed = validate_v2_unsat_manifest(
+                manifest, problem, variables, clauses
+            )
     except (OSError, UnicodeError, IndependentQfufError) as error:
         raise SystemExit(f"independent UNSAT reconstruction failed: {error}") from error
     if not args.drat_trim:
@@ -369,22 +390,21 @@ def main() -> int:
     if checked.returncode != 0 or "VERIFIED" not in checked.stdout:
         raise SystemExit(f"drat-trim rejected the proof:\n{checked.stdout}")
 
-    print(
-        json.dumps(
-            {
-                "status": "verified",
-                "result": "unsat",
-                "variables": variables,
-                "clauses": len(clauses),
-                "base_clauses": problem.base_count,
-                "replayed_theory_clauses": replayed,
-                "source_sha256": expected_source_hash,
-                "dimacs_sha256": expected_dimacs_hash,
-                "proof_sha256": expected_proof_hash,
-            },
-            sort_keys=True,
-        )
-    )
+    report = {
+        "status": "verified",
+        "result": "unsat",
+        "variables": variables,
+        "clauses": len(clauses),
+        "base_clauses": problem.base_count,
+        "source_sha256": expected_source_hash,
+        "dimacs_sha256": expected_dimacs_hash,
+        "proof_sha256": expected_proof_hash,
+    }
+    if manifest_format == V3_FORMAT:
+        report["replayed_kernel_clauses"] = replayed
+    else:
+        report["replayed_theory_clauses"] = replayed
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 

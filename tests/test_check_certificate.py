@@ -16,6 +16,30 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts" / "cert" / "check_certificate.py"
 SAT_SOURCE = ROOT / "tests" / "fixtures" / "basic_sat.smt2"
 UNSAT_SOURCE = ROOT / "tests" / "fixtures" / "basic_unsat.smt2"
+CERT_SCRIPT_DIRECTORY = ROOT / "scripts" / "cert"
+if str(CERT_SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(CERT_SCRIPT_DIRECTORY))
+import independent_qfuf as QFUF
+
+
+V3_SOURCE = """\
+(set-logic QF_UF)
+(declare-sort U 0)
+(declare-fun c0 () U)
+(declare-fun c1 () U)
+(declare-fun f (U) U)
+(declare-fun p (U) Bool)
+(assert (distinct c0 c1))
+(assert (or (= (f c0) c0) (= (f c0) c1)))
+(assert (or (= (f c1) c0) (= (f c1) c1)))
+(assert (= (f c0) (f c1)))
+(assert (or (p c0) (not (p c0)) (p c1) (not (p c1))))
+(assert
+  (or
+    (and (p (f c0)) (not (p (f c1))))
+    (and (not (p (f c0))) (p (f c1)))))
+(check-sat)
+"""
 
 
 def sha256(path: Path) -> str:
@@ -74,6 +98,50 @@ class CertificateCheckerManifestBoundaryTests(unittest.TestCase):
             "proof_sha256": sha256(self.proof_path),
         }
 
+    def v3_manifest(self) -> dict[str, object]:
+        source_path = self.directory / "finite-orbit.smt2"
+        source_path.write_text(V3_SOURCE, encoding="utf-8")
+        problem = QFUF.parse_and_encode(V3_SOURCE)
+        witness = {
+            "domain_terms": [2, 3],
+            "membership_terms": [2, 3, 4, 5],
+            "lex_terms": [4, 5],
+        }
+        reconstruction = QFUF._reconstruct_v3_orbit_kernel(problem, witness)
+        clauses = tuple(
+            clause
+            for category in QFUF._V3_CLAUSE_CATEGORIES
+            for clause in reconstruction.categories[category]
+        )
+        self.dimacs_path.write_text(
+            "p cnf "
+            f"{reconstruction.variables} {len(clauses)}\n"
+            + "".join(
+                " ".join(str(literal) for literal in clause) + " 0\n"
+                for clause in clauses
+            ),
+            encoding="ascii",
+        )
+        counts = {
+            category: len(reconstruction.categories[category])
+            for category in QFUF._V3_CLAUSE_CATEGORIES
+        }
+        counts["total"] = len(clauses)
+        return {
+            "format": QFUF.V3_FORMAT,
+            "encoding": QFUF.V3_ENCODING,
+            "result": "unsat",
+            "source": str(source_path),
+            "source_sha256": sha256(source_path),
+            "variables": reconstruction.variables,
+            "clauses": counts,
+            "finite_orbit": witness,
+            "dimacs": str(self.dimacs_path),
+            "dimacs_sha256": sha256(self.dimacs_path),
+            "proof": str(self.proof_path),
+            "proof_sha256": sha256(self.proof_path),
+        }
+
     def run_raw_manifest(self, raw_manifest: str) -> subprocess.CompletedProcess[str]:
         self.manifest_path.write_text(raw_manifest, encoding="utf-8")
         return subprocess.run(
@@ -124,6 +192,68 @@ class CertificateCheckerManifestBoundaryTests(unittest.TestCase):
         self.assertEqual(report["result"], "unsat")
         self.assertEqual(report["variables"], 2)
         self.assertEqual(report["replayed_theory_clauses"], 1)
+
+    def test_valid_v3_unsat_manifest_is_accepted_and_invokes_drat(self) -> None:
+        completed = self.run_manifest(self.v3_manifest())
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["status"], "verified")
+        self.assertEqual(report["result"], "unsat")
+        self.assertEqual(report["variables"], 21)
+        self.assertEqual(report["base_clauses"], 26)
+        self.assertEqual(report["replayed_kernel_clauses"], 38)
+
+    def test_v3_rejects_sat_unknown_keys_and_hash_tampering(self) -> None:
+        cases = []
+
+        sat = self.v3_manifest()
+        sat["result"] = "sat"
+        cases.append(("SAT result", sat, "must claim UNSAT"))
+
+        unknown = self.v3_manifest()
+        unknown["atoms"] = []
+        cases.append(("unknown key", unknown, "unknown atoms"))
+
+        bad_source_hash = self.v3_manifest()
+        bad_source_hash["source_sha256"] = "0" * 64
+        cases.append(("source hash", bad_source_hash, "source SHA-256 mismatch"))
+
+        bad_dimacs_hash = self.v3_manifest()
+        bad_dimacs_hash["dimacs_sha256"] = "0" * 64
+        cases.append(("DIMACS hash", bad_dimacs_hash, "DIMACS SHA-256 mismatch"))
+
+        bad_proof_hash = self.v3_manifest()
+        bad_proof_hash["proof_sha256"] = "0" * 64
+        cases.append(("proof hash", bad_proof_hash, "proof SHA-256 mismatch"))
+
+        for label, manifest, diagnostic in cases:
+            with self.subTest(label=label):
+                self.assert_rejected(self.run_manifest(manifest), diagnostic)
+
+    def test_v3_duplicate_keys_and_nonfinite_counts_fail_before_validation(self) -> None:
+        raw_manifest = json.dumps(self.v3_manifest(), sort_keys=True)
+        duplicate = raw_manifest.replace(
+            '"result": "unsat"',
+            '"result": "unsat", "result": "unsat"',
+            1,
+        )
+        self.assert_rejected(
+            self.run_raw_manifest(duplicate), "duplicate JSON key 'result'"
+        )
+
+        self.assertIn('"guarded_rows": 4', raw_manifest)
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(constant=constant):
+                malformed = raw_manifest.replace(
+                    '"guarded_rows": 4',
+                    f'"guarded_rows": {constant}',
+                    1,
+                )
+                self.assert_rejected(
+                    self.run_raw_manifest(malformed), "non-finite JSON number"
+                )
 
     def test_duplicate_result_keys_are_rejected_before_validation(self) -> None:
         raw_manifest = json.dumps(self.sat_manifest(), sort_keys=True)

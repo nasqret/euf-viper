@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import itertools
@@ -21,6 +22,154 @@ SPEC.loader.exec_module(QFUF)
 
 def query(commands: str) -> str:
     return f"(set-logic QF_UF)\n{commands.strip()}\n(check-sat)\n"
+
+
+V3_GOLDEN_SOURCE = query(
+    """
+    (declare-sort U 0)
+    (declare-fun c0 () U)
+    (declare-fun c1 () U)
+    (declare-fun f (U) U)
+    (declare-fun p (U) Bool)
+    (assert (distinct c0 c1))
+    (assert (or (= (f c0) c0) (= (f c0) c1)))
+    (assert (or (= (f c1) c0) (= (f c1) c1)))
+    (assert (= (f c0) (f c1)))
+    (assert (or (p c0) (not (p c0)) (p c1) (not (p c1))))
+    (assert
+      (or
+        (and (p (f c0)) (not (p (f c1))))
+        (and (not (p (f c0))) (p (f c1)))))
+    (assert
+      (or
+        (= (f (f c0)) (f (f c0)))
+        (= (f (f c1)) (f (f c1)))))
+    """
+)
+
+# Exact output of the 51d0d4d finite-orbit kernel for V3_GOLDEN_SOURCE.
+V3_GOLDEN_DIMACS = """\
+p cnf 28 80
+-1 0
+4 -2 0
+4 -3 0
+-4 2 3 0
+4 0
+7 -5 0
+7 -6 0
+-7 5 6 0
+7 0
+8 0
+11 -9 0
+11 9 0
+11 -10 0
+11 10 0
+-11 9 -9 10 -10 0
+11 0
+-14 12 0
+-14 -13 0
+14 -12 13 0
+-15 -12 0
+-15 13 0
+15 12 -13 0
+16 -14 0
+16 -15 0
+-16 14 15 0
+16 0
+19 -17 0
+19 -18 0
+-19 17 18 0
+19 0
+20 0
+21 0
+1 -2 -3 0
+1 -5 -6 0
+1 -22 -23 0
+1 -24 -25 0
+2 3 0
+5 6 0
+22 23 0
+24 25 0
+-8 -2 5 0
+-8 2 -5 0
+-2 -5 8 0
+-8 -3 6 0
+-8 3 -6 0
+-3 -6 8 0
+-13 -6 10 0
+-13 -5 9 0
+-12 -3 10 0
+-12 -2 9 0
+-10 -6 13 0
+-10 -3 12 0
+-9 -5 13 0
+-9 -2 12 0
+2 -6 0
+-26 2 -6 0
+-26 -2 6 0
+2 6 26 0
+-2 -6 26 0
+-26 3 -5 0
+-27 26 0
+-27 3 -5 0
+-27 -3 5 0
+-26 3 5 27 0
+-26 -3 -5 27 0
+-27 5 -3 0
+-28 27 0
+-28 5 -3 0
+-28 -5 3 0
+-27 5 3 28 0
+-27 -5 -3 28 0
+-28 6 -2 0
+-2 22 0
+-3 -2 23 0
+-5 -3 22 0
+-6 -3 23 0
+-5 -2 24 0
+-5 -3 25 0
+-6 -5 24 0
+-6 25 0
+"""
+
+
+def v3_manifest(
+    problem: object,
+    witness: dict[str, list[int]],
+    *,
+    reconstruction: object | None = None,
+) -> dict[str, object]:
+    categories = (
+        reconstruction.categories
+        if reconstruction is not None
+        else {
+            category: problem.clauses if category == "base" else ()
+            for category in QFUF._V3_CLAUSE_CATEGORIES
+        }
+    )
+    counts = {
+        category: len(categories[category])
+        for category in QFUF._V3_CLAUSE_CATEGORIES
+    }
+    counts["total"] = sum(counts.values())
+    return {
+        "format": QFUF.V3_FORMAT,
+        "result": "unsat",
+        "encoding": QFUF.V3_ENCODING,
+        "source": "input.smt2",
+        "source_sha256": "0" * 64,
+        "dimacs": "certificate.cnf",
+        "dimacs_sha256": "1" * 64,
+        "proof": "certificate.drat",
+        "proof_sha256": "2" * 64,
+        "variables": (
+            reconstruction.variables
+            if reconstruction is not None
+            else problem.variable_count
+        ),
+        "clauses": counts,
+        "finite_orbit": witness,
+    }
 
 
 def clauses_hold(problem: object, assignment: list[int]) -> bool:
@@ -1345,6 +1494,390 @@ class ManifestAndTamperTests(unittest.TestCase):
                 self.assertEqual(reconstructed.variable_count, case["variables"])
                 self.assertEqual(reconstructed.base_count, len(expected_clauses))
                 self.assertEqual(reconstructed.clauses, expected_clauses)
+
+
+class V3FiniteOrbitCertificateTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.problem = QFUF.parse_and_encode(V3_GOLDEN_SOURCE)
+        self.variables, self.clauses = QFUF.parse_dimacs(V3_GOLDEN_DIMACS)
+        self.witness = {
+            "domain_terms": [2, 3],
+            "membership_terms": [2, 3, 4, 5, 10, 11],
+            "lex_terms": [4, 5],
+        }
+        self.reconstruction = QFUF._reconstruct_v3_orbit_kernel(
+            QFUF._validate_problem(self.problem), self.witness
+        )
+        self.manifest = v3_manifest(
+            self.problem, self.witness, reconstruction=self.reconstruction
+        )
+
+    def _source_manifest(
+        self, source: str, witness: dict[str, list[int]]
+    ) -> tuple[object, dict[str, object]]:
+        problem = QFUF.parse_and_encode(source)
+        return problem, v3_manifest(problem, witness)
+
+    def test_exact_51d_stream_with_all_kernel_categories_is_accepted(self) -> None:
+        regenerated = tuple(
+            clause
+            for category in QFUF._V3_CLAUSE_CATEGORIES
+            for clause in self.reconstruction.categories[category]
+        )
+        self.assertEqual(self.variables, 28)
+        self.assertEqual(self.problem.base_count, 30)
+        self.assertEqual(regenerated, self.clauses)
+        self.assertNotIn((), self.clauses)
+        self.assertEqual(
+            self.manifest["clauses"],
+            {
+                "base": 30,
+                "guarded_rows": 6,
+                "finite_coverage": 4,
+                "equality_channels": 6,
+                "predicate_channels": 8,
+                "orbit_lex": 18,
+                "guarded_channels": 8,
+                "total": 80,
+            },
+        )
+        self.assertEqual(
+            QFUF.validate_v3_unsat_manifest(
+                self.manifest, self.problem, self.variables, self.clauses
+            ),
+            50,
+        )
+
+    def test_v3_shape_rejects_unknown_keys_and_type_edges(self) -> None:
+        mutations: list[tuple[str, dict[str, object]]] = []
+
+        extra_root = copy.deepcopy(self.manifest)
+        extra_root["terms"] = []
+        mutations.append(("unknown top-level key", extra_root))
+
+        extra_count = copy.deepcopy(self.manifest)
+        extra_count["clauses"]["theory_conflicts"] = 0
+        mutations.append(("unknown clause key", extra_count))
+
+        extra_witness = copy.deepcopy(self.manifest)
+        extra_witness["finite_orbit"]["swap_maps"] = []
+        mutations.append(("unknown witness key", extra_witness))
+
+        for label, field, value in (
+            ("SAT result", "result", "sat"),
+            ("wrong encoding", "encoding", "canonical-tseitin-v1"),
+            ("Boolean variables", "variables", True),
+            ("empty source", "source", ""),
+            ("uppercase hash", "source_sha256", "A" * 64),
+        ):
+            mutation = copy.deepcopy(self.manifest)
+            mutation[field] = value
+            mutations.append((label, mutation))
+
+        float_count = copy.deepcopy(self.manifest)
+        float_count["clauses"]["guarded_rows"] = 6.0
+        mutations.append(("floating count", float_count))
+
+        tuple_witness = copy.deepcopy(self.manifest)
+        tuple_witness["finite_orbit"]["domain_terms"] = (2, 3)
+        mutations.append(("tuple witness", tuple_witness))
+
+        boolean_witness = copy.deepcopy(self.manifest)
+        boolean_witness["finite_orbit"]["domain_terms"] = [2, True]
+        mutations.append(("Boolean witness ID", boolean_witness))
+
+        for label, mutation in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(QFUF.IndependentQfufError):
+                    QFUF.validate_v3_manifest_shape(mutation)
+
+    def test_v3_witness_order_and_finite_closure_are_exact(self) -> None:
+        mutations = []
+        reversed_domain = copy.deepcopy(self.manifest)
+        reversed_domain["finite_orbit"]["domain_terms"] = [3, 2]
+        mutations.append(("domain order", reversed_domain, "strictly increasing"))
+
+        reordered_membership = copy.deepcopy(self.manifest)
+        reordered_membership["finite_orbit"]["membership_terms"][:2] = [3, 2]
+        mutations.append(
+            ("membership order", reordered_membership, "finite closure")
+        )
+
+        missing_membership = copy.deepcopy(self.manifest)
+        missing_membership["finite_orbit"]["membership_terms"].pop()
+        mutations.append(
+            ("membership omission", missing_membership, "finite closure")
+        )
+
+        reversed_lex = copy.deepcopy(self.manifest)
+        reversed_lex["finite_orbit"]["lex_terms"] = [5, 4]
+        mutations.append(("lex order", reversed_lex, "Rust-order"))
+
+        for label, mutation, diagnostic in mutations:
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    QFUF.IndependentQfufError, diagnostic
+                ):
+                    QFUF.validate_v3_unsat_manifest(
+                        mutation, self.problem, self.variables, self.clauses
+                    )
+
+    def test_domain_requires_a_same_sort_nullary_mandatory_clique(self) -> None:
+        source = query(
+            """
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun c2 () U)
+            (assert (distinct c0 c1))
+            (assert (= c2 c2))
+            (assert false)
+            """
+        )
+        problem, manifest = self._source_manifest(
+            source,
+            {
+                "domain_terms": [2, 4],
+                "membership_terms": [],
+                "lex_terms": [],
+            },
+        )
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "mandatory top-level disequality clique"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                manifest,
+                problem,
+                problem.variable_count,
+                problem.clauses,
+            )
+
+    def test_missing_mandatory_coverage_changes_exact_closure(self) -> None:
+        removed = "    (assert (or (= (f c1) c0) (= (f c1) c1)))\n"
+        self.assertIn(removed, V3_GOLDEN_SOURCE)
+        source = V3_GOLDEN_SOURCE.replace(removed, "", 1)
+        problem, manifest = self._source_manifest(source, self.witness)
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "finite closure"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                manifest,
+                problem,
+                problem.variable_count,
+                problem.clauses,
+            )
+
+    def test_adjacent_swap_must_preserve_the_assertion_multiset(self) -> None:
+        source = V3_GOLDEN_SOURCE.replace(
+            "(check-sat)", "(assert (p c0))\n(check-sat)", 1
+        )
+        problem, manifest = self._source_manifest(source, self.witness)
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "assertion-multiset automorphism"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                manifest,
+                problem,
+                problem.variable_count,
+                problem.clauses,
+            )
+
+    def test_every_category_count_and_clause_boundary_is_exact(self) -> None:
+        redistributed = copy.deepcopy(self.manifest)
+        redistributed["clauses"]["equality_channels"] += 1
+        redistributed["clauses"]["predicate_channels"] -= 1
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "equality_channels count"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                redistributed, self.problem, self.variables, self.clauses
+            )
+
+        offset = 0
+        for category in QFUF._V3_CLAUSE_CATEGORIES:
+            count = self.manifest["clauses"][category]
+            self.assertGreater(count, 0)
+            tampered = list(self.clauses)
+            clause = list(tampered[offset])
+            clause[0] = -clause[0]
+            tampered[offset] = tuple(clause)
+            with self.subTest(category=category):
+                with self.assertRaisesRegex(
+                    QFUF.IndependentQfufError, f"DIMACS {category} boundary"
+                ):
+                    QFUF.validate_v3_unsat_manifest(
+                        self.manifest, self.problem, self.variables, tampered
+                    )
+            offset += count
+
+    def test_auxiliary_allocation_and_final_variable_count_are_exact(self) -> None:
+        lex_start = sum(
+            self.manifest["clauses"][category]
+            for category in QFUF._V3_CLAUSE_CATEGORIES
+            if category
+            in {
+                "base",
+                "guarded_rows",
+                "finite_coverage",
+                "equality_channels",
+                "predicate_channels",
+            }
+        )
+        tampered = list(self.clauses)
+        helper_clause = list(tampered[lex_start + 1])
+        self.assertIn(-26, helper_clause)
+        helper_clause[helper_clause.index(-26)] = -27
+        tampered[lex_start + 1] = tuple(helper_clause)
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "orbit_lex boundary"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                self.manifest, self.problem, self.variables, tampered
+            )
+
+        variable_manifest = copy.deepcopy(self.manifest)
+        variable_manifest["variables"] = self.variables + 1
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "deterministic atom allocation"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                variable_manifest,
+                self.problem,
+                self.variables + 1,
+                self.clauses,
+            )
+
+    def test_v3_hard_caps_reject_before_unbounded_materialization(self) -> None:
+        cap_cases = (
+            ("_ORBIT_MAX_MEMBERSHIP_CELLS", 11, "membership cell cap"),
+            (
+                "_ORBIT_MAX_EFFECTIVE_LEX_COORDINATES",
+                3,
+                "lex coordinate cap",
+            ),
+            ("_ORBIT_MAX_GUARDED_CLAUSES", 5, "guarded_rows budget"),
+            ("_ORBIT_MAX_GUARDED_LITERALS", 5, "guarded_rows budget"),
+            (
+                "_ORBIT_MAX_TUPLES_PER_APPLICATION",
+                1,
+                "predicate per-application tuple cap",
+            ),
+        )
+        for constant, limit, diagnostic in cap_cases:
+            with self.subTest(constant=constant):
+                with mock.patch.object(QFUF, constant, limit):
+                    with self.assertRaisesRegex(
+                        QFUF.IndependentQfufError, diagnostic
+                    ):
+                        QFUF.validate_v3_unsat_manifest(
+                            self.manifest,
+                            self.problem,
+                            self.variables,
+                            self.clauses,
+                        )
+
+        oversized_domain = copy.deepcopy(self.manifest)
+        oversized_domain["finite_orbit"]["domain_terms"] = list(range(33))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "2..=32"):
+            QFUF.validate_v3_unsat_manifest(
+                oversized_domain, self.problem, self.variables, self.clauses
+            )
+
+    def test_residual_function_tuple_cap_is_an_exact_skip(self) -> None:
+        source = query(
+            """
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun f (U) U)
+            (assert (distinct c0 c1))
+            (assert (or (= (f c0) c0) (= (f c0) c1)))
+            (assert (or (= (f c1) c0) (= (f c1) c1)))
+            (assert
+              (or
+                (= (f (f c0)) (f (f c0)))
+                (= (f (f c1)) (f (f c1)))))
+            (assert false)
+            """
+        )
+        problem = QFUF._validate_problem(QFUF.parse_and_encode(source))
+        domain = (2, 3)
+        domain_set = frozenset(domain)
+        covered = QFUF._mandatory_coverages(problem.assertions, domain_set)
+        closed = QFUF._closed_table_functions(problem, domain, covered)
+        finite = QFUF._finite_closure(problem, domain, covered, closed)
+        witness = {
+            "domain_terms": list(domain),
+            "membership_terms": sorted(finite),
+            "lex_terms": sorted(
+                covered, key=lambda term: (bool(problem.terms[term].args), term)
+            ),
+        }
+        complete = QFUF._reconstruct_v3_orbit_kernel(problem, witness)
+        self.assertGreater(len(complete.categories["guarded_channels"]), 0)
+        with mock.patch.object(QFUF, "_ORBIT_MAX_TUPLES_PER_APPLICATION", 1):
+            skipped = QFUF._reconstruct_v3_orbit_kernel(problem, witness)
+        self.assertEqual(skipped.categories["guarded_channels"], ())
+
+    def test_predicate_incompleteness_conditions_reject_exactly(self) -> None:
+        missing_canonical = query(
+            """
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun f (U) U)
+            (declare-fun p (U) Bool)
+            (assert (distinct c0 c1))
+            (assert (or (= (f c0) c0) (= (f c0) c1)))
+            (assert (or (= (f c1) c0) (= (f c1) c1)))
+            (assert (or (p (f c0)) (p (f c1))))
+            (assert false)
+            """
+        )
+        problem, manifest = self._source_manifest(
+            missing_canonical,
+            {
+                "domain_terms": [2, 3],
+                "membership_terms": [2, 3, 4, 5],
+                "lex_terms": [4, 5],
+            },
+        )
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "canonical table application is missing"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                manifest, problem, problem.variable_count, problem.clauses
+            )
+
+        outside_closure = query(
+            """
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun x () U)
+            (declare-fun f (U) U)
+            (declare-fun p (U) Bool)
+            (assert (distinct c0 c1))
+            (assert (or (= (f c0) c0) (= (f c0) c1)))
+            (assert (or (= (f c1) c0) (= (f c1) c1)))
+            (assert (or (p x) (not (p x))))
+            (assert false)
+            """
+        )
+        problem, manifest = self._source_manifest(
+            outside_closure,
+            {
+                "domain_terms": [2, 3],
+                "membership_terms": [2, 3, 4, 5],
+                "lex_terms": [4, 5],
+            },
+        )
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "predicate arguments are outside finite closure"
+        ):
+            QFUF.validate_v3_unsat_manifest(
+                manifest, problem, problem.variable_count, problem.clauses
+            )
 
 
 if __name__ == "__main__":

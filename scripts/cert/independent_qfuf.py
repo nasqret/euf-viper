@@ -23,6 +23,18 @@ QfufError = IndependentQfufError
 
 BOOL_SORT: Final = 0
 V2_FORMAT: Final = "euf-viper-euf-cnf-v2"
+V3_FORMAT: Final = "euf-viper-euf-cnf-v3"
+V3_ENCODING: Final = (
+    "canonical-tseitin-v1+finite-closure-v1+guarded-euf-v1+"
+    "adjacent-orbit-lex-v1"
+)
+
+_ORBIT_MAX_DOMAIN: Final = 32
+_ORBIT_MAX_MEMBERSHIP_CELLS: Final = 262_144
+_ORBIT_MAX_EFFECTIVE_LEX_COORDINATES: Final = 262_144
+_ORBIT_MAX_GUARDED_CLAUSES: Final = 262_144
+_ORBIT_MAX_GUARDED_LITERALS: Final = 1_048_576
+_ORBIT_MAX_TUPLES_PER_APPLICATION: Final = 4_096
 
 
 @dataclass(frozen=True)
@@ -2277,12 +2289,968 @@ def validate_v2_unsat_manifest(
     return len(normalized) - problem.base_count
 
 
+_V3_TOP_LEVEL_KEYS: Final = frozenset(
+    {
+        "format",
+        "result",
+        "encoding",
+        "source",
+        "source_sha256",
+        "dimacs",
+        "dimacs_sha256",
+        "proof",
+        "proof_sha256",
+        "variables",
+        "clauses",
+        "finite_orbit",
+    }
+)
+_V3_CLAUSE_CATEGORIES: Final = (
+    "base",
+    "guarded_rows",
+    "finite_coverage",
+    "equality_channels",
+    "predicate_channels",
+    "orbit_lex",
+    "guarded_channels",
+)
+_V3_CLAUSE_KEYS: Final = frozenset((*_V3_CLAUSE_CATEGORIES, "total"))
+_V3_WITNESS_KEYS: Final = frozenset(
+    {"domain_terms", "membership_terms", "lex_terms"}
+)
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _require_exact_keys(
+    value: object, expected: frozenset[str], context: str
+) -> dict[str, object]:
+    if type(value) is not dict:
+        raise IndependentQfufError(f"{context} must be an object")
+    if any(type(key) is not str for key in value):
+        raise IndependentQfufError(f"{context} keys must be exact strings")
+    found = set(value)
+    if found != expected:
+        missing = sorted(expected - found)
+        unknown = sorted(found - expected)
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if unknown:
+            details.append(f"unknown {', '.join(unknown)}")
+        raise IndependentQfufError(
+            f"{context} has invalid keys ({'; '.join(details)})"
+        )
+    return value
+
+
+def validate_v3_manifest_shape(manifest: Mapping[str, object]) -> None:
+    """Reject any v3 field not emitted by the fixed finite-orbit producer."""
+
+    manifest = _require_exact_keys(
+        manifest, _V3_TOP_LEVEL_KEYS, "v3 certificate manifest"
+    )
+    if type(manifest["format"]) is not str or manifest["format"] != V3_FORMAT:
+        raise IndependentQfufError("unsupported v3 certificate manifest format")
+    if type(manifest["result"]) is not str or manifest["result"] != "unsat":
+        raise IndependentQfufError("v3 certificate manifest must claim UNSAT")
+    if (
+        type(manifest["encoding"]) is not str
+        or manifest["encoding"] != V3_ENCODING
+    ):
+        raise IndependentQfufError("unsupported v3 finite-orbit encoding")
+    for field in ("source", "dimacs", "proof"):
+        if type(manifest[field]) is not str or not manifest[field]:
+            raise IndependentQfufError(
+                f"v3 certificate manifest field {field!r} must be a nonempty string"
+            )
+    for field in ("source_sha256", "dimacs_sha256", "proof_sha256"):
+        value = manifest[field]
+        if type(value) is not str or _SHA256_HEX.fullmatch(value) is None:
+            raise IndependentQfufError(
+                f"v3 certificate manifest field {field!r} must be lowercase SHA-256 hex"
+            )
+    variables = manifest["variables"]
+    if type(variables) is not int or variables < 0:
+        raise IndependentQfufError(
+            "v3 certificate manifest variables must be a nonnegative exact integer"
+        )
+
+    counts = _require_exact_keys(
+        manifest["clauses"], _V3_CLAUSE_KEYS, "v3 clause counts"
+    )
+    for category in (*_V3_CLAUSE_CATEGORIES, "total"):
+        value = counts[category]
+        if type(value) is not int or value < 0:
+            raise IndependentQfufError(
+                f"v3 clause count {category} must be a nonnegative exact integer"
+            )
+
+    witness = _require_exact_keys(
+        manifest["finite_orbit"], _V3_WITNESS_KEYS, "v3 finite_orbit witness"
+    )
+    for field in ("domain_terms", "membership_terms", "lex_terms"):
+        terms = witness[field]
+        if type(terms) is not list:
+            raise IndependentQfufError(
+                f"v3 finite_orbit {field} must be an exact JSON array"
+            )
+        if any(type(term) is not int or term < 0 for term in terms):
+            raise IndependentQfufError(
+                f"v3 finite_orbit {field} must contain nonnegative exact integers"
+            )
+
+
+def _mandatory_disequalities(
+    assertions: Sequence[BoolExpr],
+) -> set[tuple[int, int]]:
+    edges: set[tuple[int, int]] = set()
+    stack = list(assertions)
+    while stack:
+        expression = stack.pop()
+        if expression.op == "and":
+            stack.extend(expression.arguments)
+            continue
+        if expression.op != "not":
+            continue
+        child = expression.arguments[0]
+        if type(child) is not BoolExpr or child.op != "atom":
+            continue
+        atom = child.arguments[0]
+        if (
+            type(atom) is _AtomKey
+            and atom.kind == "equality"
+            and atom.left is not None
+            and atom.right is not None
+            and atom.left != atom.right
+        ):
+            edges.add(_normalized_term_pair(atom.left, atom.right))
+    return edges
+
+
+def _flatten_equality_disjunction(
+    expression: BoolExpr,
+) -> tuple[tuple[int, int], ...] | None:
+    pairs: list[tuple[int, int]] = []
+    stack = [expression]
+    while stack:
+        child = stack.pop()
+        if child.op == "or":
+            stack.extend(reversed(child.arguments))
+            continue
+        if child.op != "atom":
+            return None
+        atom = child.arguments[0]
+        if (
+            type(atom) is not _AtomKey
+            or atom.kind != "equality"
+            or atom.left is None
+            or atom.right is None
+        ):
+            return None
+        pairs.append((atom.left, atom.right))
+    return tuple(pairs)
+
+
+def _mandatory_coverages(
+    assertions: Sequence[BoolExpr], domain: frozenset[int]
+) -> frozenset[int]:
+    covered: set[int] = set()
+    stack = list(assertions)
+    while stack:
+        expression = stack.pop()
+        if expression.op == "and":
+            stack.extend(expression.arguments)
+            continue
+        if expression.op != "or":
+            continue
+        pairs = _flatten_equality_disjunction(expression)
+        if pairs is None:
+            continue
+        candidate: int | None = None
+        values: set[int] = set()
+        valid = True
+        for left, right in pairs:
+            if left in domain and right not in domain:
+                term, value = right, left
+            elif right in domain and left not in domain:
+                term, value = left, right
+            else:
+                valid = False
+                break
+            if candidate is not None and candidate != term:
+                valid = False
+                break
+            candidate = term
+            values.add(value)
+        if valid and candidate is not None and values == domain:
+            covered.add(candidate)
+    return frozenset(covered)
+
+
+def _term_index(problem: EncodedProblem) -> dict[tuple[int, tuple[int, ...]], int]:
+    index: dict[tuple[int, tuple[int, ...]], int] = {}
+    for term in problem.terms:
+        key = (term.function, term.args)
+        if key in index:
+            raise IndependentQfufError(
+                f"duplicate canonical term for function {term.function} and arguments {term.args}"
+            )
+        index[key] = term.id
+    return index
+
+
+def _closed_table_functions(
+    problem: EncodedProblem,
+    domain: tuple[int, ...],
+    covered: frozenset[int],
+) -> frozenset[int]:
+    domain_set = frozenset(domain)
+    candidates = {
+        problem.terms[term].function
+        for term in covered
+        if problem.terms[term].args
+        and all(argument in domain_set for argument in problem.terms[term].args)
+    }
+    closed: set[int] = set()
+    for function in candidates:
+        arity = len(problem.functions[function].arg_sorts)
+        expected = 1
+        for _ in range(arity):
+            if expected > len(covered) // len(domain):
+                expected = len(covered) + 1
+                break
+            expected *= len(domain)
+        table = {
+            problem.terms[term].args
+            for term in covered
+            if problem.terms[term].function == function
+            and len(problem.terms[term].args) == arity
+            and all(argument in domain_set for argument in problem.terms[term].args)
+        }
+        if len(table) == expected:
+            closed.add(function)
+    return frozenset(closed)
+
+
+def _finite_closure(
+    problem: EncodedProblem,
+    domain: tuple[int, ...],
+    covered: frozenset[int],
+    closed_functions: frozenset[int],
+) -> frozenset[int]:
+    finite = set(domain)
+    finite.update(covered)
+    applications = tuple(term for term in problem.terms if term.args)
+    while True:
+        changed = False
+        for term in applications:
+            if (
+                term.function in closed_functions
+                and all(argument in finite for argument in term.args)
+                and term.id not in finite
+            ):
+                finite.add(term.id)
+                changed = True
+        if not changed:
+            return frozenset(finite)
+
+
+def _canonical_assertion_key(
+    expression: BoolExpr,
+    term_map: Sequence[int],
+    memo: dict[int, tuple[object, ...]],
+) -> tuple[object, ...]:
+    cached = memo.get(id(expression))
+    if cached is not None:
+        return cached
+    if expression.op == "const":
+        key: tuple[object, ...] = ("const", expression.arguments[0])
+    elif expression.op == "atom":
+        atom = expression.arguments[0]
+        if type(atom) is not _AtomKey:
+            raise IndependentQfufError("source assertion atom is malformed")
+        if atom.kind == "equality":
+            assert atom.left is not None and atom.right is not None
+            left, right = _normalized_term_pair(
+                term_map[atom.left], term_map[atom.right]
+            )
+            key = ("atom", "equality", left, right)
+        elif atom.kind == "bool_term":
+            assert atom.term is not None
+            key = ("atom", "bool_term", term_map[atom.term])
+        else:
+            raise IndependentQfufError(
+                f"unknown source assertion atom kind `{atom.kind}`"
+            )
+    elif expression.op == "not":
+        child = expression.arguments[0]
+        assert type(child) is BoolExpr
+        key = ("not", _canonical_assertion_key(child, term_map, memo))
+    elif expression.op in {"and", "or", "iff"}:
+        children = tuple(
+            sorted(
+                _canonical_assertion_key(child, term_map, memo)
+                for child in expression.arguments
+                if type(child) is BoolExpr
+            )
+        )
+        if len(children) != len(expression.arguments):
+            raise IndependentQfufError("source assertion child is malformed")
+        key = (expression.op, children)
+    elif expression.op == "ite":
+        children = tuple(
+            _canonical_assertion_key(child, term_map, memo)
+            for child in expression.arguments
+            if type(child) is BoolExpr
+        )
+        if len(children) != 3:
+            raise IndependentQfufError("source ite assertion is malformed")
+        key = ("ite", *children)
+    else:
+        raise IndependentQfufError(
+            f"unknown source assertion operator `{expression.op}`"
+        )
+    memo[id(expression)] = key
+    return key
+
+
+def _assertion_multiset(
+    assertions: Sequence[BoolExpr], term_map: Sequence[int]
+) -> tuple[tuple[object, ...], ...]:
+    memo: dict[int, tuple[object, ...]] = {}
+    return tuple(
+        sorted(
+            _canonical_assertion_key(assertion, term_map, memo)
+            for assertion in assertions
+        )
+    )
+
+
+def _adjacent_swap_maps(
+    problem: EncodedProblem,
+    domain: tuple[int, ...],
+    term_ids: Mapping[tuple[int, tuple[int, ...]], int],
+) -> tuple[tuple[int, ...], ...]:
+    identity = tuple(range(len(problem.terms)))
+    baseline = _assertion_multiset(problem.assertions, identity)
+    maps: list[tuple[int, ...]] = []
+    for left, right in zip(domain, domain[1:]):
+        mapped = [-1] * len(problem.terms)
+        mapped[left] = right
+        mapped[right] = left
+        for term in problem.terms:
+            if mapped[term.id] >= 0:
+                continue
+            if not term.args:
+                mapped[term.id] = term.id
+                continue
+            arguments = tuple(mapped[argument] for argument in term.args)
+            if any(argument < 0 for argument in arguments):
+                raise IndependentQfufError(
+                    "adjacent domain swap encountered a non-topological term"
+                )
+            image = term_ids.get((term.function, arguments))
+            if image is None:
+                raise IndependentQfufError(
+                    "adjacent domain swap is not total on the source term arena"
+                )
+            mapped[term.id] = image
+        if any(image < 0 for image in mapped):
+            raise IndependentQfufError("adjacent domain swap is not total")
+        if len(set(mapped)) != len(mapped):
+            raise IndependentQfufError("adjacent domain swap is not bijective")
+        if any(mapped[mapped[term]] != term for term in identity):
+            raise IndependentQfufError("adjacent domain swap is not involutive")
+        if any(
+            problem.terms[term].sort != problem.terms[mapped[term]].sort
+            for term in identity
+        ):
+            raise IndependentQfufError("adjacent domain swap is not sort-preserving")
+        if _assertion_multiset(problem.assertions, mapped) != baseline:
+            raise IndependentQfufError(
+                "adjacent domain swap is not a source assertion-multiset automorphism"
+            )
+        maps.append(tuple(mapped))
+    return tuple(maps)
+
+
+class _OrbitCnfBuilder:
+    def __init__(self, problem: EncodedProblem) -> None:
+        self.var_atoms: list[_AtomKey | None] = [None]
+        self.atom_vars: dict[_AtomKey, int] = {}
+        for atom in problem.atoms:
+            if atom.kind == "auxiliary":
+                key = None
+            elif atom.kind == "equality":
+                assert atom.left is not None and atom.right is not None
+                left, right = _normalized_term_pair(atom.left, atom.right)
+                key = _AtomKey("equality", left, right)
+            elif atom.kind == "bool_term":
+                assert atom.term is not None
+                key = _AtomKey("bool_term", term=atom.term)
+            else:
+                raise IndependentQfufError(
+                    f"unknown base atom kind `{atom.kind}`"
+                )
+            self.var_atoms.append(key)
+            if key is not None:
+                if key in self.atom_vars:
+                    raise IndependentQfufError(
+                        "base atom table contains duplicate canonical atoms"
+                    )
+                self.atom_vars[key] = atom.variable
+
+    @property
+    def variable_count(self) -> int:
+        return len(self.var_atoms) - 1
+
+    def atom_lit(self, atom: _AtomKey) -> int:
+        if atom.kind == "equality":
+            assert atom.left is not None and atom.right is not None
+            left, right = _normalized_term_pair(atom.left, atom.right)
+            atom = _AtomKey("equality", left, right)
+        previous = self.atom_vars.get(atom)
+        if previous is not None:
+            return previous
+        variable = len(self.var_atoms)
+        self.var_atoms.append(atom)
+        self.atom_vars[atom] = variable
+        return variable
+
+    def new_auxiliary(self) -> int:
+        variable = len(self.var_atoms)
+        self.var_atoms.append(None)
+        return variable
+
+
+def _domain_tuples(
+    arguments: Sequence[int], domain: tuple[int, ...], domain_set: frozenset[int]
+) -> tuple[tuple[int, ...], ...]:
+    tuples: list[tuple[int, ...]] = [()]
+    for argument in arguments:
+        choices = (argument,) if argument in domain_set else domain
+        tuples = [prefix + (choice,) for prefix in tuples for choice in choices]
+    return tuple(tuples)
+
+
+def _tuple_count_with_cap(
+    arguments: Sequence[int], domain_size: int, domain_set: frozenset[int]
+) -> int | None:
+    count = 1
+    for argument in arguments:
+        choices = 1 if argument in domain_set else domain_size
+        if count > _ORBIT_MAX_TUPLES_PER_APPLICATION // choices:
+            return None
+        count *= choices
+    return count
+
+
+def _guarded_budget(
+    category: str, clause_count: int, literal_count: int
+) -> None:
+    if (
+        clause_count > _ORBIT_MAX_GUARDED_CLAUSES
+        or literal_count > _ORBIT_MAX_GUARDED_LITERALS
+    ):
+        raise IndependentQfufError(f"v3 {category} budget exceeded")
+
+
+def _lex_counts(coordinates: int) -> tuple[int, int]:
+    if coordinates == 0:
+        return 0, 0
+    if coordinates == 1:
+        return 1, 2
+    return coordinates * 6 - 6, coordinates * 19 - 21
+
+
+def _add_lex_less_or_equal(
+    builder: _OrbitCnfBuilder, comparison: Sequence[tuple[int, int]]
+) -> tuple[tuple[int, ...], ...]:
+    effective = tuple((left, right) for left, right in comparison if left != right)
+    clauses: list[tuple[int, ...]] = []
+    equal_prefix: int | None = None
+    for index, (left, right) in enumerate(effective):
+        if equal_prefix is None:
+            clauses.append((-left, right))
+        else:
+            clauses.append((-equal_prefix, -left, right))
+        if index + 1 == len(effective):
+            break
+        next_prefix = builder.new_auxiliary()
+        if equal_prefix is None:
+            clauses.append((-next_prefix, -left, right))
+            clauses.append((-next_prefix, left, -right))
+            clauses.append((-left, -right, next_prefix))
+            clauses.append((left, right, next_prefix))
+        else:
+            clauses.append((-next_prefix, equal_prefix))
+            clauses.append((-next_prefix, -left, right))
+            clauses.append((-next_prefix, left, -right))
+            clauses.append((-equal_prefix, -left, -right, next_prefix))
+            clauses.append((-equal_prefix, left, right, next_prefix))
+        equal_prefix = next_prefix
+    return tuple(clauses)
+
+
+@dataclass(frozen=True)
+class _OrbitReconstruction:
+    variables: int
+    categories: Mapping[str, tuple[tuple[int, ...], ...]]
+
+
+def _reconstruct_v3_orbit_kernel(
+    problem: EncodedProblem, witness: Mapping[str, object]
+) -> _OrbitReconstruction:
+    raw_domain = witness["domain_terms"]
+    assert type(raw_domain) is list
+    if not 2 <= len(raw_domain) <= _ORBIT_MAX_DOMAIN:
+        raise IndependentQfufError(
+            f"v3 domain must contain 2..={_ORBIT_MAX_DOMAIN} terms"
+        )
+    domain = tuple(raw_domain)
+    if tuple(sorted(set(domain))) != domain:
+        raise IndependentQfufError(
+            "v3 domain_terms must be strictly increasing and duplicate-free"
+        )
+    if any(term >= len(problem.terms) for term in domain):
+        raise IndependentQfufError("v3 domain term is outside the source term arena")
+    raw_membership_terms = witness["membership_terms"]
+    assert type(raw_membership_terms) is list
+    raw_membership_cells = len(raw_membership_terms) * len(domain)
+    if raw_membership_cells > _ORBIT_MAX_MEMBERSHIP_CELLS:
+        raise IndependentQfufError(
+            f"v3 membership cell cap exceeded: {raw_membership_cells}"
+        )
+    domain_sort = problem.terms[domain[0]].sort
+    if any(
+        problem.terms[term].sort != domain_sort or problem.terms[term].args
+        for term in domain
+    ):
+        raise IndependentQfufError(
+            "v3 domain_terms must be same-sort nullary source terms"
+        )
+    mandatory_disequalities = _mandatory_disequalities(problem.assertions)
+    if any(
+        _normalized_term_pair(domain[left], domain[right])
+        not in mandatory_disequalities
+        for left in range(len(domain))
+        for right in range(left + 1, len(domain))
+    ):
+        raise IndependentQfufError(
+            "v3 domain_terms are not a mandatory top-level disequality clique"
+        )
+
+    domain_set = frozenset(domain)
+    covered = _mandatory_coverages(problem.assertions, domain_set)
+    closed_functions = _closed_table_functions(problem, domain, covered)
+    finite_terms = _finite_closure(
+        problem, domain, covered, closed_functions
+    )
+    membership_terms = tuple(sorted(finite_terms))
+    if raw_membership_terms != list(membership_terms):
+        raise IndependentQfufError(
+            "v3 membership_terms differ from independent finite closure"
+        )
+    membership_cells = len(membership_terms) * len(domain)
+    if membership_cells > _ORBIT_MAX_MEMBERSHIP_CELLS:
+        raise IndependentQfufError(
+            f"v3 membership cell cap exceeded: {membership_cells}"
+        )
+
+    lex_terms = tuple(
+        sorted(covered, key=lambda term: (bool(problem.terms[term].args), term))
+    )
+    if not lex_terms:
+        raise IndependentQfufError("v3 lex_terms must not be empty")
+    if witness["lex_terms"] != list(lex_terms):
+        raise IndependentQfufError(
+            "v3 lex_terms differ from independent Rust-order reconstruction"
+        )
+    if any(term not in finite_terms for term in lex_terms):
+        raise IndependentQfufError("v3 lex_terms are outside finite closure")
+
+    term_ids = _term_index(problem)
+    swap_maps = _adjacent_swap_maps(problem, domain, term_ids)
+    lex_set = frozenset(lex_terms)
+    if any(
+        term_map[term] not in lex_set
+        for term_map in swap_maps
+        for term in lex_terms
+    ):
+        raise IndependentQfufError(
+            "v3 lex_terms are not closed under adjacent generators"
+        )
+
+    original_equalities = tuple(
+        (atom.variable, atom.left, atom.right)
+        for atom in problem.atoms
+        if atom.kind == "equality"
+        and atom.left is not None
+        and atom.right is not None
+    )
+    original_predicates = tuple(
+        sorted(
+            {
+                atom.term
+                for atom in problem.atoms
+                if atom.kind == "bool_term"
+                and atom.term is not None
+                and problem.terms[atom.term].args
+            }
+        )
+    )
+
+    builder = _OrbitCnfBuilder(problem)
+    membership: dict[tuple[int, int], int] = {}
+    for term in membership_terms:
+        for value in domain:
+            membership[(term, value)] = builder.atom_lit(
+                _AtomKey("equality", term, value)
+            )
+
+    non_domain_terms = tuple(
+        term for term in membership_terms if term not in domain_set
+    )
+    domain_pairs = len(domain) * (len(domain) - 1) // 2
+    guarded_rows_count = len(non_domain_terms) * domain_pairs + len(domain)
+    guarded_rows_literals = len(non_domain_terms) * domain_pairs * 3 + len(domain)
+    _guarded_budget(
+        "guarded_rows", guarded_rows_count, guarded_rows_literals
+    )
+    guarded_rows: list[tuple[int, ...]] = []
+    for term in membership_terms:
+        if term in domain_set:
+            guarded_rows.append((membership[(term, term)],))
+            continue
+        for left in range(len(domain)):
+            for right in range(left + 1, len(domain)):
+                guarded_rows.append(
+                    (
+                        membership[(domain[left], domain[right])],
+                        -membership[(term, domain[left])],
+                        -membership[(term, domain[right])],
+                    )
+                )
+    if len(guarded_rows) != guarded_rows_count:
+        raise IndependentQfufError("v3 guarded_rows reconstruction mismatch")
+
+    finite_coverage_count = len(non_domain_terms)
+    finite_coverage_literals = finite_coverage_count * len(domain)
+    _guarded_budget(
+        "finite_coverage", finite_coverage_count, finite_coverage_literals
+    )
+    finite_coverage = tuple(
+        tuple(membership[(term, value)] for value in domain)
+        for term in non_domain_terms
+    )
+
+    channeled_equalities = tuple(
+        (variable, left, right)
+        for variable, left, right in original_equalities
+        if left != right
+        and left in finite_terms
+        and right in finite_terms
+        and left not in domain_set
+        and right not in domain_set
+    )
+    equality_channel_count = len(channeled_equalities) * len(domain) * 3
+    _guarded_budget(
+        "equality_channels", equality_channel_count, equality_channel_count * 3
+    )
+    equality_channels: list[tuple[int, ...]] = []
+    for equality, left, right in channeled_equalities:
+        for value in domain:
+            left_value = membership[(left, value)]
+            right_value = membership[(right, value)]
+            equality_channels.append((-equality, -left_value, right_value))
+            equality_channels.append((-equality, left_value, -right_value))
+            equality_channels.append((-left_value, -right_value, equality))
+
+    predicate_clause_bound = 0
+    predicate_literal_bound = 0
+    predicate_tuple_counts: dict[int, int] = {}
+    for term_id in original_predicates:
+        term = problem.terms[term_id]
+        if any(argument not in finite_terms for argument in term.args):
+            raise IndependentQfufError(
+                "v3 predicate arguments are outside finite closure"
+            )
+        tuple_count = _tuple_count_with_cap(
+            term.args, len(domain), domain_set
+        )
+        if tuple_count is None:
+            raise IndependentQfufError(
+                "v3 predicate per-application tuple cap exceeded"
+            )
+        predicate_tuple_counts[term_id] = tuple_count
+        clauses = tuple_count * 2
+        predicate_clause_bound += clauses
+        predicate_literal_bound += clauses * (len(term.args) + 2)
+        _guarded_budget(
+            "predicate_channels",
+            predicate_clause_bound,
+            predicate_literal_bound,
+        )
+
+    predicate_clause_set: set[tuple[int, ...]] = set()
+    for term_id in original_predicates:
+        term = problem.terms[term_id]
+        tuples = _domain_tuples(term.args, domain, domain_set)
+        if len(tuples) != predicate_tuple_counts[term_id]:
+            raise IndependentQfufError(
+                "v3 predicate tuple reconstruction mismatch"
+            )
+        for values in tuples:
+            canonical = term_ids.get((term.function, values))
+            if canonical is None:
+                raise IndependentQfufError(
+                    "v3 predicate canonical table application is missing"
+                )
+            application_lit = builder.atom_lit(
+                _AtomKey("bool_term", term=term_id)
+            )
+            canonical_lit = builder.atom_lit(
+                _AtomKey("bool_term", term=canonical)
+            )
+            if application_lit == canonical_lit:
+                continue
+            conditions = tuple(
+                membership[(argument, value)]
+                for argument, value in zip(term.args, values)
+                if argument != value
+            )
+            for suffix in (
+                (-application_lit, canonical_lit),
+                (application_lit, -canonical_lit),
+            ):
+                clause = tuple(
+                    sorted({*(-condition for condition in conditions), *suffix})
+                )
+                literals = frozenset(clause)
+                if any(-literal in literals for literal in literals):
+                    continue
+                predicate_clause_set.add(clause)
+    predicate_channels = tuple(sorted(predicate_clause_set))
+    _guarded_budget(
+        "predicate_channels",
+        len(predicate_channels),
+        sum(len(clause) for clause in predicate_channels),
+    )
+    if len(predicate_channels) > predicate_clause_bound:
+        raise IndependentQfufError(
+            "v3 predicate channel materialization exceeds planned bound"
+        )
+
+    effective_coordinates = 0
+    planned_lex_clauses = 0
+    planned_lex_literals = 0
+    generator_coordinates: list[int] = []
+    for term_map in swap_maps:
+        coordinates = 0
+        for term in lex_terms:
+            for value in domain:
+                left = membership[(term, value)]
+                right = membership[(term_map[term], term_map[value])]
+                if left != right:
+                    coordinates += 1
+                    effective_coordinates += 1
+                    if (
+                        effective_coordinates
+                        > _ORBIT_MAX_EFFECTIVE_LEX_COORDINATES
+                    ):
+                        raise IndependentQfufError(
+                            "v3 effective lex coordinate cap exceeded"
+                        )
+        generator_coordinates.append(coordinates)
+        clauses, literals = _lex_counts(coordinates)
+        planned_lex_clauses += clauses
+        planned_lex_literals += literals
+        _guarded_budget(
+            "orbit_lex", planned_lex_clauses, planned_lex_literals
+        )
+
+    orbit_lex: list[tuple[int, ...]] = []
+    for term_map, coordinates in zip(swap_maps, generator_coordinates):
+        comparison = tuple(
+            (
+                -membership[(term, value)],
+                -membership[(term_map[term], term_map[value])],
+            )
+            for term in lex_terms
+            for value in domain
+        )
+        generated = _add_lex_less_or_equal(builder, comparison)
+        expected_clauses, _ = _lex_counts(coordinates)
+        if len(generated) != expected_clauses:
+            raise IndependentQfufError("v3 orbit_lex Tseitin mismatch")
+        orbit_lex.extend(generated)
+    if (
+        len(orbit_lex) != planned_lex_clauses
+        or sum(len(clause) for clause in orbit_lex) != planned_lex_literals
+    ):
+        raise IndependentQfufError("v3 orbit_lex materialization mismatch")
+
+    guarded_channels: list[tuple[int, ...]] = []
+    guarded_channel_literals = 0
+    for term in problem.terms:
+        if (
+            not term.args
+            or term.id not in finite_terms
+            or term.function not in closed_functions
+        ):
+            continue
+        tuple_count = _tuple_count_with_cap(
+            term.args, len(domain), domain_set
+        )
+        # The 51d residual app class intentionally skips over-cap expansions.
+        if tuple_count is None:
+            continue
+        tuples = _domain_tuples(term.args, domain, domain_set)
+        if len(tuples) != tuple_count:
+            raise IndependentQfufError(
+                "v3 guarded channel tuple reconstruction mismatch"
+            )
+        for values in tuples:
+            canonical = term_ids.get((term.function, values))
+            # Missing residual app channels are also exact producer skips.
+            if canonical is None or canonical == term.id:
+                continue
+            conditions = tuple(
+                membership[(argument, value)]
+                for argument, value in zip(term.args, values)
+                if argument != value
+            )
+            for output in domain:
+                clause = tuple(
+                    sorted(
+                        {
+                            *(-condition for condition in conditions),
+                            -membership[(canonical, output)],
+                            membership[(term.id, output)],
+                        }
+                    )
+                )
+                guarded_channels.append(clause)
+                guarded_channel_literals += len(clause)
+                _guarded_budget(
+                    "guarded_channels",
+                    len(guarded_channels),
+                    guarded_channel_literals,
+                )
+
+    categories: dict[str, tuple[tuple[int, ...], ...]] = {
+        "base": problem.clauses,
+        "guarded_rows": tuple(guarded_rows),
+        "finite_coverage": finite_coverage,
+        "equality_channels": tuple(equality_channels),
+        "predicate_channels": predicate_channels,
+        "orbit_lex": tuple(orbit_lex),
+        "guarded_channels": tuple(guarded_channels),
+    }
+    return _OrbitReconstruction(builder.variable_count, categories)
+
+
+def _normalize_v3_dimacs(
+    variables: int, clauses: Sequence[Sequence[int]]
+) -> tuple[tuple[int, ...], ...]:
+    if type(variables) is not int or variables < 0:
+        raise IndependentQfufError(
+            "v3 DIMACS variable count must be a nonnegative exact integer"
+        )
+    if isinstance(clauses, (str, bytes)) or not isinstance(clauses, Sequence):
+        raise IndependentQfufError("v3 DIMACS clauses must be a sequence")
+    normalized: list[tuple[int, ...]] = []
+    for index, clause in enumerate(clauses, start=1):
+        if isinstance(clause, (str, bytes)) or not isinstance(clause, Sequence):
+            raise IndependentQfufError(
+                f"v3 DIMACS clause {index} must be a literal sequence"
+            )
+        literals: list[int] = []
+        for literal in clause:
+            if (
+                type(literal) is not int
+                or literal == 0
+                or abs(literal) > variables
+            ):
+                raise IndependentQfufError(
+                    f"v3 DIMACS clause {index} has invalid literal `{literal}`"
+                )
+            literals.append(literal)
+        normalized.append(tuple(literals))
+    return tuple(normalized)
+
+
+def validate_v3_unsat_manifest(
+    manifest: Mapping[str, object],
+    problem: EncodedProblem,
+    variables: int,
+    clauses: Sequence[Sequence[int]],
+) -> int:
+    """Regenerate and match the complete v3 finite-orbit certificate CNF."""
+
+    validate_v3_manifest_shape(manifest)
+    problem = _validate_problem(problem)
+    normalized = _normalize_v3_dimacs(variables, clauses)
+    if manifest["variables"] != variables:
+        raise IndependentQfufError(
+            "v3 manifest and DIMACS variable counts differ"
+        )
+    counts = manifest["clauses"]
+    assert type(counts) is dict
+    if counts["base"] != problem.base_count:
+        raise IndependentQfufError(
+            "v3 base count differs from independent reconstruction"
+        )
+    if counts["total"] != len(normalized):
+        raise IndependentQfufError(
+            "v3 total count differs from DIMACS reconstruction"
+        )
+    if sum(counts[category] for category in _V3_CLAUSE_CATEGORIES) != counts[
+        "total"
+    ]:
+        raise IndependentQfufError("v3 clause categories do not sum to total")
+
+    witness = manifest["finite_orbit"]
+    assert type(witness) is dict
+    try:
+        reconstruction = _reconstruct_v3_orbit_kernel(problem, witness)
+    except RecursionError as error:
+        raise IndependentQfufError(
+            "v3 source assertions are too deeply nested for orbit reconstruction"
+        ) from error
+    if reconstruction.variables != variables:
+        raise IndependentQfufError(
+            "v3 variable count differs from deterministic atom allocation"
+        )
+
+    offset = 0
+    for category in _V3_CLAUSE_CATEGORIES:
+        expected = reconstruction.categories[category]
+        if counts[category] != len(expected):
+            raise IndependentQfufError(
+                f"v3 {category} count differs from independent regeneration"
+            )
+        end = offset + len(expected)
+        if normalized[offset:end] != expected:
+            raise IndependentQfufError(
+                f"v3 DIMACS {category} boundary differs from independent regeneration"
+            )
+        offset = end
+    if offset != len(normalized):
+        raise IndependentQfufError(
+            "v3 reconstructed category boundaries do not cover DIMACS"
+        )
+    return len(normalized) - problem.base_count
+
+
 def validate_unsat_manifest(
     manifest: Mapping[str, object],
     problem: EncodedProblem,
     variables: int,
     clauses: Sequence[Sequence[int]],
 ) -> int:
+    if type(manifest) is dict and manifest.get("format") == V3_FORMAT:
+        return validate_v3_unsat_manifest(manifest, problem, variables, clauses)
     return validate_v2_unsat_manifest(manifest, problem, variables, clauses)
 
 
@@ -2297,6 +3265,8 @@ __all__ = [
     "Sort",
     "Term",
     "V2_FORMAT",
+    "V3_ENCODING",
+    "V3_FORMAT",
     "euf_lemma_is_valid",
     "parse_and_encode",
     "parse_dimacs",
@@ -2309,4 +3279,6 @@ __all__ = [
     "validate_unsat_manifest",
     "validate_v2_sat_manifest",
     "validate_v2_unsat_manifest",
+    "validate_v3_manifest_shape",
+    "validate_v3_unsat_manifest",
 ]
