@@ -1240,9 +1240,145 @@ class _UnionFind:
         return True
 
 
-def _validate_problem(problem: EncodedProblem) -> None:
-    if not isinstance(problem, EncodedProblem):
+def _canonical_problem_snapshot(problem: EncodedProblem) -> EncodedProblem:
+    """Detach trusted validation state from caller-owned container identity."""
+
+    if type(problem) is not EncodedProblem:
         raise IndependentQfufError("expected an EncodedProblem")
+    tuple_fields = (
+        ("sorts", problem.sorts),
+        ("functions", problem.functions),
+        ("terms", problem.terms),
+        ("atoms", problem.atoms),
+        ("clauses", problem.clauses),
+        ("assertions", problem.assertions),
+        ("bool_data_terms", problem.bool_data_terms),
+    )
+    for name, value in tuple_fields:
+        if type(value) is not tuple:
+            raise IndependentQfufError(
+                f"EncodedProblem.{name} must be an immutable tuple"
+            )
+    if type(problem.true_term) is not int or type(problem.false_term) is not int:
+        raise IndependentQfufError("Boolean value term IDs must be integers")
+
+    sorts: list[Sort] = []
+    for sort in problem.sorts:
+        if (
+            type(sort) is not Sort
+            or type(sort.id) is not int
+            or type(sort.name) is not str
+            or type(sort.quoted) is not bool
+        ):
+            raise IndependentQfufError("sort table is not canonical and immutable")
+        sorts.append(Sort(sort.id, sort.name, sort.quoted))
+
+    functions: list[Function] = []
+    for function in problem.functions:
+        if (
+            type(function) is not Function
+            or type(function.id) is not int
+            or type(function.name) is not str
+            or type(function.arg_sorts) is not tuple
+            or any(type(sort) is not int for sort in function.arg_sorts)
+            or type(function.result_sort) is not int
+            or type(function.quoted) is not bool
+            or type(function.internal) is not bool
+            or type(function.macro) is not bool
+        ):
+            raise IndependentQfufError("function table is not canonical and immutable")
+        functions.append(
+            Function(
+                function.id,
+                function.name,
+                tuple(function.arg_sorts),
+                function.result_sort,
+                function.quoted,
+                function.internal,
+                function.macro,
+            )
+        )
+
+    terms: list[Term] = []
+    for term in problem.terms:
+        if (
+            type(term) is not Term
+            or type(term.id) is not int
+            or type(term.function) is not int
+            or type(term.args) is not tuple
+            or any(type(argument) is not int for argument in term.args)
+            or type(term.sort) is not int
+        ):
+            raise IndependentQfufError("term table is not canonical and immutable")
+        terms.append(Term(term.id, term.function, tuple(term.args), term.sort))
+
+    atoms: list[Atom] = []
+    for atom in problem.atoms:
+        if (
+            type(atom) is not Atom
+            or type(atom.variable) is not int
+            or type(atom.kind) is not str
+            or any(
+                value is not None and type(value) is not int
+                for value in (atom.left, atom.right, atom.term)
+            )
+        ):
+            raise IndependentQfufError("atom table is not canonical and immutable")
+        atoms.append(Atom(atom.variable, atom.kind, atom.left, atom.right, atom.term))
+
+    clauses: list[tuple[int, ...]] = []
+    for clause in problem.clauses:
+        if type(clause) is not tuple or any(
+            type(literal) is not int for literal in clause
+        ):
+            raise IndependentQfufError("base clauses are not canonical and immutable")
+        clauses.append(tuple(clause))
+
+    assertion_stack = list(problem.assertions)
+    while assertion_stack:
+        expression = assertion_stack.pop()
+        if (
+            type(expression) is not BoolExpr
+            or type(expression.op) is not str
+            or type(expression.arguments) is not tuple
+        ):
+            raise IndependentQfufError("assertion table is not canonical and immutable")
+        for argument in expression.arguments:
+            if type(argument) is BoolExpr:
+                assertion_stack.append(argument)
+            elif type(argument) is _AtomKey:
+                if (
+                    type(argument.kind) is not str
+                    or any(
+                        value is not None and type(value) is not int
+                        for value in (argument.left, argument.right, argument.term)
+                    )
+                ):
+                    raise IndependentQfufError(
+                        "assertion atom is not canonical and immutable"
+                    )
+            elif type(argument) is not bool:
+                raise IndependentQfufError(
+                    "assertion argument is not canonical and immutable"
+                )
+    if any(type(term) is not int for term in problem.bool_data_terms):
+        raise IndependentQfufError("Bool-as-data term table is not canonical")
+
+    return EncodedProblem(
+        tuple(sorts),
+        tuple(functions),
+        tuple(terms),
+        tuple(atoms),
+        tuple(clauses),
+        problem.true_term,
+        problem.false_term,
+        problem.assertions,
+        tuple(problem.bool_data_terms),
+    )
+
+
+def _validate_problem(problem: EncodedProblem) -> EncodedProblem:
+    problem = _canonical_problem_snapshot(problem)
     if [sort.id for sort in problem.sorts] != list(range(len(problem.sorts))):
         raise IndependentQfufError("sort IDs must be contiguous and ordered")
     if not problem.sorts or problem.sorts[BOOL_SORT].name != "Bool":
@@ -1337,6 +1473,7 @@ def _validate_problem(problem: EncodedProblem) -> None:
                 raise IndependentQfufError(
                     f"base clause {clause_index} has invalid literal `{literal}`"
                 )
+    return problem
 
 
 def _close_congruence(problem: EncodedProblem, union_find: _UnionFind) -> None:
@@ -1386,7 +1523,7 @@ def validate_total_assignment(
 ) -> tuple[bool, ...]:
     """Validate an exact DIMACS assignment as a total QF_UF model."""
 
-    _validate_problem(problem)
+    problem = _validate_problem(problem)
     values = _assignment_values(problem, assignment)
     for clause_index, clause in enumerate(problem.clauses, start=1):
         if not any((literal > 0) == values[abs(literal)] for literal in clause):
@@ -1485,7 +1622,7 @@ def _validate_euf_lemma_literals(
 def validate_euf_lemma(problem: EncodedProblem, clause: Sequence[int]) -> None:
     """Validate a clause by refuting its negation in reconstructed EUF."""
 
-    _validate_problem(problem)
+    problem = _validate_problem(problem)
     literals = _clause_literals(problem, clause, "EUF lemma")
     _validate_euf_lemma_literals(problem, literals)
 
@@ -1605,7 +1742,7 @@ def validate_unsat_dimacs(
 ) -> int:
     """Check the exact local base prefix and every EUF-only suffix clause."""
 
-    _validate_problem(problem)
+    problem = _validate_problem(problem)
     if not isinstance(variables, int) or isinstance(variables, bool) or variables < 0:
         raise IndependentQfufError("DIMACS variable count must be a nonnegative integer")
     if variables != problem.variable_count:

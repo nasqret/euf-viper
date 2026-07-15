@@ -681,6 +681,66 @@ class ManifestAndTamperTests(unittest.TestCase):
 
         self.assertEqual(validate_problem.call_count, 1)
 
+    def test_unsat_helper_uses_a_detached_problem_snapshot(self) -> None:
+        premise, consequence = self.equalities
+        problem = QFUF.EncodedProblem(
+            self.problem.sorts,
+            self.problem.functions,
+            self.problem.terms,
+            self.problem.atoms,
+            self.problem.clauses,
+            self.problem.true_term,
+            self.problem.false_term,
+            self.problem.assertions,
+            self.problem.bool_data_terms,
+        )
+        mutated = False
+
+        class MutatingClauses(list[tuple[int, ...]]):
+            def __iter__(inner_self):
+                nonlocal mutated
+                mutated = True
+                object.__setattr__(problem, "atoms", tuple(reversed(problem.atoms)))
+                return super().__iter__()
+
+        clauses = MutatingClauses((*problem.clauses, (-premise, consequence)))
+        self.assertEqual(
+            QFUF.validate_unsat_dimacs(problem, problem.variable_count, clauses),
+            1,
+        )
+        self.assertTrue(mutated)
+
+    def test_problem_rejects_mutable_nested_containers(self) -> None:
+        fields = {
+            name: getattr(self.problem, name)
+            for name in self.problem.__dataclass_fields__
+        }
+        fields["atoms"] = list(self.problem.atoms)
+        mutable_atoms = QFUF.EncodedProblem(**fields)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "atoms.*immutable"):
+            QFUF.validate_euf_lemma(mutable_atoms, self.equalities)
+
+        fields["atoms"] = self.problem.atoms
+        first_term = self.problem.terms[0]
+        fields["terms"] = (
+            QFUF.Term(
+                first_term.id,
+                first_term.function,
+                list(first_term.args),
+                first_term.sort,
+            ),
+            *self.problem.terms[1:],
+        )
+        mutable_term = QFUF.EncodedProblem(**fields)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "term table"):
+            QFUF.validate_euf_lemma(mutable_term, self.equalities)
+
+        fields["terms"] = self.problem.terms
+        fields["clauses"] = (list(self.problem.clauses[0]), *self.problem.clauses[1:])
+        mutable_clause = QFUF.EncodedProblem(**fields)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "base clauses"):
+            QFUF.validate_euf_lemma(mutable_clause, self.equalities)
+
     def test_dimacs_parser_is_strict_and_supports_split_clauses(self) -> None:
         variables, clauses = QFUF.parse_dimacs(
             "c comment\np cnf 3 2\n1 -2\n3 0\n0\n"
