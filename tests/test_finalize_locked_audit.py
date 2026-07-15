@@ -1177,13 +1177,16 @@ class FinalizeLockedAuditTests(unittest.TestCase):
             self.finalize(pre_publish_hook=replace)
         self.assertFalse(self.output.exists())
 
-    def test_path_replacement_at_link_boundary_rolls_back_index(self) -> None:
+    def test_path_replacement_at_link_boundary_preserves_index_for_retry(self) -> None:
+        target = self.root / "audit" / "full" / "global.json"
+        original_target = self.root / "original-full-global.json"
+        original_target.hardlink_to(target)
         bindings = self.current_bindings()
         scheduler_sha256 = self.write_scheduler(bindings)
-        target = self.root / "audit" / "full" / "global.json"
         strict_os = FINALIZER.atomic_write_nofollow.__globals__["os"]
         real_link = strict_os.link
         replaced = False
+        downstream_receipt = self.root / "audit" / "downstream.json"
 
         def replace_then_link(*args: object, **kwargs: object) -> None:
             nonlocal replaced
@@ -1194,18 +1197,44 @@ class FinalizeLockedAuditTests(unittest.TestCase):
                 target.chmod(0o400)
             real_link(*args, **kwargs)
 
+        def finalize_then_publish_downstream() -> None:
+            payload = self.finalize(
+                validated_analyses=bindings,
+                write_scheduler=False,
+                scheduler_receipt_sha256=scheduler_sha256,
+            )
+            downstream_receipt.write_bytes(FINALIZER.canonical_json_bytes(payload))
+
         with mock.patch.object(strict_os, "link", side_effect=replace_then_link):
             with self.assertRaisesRegex(
                 FINALIZER.AuditFinalizeError, "no longer names descriptor"
             ):
-                self.finalize(
-                    validated_analyses=bindings,
-                    write_scheduler=False,
-                    scheduler_receipt_sha256=scheduler_sha256,
-                )
+                finalize_then_publish_downstream()
         self.assertTrue(replaced)
-        self.assertFalse(self.output.exists())
+        self.assertFalse(downstream_receipt.exists())
         self.assertEqual(target.read_bytes(), b'{"replaced":true}\n')
+
+        preserved_output = self.output.read_bytes()
+        preserved_payload = json.loads(preserved_output)
+        self.assertEqual(
+            preserved_output, FINALIZER.canonical_json_bytes(preserved_payload)
+        )
+        self.assertEqual(self.output.stat().st_mode & 0o777, 0o400)
+        self.assertEqual(
+            preserved_payload["analyses"]["full"]["inode"],
+            original_target.stat().st_ino,
+        )
+
+        target.unlink()
+        target.hardlink_to(original_target)
+        original_target.unlink()
+        retried = self.finalize(
+            validated_analyses=bindings,
+            write_scheduler=False,
+            scheduler_receipt_sha256=scheduler_sha256,
+        )
+        self.assertEqual(retried, preserved_payload)
+        self.assertEqual(self.output.read_bytes(), preserved_output)
 
     def test_in_place_analysis_mutation_before_publish_is_rejected(self) -> None:
         target = self.root / "audit" / "official" / "global.json"
