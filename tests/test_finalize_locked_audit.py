@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import threading
@@ -49,8 +50,68 @@ def render_analysis(root: Path, kind: str) -> dict[str, object]:
     shard_lock_path.parent.mkdir(parents=True, exist_ok=True)
     shard_raw_path.parent.mkdir(parents=True, exist_ok=True)
 
+    instances = [
+        {
+            "id": str(index),
+            "relative_path": f"QF_UF/family/case-{index}.smt2",
+            "path": str(root / "corpus" / f"case-{index}.smt2"),
+            "sha256": f"{index + 5}" * 64,
+            "bytes": 100 + index,
+            "status": status,
+            "family": "fixture-family",
+            "lineage": "fixture/generated",
+            "normalized_sha256": f"{index + 7}" * 64,
+            "split": "development",
+        }
+        for index, status in enumerate(("sat", "unsat"))
+    ]
+    solvers = [
+        {
+            "id": solver_id,
+            "comparator_id": solver_id,
+            "configuration": "default",
+            "version": "fixture-1",
+            "binary": str(root / "bin" / solver_id),
+            "sha256": digest,
+            "argv_template": ["{binary}", "{instance}"],
+            "version_output": None,
+            "version_output_sha256": None,
+            "environment": {},
+        }
+        for solver_id, digest in (("euf-viper", "2" * 64), ("z3", "3" * 64))
+    ]
     parent_raw, parent_lock_sha256 = lock_bytes(
-        campaign_id=f"production-p0-{kind}", schema_version=1
+        schema_version=1,
+        campaign_id=f"production-p0-{kind}",
+        created_from_commit_time="2026-07-15T00:00:00+00:00",
+        promotion_eligible=True,
+        spec={"path": str(root / "campaign.json"), "sha256": "9" * 64},
+        repository={
+            "root": str(root),
+            "commit": "a" * 40,
+            "commit_time": "2026-07-15T00:00:00+00:00",
+            "clean": True,
+            "promotion_eligible": True,
+        },
+        host={},
+        corpus={
+            "id": f"fixture-{kind}",
+            "manifest_path": str(root / "manifest.jsonl"),
+            "manifest_sha256": "1" * 64,
+            "taxonomy_path": str(root / "taxonomy.jsonl"),
+            "taxonomy_sha256": "4" * 64,
+            "root": str(root / "corpus"),
+            "instances": instances,
+        },
+        solver_config={"path": str(root / "solvers.json"), "sha256": "b" * 64},
+        solver_release_lock={
+            "path": str(root / "solver-releases.json"),
+            "sha256": "c" * 64,
+        },
+        solvers=solvers,
+        budgets_s=[2.0],
+        execution={},
+        output={},
     )
     shard_lock_raw, shard_lock_sha256 = lock_bytes(
         campaign_id=f"production-p0-{kind}",
@@ -107,6 +168,44 @@ def render_analysis(root: Path, kind: str) -> dict[str, object]:
     return analysis
 
 
+def render_generated_sharded_analysis(
+    root: Path, kind: str
+) -> dict[str, object]:
+    source_root = root / "generated" / kind
+    source_root.mkdir(parents=True, exist_ok=True)
+    source_parent, source_pairs = ANALYZER_FIXTURE.write_sharded_fixture(source_root)
+    parent = root / "locks" / f"{kind}-parent.json"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_bytes(source_parent.read_bytes())
+
+    pairs: list[tuple[Path, Path]] = []
+    for index, (source_lock, source_raw) in enumerate(source_pairs):
+        lock = root / "locks" / kind / f"bound-{index:04d}.json"
+        raw = root / f"{kind}-2s" / f"shard-{index:04d}" / "raw.jsonl"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        raw.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_bytes(source_lock.read_bytes())
+        raw.write_bytes(source_raw.read_bytes())
+        pairs.append((lock, raw))
+
+    report = ANALYZER_FIXTURE.ANALYZER.analyze_sharded_locked_campaign(
+        parent,
+        pairs,
+        candidate_id="euf-viper",
+        baseline_ids=["z3"],
+        seed=31,
+        bootstrap_replicates=16,
+        confidence_level=0.9,
+    )
+    analysis_path = root / "audit" / kind / "global.json"
+    analysis_path.parent.mkdir(parents=True, exist_ok=True)
+    analysis_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="ascii"
+    )
+    analysis_path.chmod(0o400)
+    return report
+
+
 class FinalizeLockedAuditTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -140,6 +239,14 @@ class FinalizeLockedAuditTests(unittest.TestCase):
             **kwargs,
         )
 
+    def rewrite_analysis(self, kind: str, value: dict[str, object]) -> None:
+        target = self.root / "audit" / kind / "global.json"
+        target.chmod(0o600)
+        target.write_text(
+            json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="ascii"
+        )
+        target.chmod(0o400)
+
     def test_schema_accepts_analyzer_generated_sharded_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent, pairs = ANALYZER_FIXTURE.write_sharded_fixture(Path(temporary))
@@ -157,11 +264,211 @@ class FinalizeLockedAuditTests(unittest.TestCase):
     def test_batch_continues_only_for_success_or_statistical_rejection(self) -> None:
         text = AUDIT_BATCH.read_text(encoding="ascii")
         self.assertIn('case "$ANALYSIS_STATUS" in', text)
+        self.assertIn('[ -e "$ANALYSIS_OUTPUT" ] || [ -L "$ANALYSIS_OUTPUT" ]', text)
         self.assertIn("analysis completed with statistical rejection", text)
         self.assertIn("analysis rejected its lock/raw input", text)
         self.assertIn("analysis could not publish its output", text)
+        self.assertIn("analysis failed internally", text)
+        self.assertIn("--validate-analysis", text)
+        self.assertIn("--expected-analysis-exit", text)
         self.assertIn("exit 2", text)
         self.assertIn("exit 3", text)
+
+    def test_live_parent_identity_fields_cannot_be_forged_in_report(self) -> None:
+        cases = (
+            ("campaign", "campaign identity"),
+            ("solver", "solver hashes"),
+            ("budget", "budget identity"),
+            ("manifest", "manifest identity"),
+            ("taxonomy", "taxonomy identity"),
+            ("eligibility", "promotion eligibility"),
+        )
+        for field, diagnostic in cases:
+            with self.subTest(field=field):
+                value = render_analysis(self.root, "full")
+                if field == "campaign":
+                    value["inputs"]["campaign_id"] = "forged-campaign"
+                elif field == "solver":
+                    value["input_hashes"]["solver_binary_sha256"][
+                        "euf-viper"
+                    ] = "d" * 64
+                elif field == "budget":
+                    value["inputs"]["budgets_s"] = [3.0]
+                    budget = value["comparisons"]["z3"]["budgets"].pop("2")
+                    budget["budget_s"] = 3.0
+                    value["comparisons"]["z3"]["budgets"]["3"] = budget
+                    value["comparisons"]["z3"]["promotion"][
+                        "failed_budgets"
+                    ] = ["3"]
+                elif field == "manifest":
+                    value["input_hashes"]["manifest_sha256"] = "d" * 64
+                elif field == "taxonomy":
+                    value["input_hashes"]["taxonomy_sha256"] = "d" * 64
+                else:
+                    value["promotion"]["lock_promotion_eligible"] = False
+                self.rewrite_analysis("full", value)
+                with self.assertRaisesRegex(
+                    FINALIZER.AuditFinalizeError, diagnostic
+                ):
+                    self.finalize()
+                self.assertFalse(self.output.exists())
+
+    def test_aggregate_promotion_cannot_contradict_individual_checks(self) -> None:
+        value = self.analyses["full"]
+        budget = value["comparisons"]["z3"]["budgets"]["2"]
+        self.assertFalse(
+            budget["promotion"]["checks"]["zero_coverage_loss"]["passed"]
+        )
+        budget["promotion"].update({"passed": True, "status": "promoted"})
+        value["comparisons"]["z3"]["promotion"] = {
+            "failed_budgets": [],
+            "passed": True,
+            "status": "promoted",
+        }
+        value.update({"promoted": True, "status": "promoted"})
+        value["promotion"] = {
+            "failed_comparisons": [],
+            "lock_promotion_eligible": True,
+            "passed": True,
+            "status": "promoted",
+        }
+        self.rewrite_analysis("full", value)
+        with self.assertRaisesRegex(
+            FINALIZER.AuditFinalizeError, "contradicts individual checks"
+        ):
+            self.finalize()
+        self.assertFalse(self.output.exists())
+
+    def test_failed_promotion_check_cannot_be_omitted(self) -> None:
+        value = self.analyses["full"]
+        budget = value["comparisons"]["z3"]["budgets"]["2"]
+        budget["promotion"]["checks"].pop("zero_coverage_loss")
+        budget["promotion"].update({"passed": True, "status": "promoted"})
+        value["comparisons"]["z3"]["promotion"] = {
+            "failed_budgets": [],
+            "passed": True,
+            "status": "promoted",
+        }
+        value.update({"promoted": True, "status": "promoted"})
+        value["promotion"] = {
+            "failed_comparisons": [],
+            "lock_promotion_eligible": True,
+            "passed": True,
+            "status": "promoted",
+        }
+        self.rewrite_analysis("full", value)
+        with self.assertRaisesRegex(
+            FINALIZER.AuditFinalizeError, "missing keys.*zero_coverage_loss"
+        ):
+            self.finalize()
+        self.assertFalse(self.output.exists())
+
+    def test_parent_promotion_eligibility_is_independently_derived(self) -> None:
+        parent_path = self.root / "locks" / "full-parent.json"
+        parent = json.loads(parent_path.read_text(encoding="ascii"))
+        parent["repository"].update(
+            {"clean": False, "promotion_eligible": False}
+        )
+        parent["lock_sha256"] = ""
+        parent["lock_sha256"] = sha256(
+            FINALIZER._canonical_analysis_bytes(parent)
+        )
+        parent_path.write_bytes(FINALIZER._canonical_analysis_bytes(parent))
+
+        analysis = self.analyses["full"]
+        analysis["input_hashes"]["lock_file_sha256"] = sha256(
+            parent_path.read_bytes()
+        )
+        analysis["input_hashes"]["lock_sha256"] = parent["lock_sha256"]
+        self.rewrite_analysis("full", analysis)
+        with self.assertRaisesRegex(
+            FINALIZER.AuditFinalizeError,
+            "promotion eligibility contradicts repository and taxonomy",
+        ):
+            self.finalize()
+        self.assertFalse(self.output.exists())
+
+    def test_analysis_exit_is_accepted_only_after_hash_bound_validation(self) -> None:
+        validation = FINALIZER.validate_analysis_output(self.root, "full", 1, 1)
+        self.assertFalse(validation["promoted"])
+        self.assertEqual(
+            validation["analysis_sha256"],
+            sha256((self.root / "audit" / "full" / "global.json").read_bytes()),
+        )
+        with self.assertRaisesRegex(
+            FINALIZER.AuditFinalizeError, "contradicts process exit"
+        ):
+            FINALIZER.validate_analysis_output(self.root, "full", 1, 0)
+
+        raw = self.root / "full-2s" / "shard-0000" / "raw.jsonl"
+        raw.write_bytes(raw.read_bytes() + b'{"stale":true}\n')
+        with self.assertRaisesRegex(FINALIZER.AuditFinalizeError, "raw hash is stale"):
+            FINALIZER.validate_analysis_output(self.root, "full", 1, 1)
+
+    def test_batch_validation_cli_uses_the_same_hash_bound_contract(self) -> None:
+        arguments = [
+            sys.executable,
+            "-B",
+            str(MODULE_PATH),
+            "--run-root",
+            str(self.root),
+            "--shards",
+            "1",
+            "--validate-analysis",
+            "full",
+            "--expected-analysis-exit",
+            "1",
+        ]
+        accepted = subprocess.run(
+            arguments, text=True, capture_output=True, check=False
+        )
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(
+            json.loads(accepted.stdout)["analysis_sha256"],
+            sha256((self.root / "audit" / "full" / "global.json").read_bytes()),
+        )
+        rejected = subprocess.run(
+            [*arguments[:-1], "0"], text=True, capture_output=True, check=False
+        )
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("contradicts process exit", rejected.stderr)
+
+    def test_two_shard_analyzer_to_finalizer_end_to_end(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            run_root = Path(temporary).resolve()
+            reports = {
+                kind: render_generated_sharded_analysis(run_root, kind)
+                for kind in ("full", "official")
+            }
+            for kind, report in reports.items():
+                expected_exit = 0 if report["promoted"] else 1
+                validated = FINALIZER.validate_analysis_output(
+                    run_root, kind, 2, expected_exit
+                )
+                self.assertEqual(validated["promoted"], report["promoted"])
+                self.assertEqual(
+                    len(validated["input_artifacts"]["shards"]), 2
+                )
+            output = run_root / "audit" / "index.json"
+            payload = FINALIZER.finalize(
+                output,
+                self.provenance,
+                run_root,
+                10,
+                2,
+                11,
+                {"status": "accepted"},
+            )
+            self.assertEqual(payload["shards"], 2)
+            for kind in ("full", "official"):
+                identity = payload["analyses"][kind]["input_artifacts"][
+                    "parent_lock"
+                ]["identity"]
+                self.assertEqual(identity["campaign_id"], "locked-test")
+                self.assertEqual(
+                    identity["solver_binary_sha256"],
+                    reports[kind]["input_hashes"]["solver_binary_sha256"],
+                )
 
     def test_realistic_rejected_analysis_binds_live_inputs_without_broadening_claims(self) -> None:
         payload = self.finalize()

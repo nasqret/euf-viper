@@ -79,6 +79,7 @@ EXIT_PROMOTED = 0
 EXIT_STATISTICALLY_REJECTED = 1
 EXIT_INVALID_INPUT = 2
 EXIT_PUBLICATION_FAILED = 3
+EXIT_INTERNAL_ERROR = 4
 
 BOOTSTRAP_METRICS = (
     "timeout_charged_wall",
@@ -2923,7 +2924,7 @@ def _emit_json(payload: Mapping[str, Any], output: Path | None) -> None:
 def _safe_hash(path: Path) -> str | None:
     try:
         return sha256_file(path)
-    except OSError:
+    except (OSError, CampaignInputError):
         return None
 
 
@@ -3099,6 +3100,13 @@ def main(argv: list[str] | None = None) -> int:
             },
         }
         exit_code = EXIT_INVALID_INPUT
+    except Exception as error:
+        print(
+            "campaign analysis internal failure: "
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        return EXIT_INTERNAL_ERROR
     else:
         exit_code = (
             EXIT_PROMOTED if payload["promoted"] else EXIT_STATISTICALLY_REJECTED
@@ -3108,6 +3116,13 @@ def main(argv: list[str] | None = None) -> int:
     except CampaignPublicationError as error:
         print(f"campaign analysis publication failed: {error}", file=sys.stderr)
         return EXIT_PUBLICATION_FAILED
+    except Exception as error:
+        print(
+            "campaign analysis internal publication failure: "
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        return EXIT_INTERNAL_ERROR
     return exit_code
 
 

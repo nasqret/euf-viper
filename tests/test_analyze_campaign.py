@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
 import csv
 import hashlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -159,7 +161,13 @@ def write_locked_fixture(
         "created_from_commit_time": "2026-07-12T00:00:00+00:00",
         "promotion_eligible": True,
         "spec": {"path": str(directory / "spec.json"), "sha256": "1" * 64},
-        "repository": {},
+        "repository": {
+            "root": str(directory),
+            "commit": "a" * 40,
+            "commit_time": "2026-07-12T00:00:00+00:00",
+            "clean": True,
+            "promotion_eligible": True,
+        },
         "host": {},
         "corpus": {
             "id": "test-corpus",
@@ -950,6 +958,51 @@ class AnalyzerExitContractTests(unittest.TestCase):
             self.assertEqual(
                 publication_output.read_text(encoding="ascii"), "do not replace\n"
             )
+
+    def test_nofollow_input_rejection_cannot_crash_into_scientific_exit_one(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_path, manifest_path, _ = write_fixture(
+                root, [case("alpha", "sat", 1.0, 2.0)]
+            )
+            linked_csv = root / "linked.csv"
+            linked_csv.symlink_to(csv_path)
+            output = root / "invalid.json"
+            completed = self.run_analyzer(linked_csv, manifest_path, output)
+            self.assertEqual(completed.returncode, ANALYZER.EXIT_INVALID_INPUT)
+            self.assertNotEqual(
+                completed.returncode, ANALYZER.EXIT_STATISTICALLY_REJECTED
+            )
+            payload = json.loads(output.read_text(encoding="ascii"))
+            self.assertEqual(payload["status"], "invalid_input")
+            self.assertIsNone(payload["input_hashes"]["results_sha256"])
+
+    def test_unexpected_analyzer_exception_has_distinct_exit_and_no_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_path, manifest_path, _ = write_fixture(
+                root, [case("alpha", "sat", 1.0, 2.0)]
+            )
+            output = root / "analysis.json"
+            stderr = io.StringIO()
+            with mock.patch.object(
+                ANALYZER,
+                "analyze_campaign",
+                side_effect=RuntimeError("adversarial crash probe"),
+            ), redirect_stderr(stderr):
+                exit_code = ANALYZER.main(
+                    [
+                        str(csv_path),
+                        "--manifest",
+                        str(manifest_path),
+                        "--out",
+                        str(output),
+                    ]
+                )
+            self.assertEqual(exit_code, ANALYZER.EXIT_INTERNAL_ERROR)
+            self.assertNotEqual(exit_code, ANALYZER.EXIT_STATISTICALLY_REJECTED)
+            self.assertFalse(output.exists())
+            self.assertIn("internal failure", stderr.getvalue())
 
 
 class ResamplingAndMultiplicityTests(unittest.TestCase):

@@ -50,8 +50,32 @@
           "family_macro": {},
           "promotion": {
             "checks": {
+              "common_wall_geometric_bootstrap_lower_bound": {
+                "passed": true
+              },
+              "common_wall_total_bootstrap_lower_bound": {
+                "passed": true
+              },
+              "family_macro_non_regression": {
+                "passed": true
+              },
+              "family_non_regression": {
+                "passed": true
+              },
+              "status_non_regression": {
+                "passed": true
+              },
+              "timeout_charged_wall_bootstrap_lower_bound": {
+                "passed": true
+              },
               "zero_coverage_loss": {
                 "passed": false
+              },
+              "zero_execution_errors": {
+                "passed": true
+              },
+              "zero_invalid_results": {
+                "passed": true
               }
             },
             "passed": false,

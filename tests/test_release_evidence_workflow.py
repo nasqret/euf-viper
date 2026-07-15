@@ -56,8 +56,13 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "record_solver_config.py",
             "check_production_evidence.py",
             "freeze_campaign.py",
+            "shard_campaign_lock.py",
+            "bind_campaign_cpu.py",
             "run_locked_campaign.py",
             "analyze_campaign.py",
+            "finalize_locked_audit.py",
+            "--validate-analysis",
+            "--expected-analysis-exit",
             "--smoke-instance",
             "--evidence-out",
             "accepted_decisive_statuses",
@@ -68,6 +73,9 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertNotIn("fake solver", text.lower())
         self.assertIn("allowed={1}", text)
         self.assertIn("evidence status mismatch: expected 'sat', got 'unsupported'", text)
+        self.assertIn('for kind in ("full", "official")', text)
+        self.assertIn('for index in range(2)', text)
+        self.assertIn("ubuntu-24.04", WORKFLOW.read_text(encoding="ascii"))
 
     def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")

@@ -105,6 +105,75 @@ BUDGET_REPORT_KEYS = {
     "statuses",
 }
 BUDGET_PROMOTION_KEYS = {"checks", "passed", "status"}
+BUDGET_PROMOTION_CHECK_KEYS = {
+    "zero_invalid_results",
+    "zero_execution_errors",
+    "zero_coverage_loss",
+    "family_non_regression",
+    "status_non_regression",
+    "family_macro_non_regression",
+    "timeout_charged_wall_bootstrap_lower_bound",
+    "common_wall_total_bootstrap_lower_bound",
+    "common_wall_geometric_bootstrap_lower_bound",
+}
+PARENT_LOCK_KEYS = {
+    "schema_version",
+    "campaign_id",
+    "lock_sha256",
+    "created_from_commit_time",
+    "promotion_eligible",
+    "spec",
+    "repository",
+    "host",
+    "corpus",
+    "solver_config",
+    "solver_release_lock",
+    "solvers",
+    "budgets_s",
+    "execution",
+    "output",
+}
+PARENT_REPOSITORY_KEYS = {
+    "root",
+    "commit",
+    "commit_time",
+    "clean",
+    "promotion_eligible",
+}
+PARENT_CORPUS_KEYS = {
+    "id",
+    "manifest_path",
+    "manifest_sha256",
+    "taxonomy_path",
+    "taxonomy_sha256",
+    "root",
+    "instances",
+}
+PARENT_INSTANCE_KEYS = {
+    "id",
+    "relative_path",
+    "path",
+    "sha256",
+    "bytes",
+    "status",
+    "family",
+    "lineage",
+    "normalized_sha256",
+    "split",
+}
+PARENT_SOLVER_KEYS = {
+    "id",
+    "comparator_id",
+    "configuration",
+    "version",
+    "binary",
+    "sha256",
+    "argv_template",
+    "version_output",
+    "version_output_sha256",
+    "environment",
+}
+CANDIDATE_ID = "euf-viper"
 
 
 class AuditFinalizeError(ValueError):
@@ -168,6 +237,26 @@ def _boolean(value: Any, context: str) -> bool:
     if type(value) is not bool:
         raise AuditFinalizeError(f"{context} must be boolean")
     return value
+
+
+def _budget_names(value: Any, context: str) -> list[str]:
+    if type(value) is not list or not value:
+        raise AuditFinalizeError(f"{context} must be a non-empty array")
+    budgets: list[float] = []
+    for index, item in enumerate(value):
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, (int, float))
+            or not math.isfinite(float(item))
+            or float(item) <= 0.0
+        ):
+            raise AuditFinalizeError(
+                f"{context}[{index}] must be finite and positive"
+            )
+        budgets.append(float(item))
+    if any(left >= right for left, right in zip(budgets, budgets[1:])):
+        raise AuditFinalizeError(f"{context} must be strictly increasing")
+    return [format(budget, ".17g") for budget in budgets]
 
 
 def _string_list(value: Any, context: str, *, nonempty: bool = False) -> list[str]:
@@ -265,18 +354,7 @@ def _validate_analysis_schema(
     if len(set(baseline_ids)) != len(baseline_ids) or candidate_id in baseline_ids:
         raise AuditFinalizeError(f"{context}.inputs solver ids are not distinct")
     budgets = inputs["budgets_s"]
-    if (
-        type(budgets) is not list
-        or not budgets
-        or any(
-            isinstance(item, bool)
-            or not isinstance(item, (int, float))
-            or not math.isfinite(float(item))
-            or float(item) <= 0.0
-            for item in budgets
-        )
-    ):
-        raise AuditFinalizeError(f"{context}.inputs.budgets_s is invalid")
+    budget_names = _budget_names(budgets, f"{context}.inputs.budgets_s")
 
     shards = inputs["shards"]
     if type(shards) is not list or len(shards) != shard_count:
@@ -353,7 +431,7 @@ def _validate_analysis_schema(
         value["comparisons"], set(baseline_ids), f"{context}.comparisons"
     )
     failed_by_comparison: list[str] = []
-    expected_budget_names = {format(float(budget), ".17g") for budget in budgets}
+    expected_budget_names = set(budget_names)
     for baseline_id, comparison_value in comparisons.items():
         comparison = _exact_object(
             comparison_value,
@@ -397,8 +475,34 @@ def _validate_analysis_schema(
                 budget_promotion["passed"],
                 f"{context}.comparisons[{baseline_id!r}].budgets[{budget_name!r}].promotion.passed",
             )
-            if type(budget_promotion["checks"]) is not dict:
-                raise AuditFinalizeError(f"{context} budget promotion checks must be an object")
+            checks = _exact_object(
+                budget_promotion["checks"],
+                BUDGET_PROMOTION_CHECK_KEYS,
+                f"{context}.comparisons[{baseline_id!r}]"
+                f".budgets[{budget_name!r}].promotion.checks",
+            )
+            check_outcomes: list[bool] = []
+            for check_name, check_value in checks.items():
+                if type(check_name) is not str or not check_name:
+                    raise AuditFinalizeError(
+                        f"{context} budget promotion check name is invalid"
+                    )
+                if type(check_value) is not dict or "passed" not in check_value:
+                    raise AuditFinalizeError(
+                        f"{context} budget promotion check {check_name!r} is invalid"
+                    )
+                check_outcomes.append(
+                    _boolean(
+                        check_value["passed"],
+                        f"{context}.comparisons[{baseline_id!r}]"
+                        f".budgets[{budget_name!r}].promotion"
+                        f".checks[{check_name!r}].passed",
+                    )
+                )
+            if budget_passed != all(check_outcomes):
+                raise AuditFinalizeError(
+                    f"{context} budget promotion outcome contradicts individual checks"
+                )
             if budget_promotion["status"] != (
                 "promoted" if budget_passed else "rejected"
             ):
@@ -475,6 +579,173 @@ def _lock_sha256(artifact: BoundArtifact) -> str:
     return declared
 
 
+def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
+    try:
+        value = strict_json_loads(artifact.raw.decode("ascii"), artifact.context)
+    except (UnicodeError, StrictArtifactError) as error:
+        raise AuditFinalizeError(str(error)) from error
+    parent = _exact_object(value, PARENT_LOCK_KEYS, artifact.context)
+    if type(parent["schema_version"]) is not int or parent["schema_version"] != 1:
+        raise AuditFinalizeError(
+            f"{artifact.context}.schema_version must be integer 1"
+        )
+    lock_sha256 = _lock_sha256(artifact)
+    campaign_id = _string(parent["campaign_id"], f"{artifact.context}.campaign_id")
+
+    repository = _exact_object(
+        parent["repository"],
+        PARENT_REPOSITORY_KEYS,
+        f"{artifact.context}.repository",
+    )
+    for field in ("root", "commit", "commit_time"):
+        _string(repository[field], f"{artifact.context}.repository.{field}")
+    repository_clean = _boolean(
+        repository["clean"], f"{artifact.context}.repository.clean"
+    )
+    repository_eligible = _boolean(
+        repository["promotion_eligible"],
+        f"{artifact.context}.repository.promotion_eligible",
+    )
+    if repository_eligible != repository_clean:
+        raise AuditFinalizeError(
+            f"{artifact.context} repository promotion eligibility contradicts cleanliness"
+        )
+
+    corpus = _exact_object(
+        parent["corpus"], PARENT_CORPUS_KEYS, f"{artifact.context}.corpus"
+    )
+    for field in ("id", "manifest_path", "taxonomy_path", "root"):
+        _string(corpus[field], f"{artifact.context}.corpus.{field}")
+    manifest_sha256 = _hash(
+        corpus["manifest_sha256"], f"{artifact.context}.corpus.manifest_sha256"
+    )
+    taxonomy_sha256 = _hash(
+        corpus["taxonomy_sha256"], f"{artifact.context}.corpus.taxonomy_sha256"
+    )
+    instances = corpus["instances"]
+    if type(instances) is not list or not instances:
+        raise AuditFinalizeError(
+            f"{artifact.context}.corpus.instances must be a non-empty array"
+        )
+    instance_ids: set[str] = set()
+    families: set[str] = set()
+    for index, instance_value in enumerate(instances):
+        instance = _exact_object(
+            instance_value,
+            PARENT_INSTANCE_KEYS,
+            f"{artifact.context}.corpus.instances[{index}]",
+        )
+        instance_id = _string(
+            instance["id"], f"{artifact.context}.corpus.instances[{index}].id"
+        )
+        if instance_id in instance_ids:
+            raise AuditFinalizeError(
+                f"{artifact.context} contains duplicate corpus instance ids"
+            )
+        instance_ids.add(instance_id)
+        families.add(
+            _string(
+                instance["family"],
+                f"{artifact.context}.corpus.instances[{index}].family",
+            )
+        )
+
+    solver_values = parent["solvers"]
+    if type(solver_values) is not list or len(solver_values) < 2:
+        raise AuditFinalizeError(
+            f"{artifact.context}.solvers must contain at least two entries"
+        )
+    solver_hashes: dict[str, str] = {}
+    for index, solver_value in enumerate(solver_values):
+        expected_keys = PARENT_SOLVER_KEYS | (
+            {"evidence"}
+            if type(solver_value) is dict and "evidence" in solver_value
+            else set()
+        )
+        solver = _exact_object(
+            solver_value, expected_keys, f"{artifact.context}.solvers[{index}]"
+        )
+        solver_id = _string(
+            solver["id"], f"{artifact.context}.solvers[{index}].id"
+        )
+        if solver_id in solver_hashes:
+            raise AuditFinalizeError(
+                f"{artifact.context} contains duplicate solver ids"
+            )
+        solver_hashes[solver_id] = _hash(
+            solver["sha256"], f"{artifact.context}.solvers[{index}].sha256"
+        )
+    if list(solver_hashes) != sorted(solver_hashes):
+        raise AuditFinalizeError(f"{artifact.context}.solvers must be sorted by id")
+    if CANDIDATE_ID not in solver_hashes:
+        raise AuditFinalizeError(
+            f"{artifact.context} does not contain the production candidate"
+        )
+
+    budget_names = _budget_names(
+        parent["budgets_s"], f"{artifact.context}.budgets_s"
+    )
+    promotion_eligible = _boolean(
+        parent["promotion_eligible"],
+        f"{artifact.context}.promotion_eligible",
+    )
+    expected_eligibility = bool(repository_eligible and corpus["taxonomy_path"])
+    if promotion_eligible != expected_eligibility:
+        raise AuditFinalizeError(
+            f"{artifact.context} promotion eligibility contradicts repository and taxonomy"
+        )
+    return {
+        "campaign_id": campaign_id,
+        "candidate_id": CANDIDATE_ID,
+        "baseline_ids": sorted(
+            solver_id for solver_id in solver_hashes if solver_id != CANDIDATE_ID
+        ),
+        "promotion_eligible": promotion_eligible,
+        "budgets_s": [float(name) for name in budget_names],
+        "budget_names": budget_names,
+        "manifest_sha256": manifest_sha256,
+        "taxonomy_sha256": taxonomy_sha256,
+        "solver_binary_sha256": solver_hashes,
+        "instances": len(instances),
+        "families": len(families),
+        "lock_sha256": lock_sha256,
+    }
+
+
+def _validate_analysis_parent_identity(
+    value: dict[str, Any], parent: dict[str, Any], context: str
+) -> None:
+    inputs = value["inputs"]
+    hashes = value["input_hashes"]
+    if inputs["campaign_id"] != parent["campaign_id"]:
+        raise AuditFinalizeError(f"{context} campaign identity disagrees with parent lock")
+    if _budget_names(inputs["budgets_s"], f"{context}.inputs.budgets_s") != parent[
+        "budget_names"
+    ]:
+        raise AuditFinalizeError(f"{context} budget identity disagrees with parent lock")
+    if inputs["instances"] != parent["instances"]:
+        raise AuditFinalizeError(f"{context} instance count disagrees with parent lock")
+    if inputs["families"] != parent["families"]:
+        raise AuditFinalizeError(f"{context} family count disagrees with parent lock")
+    if inputs["candidate_id"] != CANDIDATE_ID:
+        raise AuditFinalizeError(f"{context} candidate identity is not production-bound")
+    if inputs["baseline_ids"] != parent["baseline_ids"]:
+        raise AuditFinalizeError(f"{context} baseline identities disagree with parent lock")
+    if hashes["solver_binary_sha256"] != parent["solver_binary_sha256"]:
+        raise AuditFinalizeError(f"{context} solver hashes disagree with parent lock")
+    if hashes["manifest_sha256"] != parent["manifest_sha256"]:
+        raise AuditFinalizeError(f"{context} manifest identity disagrees with parent lock")
+    if hashes["taxonomy_sha256"] != parent["taxonomy_sha256"]:
+        raise AuditFinalizeError(f"{context} taxonomy identity disagrees with parent lock")
+    if (
+        value["promotion"]["lock_promotion_eligible"]
+        != parent["promotion_eligible"]
+    ):
+        raise AuditFinalizeError(
+            f"{context} promotion eligibility disagrees with parent lock"
+        )
+
+
 def _artifact_index(artifact: BoundArtifact) -> dict[str, Any]:
     return {
         "bytes": len(artifact.raw),
@@ -505,9 +776,13 @@ def _bind_current_inputs(
             raise AuditFinalizeError(f"{kind} analysis parent-lock path is stale")
         if hashes["lock_file_sha256"] != parent.sha256:
             raise AuditFinalizeError(f"{kind} analysis parent-lock file hash is stale")
-        parent_lock_sha256 = _lock_sha256(parent)
+        parent_identity = _parse_parent_lock(parent)
+        parent_lock_sha256 = parent_identity["lock_sha256"]
         if hashes["lock_sha256"] != parent_lock_sha256:
             raise AuditFinalizeError(f"{kind} analysis parent-lock self-hash is stale")
+        _validate_analysis_parent_identity(
+            analysis.value, parent_identity, f"{kind} global analysis"
+        )
 
         source_shards: list[dict[str, Any]] = []
         bundle_shards: list[dict[str, Any]] = []
@@ -576,6 +851,21 @@ def _bind_current_inputs(
             raise AuditFinalizeError(f"{kind} analysis shard bundle hash is stale")
         parent_index = _artifact_index(parent)
         parent_index["lock_sha256"] = parent_lock_sha256
+        parent_index["identity"] = {
+            field: parent_identity[field]
+            for field in (
+                "campaign_id",
+                "candidate_id",
+                "baseline_ids",
+                "promotion_eligible",
+                "budgets_s",
+                "manifest_sha256",
+                "taxonomy_sha256",
+                "solver_binary_sha256",
+                "instances",
+                "families",
+            )
+        }
         return (
             {
                 "parent_lock": parent_index,
@@ -599,6 +889,54 @@ def _metadata_identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def validate_analysis_output(
+    run_root: Path,
+    kind: str,
+    shards: int,
+    expected_analysis_exit: int,
+) -> dict[str, Any]:
+    """Validate one just-produced analysis against all of its live inputs."""
+
+    if kind not in {"full", "official"}:
+        raise AuditFinalizeError("analysis kind must be full or official")
+    _integer(shards, "shards", 1)
+    if type(expected_analysis_exit) is not int or expected_analysis_exit not in {0, 1}:
+        raise AuditFinalizeError("expected analysis exit must be 0 or 1")
+    opened: list[BoundArtifact] = []
+    try:
+        run_root = run_root.resolve(strict=True)
+        analysis = _open_analysis(
+            run_root / "audit" / kind / "global.json", kind, run_root
+        )
+        opened.append(analysis)
+        _validate_analysis_schema(analysis.value, kind, shards)
+        input_artifacts, source_artifacts = _bind_current_inputs(
+            kind, analysis, run_root, shards
+        )
+        opened.extend(source_artifacts)
+        expected_promoted = expected_analysis_exit == 0
+        if analysis.value["promoted"] != expected_promoted:
+            raise AuditFinalizeError(
+                f"{kind} analysis outcome contradicts process exit "
+                f"{expected_analysis_exit}"
+            )
+        return {
+            "schema": "euf-viper.locked-analysis-validation.v1",
+            "kind": kind,
+            "analysis_sha256": analysis.sha256,
+            "expected_analysis_exit": expected_analysis_exit,
+            "promoted": expected_promoted,
+            "input_artifacts": input_artifacts,
+        }
+    except AuditFinalizeError:
+        raise
+    except (KeyError, OSError, StrictArtifactError) as error:
+        raise AuditFinalizeError(str(error)) from error
+    finally:
+        for artifact in opened:
+            os.close(artifact.descriptor)
 
 
 def finalize(
@@ -717,24 +1055,70 @@ def finalize(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--provenance", required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--provenance")
     parser.add_argument("--run-root", type=Path, required=True)
-    parser.add_argument("--prepare-job", type=int, required=True)
+    parser.add_argument("--prepare-job", type=int)
     parser.add_argument("--shards", type=int, required=True)
-    parser.add_argument("--audit-job", type=int, required=True)
-    parser.add_argument("--preparation-binding", required=True)
+    parser.add_argument("--audit-job", type=int)
+    parser.add_argument("--preparation-binding")
+    parser.add_argument("--validate-analysis", choices=("full", "official"))
+    parser.add_argument("--expected-analysis-exit", type=int, choices=(0, 1))
     args = parser.parse_args()
     try:
-        payload = finalize(
-            args.out,
-            json.loads(args.provenance),
-            args.run_root,
-            args.prepare_job,
-            args.shards,
-            args.audit_job,
-            json.loads(args.preparation_binding),
-        )
+        if args.validate_analysis is not None:
+            if args.expected_analysis_exit is None:
+                parser.error(
+                    "--validate-analysis requires --expected-analysis-exit"
+                )
+            if any(
+                value is not None
+                for value in (
+                    args.out,
+                    args.provenance,
+                    args.prepare_job,
+                    args.audit_job,
+                    args.preparation_binding,
+                )
+            ):
+                parser.error(
+                    "analysis validation does not accept final publication options"
+                )
+            payload = validate_analysis_output(
+                args.run_root,
+                args.validate_analysis,
+                args.shards,
+                args.expected_analysis_exit,
+            )
+        else:
+            if args.expected_analysis_exit is not None:
+                parser.error(
+                    "--expected-analysis-exit requires --validate-analysis"
+                )
+            required = {
+                "--out": args.out,
+                "--provenance": args.provenance,
+                "--prepare-job": args.prepare_job,
+                "--audit-job": args.audit_job,
+                "--preparation-binding": args.preparation_binding,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                parser.error("final publication requires " + ", ".join(missing))
+            assert args.out is not None
+            assert args.provenance is not None
+            assert args.prepare_job is not None
+            assert args.audit_job is not None
+            assert args.preparation_binding is not None
+            payload = finalize(
+                args.out,
+                json.loads(args.provenance),
+                args.run_root,
+                args.prepare_job,
+                args.shards,
+                args.audit_job,
+                json.loads(args.preparation_binding),
+            )
     except (AuditFinalizeError, json.JSONDecodeError, OSError, ValueError) as error:
         print(f"locked audit finalization rejected: {error}", file=sys.stderr)
         return 2

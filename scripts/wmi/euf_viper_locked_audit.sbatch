@@ -221,6 +221,12 @@ closed_python() {
 
 for KIND in full official; do
   "$MKDIR_BIN" -p "$RUN_ROOT/audit/$KIND"
+  ANALYSIS_OUTPUT="$RUN_ROOT/audit/$KIND/global.json"
+  if [ -e "$ANALYSIS_OUTPUT" ] || [ -L "$ANALYSIS_OUTPUT" ]; then
+    printf '%s analysis output already exists; refusing stale evidence\n' \
+      "$KIND" >&2
+    exit 2
+  fi
   for ((INDEX=0; INDEX<SHARDS; INDEX++)); do
     PADDED="$(printf '%04d' "$INDEX")"
     test -s "$RUN_ROOT/locks/$KIND/bound-$PADDED.json"
@@ -233,7 +239,7 @@ for KIND in full official; do
       --shard-results-root "$RUN_ROOT/$KIND-2s" \
       --bootstrap-replicates 10000 \
       --confidence-level 0.95 \
-      --out "$RUN_ROOT/audit/$KIND/global.json"; then
+      --out "$ANALYSIS_OUTPUT"; then
     ANALYSIS_STATUS=0
   else
     ANALYSIS_STATUS=$?
@@ -251,12 +257,22 @@ for KIND in full official; do
       printf '%s analysis could not publish its output\n' "$KIND" >&2
       exit 3
       ;;
+    4)
+      printf '%s analysis failed internally\n' "$KIND" >&2
+      exit 4
+      ;;
     *)
       printf '%s analysis returned unexpected status %s\n' \
         "$KIND" "$ANALYSIS_STATUS" >&2
       exit "$ANALYSIS_STATUS"
       ;;
   esac
+  closed_python "$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
+    --run-root "$RUN_ROOT" \
+    --shards "$SHARDS" \
+    --validate-analysis "$KIND" \
+    --expected-analysis-exit "$ANALYSIS_STATUS" \
+    >/dev/null
 done
 
 FINAL_PROVENANCE="$(python_bound_bootstrap "$PROVENANCE_HELPER" \

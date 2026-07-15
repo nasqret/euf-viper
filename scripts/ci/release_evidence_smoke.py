@@ -397,94 +397,223 @@ def main() -> int:
             raise SystemExit("real recorder did not bind the compiled evidence solver")
 
         corpus = root / "corpus"
-        instance = corpus / "family" / "sat.smt2"
+        instance = corpus / "family" / "sat-0.smt2"
+        second_instance = corpus / "family" / "sat-1.smt2"
         instance.parent.mkdir(parents=True)
         instance.write_bytes(sat_source.read_bytes())
+        second_instance.write_text(
+            "(set-logic QF_UF)\n"
+            "(set-info :status sat)\n"
+            "(declare-fun q () Bool)\n"
+            "(assert q)\n"
+            "(check-sat)\n",
+            encoding="ascii",
+        )
         manifest = root / "manifest.jsonl"
         manifest.write_bytes(
-            canonical(
-                {
-                    "bytes": instance.stat().st_size,
-                    "id": 0,
-                    "path": str(instance),
-                    "relative_path": "family/sat.smt2",
-                    "sha256": sha256(instance),
-                    "status": "sat",
-                }
+            b"".join(
+                canonical(
+                    {
+                        "bytes": source.stat().st_size,
+                        "id": index,
+                        "path": str(source),
+                        "relative_path": f"family/sat-{index}.smt2",
+                        "sha256": sha256(source),
+                        "status": "sat",
+                    }
+                )
+                for index, source in enumerate((instance, second_instance))
             )
         )
         taxonomy = root / "taxonomy.jsonl"
         taxonomy.write_bytes(
-            canonical(
-                {
-                    "family": "release-smoke",
-                    "lineage": "ci/release-smoke",
-                    "normalized_sha256": sha256(instance),
-                    "relative_path": "family/sat.smt2",
-                    "split": "development",
-                }
+            b"".join(
+                canonical(
+                    {
+                        "family": "release-smoke",
+                        "lineage": "ci/release-smoke",
+                        "normalized_sha256": sha256(source),
+                        "relative_path": f"family/sat-{index}.smt2",
+                        "split": "development",
+                    }
+                )
+                for index, source in enumerate((instance, second_instance))
             )
         )
-        lock = root / "locked.json"
-        output_root = root / "campaign-output"
+        run_root = root / "locked-audit"
+        (run_root / "locks").mkdir(parents=True)
+        analysis_payloads: dict[str, dict[str, object]] = {}
+        for kind in ("full", "official"):
+            parent_lock = run_root / "locks" / f"{kind}-parent.json"
+            output_root = run_root / f"{kind}-2s"
+            run(
+                [
+                    python,
+                    repository / "scripts/bench/freeze_campaign.py",
+                    repository / "campaigns/best-overall-qf-uf-2026-07.json",
+                    "--manifest",
+                    manifest,
+                    "--taxonomy",
+                    taxonomy,
+                    "--solver-config",
+                    solver_config,
+                    "--repository",
+                    repository,
+                    "--corpus-root",
+                    corpus,
+                    "--cpu-id",
+                    "0",
+                    "--memory-bytes",
+                    str(2 * 1024**3),
+                    "--order",
+                    "balanced_latin_square",
+                    "--budget",
+                    "2",
+                    "--output-directory",
+                    output_root,
+                    "--out",
+                    parent_lock,
+                ],
+                cwd=repository,
+            )
+            prepared_locks = run_root / "locks" / f"{kind}-prepared"
+            bound_locks = run_root / "locks" / kind
+            run(
+                [
+                    python,
+                    repository / "scripts/bench/shard_campaign_lock.py",
+                    parent_lock,
+                    "--count",
+                    "2",
+                    "--out-dir",
+                    prepared_locks,
+                ],
+                cwd=repository,
+            )
+            for index in range(2):
+                prepared = prepared_locks / f"lock-{index:04d}.json"
+                bound = bound_locks / f"bound-{index:04d}.json"
+                run(
+                    [
+                        python,
+                        repository / "scripts/bench/bind_campaign_cpu.py",
+                        prepared,
+                        "--out",
+                        bound,
+                    ],
+                    cwd=repository,
+                )
+                run(
+                    [
+                        python,
+                        repository / "scripts/bench/run_locked_campaign.py",
+                        bound,
+                    ],
+                    cwd=repository,
+                )
+                raw = output_root / f"shard-{index:04d}" / "raw.jsonl"
+                if not raw.is_file():
+                    raise SystemExit(
+                        f"miniature locked runner omitted {kind} shard {index} raw"
+                    )
+
+            analysis = run_root / "audit" / kind / "global.json"
+            analysis.parent.mkdir(parents=True, exist_ok=True)
+            completed = run(
+                [
+                    python,
+                    repository / "scripts/bench/analyze_campaign.py",
+                    "--parent-lock",
+                    parent_lock,
+                    "--shard-lock-dir",
+                    bound_locks,
+                    "--shard-results-root",
+                    output_root,
+                    "--bootstrap-replicates",
+                    "64",
+                    "--out",
+                    analysis,
+                ],
+                cwd=repository,
+                allowed={0, 1},
+            )
+            report_payload = json.loads(analysis.read_bytes())
+            if (
+                report_payload.get("inputs", {}).get("instances") != 2
+                or len(report_payload.get("inputs", {}).get("shards", [])) != 2
+            ):
+                raise SystemExit(
+                    f"miniature {kind} analyzer did not validate two exact shards"
+                )
+            expected_exit = 0 if report_payload.get("promoted") is True else 1
+            if completed.returncode != expected_exit:
+                raise SystemExit(
+                    f"miniature {kind} analyzer report contradicts its exit status"
+                )
+            run(
+                [
+                    python,
+                    repository / "scripts/wmi/finalize_locked_audit.py",
+                    "--run-root",
+                    run_root,
+                    "--shards",
+                    "2",
+                    "--validate-analysis",
+                    kind,
+                    "--expected-analysis-exit",
+                    str(expected_exit),
+                ],
+                cwd=repository,
+            )
+            analysis_payloads[kind] = report_payload
+
+        audit_index = run_root / "audit" / "index.json"
+        provenance = {
+            "attempt": "linux-release-smoke",
+            "environment": {"kind": "hosted-linux-ci"},
+            "manifest_sha256": sha256(args.sealed_build_manifest),
+            "revision": sealed_build.get("revision", "0" * 40),
+            "source_blob_count": 1,
+            "source_blobs_sha256": sha256(args.sealed_build_manifest),
+            "source_tree": sealed_build.get("source_tree", "0" * 40),
+        }
         run(
             [
                 python,
-                repository / "scripts/bench/freeze_campaign.py",
-                repository / "campaigns/best-overall-qf-uf-2026-07.json",
-                "--manifest",
-                manifest,
-                "--taxonomy",
-                taxonomy,
-                "--solver-config",
-                solver_config,
-                "--repository",
-                repository,
-                "--corpus-root",
-                corpus,
-                "--cpu-id",
-                "0",
-                "--memory-bytes",
-                str(2 * 1024**3),
-                "--order",
-                "balanced_latin_square",
-                "--budget",
+                repository / "scripts/wmi/finalize_locked_audit.py",
+                "--out",
+                audit_index,
+                "--provenance",
+                json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+                "--run-root",
+                run_root,
+                "--prepare-job",
+                "1",
+                "--shards",
                 "2",
-                "--output-directory",
-                output_root,
-                "--out",
-                lock,
+                "--audit-job",
+                "2",
+                "--preparation-binding",
+                json.dumps(
+                    {
+                        "sealed_build_receipt_sha256": sealed_receipt_sha256,
+                        "status": "ci-smoke",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
             ],
             cwd=repository,
         )
-        run(
-            [python, repository / "scripts/bench/run_locked_campaign.py", lock],
-            cwd=repository,
-        )
-        raw = output_root / "raw.jsonl"
-        if not raw.is_file():
-            raise SystemExit("miniature locked runner omitted raw.jsonl")
-        analysis = root / "analysis.json"
-        run(
-            [
-                python,
-                repository / "scripts/bench/analyze_campaign.py",
-                raw,
-                "--lock",
-                lock,
-                "--baseline",
-                "z3-default",
-                "--bootstrap-replicates",
-                "64",
-                "--out",
-                analysis,
-            ],
-            cwd=repository,
-            allowed={0, 1},
-        )
-        report_payload = json.loads(analysis.read_bytes())
-        if report_payload.get("inputs", {}).get("instances") != 1:
-            raise SystemExit("miniature locked analyzer did not validate exactly one instance")
+        index_payload = json.loads(audit_index.read_bytes())
+        for kind, report_payload in analysis_payloads.items():
+            indexed = index_payload.get("analyses", {}).get(kind, {})
+            if (
+                indexed.get("sha256") != sha256(run_root / "audit" / kind / "global.json")
+                or indexed.get("shards") != 2
+                or indexed.get("promoted") != report_payload.get("promoted")
+            ):
+                raise SystemExit(f"final audit index did not bind {kind} analysis")
 
     print("real release evidence and locked-campaign smoke passed")
     return 0
