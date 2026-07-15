@@ -209,6 +209,33 @@ is therefore rejected as a default. Its sharp target/anti-target separation may
 feed T3 M0 telemetry, but it does not authorize migration or integration. The
 final audit file SHA-256 is `fffb152c...e3831ff`.
 
+### SAT-Impact Explanation Falsifier
+
+Current eager and model-cut conflict generation runs only after a complete SAT
+assignment. It has no SAT decision levels and retains one causal explanation,
+so adding an activity score there would not test SAT-aware selection. The
+minimal T7 experiment is therefore isolated on frozen rollback head `6e402f0`,
+where callback levels, active facts, causal edges, replay, and final model
+validation already exist. The frozen implementation retains only a conflict
+count from the first eager failure, not the assignment and clauses previously
+claimed in the plan, so offline selector replay is not evidence.
+
+Both experimental arms build and independently replay the same pool of at most
+four deterministic explanation forests. Both restrict selection to the common
+minimum-width clauses. The control chooses lexically; the candidate minimizes
+LBD, current-level literal count, second-highest level, negative historical
+reuse, and then lexical order. This prevents a shorter proof from masquerading
+as a SAT-impact result.
+
+The first stop is opportunity-only: at least two of three frozen multi-round
+controls must expose two distinct replay-valid minimum-width clauses and a
+policy disagreement. A survivor receives a 32-observation, four-source ABBA
+canary; only a passing canary receives the 24-source, 192-observation panel.
+Required gates are `1.10x` target geometric speed, at least 20% fewer
+validations or propagations, under 5% selector work, A12 p95 overhead at most
+`1.10`, and zero wrong, missing, replay, certificate, fallback, or off-only
+outcomes. No vivification, integration, or WMI run is bundled with this test.
+
 ## Long-Timeout Graph
 
 Full and official 1,200-second timeout-only arrays were `145785` and `145787`.

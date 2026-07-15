@@ -559,6 +559,24 @@ Do not compose two candidates in P2. Attribution must remain exact.
   explanations after T2 exists. Require at least 20% fewer validation rounds or
   downstream propagations, selection overhead below 5%, and `1.10x` target
   speed; reject if shortest-proof alone explains the gain.
+  - [x] Freeze a non-compositional opportunity falsifier on exact rollback head
+    `6e402f0`. Both `off` and `on` construct and replay the same at-most-four
+    deterministic candidate forests and restrict selection to the identical
+    minimum-width clause pool. `off` uses lexical order; `on` minimizes LBD,
+    current-level count, second-highest level, negative reuse, then lexical
+    order. Current eager/model-cut paths are ineligible because they expose no
+    decision levels or alternative reasons.
+  - [ ] Stop after one shadow pass unless at least two of the three frozen
+    multi-round controls have two distinct replay-valid minimum-width candidates
+    and an `off`/`on` disagreement. Only a surviving opportunity gate authorizes
+    a 32-observation four-source ABBA canary; only that canary authorizes the
+    frozen 24-source, 192-observation panel.
+  - [ ] Require nonzero disagreements, zero replay/certificate/fallback/wrong/
+    error/missing/off-only outcomes, selected width equal to the common minimum,
+    selector work below 5%, at least 20% fewer validations or propagations,
+    `1.10x` target geometric speed, and A12 p95 overhead at most `1.10` with no
+    coverage loss. A pass authorizes only a current-main port and the later
+    shortest/SAT-impact/certificate-aware comparison.
 - [ ] Run no/Boolean/EUF/combined vivification factorial and reject if generic
   vivification explains the gain. EUF or combined must beat Boolean-only,
   remove at least twice as many useful literals, reduce later validation or

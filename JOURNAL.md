@@ -1402,6 +1402,17 @@
   Yices2 common-time deficit is predominantly UNSAT. Retain only a charged
   no-phase/shuffled-phase/perfect-EUF-phase oracle as a reopen condition; no
   implementation or job was launched.
+- Froze the minimal T7 falsifier after a current-main code audit. Eager and
+  model-cut explanations have no SAT decision levels or alternative reasons;
+  the experiment must therefore remain a sidecar on rollback head `6e402f0`.
+  Both arms construct the same bounded, replay-valid minimum-width candidate
+  pool. Only the tie-break changes from lexical to
+  LBD/current-level/second-level/reuse/lexical. A three-source opportunity pass
+  precedes every timing run, then a 32-observation canary precedes the frozen
+  192-observation panel. The isolated branch
+  `research-t7-sat-impact-explanations` is under implementation; no WMI job is
+  authorized. The audit also found that T2 retained only a conflict count, not
+  the claimed first eager assignment and clauses, so offline replay is invalid.
 
 ## Next Entry Template
 

@@ -970,3 +970,10 @@
   control. Reopen only after a charged perfect-EUF-model phase oracle beats
   no-phase and shuffled-phase controls with one conversion, `2x` median speed,
   zero solve loss, and sub-1% p95 import overhead.
+- T7's faithful cheap falsifier must use rollback head `6e402f0`; current eager
+  and model-cut code has neither decision levels nor alternative explanations.
+  Both arms build the same at-most-four replay-valid minimum-width pool; only
+  lexical versus SAT-impact/reuse tie-breaking differs. Stop unless two of M3
+  disagree, then require a 32-row canary before the 192-row panel. No WMI before
+  review. T2 did not actually retain its first eager assignment/clauses, only a
+  conflict count, so no offline-selector claim may rely on that PLAN sentence.
