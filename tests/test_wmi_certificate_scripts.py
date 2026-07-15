@@ -112,6 +112,13 @@ class WmiCertificateScriptTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_CERT_DRAT_TRIM_SHA256", text)
         self.assertIn("EUF_VIPER_CERT_CHECKER_SHA256", text)
         self.assertIn("--kill-on-invalid-dep=yes", text)
+        self.assertIn('PREPARE_DEPENDENCY_OPTION=""', text)
+        self.assertIn(
+            'PREPARE_DEPENDENCY_OPTION="--dependency=afterok:$BASE_DEPENDENCY_JOB"',
+            text,
+        )
+        self.assertNotIn("PREPARE_DEPENDENCY=()", text)
+        self.assertNotIn("${PREPARE_DEPENDENCY[*]}", text)
         self.assertGreaterEqual(text.count("afterok:"), 3)
         self.assertNotIn("afterany:", text)
         self.assertIn("abort_partial_chain", text)

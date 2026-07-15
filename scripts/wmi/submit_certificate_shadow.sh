@@ -292,11 +292,11 @@ abort_partial_chain() {
   exit 2
 }
 
-PREPARE_DEPENDENCY=()
+PREPARE_DEPENDENCY_OPTION=""
 if [ -n "$BASE_DEPENDENCY_JOB" ]; then
-  PREPARE_DEPENDENCY=(--dependency="afterok:$BASE_DEPENDENCY_JOB")
+  PREPARE_DEPENDENCY_OPTION="--dependency=afterok:$BASE_DEPENDENCY_JOB"
 fi
-PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes ${PREPARE_DEPENDENCY[*]} --export='$EXPORTS' scripts/wmi/euf_viper_certificate_prepare.sbatch")"
+PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && sbatch --parsable --kill-on-invalid-dep=yes $PREPARE_DEPENDENCY_OPTION --export='$EXPORTS' scripts/wmi/euf_viper_certificate_prepare.sbatch")"
 PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
 positive_integer "$PREPARE_JOB" || abort_partial_chain "invalid prepare job id: $PREPARE_SUBMISSION"
 SUBMITTED_JOBS+=("$PREPARE_JOB")
