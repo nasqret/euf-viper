@@ -430,10 +430,16 @@ class ProductionContractTests(unittest.TestCase):
         self.assertIn("corpus_root", runner_options)
         self.assertIn("corpus_root", auditor_options)
 
-    def test_production_anchors_are_mandatory_and_currently_blocked(self) -> None:
-        self.assertIsNone(census.PRODUCTION_CONTRACT.target_projection)
-        with self.assertRaisesRegex(census.CensusError, "target anchors"):
-            census._assert_contract_ready(census.PRODUCTION_CONTRACT)
+    def test_production_target_anchor_is_exact_and_ready(self) -> None:
+        runner_projection = dict(census.PRODUCTION_CONTRACT.target_projection or {})
+        auditor_projection = dict(audit.PRODUCTION_CONTRACT.target_projection or {})
+        self.assertEqual(runner_projection, auditor_projection)
+        self.assertEqual(
+            census.canonical_hash(runner_projection),
+            "2388efca35cebbcfe161a43c45a75351719682babef4fae2875e42296cb8b3e3",
+        )
+        census._assert_contract_ready(census.PRODUCTION_CONTRACT)
+        audit._assert_contract_ready(audit.PRODUCTION_CONTRACT)
 
     def test_auditor_rejects_runner_cap_and_schema_drift(self) -> None:
         with mock.patch.object(
