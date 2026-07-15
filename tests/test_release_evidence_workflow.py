@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,12 @@ CLI_BASELINE_SPEC = importlib.util.spec_from_file_location(
 assert CLI_BASELINE_SPEC is not None and CLI_BASELINE_SPEC.loader is not None
 CLI_BASELINE_MODULE = importlib.util.module_from_spec(CLI_BASELINE_SPEC)
 CLI_BASELINE_SPEC.loader.exec_module(CLI_BASELINE_MODULE)
+SMOKE_SPEC = importlib.util.spec_from_file_location(
+    "release_evidence_smoke_test", SMOKE
+)
+assert SMOKE_SPEC is not None and SMOKE_SPEC.loader is not None
+SMOKE_MODULE = importlib.util.module_from_spec(SMOKE_SPEC)
+SMOKE_SPEC.loader.exec_module(SMOKE_MODULE)
 
 
 class ReleaseEvidenceWorkflowTests(unittest.TestCase):
@@ -63,6 +70,11 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "finalize_locked_audit.py",
             "--validate-analysis",
             "--expected-analysis-exit",
+            "--write-scheduler-receipt",
+            "--preparation-receipt-sha256",
+            "--scheduler-receipt-sha256",
+            "analysis-sha256",
+            "analysis-exit",
             "--smoke-instance",
             "--evidence-out",
             "accepted_decisive_statuses",
@@ -75,7 +87,68 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("evidence status mismatch: expected 'sat', got 'unsupported'", text)
         self.assertIn('for kind in ("full", "official")', text)
         self.assertIn('for index in range(2)', text)
+        self.assertIn('manifests["full"]', text)
+        self.assertIn('manifests["official"]', text)
+        self.assertIn('taxonomies["full"]', text)
+        self.assertIn('taxonomies["official"]', text)
+        self.assertNotIn("--preparation-binding", text)
         self.assertIn("ubuntu-24.04", WORKFLOW.read_text(encoding="ascii"))
+
+    def test_release_smoke_corpus_views_have_distinct_real_identities(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = [root / "sat-0.smt2", root / "sat-1.smt2"]
+            for index, source in enumerate(sources):
+                source.write_text(
+                    f"(set-logic QF_UF)\n; instance {index}\n(check-sat)\n",
+                    encoding="ascii",
+                )
+            paths = {
+                kind: {
+                    name: root / name / f"{kind}.{suffix}"
+                    for name, suffix in (
+                        ("manifest", "jsonl"),
+                        ("taxonomy", "jsonl"),
+                        ("split", "json"),
+                    )
+                }
+                for kind in ("full", "official")
+            }
+            SMOKE_MODULE.write_corpus_view(
+                "full",
+                sources,
+                paths["full"]["manifest"],
+                paths["full"]["taxonomy"],
+                paths["full"]["split"],
+            )
+            SMOKE_MODULE.write_corpus_view(
+                "official",
+                sources[:1],
+                paths["official"]["manifest"],
+                paths["official"]["taxonomy"],
+                paths["official"]["split"],
+            )
+            self.assertNotEqual(
+                SMOKE_MODULE.sha256(paths["full"]["manifest"]),
+                SMOKE_MODULE.sha256(paths["official"]["manifest"]),
+            )
+            self.assertNotEqual(
+                SMOKE_MODULE.sha256(paths["full"]["taxonomy"]),
+                SMOKE_MODULE.sha256(paths["official"]["taxonomy"]),
+            )
+            full_records = paths["full"]["manifest"].read_text(
+                encoding="ascii"
+            ).splitlines()
+            official_records = paths["official"]["manifest"].read_text(
+                encoding="ascii"
+            ).splitlines()
+            self.assertEqual(len(full_records), 2)
+            self.assertEqual(len(official_records), 1)
+            split = json.loads(paths["official"]["split"].read_bytes())
+            self.assertEqual(
+                split["manifest_sha256"],
+                SMOKE_MODULE.sha256(paths["official"]["manifest"]),
+            )
 
     def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")

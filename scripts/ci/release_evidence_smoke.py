@@ -22,6 +22,77 @@ def canonical(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def artifact_record(path: Path) -> dict[str, object]:
+    resolved = path.resolve(strict=True)
+    return {"path": str(resolved), "sha256": sha256(resolved)}
+
+
+def executable_record(path: Path) -> dict[str, object]:
+    resolved = path.resolve(strict=True)
+    metadata = resolved.stat()
+    if not resolved.is_file() or not os.access(resolved, os.X_OK):
+        raise SystemExit(f"receipt executable is not runnable: {resolved}")
+    return {
+        "path": str(path.absolute()),
+        "realpath": str(resolved),
+        "sha256": sha256(resolved),
+        "bytes": metadata.st_size,
+    }
+
+
+def write_corpus_view(
+    kind: str,
+    sources: list[Path],
+    manifest: Path,
+    taxonomy: Path,
+    split: Path,
+) -> None:
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    taxonomy.parent.mkdir(parents=True, exist_ok=True)
+    split.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_bytes(
+        b"".join(
+            canonical(
+                {
+                    "bytes": source.stat().st_size,
+                    "id": index,
+                    "path": str(source),
+                    "relative_path": f"family/sat-{index}.smt2",
+                    "sha256": sha256(source),
+                    "status": "sat",
+                }
+            )
+            for index, source in enumerate(sources)
+        )
+    )
+    taxonomy.write_bytes(
+        b"".join(
+            canonical(
+                {
+                    "family": "release-smoke",
+                    "lineage": "ci/release-smoke",
+                    "normalized_sha256": sha256(source),
+                    "relative_path": f"family/sat-{index}.smt2",
+                    "split": "development",
+                }
+            )
+            for index, source in enumerate(sources)
+        )
+    )
+    split.write_bytes(
+        canonical(
+            {
+                "kind": kind,
+                "manifest_sha256": sha256(manifest),
+                "relative_paths": [
+                    f"family/sat-{index}.smt2" for index in range(len(sources))
+                ],
+                "taxonomy_sha256": sha256(taxonomy),
+            }
+        )
+    )
+
+
 def run(
     arguments: list[str | Path],
     *,
@@ -157,10 +228,13 @@ def main() -> int:
 
     report = run([feature_report], cwd=repository).stdout.decode("ascii").strip()
     features = report.split(",") if report else []
-    if len(features) != len(set(features)) or not {
+    expected_features = [
         "certificates",
+        "default",
+        "finite-symmetry",
         "production-evidence",
-    } <= set(features):
+    ]
+    if features != expected_features:
         raise SystemExit(f"release feature report is incomplete or malformed: {report!r}")
 
     run(
@@ -357,7 +431,9 @@ def main() -> int:
         if winning_nonce != winners[0][3]:
             raise SystemExit("published race sidecar does not belong to the decisive process")
 
-        solver_config = root / "solver-config.json"
+        run_root = root / "locked-audit"
+        (run_root / "locks").mkdir(parents=True)
+        solver_config = run_root / "solver-config.json"
         run(
             [
                 python,
@@ -409,40 +485,41 @@ def main() -> int:
             "(check-sat)\n",
             encoding="ascii",
         )
-        manifest = root / "manifest.jsonl"
-        manifest.write_bytes(
-            b"".join(
-                canonical(
-                    {
-                        "bytes": source.stat().st_size,
-                        "id": index,
-                        "path": str(source),
-                        "relative_path": f"family/sat-{index}.smt2",
-                        "sha256": sha256(source),
-                        "status": "sat",
-                    }
-                )
-                for index, source in enumerate((instance, second_instance))
-            )
+        manifests = {
+            kind: run_root / "manifests" / f"{kind}.jsonl"
+            for kind in ("full", "official")
+        }
+        taxonomies = {
+            kind: run_root / "taxonomy" / f"{kind}.jsonl"
+            for kind in ("full", "official")
+        }
+        taxonomy_splits = {
+            kind: run_root / "taxonomy" / f"{kind}-split.json"
+            for kind in ("full", "official")
+        }
+        write_corpus_view(
+            "full",
+            [instance, second_instance],
+            manifests["full"],
+            taxonomies["full"],
+            taxonomy_splits["full"],
         )
-        taxonomy = root / "taxonomy.jsonl"
-        taxonomy.write_bytes(
-            b"".join(
-                canonical(
-                    {
-                        "family": "release-smoke",
-                        "lineage": "ci/release-smoke",
-                        "normalized_sha256": sha256(source),
-                        "relative_path": f"family/sat-{index}.smt2",
-                        "split": "development",
-                    }
-                )
-                for index, source in enumerate((instance, second_instance))
-            )
+        write_corpus_view(
+            "official",
+            [instance],
+            manifests["official"],
+            taxonomies["official"],
+            taxonomy_splits["official"],
         )
-        run_root = root / "locked-audit"
-        (run_root / "locks").mkdir(parents=True)
+        if (
+            manifests["full"] == manifests["official"]
+            or sha256(manifests["full"]) == sha256(manifests["official"])
+            or taxonomies["full"] == taxonomies["official"]
+            or sha256(taxonomies["full"]) == sha256(taxonomies["official"])
+        ):
+            raise SystemExit("full and official smoke corpus identities are not distinct")
         analysis_payloads: dict[str, dict[str, object]] = {}
+        validation_payloads: dict[str, dict[str, object]] = {}
         for kind in ("full", "official"):
             parent_lock = run_root / "locks" / f"{kind}-parent.json"
             output_root = run_root / f"{kind}-2s"
@@ -452,9 +529,9 @@ def main() -> int:
                     repository / "scripts/bench/freeze_campaign.py",
                     repository / "campaigns/best-overall-qf-uf-2026-07.json",
                     "--manifest",
-                    manifest,
+                    manifests[kind],
                     "--taxonomy",
-                    taxonomy,
+                    taxonomies[kind],
                     "--solver-config",
                     solver_config,
                     "--repository",
@@ -538,8 +615,10 @@ def main() -> int:
                 allowed={0, 1},
             )
             report_payload = json.loads(analysis.read_bytes())
+            expected_instances = 2 if kind == "full" else 1
             if (
-                report_payload.get("inputs", {}).get("instances") != 2
+                report_payload.get("inputs", {}).get("instances")
+                != expected_instances
                 or len(report_payload.get("inputs", {}).get("shards", [])) != 2
             ):
                 raise SystemExit(
@@ -550,7 +629,7 @@ def main() -> int:
                 raise SystemExit(
                     f"miniature {kind} analyzer report contradicts its exit status"
                 )
-            run(
+            validation = run(
                 [
                     python,
                     repository / "scripts/wmi/finalize_locked_audit.py",
@@ -565,18 +644,195 @@ def main() -> int:
                 ],
                 cwd=repository,
             )
+            validation_payload = json.loads(validation.stdout)
+            if (
+                validation_payload.get("kind") != kind
+                or validation_payload.get("expected_analysis_exit") != expected_exit
+                or validation_payload.get("analysis_sha256") != sha256(analysis)
+            ):
+                raise SystemExit(
+                    f"miniature {kind} validation receipt does not bind analysis bytes"
+                )
             analysis_payloads[kind] = report_payload
+            validation_payloads[kind] = validation_payload
 
         audit_index = run_root / "audit" / "index.json"
-        provenance = {
-            "attempt": "linux-release-smoke",
-            "environment": {"kind": "hosted-linux-ci"},
-            "manifest_sha256": sha256(args.sealed_build_manifest),
-            "revision": sealed_build.get("revision", "0" * 40),
-            "source_blob_count": 1,
-            "source_blobs_sha256": sha256(args.sealed_build_manifest),
-            "source_tree": sealed_build.get("source_tree", "0" * 40),
+        parent_payloads = {
+            kind: json.loads(
+                (run_root / "locks" / f"{kind}-parent.json").read_bytes()
+            )
+            for kind in ("full", "official")
         }
+        revisions = {
+            payload.get("repository", {}).get("commit")
+            for payload in parent_payloads.values()
+        }
+        if revisions != {sealed_build.get("revision")}:
+            raise SystemExit(
+                "smoke parent locks do not bind the sealed repository revision"
+            )
+        source_snapshot = sealed_build.get("source_snapshot")
+        if not isinstance(source_snapshot, dict) or not isinstance(
+            source_snapshot.get("files"), list
+        ):
+            raise SystemExit("sealed build source snapshot is malformed")
+        provenance = {
+            "attempt": {
+                "checkout": str(repository),
+                "id": "linux-release-smoke",
+            },
+            "environment": {
+                "kind": "hosted-linux-ci",
+                "platform": sys.platform,
+            },
+            "execution_environment": {
+                name: os.environ.get(name, "")
+                for name in ("HOME", "PATH", "RUNNER_OS", "RUNNER_ARCH")
+            },
+            "manifest_sha256": sha256(args.sealed_build_manifest),
+            "revision": sealed_build["revision"],
+            "runtime_tools": {"python": executable_record(python)},
+            "source_blob_count": len(source_snapshot["files"]),
+            "source_blobs_sha256": hashlib.sha256(
+                canonical(source_snapshot["files"])
+            ).hexdigest(),
+            "source_tree": sealed_build["source_tree"],
+        }
+        execution_closure = run_root / "execution-closure.json"
+        execution_closure.write_bytes(
+            canonical(sealed_build["build_execution_closure"])
+        )
+        sealed_attestation = (
+            args.sealed_build_manifest.resolve(strict=True).parent
+            / "sealed-build-attestation.json"
+        ).resolve(strict=True)
+        preparation_receipt = run_root / "prepare.json"
+        preparation_artifacts = {
+            name: artifact_record(run_root / name)
+            for name in (
+                "solver-config.json",
+                "taxonomy/full.jsonl",
+                "taxonomy/full-split.json",
+                "taxonomy/official.jsonl",
+                "taxonomy/official-split.json",
+                "locks/full-parent.json",
+                "locks/official-parent.json",
+            )
+        }
+        preparation = {
+            "schema": "euf-viper.locked-p0-preparation.v3",
+            "status": "prepared",
+            "attempt": provenance["attempt"],
+            "artifacts": preparation_artifacts,
+            "build_features": features,
+            "corpus": {
+                "full_manifest": artifact_record(manifests["full"]),
+                "official_manifest": artifact_record(manifests["official"]),
+                "root": str(corpus.resolve(strict=True)),
+            },
+            "environment": provenance["environment"],
+            "execution_environment": provenance["execution_environment"],
+            "feature_report": executable_record(feature_report),
+            "hostname": os.uname().nodename,
+            "job": {"id": 1, "submit_directory": str(repository)},
+            "paths": {
+                "checkout": str(repository),
+                "run_root": str(run_root.resolve(strict=True)),
+                "submission_manifest": str(
+                    args.sealed_build_manifest.resolve(strict=True)
+                ),
+            },
+            "revision": provenance["revision"],
+            "runtime_tools": provenance["runtime_tools"],
+            "shards": 2,
+            "solver_executables": {
+                record["id"]: executable_record(Path(record["binary"]))
+                for record in config["solvers"]
+            },
+            "sealed_build": {
+                "path": str(args.sealed_build_manifest.resolve(strict=True)),
+                "sha256": sha256(args.sealed_build_manifest),
+                "source_snapshot_manifest_sha256": sealed_build[
+                    "source_snapshot_manifest_sha256"
+                ],
+                "build_execution_closure_sha256": sealed_build[
+                    "build_execution_closure_sha256"
+                ],
+                "attestation_path": str(sealed_attestation),
+                "attestation_sha256": sha256(sealed_attestation),
+                "receipt_path": str(sealed_receipt),
+                "receipt_sha256": sealed_receipt_sha256,
+            },
+            "execution_closure": artifact_record(execution_closure),
+            "source": {
+                "blob_count": provenance["source_blob_count"],
+                "blobs_sha256": provenance["source_blobs_sha256"],
+                "tree": provenance["source_tree"],
+                "snapshot_manifest_sha256": sealed_build[
+                    "source_snapshot_manifest_sha256"
+                ],
+                "build_execution_closure_sha256": sealed_build[
+                    "build_execution_closure_sha256"
+                ],
+            },
+            "submission_manifest_sha256": provenance["manifest_sha256"],
+            "viper": executable_record(binary),
+        }
+        preparation_receipt.write_bytes(canonical(preparation))
+        preparation_receipt.chmod(0o400)
+        preparation_sha256 = sha256(preparation_receipt)
+        analysis_binding_arguments: list[str | Path] = []
+        for kind in ("full", "official"):
+            analysis_binding_arguments.extend(
+                [
+                    f"--{kind}-analysis-sha256",
+                    str(validation_payloads[kind]["analysis_sha256"]),
+                    f"--{kind}-analysis-exit",
+                    str(validation_payloads[kind]["expected_analysis_exit"]),
+                ]
+            )
+        provenance_argument = json.dumps(
+            provenance, sort_keys=True, separators=(",", ":")
+        )
+        scheduler_receipt = run_root / "audit" / "scheduler.json"
+        scheduler_result = run(
+            [
+                python,
+                repository / "scripts/wmi/finalize_locked_audit.py",
+                "--out",
+                scheduler_receipt,
+                "--provenance",
+                provenance_argument,
+                "--run-root",
+                run_root,
+                "--prepare-job",
+                "1",
+                "--shards",
+                "2",
+                "--audit-job",
+                "2",
+                "--preparation-receipt",
+                preparation_receipt,
+                "--preparation-receipt-sha256",
+                preparation_sha256,
+                "--write-scheduler-receipt",
+                *analysis_binding_arguments,
+            ],
+            cwd=repository,
+        )
+        scheduler_payload = json.loads(scheduler_result.stdout)
+        if (
+            scheduler_payload.get("jobs") != {"prepare": 1, "audit": 2}
+            or scheduler_payload.get("preparation_receipt", {}).get("sha256")
+            != preparation_sha256
+            or any(
+                scheduler_payload.get("analyses", {}).get(kind, {}).get("sha256")
+                != validation_payloads[kind]["analysis_sha256"]
+                for kind in ("full", "official")
+            )
+        ):
+            raise SystemExit("scheduler receipt did not preserve validated bindings")
+        scheduler_sha256 = sha256(scheduler_receipt)
         run(
             [
                 python,
@@ -593,15 +849,15 @@ def main() -> int:
                 "2",
                 "--audit-job",
                 "2",
-                "--preparation-binding",
-                json.dumps(
-                    {
-                        "sealed_build_receipt_sha256": sealed_receipt_sha256,
-                        "status": "ci-smoke",
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
+                "--preparation-receipt",
+                preparation_receipt,
+                "--preparation-receipt-sha256",
+                preparation_sha256,
+                "--scheduler-receipt",
+                scheduler_receipt,
+                "--scheduler-receipt-sha256",
+                scheduler_sha256,
+                *analysis_binding_arguments,
             ],
             cwd=repository,
         )
@@ -612,8 +868,17 @@ def main() -> int:
                 indexed.get("sha256") != sha256(run_root / "audit" / kind / "global.json")
                 or indexed.get("shards") != 2
                 or indexed.get("promoted") != report_payload.get("promoted")
+                or indexed.get("validated_process_exit")
+                != validation_payloads[kind]["expected_analysis_exit"]
             ):
                 raise SystemExit(f"final audit index did not bind {kind} analysis")
+        if (
+            index_payload.get("preparation_receipt", {}).get("sha256")
+            != preparation_sha256
+            or index_payload.get("scheduler_receipt", {}).get("sha256")
+            != scheduler_sha256
+        ):
+            raise SystemExit("final audit index omitted receipt consistency bindings")
 
     print("real release evidence and locked-campaign smoke passed")
     return 0

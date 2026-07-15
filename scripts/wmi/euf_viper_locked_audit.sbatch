@@ -178,13 +178,14 @@ python_bound() {
 cd "$CHECKOUT"
 RUN_ROOT="$ATTEMPT_ROOT/results/p0-${PREPARE_JOB_ID}"
 PREPARE_RECEIPT="$RUN_ROOT/prepare.json"
-PREPARATION_BINDING="$(python_bound "$PROVENANCE_HELPER" \
+python_bound "$PROVENANCE_HELPER" \
   "$PROVENANCE_HELPER_SHA256" verify-preparation-receipt \
   --receipt "$PREPARE_RECEIPT" \
   --provenance "$VERIFIED_PROVENANCE" \
   --run-root "$RUN_ROOT" \
   --prepare-job "$PREPARE_JOB_ID" \
-  --expected-sha256 "$PREPARE_RECEIPT_SHA256")"
+  --expected-sha256 "$PREPARE_RECEIPT_SHA256" \
+  >/dev/null
 
 EXECUTION_CLOSURE_FIELDS="$(python_clean -c '
 import json, sys
@@ -219,6 +220,10 @@ closed_python() {
     -- "$PYTHON_BIN" -B -I -S "$@"
 }
 
+FULL_ANALYSIS_SHA256=""
+FULL_ANALYSIS_EXIT=""
+OFFICIAL_ANALYSIS_SHA256=""
+OFFICIAL_ANALYSIS_EXIT=""
 for KIND in full official; do
   "$MKDIR_BIN" -p "$RUN_ROOT/audit/$KIND"
   ANALYSIS_OUTPUT="$RUN_ROOT/audit/$KIND/global.json"
@@ -267,13 +272,59 @@ for KIND in full official; do
       exit "$ANALYSIS_STATUS"
       ;;
   esac
-  closed_python "$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
+  VALIDATION_JSON="$(closed_python \
+    "$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
     --run-root "$RUN_ROOT" \
     --shards "$SHARDS" \
     --validate-analysis "$KIND" \
-    --expected-analysis-exit "$ANALYSIS_STATUS" \
-    >/dev/null
+    --expected-analysis-exit "$ANALYSIS_STATUS")"
+  VALIDATED_SHA256="$(python_clean -c '
+import json, sys
+value = json.loads(sys.argv[1])
+kind, expected_exit = sys.argv[2], int(sys.argv[3])
+if (
+    value.get("schema") != "euf-viper.locked-analysis-validation.v1"
+    or value.get("kind") != kind
+    or value.get("expected_analysis_exit") != expected_exit
+    or value.get("promoted") is not (expected_exit == 0)
+):
+    raise SystemExit("analysis validation receipt fields disagree")
+digest = value.get("analysis_sha256")
+if not isinstance(digest, str) or len(digest) != 64 or any(
+    character not in "0123456789abcdef" for character in digest
+):
+    raise SystemExit("analysis validation receipt hash is malformed")
+print(digest)
+' "$VALIDATION_JSON" "$KIND" "$ANALYSIS_STATUS")"
+  case "$KIND" in
+    full)
+      FULL_ANALYSIS_SHA256="$VALIDATED_SHA256"
+      FULL_ANALYSIS_EXIT="$ANALYSIS_STATUS"
+      ;;
+    official)
+      OFFICIAL_ANALYSIS_SHA256="$VALIDATED_SHA256"
+      OFFICIAL_ANALYSIS_EXIT="$ANALYSIS_STATUS"
+      ;;
+  esac
 done
+
+SCHEDULER_RECEIPT="$RUN_ROOT/audit/scheduler.json"
+closed_python "$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
+  --write-scheduler-receipt \
+  --out "$SCHEDULER_RECEIPT" \
+  --provenance "$VERIFIED_PROVENANCE" \
+  --run-root "$RUN_ROOT" \
+  --prepare-job "$PREPARE_JOB_ID" \
+  --shards "$SHARDS" \
+  --audit-job "$SLURM_JOB_ID" \
+  --preparation-receipt "$PREPARE_RECEIPT" \
+  --preparation-receipt-sha256 "$PREPARE_RECEIPT_SHA256" \
+  --full-analysis-sha256 "$FULL_ANALYSIS_SHA256" \
+  --full-analysis-exit "$FULL_ANALYSIS_EXIT" \
+  --official-analysis-sha256 "$OFFICIAL_ANALYSIS_SHA256" \
+  --official-analysis-exit "$OFFICIAL_ANALYSIS_EXIT" \
+  >/dev/null
+SCHEDULER_RECEIPT_SHA256="$(hash_file "$SCHEDULER_RECEIPT")"
 
 FINAL_PROVENANCE="$(python_bound_bootstrap "$PROVENANCE_HELPER" \
   "$PROVENANCE_HELPER_SHA256" verify \
@@ -292,6 +343,13 @@ closed_python "$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
   --prepare-job "$PREPARE_JOB_ID" \
   --shards "$SHARDS" \
   --audit-job "$SLURM_JOB_ID" \
-  --preparation-binding "$PREPARATION_BINDING"
+  --preparation-receipt "$PREPARE_RECEIPT" \
+  --preparation-receipt-sha256 "$PREPARE_RECEIPT_SHA256" \
+  --scheduler-receipt "$SCHEDULER_RECEIPT" \
+  --scheduler-receipt-sha256 "$SCHEDULER_RECEIPT_SHA256" \
+  --full-analysis-sha256 "$FULL_ANALYSIS_SHA256" \
+  --full-analysis-exit "$FULL_ANALYSIS_EXIT" \
+  --official-analysis-sha256 "$OFFICIAL_ANALYSIS_SHA256" \
+  --official-analysis-exit "$OFFICIAL_ANALYSIS_EXIT"
 
 printf 'audit=%s\n' "$RUN_ROOT/audit/index.json"

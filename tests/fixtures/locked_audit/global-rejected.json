@@ -27,6 +27,8 @@
               "baseline": {
                 "solved": 2,
                 "statuses": {
+                  "error": 0,
+                  "invalid": 0,
                   "sat": 1,
                   "unsat": 1
                 }
@@ -34,6 +36,8 @@
               "candidate": {
                 "solved": 1,
                 "statuses": {
+                  "error": 0,
+                  "invalid": 0,
                   "sat": 1,
                   "unsupported": 1
                 }
@@ -44,48 +48,144 @@
               "candidate_only": 0
             }
           },
-          "bootstrap": {},
+          "bootstrap": {
+            "metrics": {
+              "common_wall_geometric": {
+                "ci_lower": 2.0
+              },
+              "common_wall_total": {
+                "ci_lower": 2.0
+              },
+              "timeout_charged_wall": {
+                "ci_lower": 2.0
+              }
+            }
+          },
           "budget_s": 2.0,
-          "families": {},
-          "family_macro": {},
+          "families": {
+            "fixture-family": {
+              "coverage": {
+                "baseline_only": 1
+              },
+              "speedups": {
+                "common_wall_geometric": 1.0,
+                "common_wall_total": 1.0,
+                "par2_wall": 1.0,
+                "timeout_charged_wall": 1.0
+              }
+            }
+          },
+          "family_macro": {
+            "speedups": {
+              "common_wall_geometric": 1.0,
+              "common_wall_total": 1.0,
+              "par2_wall": 1.0,
+              "timeout_charged_wall": 1.0
+            }
+          },
           "promotion": {
             "checks": {
               "common_wall_geometric_bootstrap_lower_bound": {
-                "passed": true
+                "actual": 2.0,
+                "operator": ">",
+                "passed": true,
+                "threshold": 1.0
               },
               "common_wall_total_bootstrap_lower_bound": {
-                "passed": true
+                "actual": 2.0,
+                "operator": ">",
+                "passed": true,
+                "threshold": 1.0
               },
               "family_macro_non_regression": {
-                "passed": true
+                "actual": 0,
+                "details": [],
+                "operator": "==",
+                "passed": true,
+                "threshold": 0
               },
               "family_non_regression": {
-                "passed": true
+                "actual": 1,
+                "details": [
+                  {
+                    "actual": 1,
+                    "group": "fixture-family",
+                    "group_type": "family",
+                    "metric": "baseline_only_solves",
+                    "required": 0
+                  }
+                ],
+                "operator": "==",
+                "passed": false,
+                "threshold": 0
               },
               "status_non_regression": {
-                "passed": true
+                "actual": 1,
+                "details": [
+                  {
+                    "actual": 1,
+                    "group": "unsat",
+                    "group_type": "expected_status",
+                    "metric": "baseline_only_solves",
+                    "required": 0
+                  }
+                ],
+                "operator": "==",
+                "passed": false,
+                "threshold": 0
               },
               "timeout_charged_wall_bootstrap_lower_bound": {
-                "passed": true
+                "actual": 2.0,
+                "operator": ">",
+                "passed": true,
+                "threshold": 1.0
               },
               "zero_coverage_loss": {
-                "passed": false
+                "actual": 1,
+                "operator": "==",
+                "passed": false,
+                "threshold": 0
               },
               "zero_execution_errors": {
-                "passed": true
+                "actual": 0,
+                "operator": "==",
+                "passed": true,
+                "threshold": 0
               },
               "zero_invalid_results": {
-                "passed": true
+                "actual": 0,
+                "operator": "==",
+                "passed": true,
+                "threshold": 0
               }
             },
             "passed": false,
             "status": "rejected"
           },
           "statuses": {
-            "sat": {},
+            "sat": {
+              "coverage": {
+                "baseline_only": 0
+              },
+              "speedups": {
+                "common_wall_geometric": 1.0,
+                "common_wall_total": 1.0,
+                "par2_wall": 1.0,
+                "timeout_charged_wall": 1.0
+              }
+            },
             "unsat": {
               "candidate_result": "unsupported",
-              "production_evidence_decisive": false
+              "coverage": {
+                "baseline_only": 1
+              },
+              "production_evidence_decisive": false,
+              "speedups": {
+                "common_wall_geometric": 1.0,
+                "common_wall_total": 1.0,
+                "par2_wall": 1.0,
+                "timeout_charged_wall": 1.0
+              }
             }
           }
         }

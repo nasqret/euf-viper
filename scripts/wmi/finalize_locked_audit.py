@@ -116,6 +116,17 @@ BUDGET_PROMOTION_CHECK_KEYS = {
     "common_wall_total_bootstrap_lower_bound",
     "common_wall_geometric_bootstrap_lower_bound",
 }
+NON_REGRESSION_METRICS = (
+    "timeout_charged_wall",
+    "par2_wall",
+    "common_wall_total",
+    "common_wall_geometric",
+)
+REQUIRED_PROMOTION_METRICS = (
+    "timeout_charged_wall",
+    "common_wall_total",
+    "common_wall_geometric",
+)
 PARENT_LOCK_KEYS = {
     "schema_version",
     "campaign_id",
@@ -174,6 +185,51 @@ PARENT_SOLVER_KEYS = {
     "environment",
 }
 CANDIDATE_ID = "euf-viper"
+PREPARATION_KEYS = {
+    "schema",
+    "status",
+    "attempt",
+    "artifacts",
+    "build_features",
+    "corpus",
+    "environment",
+    "execution_environment",
+    "feature_report",
+    "hostname",
+    "job",
+    "paths",
+    "revision",
+    "runtime_tools",
+    "shards",
+    "solver_executables",
+    "sealed_build",
+    "execution_closure",
+    "source",
+    "submission_manifest_sha256",
+    "viper",
+}
+PREPARATION_ARTIFACT_NAMES = {
+    "solver-config.json",
+    "taxonomy/full.jsonl",
+    "taxonomy/full-split.json",
+    "taxonomy/official.jsonl",
+    "taxonomy/official-split.json",
+    "locks/full-parent.json",
+    "locks/official-parent.json",
+}
+SCHEDULER_RECEIPT_KEYS = {
+    "schema",
+    "status",
+    "run_root",
+    "revision",
+    "submission_manifest_sha256",
+    "preparation_receipt",
+    "jobs",
+    "shards",
+    "parent_locks",
+    "analyses",
+}
+VALIDATED_ANALYSIS_KEYS = {"sha256", "process_exit"}
 
 
 class AuditFinalizeError(ValueError):
@@ -237,6 +293,221 @@ def _boolean(value: Any, context: str) -> bool:
     if type(value) is not bool:
         raise AuditFinalizeError(f"{context} must be boolean")
     return value
+
+
+def _number(value: Any, context: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise AuditFinalizeError(f"{context} must be a finite number")
+    return float(value)
+
+
+def _count(value: Any, context: str) -> int:
+    if type(value) is not int or value < 0:
+        raise AuditFinalizeError(f"{context} must be a non-negative integer")
+    return value
+
+
+def _same_json(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if type(left) is dict:
+        return set(left) == set(right) and all(
+            _same_json(left[key], right[key]) for key in left
+        )
+    if type(left) is list:
+        return len(left) == len(right) and all(
+            _same_json(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return bool(left == right)
+
+
+def _semantic_check(
+    passed: bool,
+    *,
+    actual: Any,
+    operator: str,
+    threshold: Any,
+    details: Any | None = None,
+) -> dict[str, Any]:
+    result = {
+        "actual": actual,
+        "operator": operator,
+        "passed": passed,
+        "threshold": threshold,
+    }
+    if details is not None:
+        result["details"] = details
+    return result
+
+
+def _non_regression_failures(
+    summaries: Any, group_type: str, context: str
+) -> list[dict[str, Any]]:
+    if type(summaries) is not dict:
+        raise AuditFinalizeError(f"{context} must be an object")
+    failures: list[dict[str, Any]] = []
+    for name in sorted(summaries):
+        if type(name) is not str or not name:
+            raise AuditFinalizeError(f"{context} has an invalid group name")
+        summary = summaries[name]
+        if type(summary) is not dict:
+            raise AuditFinalizeError(f"{context}[{name!r}] must be an object")
+        coverage = summary.get("coverage")
+        speedups = summary.get("speedups")
+        if type(coverage) is not dict or type(speedups) is not dict:
+            raise AuditFinalizeError(
+                f"{context}[{name!r}] lacks coverage or speedup source data"
+            )
+        baseline_only = _count(
+            coverage.get("baseline_only"),
+            f"{context}[{name!r}].coverage.baseline_only",
+        )
+        if baseline_only:
+            failures.append(
+                {
+                    "actual": baseline_only,
+                    "group": name,
+                    "group_type": group_type,
+                    "metric": "baseline_only_solves",
+                    "required": 0,
+                }
+            )
+        for metric in NON_REGRESSION_METRICS:
+            if metric not in speedups:
+                raise AuditFinalizeError(
+                    f"{context}[{name!r}].speedups lacks {metric!r}"
+                )
+            value = speedups[metric]
+            if value is not None:
+                _number(value, f"{context}[{name!r}].speedups[{metric!r}]")
+                if value < 1.0:
+                    failures.append(
+                        {
+                            "actual": value,
+                            "group": name,
+                            "group_type": group_type,
+                            "metric": metric,
+                            "required": 1.0,
+                        }
+                    )
+    return failures
+
+
+def _macro_non_regression_failures(value: Any, context: str) -> list[dict[str, Any]]:
+    if type(value) is not dict or type(value.get("speedups")) is not dict:
+        raise AuditFinalizeError(f"{context} lacks speedup source data")
+    speedups = value["speedups"]
+    if set(speedups) != set(NON_REGRESSION_METRICS):
+        raise AuditFinalizeError(f"{context}.speedups has an incompatible metric set")
+    failures: list[dict[str, Any]] = []
+    for metric in sorted(speedups):
+        if type(metric) is not str or not metric:
+            raise AuditFinalizeError(f"{context}.speedups has an invalid metric")
+        item = speedups[metric]
+        if item is not None:
+            _number(item, f"{context}.speedups[{metric!r}]")
+            if item < 1.0:
+                failures.append(
+                    {"actual": item, "metric": metric, "required": 1.0}
+                )
+    return failures
+
+
+def _recompute_budget_checks(
+    budget: dict[str, Any], minimum_speedup: float, context: str
+) -> dict[str, dict[str, Any]]:
+    aggregate = budget["aggregate"]
+    if type(aggregate) is not dict or type(aggregate.get("arms")) is not dict:
+        raise AuditFinalizeError(f"{context}.aggregate lacks arm source data")
+    statuses: dict[str, dict[str, Any]] = {}
+    for label in ("baseline", "candidate"):
+        arm = aggregate["arms"].get(label)
+        if type(arm) is not dict or type(arm.get("statuses")) is not dict:
+            raise AuditFinalizeError(
+                f"{context}.aggregate.arms[{label!r}] lacks status source data"
+            )
+        statuses[label] = arm["statuses"]
+    invalid_count = sum(
+        _count(statuses[label].get("invalid"), f"{context}.{label}.invalid")
+        for label in statuses
+    )
+    error_count = sum(
+        _count(statuses[label].get("error"), f"{context}.{label}.error")
+        for label in statuses
+    )
+    coverage = aggregate.get("coverage")
+    if type(coverage) is not dict:
+        raise AuditFinalizeError(f"{context}.aggregate.coverage must be an object")
+    baseline_only = _count(
+        coverage.get("baseline_only"),
+        f"{context}.aggregate.coverage.baseline_only",
+    )
+    family_failures = _non_regression_failures(
+        budget["families"], "family", f"{context}.families"
+    )
+    status_failures = _non_regression_failures(
+        budget["statuses"], "expected_status", f"{context}.statuses"
+    )
+    macro_failures = _macro_non_regression_failures(
+        budget["family_macro"], f"{context}.family_macro"
+    )
+    checks = {
+        "zero_invalid_results": _semantic_check(
+            invalid_count == 0, actual=invalid_count, operator="==", threshold=0
+        ),
+        "zero_execution_errors": _semantic_check(
+            error_count == 0, actual=error_count, operator="==", threshold=0
+        ),
+        "zero_coverage_loss": _semantic_check(
+            baseline_only == 0, actual=baseline_only, operator="==", threshold=0
+        ),
+        "family_non_regression": _semantic_check(
+            not family_failures,
+            actual=len(family_failures),
+            operator="==",
+            threshold=0,
+            details=family_failures,
+        ),
+        "status_non_regression": _semantic_check(
+            not status_failures,
+            actual=len(status_failures),
+            operator="==",
+            threshold=0,
+            details=status_failures,
+        ),
+        "family_macro_non_regression": _semantic_check(
+            not macro_failures,
+            actual=len(macro_failures),
+            operator="==",
+            threshold=0,
+            details=macro_failures,
+        ),
+    }
+    bootstrap = budget["bootstrap"]
+    metrics = bootstrap.get("metrics") if type(bootstrap) is dict else None
+    if type(metrics) is not dict:
+        raise AuditFinalizeError(f"{context}.bootstrap.metrics must be an object")
+    for metric in REQUIRED_PROMOTION_METRICS:
+        interval = metrics.get(metric)
+        if type(interval) is not dict or "ci_lower" not in interval:
+            raise AuditFinalizeError(
+                f"{context}.bootstrap.metrics[{metric!r}] lacks ci_lower"
+            )
+        lower = interval["ci_lower"]
+        if lower is not None:
+            _number(lower, f"{context}.bootstrap.metrics[{metric!r}].ci_lower")
+        checks[f"{metric}_bootstrap_lower_bound"] = _semantic_check(
+            lower is not None and lower > minimum_speedup,
+            actual=lower,
+            operator=">",
+            threshold=minimum_speedup,
+        )
+    return checks
 
 
 def _budget_names(value: Any, context: str) -> list[str]:
@@ -427,6 +698,14 @@ def _validate_analysis_schema(
     for field in ("configuration", "assumptions", "hypotheses"):
         if type(value[field]) is not dict:
             raise AuditFinalizeError(f"{context}.{field} must be an object")
+    minimum_speedup = _number(
+        value["configuration"].get("minimum_speedup"),
+        f"{context}.configuration.minimum_speedup",
+    )
+    if minimum_speedup <= 0.0:
+        raise AuditFinalizeError(
+            f"{context}.configuration.minimum_speedup must be positive"
+        )
     comparisons = _exact_object(
         value["comparisons"], set(baseline_ids), f"{context}.comparisons"
     )
@@ -481,25 +760,22 @@ def _validate_analysis_schema(
                 f"{context}.comparisons[{baseline_id!r}]"
                 f".budgets[{budget_name!r}].promotion.checks",
             )
-            check_outcomes: list[bool] = []
-            for check_name, check_value in checks.items():
-                if type(check_name) is not str or not check_name:
+            expected_checks = _recompute_budget_checks(
+                budget,
+                minimum_speedup,
+                f"{context}.comparisons[{baseline_id!r}]"
+                f".budgets[{budget_name!r}]",
+            )
+            for check_name in sorted(BUDGET_PROMOTION_CHECK_KEYS):
+                if not _same_json(checks[check_name], expected_checks[check_name]):
                     raise AuditFinalizeError(
-                        f"{context} budget promotion check name is invalid"
+                        f"{context} promotion check {check_name!r} "
+                        "contradicts source data"
                     )
-                if type(check_value) is not dict or "passed" not in check_value:
-                    raise AuditFinalizeError(
-                        f"{context} budget promotion check {check_name!r} is invalid"
-                    )
-                check_outcomes.append(
-                    _boolean(
-                        check_value["passed"],
-                        f"{context}.comparisons[{baseline_id!r}]"
-                        f".budgets[{budget_name!r}].promotion"
-                        f".checks[{check_name!r}].passed",
-                    )
-                )
-            if budget_passed != all(check_outcomes):
+            derived_budget_passed = all(
+                check["passed"] for check in expected_checks.values()
+            )
+            if budget_passed != derived_budget_passed:
                 raise AuditFinalizeError(
                     f"{context} budget promotion outcome contradicts individual checks"
                 )
@@ -599,6 +875,7 @@ def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
     )
     for field in ("root", "commit", "commit_time"):
         _string(repository[field], f"{artifact.context}.repository.{field}")
+    repository_commit = repository["commit"]
     repository_clean = _boolean(
         repository["clean"], f"{artifact.context}.repository.clean"
     )
@@ -621,6 +898,17 @@ def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
     )
     taxonomy_sha256 = _hash(
         corpus["taxonomy_sha256"], f"{artifact.context}.corpus.taxonomy_sha256"
+    )
+    solver_config = _exact_object(
+        parent["solver_config"],
+        {"path", "sha256"},
+        f"{artifact.context}.solver_config",
+    )
+    solver_config_path = _string(
+        solver_config["path"], f"{artifact.context}.solver_config.path"
+    )
+    solver_config_sha256 = _hash(
+        solver_config["sha256"], f"{artifact.context}.solver_config.sha256"
     )
     instances = corpus["instances"]
     if type(instances) is not list or not instances:
@@ -696,6 +984,7 @@ def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
         )
     return {
         "campaign_id": campaign_id,
+        "repository_commit": repository_commit,
         "candidate_id": CANDIDATE_ID,
         "baseline_ids": sorted(
             solver_id for solver_id in solver_hashes if solver_id != CANDIDATE_ID
@@ -704,7 +993,11 @@ def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
         "budgets_s": [float(name) for name in budget_names],
         "budget_names": budget_names,
         "manifest_sha256": manifest_sha256,
+        "manifest_path": corpus["manifest_path"],
         "taxonomy_sha256": taxonomy_sha256,
+        "taxonomy_path": corpus["taxonomy_path"],
+        "solver_config_path": solver_config_path,
+        "solver_config_sha256": solver_config_sha256,
         "solver_binary_sha256": solver_hashes,
         "instances": len(instances),
         "families": len(families),
@@ -855,12 +1148,17 @@ def _bind_current_inputs(
             field: parent_identity[field]
             for field in (
                 "campaign_id",
+                "repository_commit",
                 "candidate_id",
                 "baseline_ids",
                 "promotion_eligible",
                 "budgets_s",
                 "manifest_sha256",
+                "manifest_path",
                 "taxonomy_sha256",
+                "taxonomy_path",
+                "solver_config_path",
+                "solver_config_sha256",
                 "solver_binary_sha256",
                 "instances",
                 "families",
@@ -889,6 +1187,470 @@ def _metadata_identity(value: os.stat_result) -> tuple[int, ...]:
         value.st_mtime_ns,
         value.st_ctime_ns,
     )
+
+
+def _open_external_artifact(path: Path, context: str) -> BoundArtifact:
+    descriptor = -1
+    try:
+        absolute, descriptor = open_read_nofollow(path, context)
+        raw, metadata = read_open_descriptor(descriptor, context)
+        result = BoundArtifact(absolute, descriptor, raw, metadata, context)
+        descriptor = -1
+        return result
+    except StrictArtifactError as error:
+        raise AuditFinalizeError(str(error)) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _canonical_receipt_object(
+    artifact: BoundArtifact, expected_keys: set[str]
+) -> dict[str, Any]:
+    try:
+        value = strict_json_loads(artifact.raw.decode("ascii"), artifact.context)
+    except (UnicodeError, StrictArtifactError) as error:
+        raise AuditFinalizeError(str(error)) from error
+    result = _exact_object(value, expected_keys, artifact.context)
+    if _canonical_analysis_bytes(result) != artifact.raw:
+        raise AuditFinalizeError(f"{artifact.context} is not canonical JSON")
+    return result
+
+
+def _validated_analysis_bindings(value: Any) -> dict[str, dict[str, Any]]:
+    bindings = _exact_object(value, {"full", "official"}, "validated analyses")
+    result: dict[str, dict[str, Any]] = {}
+    for kind, raw_binding in bindings.items():
+        binding = _exact_object(
+            raw_binding, VALIDATED_ANALYSIS_KEYS, f"validated analyses.{kind}"
+        )
+        digest = _hash(binding["sha256"], f"validated analyses.{kind}.sha256")
+        process_exit = binding["process_exit"]
+        if type(process_exit) is not int or process_exit not in {0, 1}:
+            raise AuditFinalizeError(
+                f"validated analyses.{kind}.process_exit must be 0 or 1"
+            )
+        result[kind] = {"sha256": digest, "process_exit": process_exit}
+    return result
+
+
+def _open_current_audit(
+    run_root: Path,
+    shards: int,
+    validated_analyses: dict[str, dict[str, Any]],
+) -> tuple[
+    dict[str, BoundAnalysis],
+    dict[str, dict[str, Any]],
+    list[BoundArtifact],
+]:
+    opened: list[BoundArtifact] = []
+    try:
+        analyses: dict[str, BoundAnalysis] = {}
+        for kind in ("full", "official"):
+            analysis = _open_analysis(
+                run_root / "audit" / kind / "global.json", kind, run_root
+            )
+            opened.append(analysis)
+            _validate_analysis_schema(analysis.value, kind, shards)
+            expected = validated_analyses[kind]
+            if analysis.sha256 != expected["sha256"]:
+                raise AuditFinalizeError(
+                    f"{kind} analysis bytes differ from validated analysis receipt"
+                )
+            expected_promoted = expected["process_exit"] == 0
+            if analysis.value["promoted"] != expected_promoted:
+                raise AuditFinalizeError(
+                    f"{kind} analysis outcome contradicts validated process exit"
+                )
+            analyses[kind] = analysis
+
+        current_inputs: dict[str, dict[str, Any]] = {}
+        for kind, analysis in analyses.items():
+            binding, source_artifacts = _bind_current_inputs(
+                kind, analysis, run_root, shards
+            )
+            opened.extend(source_artifacts)
+            current_inputs[kind] = binding
+        return analyses, current_inputs, opened
+    except BaseException:
+        for artifact in opened:
+            os.close(artifact.descriptor)
+        raise
+
+
+def _verify_preparation_receipt(
+    receipt_path: Path,
+    expected_sha256: str,
+    provenance: dict[str, Any],
+    run_root: Path,
+    prepare_job: int,
+    shards: int,
+    current_inputs: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any], list[BoundArtifact]]:
+    opened: list[BoundArtifact] = []
+    try:
+        expected_path = run_root / "prepare.json"
+        if receipt_path.resolve(strict=True) != expected_path:
+            raise AuditFinalizeError(
+                "preparation receipt path is not the locked run receipt"
+            )
+        receipt = _open_artifact(expected_path, "preparation receipt", run_root)
+        opened.append(receipt)
+        expected_receipt_sha256 = _hash(
+            expected_sha256, "preparation receipt expected SHA-256"
+        )
+        if receipt.sha256 != expected_receipt_sha256:
+            raise AuditFinalizeError(
+                "preparation receipt SHA-256 differs from external binding"
+            )
+        value = _canonical_receipt_object(receipt, PREPARATION_KEYS)
+        if (
+            value["schema"] != "euf-viper.locked-p0-preparation.v3"
+            or value["status"] != "prepared"
+        ):
+            raise AuditFinalizeError("preparation receipt schema or status is invalid")
+
+        provenance_revision = _string(
+            provenance.get("revision"), "provenance.revision"
+        )
+        provenance_manifest = _hash(
+            provenance.get("manifest_sha256"), "provenance.manifest_sha256"
+        )
+        if _string(value["revision"], "preparation receipt revision") != provenance_revision:
+            raise AuditFinalizeError("preparation receipt revision disagrees")
+        if (
+            _hash(
+                value["submission_manifest_sha256"],
+                "preparation receipt submission manifest SHA-256",
+            )
+            != provenance_manifest
+        ):
+            raise AuditFinalizeError(
+                "preparation receipt submission manifest disagrees"
+            )
+        for field in (
+            "attempt",
+            "environment",
+            "execution_environment",
+            "runtime_tools",
+        ):
+            if field not in provenance or not _same_json(value[field], provenance[field]):
+                raise AuditFinalizeError(
+                    f"preparation receipt {field} disagrees with provenance"
+                )
+        job = _exact_object(value["job"], {"id", "submit_directory"}, "prepare job")
+        if _integer(job["id"], "preparation receipt prepare job", 1) != prepare_job:
+            raise AuditFinalizeError("preparation receipt prepare job disagrees")
+        if _integer(value["shards"], "preparation receipt shards", 1) != shards:
+            raise AuditFinalizeError("preparation receipt shard count disagrees")
+        paths = _exact_object(
+            value["paths"],
+            {"checkout", "run_root", "submission_manifest"},
+            "preparation receipt paths",
+        )
+        if _string(paths["run_root"], "preparation receipt run root") != str(run_root):
+            raise AuditFinalizeError("preparation receipt run root disagrees")
+        if value["build_features"] != [
+            "certificates",
+            "default",
+            "finite-symmetry",
+            "production-evidence",
+        ]:
+            raise AuditFinalizeError("preparation receipt build features disagree")
+        source = _exact_object(
+            value["source"],
+            {
+                "blob_count",
+                "blobs_sha256",
+                "tree",
+                "snapshot_manifest_sha256",
+                "build_execution_closure_sha256",
+            },
+            "preparation receipt source",
+        )
+        for receipt_field, provenance_field in (
+            ("blob_count", "source_blob_count"),
+            ("blobs_sha256", "source_blobs_sha256"),
+            ("tree", "source_tree"),
+        ):
+            if not _same_json(
+                source[receipt_field], provenance.get(provenance_field)
+            ):
+                raise AuditFinalizeError(
+                    "preparation receipt source disagrees with provenance"
+                )
+
+        artifacts = _exact_object(
+            value["artifacts"],
+            PREPARATION_ARTIFACT_NAMES,
+            "preparation receipt artifacts",
+        )
+        for name, raw_record in artifacts.items():
+            record = _exact_object(
+                raw_record, {"path", "sha256"}, f"preparation artifact {name}"
+            )
+            record_path = _string(
+                record["path"], f"preparation artifact {name} path"
+            )
+            record_sha256 = _hash(
+                record["sha256"], f"preparation artifact {name} SHA-256"
+            )
+            artifact = _open_artifact(
+                run_root / name, f"preparation artifact {name}", run_root
+            )
+            opened.append(artifact)
+            if record_path != str(artifact.path) or record_sha256 != artifact.sha256:
+                raise AuditFinalizeError(
+                    f"preparation artifact {name} path or SHA-256 disagrees"
+                )
+
+        for kind in ("full", "official"):
+            identity = current_inputs[kind]["parent_lock"]["identity"]
+            parent_record = artifacts[f"locks/{kind}-parent.json"]
+            parent_index = current_inputs[kind]["parent_lock"]
+            if (
+                parent_record["path"] != parent_index["path"]
+                or parent_record["sha256"] != parent_index["sha256"]
+            ):
+                raise AuditFinalizeError(
+                    f"preparation receipt {kind} parent lock hash disagrees"
+                )
+            if identity["repository_commit"] != provenance_revision:
+                raise AuditFinalizeError(
+                    f"{kind} parent repository commit disagrees with provenance revision"
+                )
+            taxonomy_record = artifacts[f"taxonomy/{kind}.jsonl"]
+            if (
+                taxonomy_record["path"] != identity["taxonomy_path"]
+                or taxonomy_record["sha256"] != identity["taxonomy_sha256"]
+            ):
+                raise AuditFinalizeError(
+                    f"preparation receipt {kind} taxonomy identity disagrees"
+                )
+            solver_config_record = artifacts["solver-config.json"]
+            if (
+                solver_config_record["path"] != identity["solver_config_path"]
+                or solver_config_record["sha256"] != identity["solver_config_sha256"]
+            ):
+                raise AuditFinalizeError(
+                    f"preparation receipt {kind} solver configuration disagrees"
+                )
+
+        corpus = _exact_object(
+            value["corpus"],
+            {"full_manifest", "official_manifest", "root"},
+            "preparation receipt corpus",
+        )
+        manifest_records: dict[str, dict[str, Any]] = {}
+        for kind in ("full", "official"):
+            record = _exact_object(
+                corpus[f"{kind}_manifest"],
+                {"path", "sha256"},
+                f"preparation corpus {kind} manifest",
+            )
+            record_path = _string(
+                record["path"], f"preparation corpus {kind} manifest path"
+            )
+            record_sha256 = _hash(
+                record["sha256"],
+                f"preparation corpus {kind} manifest SHA-256",
+            )
+            manifest = _open_external_artifact(
+                Path(record_path), f"preparation corpus {kind} manifest"
+            )
+            opened.append(manifest)
+            if record_path != str(manifest.path) or record_sha256 != manifest.sha256:
+                raise AuditFinalizeError(
+                    f"preparation corpus {kind} manifest path or hash disagrees"
+                )
+            identity = current_inputs[kind]["parent_lock"]["identity"]
+            if (
+                record["path"] != identity["manifest_path"]
+                or record["sha256"] != identity["manifest_sha256"]
+            ):
+                raise AuditFinalizeError(
+                    f"preparation corpus {kind} manifest identity disagrees"
+                )
+            manifest_records[kind] = record
+        if (
+            manifest_records["full"]["path"] == manifest_records["official"]["path"]
+            or manifest_records["full"]["sha256"]
+            == manifest_records["official"]["sha256"]
+        ):
+            raise AuditFinalizeError(
+                "full and official preparation manifests must be distinct"
+            )
+        full_taxonomy = artifacts["taxonomy/full.jsonl"]
+        official_taxonomy = artifacts["taxonomy/official.jsonl"]
+        if (
+            full_taxonomy["path"] == official_taxonomy["path"]
+            or full_taxonomy["sha256"] == official_taxonomy["sha256"]
+        ):
+            raise AuditFinalizeError(
+                "full and official preparation taxonomies must be distinct"
+            )
+        return value, opened
+    except BaseException:
+        for artifact in opened:
+            os.close(artifact.descriptor)
+        raise
+
+
+def _scheduler_payload(
+    provenance: dict[str, Any],
+    run_root: Path,
+    prepare_job: int,
+    audit_job: int,
+    shards: int,
+    preparation_receipt_path: Path,
+    preparation_receipt_sha256: str,
+    validated_analyses: dict[str, dict[str, Any]],
+    current_inputs: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema": "euf-viper.locked-p0-audit-scheduler.v1",
+        "status": "bound",
+        "run_root": str(run_root),
+        "revision": provenance["revision"],
+        "submission_manifest_sha256": provenance["manifest_sha256"],
+        "preparation_receipt": {
+            "path": str(preparation_receipt_path),
+            "sha256": preparation_receipt_sha256,
+        },
+        "jobs": {"prepare": prepare_job, "audit": audit_job},
+        "shards": shards,
+        "parent_locks": {
+            kind: {
+                "path": current_inputs[kind]["parent_lock"]["path"],
+                "file_sha256": current_inputs[kind]["parent_lock"]["sha256"],
+                "lock_sha256": current_inputs[kind]["parent_lock"]["lock_sha256"],
+            }
+            for kind in ("full", "official")
+        },
+        "analyses": {
+            kind: {
+                "path": str(run_root / "audit" / kind / "global.json"),
+                "sha256": validated_analyses[kind]["sha256"],
+                "process_exit": validated_analyses[kind]["process_exit"],
+            }
+            for kind in ("full", "official")
+        },
+    }
+
+
+def _verify_opened_artifacts(opened: list[BoundArtifact]) -> None:
+    for artifact in opened:
+        assert_descriptor_path_nofollow(
+            artifact.path, artifact.descriptor, artifact.context
+        )
+        current, metadata = read_open_descriptor(
+            artifact.descriptor, f"{artifact.context} final rehash"
+        )
+        if (
+            current != artifact.raw
+            or _metadata_identity(metadata) != _metadata_identity(artifact.metadata)
+        ):
+            raise StrictArtifactError(
+                f"{artifact.context} changed before receipt publication"
+            )
+
+
+def create_scheduler_receipt(
+    output: Path,
+    provenance: dict[str, Any],
+    run_root: Path,
+    prepare_job: int,
+    shards: int,
+    audit_job: int,
+    preparation_receipt_path: Path,
+    preparation_receipt_sha256: str,
+    validated_analyses: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    opened: list[BoundArtifact] = []
+    try:
+        run_root = run_root.resolve(strict=True)
+        _integer(prepare_job, "prepare job", 1)
+        _integer(audit_job, "audit job", 1)
+        _integer(shards, "shards", 1)
+        validated_analyses = _validated_analysis_bindings(validated_analyses)
+        analyses, current_inputs, audit_artifacts = _open_current_audit(
+            run_root, shards, validated_analyses
+        )
+        del analyses
+        opened.extend(audit_artifacts)
+        preparation, preparation_artifacts = _verify_preparation_receipt(
+            preparation_receipt_path,
+            preparation_receipt_sha256,
+            provenance,
+            run_root,
+            prepare_job,
+            shards,
+            current_inputs,
+        )
+        del preparation
+        opened.extend(preparation_artifacts)
+        receipt_path = (run_root / "prepare.json").resolve(strict=True)
+        payload = _scheduler_payload(
+            provenance,
+            run_root,
+            prepare_job,
+            audit_job,
+            shards,
+            receipt_path,
+            preparation_receipt_sha256,
+            validated_analyses,
+            current_inputs,
+        )
+        expected_output = run_root / "audit" / "scheduler.json"
+        if output.absolute() != expected_output:
+            raise AuditFinalizeError(
+                "scheduler receipt output is not the locked audit receipt path"
+            )
+        atomic_write_nofollow(
+            output,
+            canonical_json_bytes(payload),
+            "locked audit scheduler receipt",
+            immutable=True,
+            mode=0o400,
+            pre_publish=lambda: _verify_opened_artifacts(opened),
+        )
+        return payload
+    except AuditFinalizeError:
+        raise
+    except (KeyError, OSError, StrictArtifactError) as error:
+        raise AuditFinalizeError(str(error)) from error
+    finally:
+        for artifact in opened:
+            os.close(artifact.descriptor)
+
+
+def _verify_scheduler_receipt(
+    receipt_path: Path,
+    expected_sha256: str,
+    expected_payload: dict[str, Any],
+    run_root: Path,
+) -> BoundArtifact:
+    expected_path = run_root / "audit" / "scheduler.json"
+    if receipt_path.resolve(strict=True) != expected_path:
+        raise AuditFinalizeError("scheduler receipt path is not locked")
+    receipt = _open_artifact(expected_path, "audit scheduler receipt", run_root)
+    try:
+        digest = _hash(expected_sha256, "scheduler receipt expected SHA-256")
+        if receipt.sha256 != digest:
+            raise AuditFinalizeError(
+                "scheduler receipt SHA-256 differs from external binding"
+            )
+        value = _canonical_receipt_object(receipt, SCHEDULER_RECEIPT_KEYS)
+        if not _same_json(value, expected_payload):
+            raise AuditFinalizeError(
+                "scheduler receipt disagrees with current jobs, locks, or analyses"
+            )
+        if stat.S_IMODE(receipt.metadata.st_mode) != 0o400:
+            raise AuditFinalizeError("scheduler receipt mode is not 0400")
+        return receipt
+    except BaseException:
+        os.close(receipt.descriptor)
+        raise
 
 
 def validate_analysis_output(
@@ -946,30 +1708,55 @@ def finalize(
     prepare_job: int,
     shards: int,
     audit_job: int,
-    preparation_binding: dict[str, Any],
+    preparation_receipt_path: Path,
+    preparation_receipt_sha256: str,
+    scheduler_receipt_path: Path,
+    scheduler_receipt_sha256: str,
+    validated_analyses: dict[str, dict[str, Any]],
     *,
     pre_publish_hook: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     opened: list[BoundArtifact] = []
     try:
         run_root = run_root.resolve(strict=True)
+        _integer(prepare_job, "prepare job", 1)
+        _integer(audit_job, "audit job", 1)
         _integer(shards, "shards", 1)
-        analyses: dict[str, BoundAnalysis] = {}
-        for kind in ("full", "official"):
-            analysis = _open_analysis(
-                run_root / "audit" / kind / "global.json", kind, run_root
-            )
-            opened.append(analysis)
-            _validate_analysis_schema(analysis.value, kind, shards)
-            analyses[kind] = analysis
-
-        current_inputs: dict[str, dict[str, Any]] = {}
-        for kind, analysis in analyses.items():
-            binding, source_artifacts = _bind_current_inputs(
-                kind, analysis, run_root, shards
-            )
-            opened.extend(source_artifacts)
-            current_inputs[kind] = binding
+        validated_analyses = _validated_analysis_bindings(validated_analyses)
+        analyses, current_inputs, audit_artifacts = _open_current_audit(
+            run_root, shards, validated_analyses
+        )
+        opened.extend(audit_artifacts)
+        preparation, preparation_artifacts = _verify_preparation_receipt(
+            preparation_receipt_path,
+            preparation_receipt_sha256,
+            provenance,
+            run_root,
+            prepare_job,
+            shards,
+            current_inputs,
+        )
+        opened.extend(preparation_artifacts)
+        canonical_preparation_path = (run_root / "prepare.json").resolve(strict=True)
+        expected_scheduler = _scheduler_payload(
+            provenance,
+            run_root,
+            prepare_job,
+            audit_job,
+            shards,
+            canonical_preparation_path,
+            preparation_receipt_sha256,
+            validated_analyses,
+            current_inputs,
+        )
+        scheduler = _verify_scheduler_receipt(
+            scheduler_receipt_path,
+            scheduler_receipt_sha256,
+            expected_scheduler,
+            run_root,
+        )
+        opened.append(scheduler)
+        preparation_artifact = preparation_artifacts[0]
 
         payload: dict[str, Any] = {
             "schema": SCHEMA,
@@ -979,7 +1766,17 @@ def finalize(
             "environment": provenance["environment"],
             "job_id": audit_job,
             "prepare_job_id": prepare_job,
-            "preparation_receipt": preparation_binding,
+            "preparation_receipt": {
+                **_artifact_index(preparation_artifact),
+                "job_id": preparation["job"]["id"],
+                "revision": preparation["revision"],
+                "status": preparation["status"],
+            },
+            "scheduler_receipt": {
+                **_artifact_index(scheduler),
+                "job_id": audit_job,
+                "status": "bound",
+            },
             "revision": provenance["revision"],
             "run_root": str(run_root),
             "shards": shards,
@@ -1004,6 +1801,7 @@ def finalize(
                 "sha256": binding.sha256,
                 "shards": len(value["inputs"]["shards"]),
                 "status": value["status"],
+                "validated_process_exit": validated_analyses[kind]["process_exit"],
             }
 
         encoded = canonical_json_bytes(payload)
@@ -1061,11 +1859,29 @@ def main() -> int:
     parser.add_argument("--prepare-job", type=int)
     parser.add_argument("--shards", type=int, required=True)
     parser.add_argument("--audit-job", type=int)
-    parser.add_argument("--preparation-binding")
+    parser.add_argument("--preparation-receipt", type=Path)
+    parser.add_argument("--preparation-receipt-sha256")
+    parser.add_argument("--scheduler-receipt", type=Path)
+    parser.add_argument("--scheduler-receipt-sha256")
+    parser.add_argument("--full-analysis-sha256")
+    parser.add_argument("--full-analysis-exit", type=int, choices=(0, 1))
+    parser.add_argument("--official-analysis-sha256")
+    parser.add_argument("--official-analysis-exit", type=int, choices=(0, 1))
+    parser.add_argument("--write-scheduler-receipt", action="store_true")
     parser.add_argument("--validate-analysis", choices=("full", "official"))
     parser.add_argument("--expected-analysis-exit", type=int, choices=(0, 1))
     args = parser.parse_args()
     try:
+        analysis_options = {
+            "full": {
+                "sha256": args.full_analysis_sha256,
+                "process_exit": args.full_analysis_exit,
+            },
+            "official": {
+                "sha256": args.official_analysis_sha256,
+                "process_exit": args.official_analysis_exit,
+            },
+        }
         if args.validate_analysis is not None:
             if args.expected_analysis_exit is None:
                 parser.error(
@@ -1078,9 +1894,16 @@ def main() -> int:
                     args.provenance,
                     args.prepare_job,
                     args.audit_job,
-                    args.preparation_binding,
+                    args.preparation_receipt,
+                    args.preparation_receipt_sha256,
+                    args.scheduler_receipt,
+                    args.scheduler_receipt_sha256,
+                    args.full_analysis_sha256,
+                    args.full_analysis_exit,
+                    args.official_analysis_sha256,
+                    args.official_analysis_exit,
                 )
-            ):
+            ) or args.write_scheduler_receipt:
                 parser.error(
                     "analysis validation does not accept final publication options"
                 )
@@ -1089,6 +1912,45 @@ def main() -> int:
                 args.validate_analysis,
                 args.shards,
                 args.expected_analysis_exit,
+            )
+        elif args.write_scheduler_receipt:
+            if args.expected_analysis_exit is not None:
+                parser.error(
+                    "--expected-analysis-exit requires --validate-analysis"
+                )
+            required = {
+                "--out": args.out,
+                "--provenance": args.provenance,
+                "--prepare-job": args.prepare_job,
+                "--audit-job": args.audit_job,
+                "--preparation-receipt": args.preparation_receipt,
+                "--preparation-receipt-sha256": args.preparation_receipt_sha256,
+                "--full-analysis-sha256": args.full_analysis_sha256,
+                "--full-analysis-exit": args.full_analysis_exit,
+                "--official-analysis-sha256": args.official_analysis_sha256,
+                "--official-analysis-exit": args.official_analysis_exit,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                parser.error("scheduler receipt requires " + ", ".join(missing))
+            if args.scheduler_receipt is not None or args.scheduler_receipt_sha256 is not None:
+                parser.error("scheduler receipt creation cannot consume itself")
+            assert args.out is not None
+            assert args.provenance is not None
+            assert args.prepare_job is not None
+            assert args.audit_job is not None
+            assert args.preparation_receipt is not None
+            assert args.preparation_receipt_sha256 is not None
+            payload = create_scheduler_receipt(
+                args.out,
+                json.loads(args.provenance),
+                args.run_root,
+                args.prepare_job,
+                args.shards,
+                args.audit_job,
+                args.preparation_receipt,
+                args.preparation_receipt_sha256,
+                analysis_options,
             )
         else:
             if args.expected_analysis_exit is not None:
@@ -1100,7 +1962,14 @@ def main() -> int:
                 "--provenance": args.provenance,
                 "--prepare-job": args.prepare_job,
                 "--audit-job": args.audit_job,
-                "--preparation-binding": args.preparation_binding,
+                "--preparation-receipt": args.preparation_receipt,
+                "--preparation-receipt-sha256": args.preparation_receipt_sha256,
+                "--scheduler-receipt": args.scheduler_receipt,
+                "--scheduler-receipt-sha256": args.scheduler_receipt_sha256,
+                "--full-analysis-sha256": args.full_analysis_sha256,
+                "--full-analysis-exit": args.full_analysis_exit,
+                "--official-analysis-sha256": args.official_analysis_sha256,
+                "--official-analysis-exit": args.official_analysis_exit,
             }
             missing = [name for name, value in required.items() if value is None]
             if missing:
@@ -1109,7 +1978,10 @@ def main() -> int:
             assert args.provenance is not None
             assert args.prepare_job is not None
             assert args.audit_job is not None
-            assert args.preparation_binding is not None
+            assert args.preparation_receipt is not None
+            assert args.preparation_receipt_sha256 is not None
+            assert args.scheduler_receipt is not None
+            assert args.scheduler_receipt_sha256 is not None
             payload = finalize(
                 args.out,
                 json.loads(args.provenance),
@@ -1117,7 +1989,11 @@ def main() -> int:
                 args.prepare_job,
                 args.shards,
                 args.audit_job,
-                json.loads(args.preparation_binding),
+                args.preparation_receipt,
+                args.preparation_receipt_sha256,
+                args.scheduler_receipt,
+                args.scheduler_receipt_sha256,
+                analysis_options,
             )
     except (AuditFinalizeError, json.JSONDecodeError, OSError, ValueError) as error:
         print(f"locked audit finalization rejected: {error}", file=sys.stderr)
