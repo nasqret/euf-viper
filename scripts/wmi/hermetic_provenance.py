@@ -656,6 +656,89 @@ def require_exact_keys(value: dict[str, Any], expected: set[str], label: str) ->
         )
 
 
+def verify_preparation_environment_compatibility(
+    preparation_environment: Any,
+    provenance: Any,
+    *,
+    prepare_job: int,
+    shards: int,
+    receipt_sha256: str,
+) -> None:
+    """Verify a prepare-stage receipt against one shard or audit-stage binding."""
+
+    if type(prepare_job) is not int or prepare_job < 1:
+        raise ProvenanceError("preparation job binding must be a positive integer")
+    if type(shards) is not int or shards < 1:
+        raise ProvenanceError("preparation shard binding must be a positive integer")
+    if type(receipt_sha256) is not str or not HEX64.fullmatch(receipt_sha256):
+        raise ProvenanceError("preparation receipt SHA-256 binding is malformed")
+    if type(provenance) is not dict:
+        raise ProvenanceError("current provenance must be an object")
+    stage = provenance.get("stage")
+    if stage not in {"shard", "audit"}:
+        raise ProvenanceError(
+            "preparation receipts may only be consumed at shard or audit stage"
+        )
+    current_environment = provenance.get("environment")
+    if type(current_environment) is not dict or any(
+        type(name) is not str or type(value) is not str
+        for name, value in current_environment.items()
+    ):
+        raise ProvenanceError("current provenance environment must bind strings")
+    if type(preparation_environment) is not dict or any(
+        type(name) is not str or type(value) is not str
+        for name, value in preparation_environment.items()
+    ):
+        raise ProvenanceError("preparation receipt environment must bind strings")
+    parameters = provenance.get("parameters")
+    if type(parameters) is not dict:
+        raise ProvenanceError("current provenance parameters must be an object")
+    require_exact_keys(parameters, set(REQUIRED_PARAMETERS), "current parameters")
+    if any(type(value) is not str or not value for value in parameters.values()):
+        raise ProvenanceError("current provenance parameters must bind strings")
+
+    require_exact_keys(
+        preparation_environment,
+        set(COMMON_EUF_ENV | STAGE_EUF_ENV["prepare"]),
+        "preparation receipt environment",
+    )
+    require_exact_keys(
+        current_environment,
+        set(COMMON_EUF_ENV | STAGE_EUF_ENV[stage]),
+        f"{stage} provenance environment",
+    )
+    for name in sorted(COMMON_EUF_ENV):
+        if preparation_environment[name] != current_environment[name]:
+            raise ProvenanceError(
+                f"preparation and {stage} common environment binding {name} differs"
+            )
+
+    shard_text = str(shards)
+    if parameters["shards"] != shard_text:
+        raise ProvenanceError("provenance shard parameter disagrees with receipt")
+    if preparation_environment["EUF_VIPER_LOCKED_SHARDS"] != shard_text:
+        raise ProvenanceError("prepare-stage shard binding disagrees with receipt")
+    if (
+        preparation_environment["EUF_VIPER_SHARED_CORPUS"]
+        != parameters["shared_corpus"]
+    ):
+        raise ProvenanceError(
+            "prepare-stage shared corpus disagrees with provenance parameter"
+        )
+    if current_environment["EUF_VIPER_PREPARE_JOB_ID"] != str(prepare_job):
+        raise ProvenanceError(f"{stage}-stage prepare job binding disagrees")
+    if (
+        current_environment["EUF_VIPER_PREPARE_RECEIPT_SHA256"]
+        != receipt_sha256
+    ):
+        raise ProvenanceError(f"{stage}-stage preparation receipt hash disagrees")
+    if stage == "audit":
+        if current_environment["EUF_VIPER_LOCKED_SHARDS"] != shard_text:
+            raise ProvenanceError("audit-stage shard binding disagrees with receipt")
+    elif current_environment["EUF_VIPER_CORPUS_KIND"] not in {"full", "official"}:
+        raise ProvenanceError("shard-stage corpus kind must be full or official")
+
+
 def verify_manifest(args: argparse.Namespace) -> dict[str, Any]:
     if not HEX64.fullmatch(args.expected_sha256):
         raise ProvenanceError("expected manifest SHA-256 is malformed")
@@ -815,7 +898,6 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         "attempt": provenance["attempt"],
         "revision": provenance["revision"],
         "submission_manifest_sha256": provenance["manifest_sha256"],
-        "environment": provenance["environment"],
         "execution_environment": provenance["execution_environment"],
         "runtime_tools": provenance["runtime_tools"],
     }
@@ -838,8 +920,15 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
     require_exact_keys(value["job"], {"id", "submit_directory"}, "preparation job")
     if value["job"]["id"] != args.prepare_job:
         raise ProvenanceError("preparation receipt job mismatch")
-    if value["shards"] != int(provenance["parameters"]["shards"]):
-        raise ProvenanceError("preparation receipt shard count mismatch")
+    if type(value["shards"]) is not int or value["shards"] < 1:
+        raise ProvenanceError("preparation receipt shard count is invalid")
+    verify_preparation_environment_compatibility(
+        value["environment"],
+        provenance,
+        prepare_job=args.prepare_job,
+        shards=value["shards"],
+        receipt_sha256=args.expected_sha256,
+    )
     if value["build_features"] != [
         "certificates",
         "default",

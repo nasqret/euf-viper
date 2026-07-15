@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -94,15 +97,22 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertNotIn("--preparation-binding", text)
         self.assertIn("ubuntu-24.04", WORKFLOW.read_text(encoding="ascii"))
 
-    def test_release_smoke_corpus_views_have_distinct_real_identities(self) -> None:
+    def test_release_smoke_corpus_views_are_distinct_valid_two_shard_inputs(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            sources = [root / "sat-0.smt2", root / "sat-1.smt2"]
+            sources = [
+                root / "sat-shared.smt2",
+                root / "sat-full.smt2",
+                root / "sat-official.smt2",
+            ]
             for index, source in enumerate(sources):
                 source.write_text(
                     f"(set-logic QF_UF)\n; instance {index}\n(check-sat)\n",
                     encoding="ascii",
                 )
+            views = SMOKE_MODULE.release_smoke_corpus_views(*sources)
             paths = {
                 kind: {
                     name: root / name / f"{kind}.{suffix}"
@@ -114,20 +124,14 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                 }
                 for kind in ("full", "official")
             }
-            SMOKE_MODULE.write_corpus_view(
-                "full",
-                sources,
-                paths["full"]["manifest"],
-                paths["full"]["taxonomy"],
-                paths["full"]["split"],
-            )
-            SMOKE_MODULE.write_corpus_view(
-                "official",
-                sources[:1],
-                paths["official"]["manifest"],
-                paths["official"]["taxonomy"],
-                paths["official"]["split"],
-            )
+            for kind in ("full", "official"):
+                SMOKE_MODULE.write_corpus_view(
+                    kind,
+                    views[kind],
+                    paths[kind]["manifest"],
+                    paths[kind]["taxonomy"],
+                    paths[kind]["split"],
+                )
             self.assertNotEqual(
                 SMOKE_MODULE.sha256(paths["full"]["manifest"]),
                 SMOKE_MODULE.sha256(paths["official"]["manifest"]),
@@ -143,12 +147,71 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                 encoding="ascii"
             ).splitlines()
             self.assertEqual(len(full_records), 2)
-            self.assertEqual(len(official_records), 1)
+            self.assertEqual(len(official_records), 2)
             split = json.loads(paths["official"]["split"].read_bytes())
             self.assertEqual(
                 split["manifest_sha256"],
                 SMOKE_MODULE.sha256(paths["official"]["manifest"]),
             )
+
+            for kind in ("full", "official"):
+                parent = {
+                    "schema_version": 1,
+                    "campaign_id": f"release-smoke-{kind}",
+                    "lock_sha256": "",
+                    "created_from_commit_time": "fixture",
+                    "promotion_eligible": False,
+                    "spec": {},
+                    "repository": {},
+                    "host": {},
+                    "corpus": {
+                        "instances": [
+                            {
+                                "id": str(index),
+                                "relative_path": source.name,
+                            }
+                            for index, source in enumerate(views[kind])
+                        ]
+                    },
+                    "solver_config": {},
+                    "solver_release_lock": {},
+                    "solvers": [],
+                    "budgets_s": [2.0],
+                    "execution": {},
+                    "output": {"directory": str(root / f"{kind}-results")},
+                }
+                parent["lock_sha256"] = hashlib.sha256(
+                    SMOKE_MODULE.canonical(parent)
+                ).hexdigest()
+                parent_path = root / f"{kind}-parent.json"
+                parent_path.write_bytes(SMOKE_MODULE.canonical(parent))
+                shard_root = root / f"{kind}-shards"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-B",
+                        str(ROOT / "scripts/bench/shard_campaign_lock.py"),
+                        str(parent_path),
+                        "--count",
+                        "2",
+                        "--out-dir",
+                        str(shard_root),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                shards = sorted(shard_root.glob("lock-*.json"))
+                self.assertEqual(len(shards), 2)
+                self.assertEqual(
+                    [
+                        len(json.loads(path.read_bytes())["corpus"]["instances"])
+                        for path in shards
+                    ],
+                    [1, 1],
+                )
 
     def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")

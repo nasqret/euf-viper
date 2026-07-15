@@ -107,7 +107,12 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         )
 
     def verification_environment(
-        self, args: argparse.Namespace, summary: dict[str, object], stage: str
+        self,
+        args: argparse.Namespace,
+        summary: dict[str, object],
+        stage: str,
+        *,
+        receipt_sha256: str = "f" * 64,
     ) -> dict[str, str]:
         tools = summary["runtime_tools"]
         assert isinstance(tools, dict)
@@ -139,12 +144,12 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                 "shard": {
                     "EUF_VIPER_CORPUS_KIND": "full",
                     "EUF_VIPER_PREPARE_JOB_ID": "123",
-                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": receipt_sha256,
                 },
                 "audit": {
                     "EUF_VIPER_LOCKED_SHARDS": "4",
                     "EUF_VIPER_PREPARE_JOB_ID": "123",
-                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": receipt_sha256,
                 },
             }[stage]
         )
@@ -297,6 +302,122 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             PROVENANCE.audit_environment(
                 "prepare", {key: value for key, value in allowed.items() if key != "EUF_VIPER_PYTHON"}
             )
+
+    def test_preparation_environment_compatibility_is_stage_aware_and_exact(
+        self,
+    ) -> None:
+        common = {
+            name: f"bound-{index}"
+            for index, name in enumerate(sorted(PROVENANCE.COMMON_EUF_ENV))
+        }
+        parameters = {"shared_corpus": "/srv/corpus", "shards": "4"}
+        preparation = {
+            **common,
+            "EUF_VIPER_LOCKED_SHARDS": "4",
+            "EUF_VIPER_SHARED_CORPUS": parameters["shared_corpus"],
+        }
+
+        def current(stage: str) -> dict[str, object]:
+            stage_environment = {
+                "audit": {
+                    "EUF_VIPER_LOCKED_SHARDS": "4",
+                    "EUF_VIPER_PREPARE_JOB_ID": "123",
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
+                },
+                "shard": {
+                    "EUF_VIPER_CORPUS_KIND": "official",
+                    "EUF_VIPER_PREPARE_JOB_ID": "123",
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
+                },
+            }[stage]
+            return {
+                "environment": {**common, **stage_environment},
+                "parameters": dict(parameters),
+                "stage": stage,
+            }
+
+        for stage in ("shard", "audit"):
+            with self.subTest(accepted_stage=stage):
+                PROVENANCE.verify_preparation_environment_compatibility(
+                    preparation,
+                    current(stage),
+                    prepare_job=123,
+                    shards=4,
+                    receipt_sha256="f" * 64,
+                )
+
+        cases = (
+            (
+                "prepare-extra-key",
+                {**preparation, "EUF_VIPER_PREPARE_JOB_ID": "123"},
+                current("audit"),
+                "preparation receipt environment keys differ",
+            ),
+            (
+                "common-binding",
+                preparation,
+                {
+                    **current("audit"),
+                    "environment": {
+                        **current("audit")["environment"],
+                        "EUF_VIPER_EXPECTED_REVISION": "changed",
+                    },
+                },
+                "common environment binding EUF_VIPER_EXPECTED_REVISION differs",
+            ),
+            (
+                "shared-corpus",
+                {**preparation, "EUF_VIPER_SHARED_CORPUS": "/other"},
+                current("audit"),
+                "shared corpus disagrees",
+            ),
+            (
+                "prepare-job",
+                preparation,
+                {
+                    **current("audit"),
+                    "environment": {
+                        **current("audit")["environment"],
+                        "EUF_VIPER_PREPARE_JOB_ID": "124",
+                    },
+                },
+                "prepare job binding disagrees",
+            ),
+            (
+                "receipt-hash",
+                preparation,
+                {
+                    **current("audit"),
+                    "environment": {
+                        **current("audit")["environment"],
+                        "EUF_VIPER_PREPARE_RECEIPT_SHA256": "e" * 64,
+                    },
+                },
+                "preparation receipt hash disagrees",
+            ),
+            (
+                "shard-kind",
+                preparation,
+                {
+                    **current("shard"),
+                    "environment": {
+                        **current("shard")["environment"],
+                        "EUF_VIPER_CORPUS_KIND": "development",
+                    },
+                },
+                "corpus kind must be full or official",
+            ),
+        )
+        for name, receipt_environment, provenance, diagnostic in cases:
+            with self.subTest(rejected_binding=name):
+                with self.assertRaisesRegex(PROVENANCE.ProvenanceError, diagnostic):
+                    PROVENANCE.verify_preparation_environment_compatibility(
+                        receipt_environment,
+                        provenance,
+                        prepare_job=123,
+                        shards=4,
+                        receipt_sha256="f" * 64,
+                    )
 
     def test_submitter_is_attempt_scoped_and_exports_only_receipt_bindings(self) -> None:
         prepare_text = (ROOT / "scripts" / "wmi" / "submit_locked_p0.sh").read_text(
@@ -693,10 +814,34 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         receipt_args = argparse.Namespace(
             receipt=receipt,
             expected_sha256=receipt_sha256,
-            provenance=json.dumps(provenance, sort_keys=True, separators=(",", ":")),
+            provenance="",
             run_root=run_root,
             prepare_job=123,
         )
+
+        def bind_receipt(digest: str, stage: str = "audit") -> None:
+            current_args = argparse.Namespace(
+                manifest=args.out,
+                expected_sha256=summary["manifest_sha256"],
+                stage=stage,
+            )
+            current_environment = self.verification_environment(
+                args,
+                summary,
+                stage,
+                receipt_sha256=digest,
+            )
+            with mock.patch.dict(os.environ, current_environment, clear=True):
+                current = PROVENANCE.verify_manifest(current_args)
+            receipt_args.expected_sha256 = digest
+            receipt_args.provenance = json.dumps(
+                current, sort_keys=True, separators=(",", ":")
+            )
+
+        bind_receipt(receipt_sha256, "shard")
+        accepted = PROVENANCE.verify_preparation_receipt(receipt_args)
+        self.assertEqual(accepted["status"], "accepted")
+        bind_receipt(receipt_sha256, "audit")
         receipt_args.expected_sha256 = "0" * 64
         with self.assertRaisesRegex(
             PROVENANCE.ProvenanceError, "differs from external binding"
@@ -716,7 +861,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             sealed_receipt.read_bytes()
         ).hexdigest()
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
-        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        bind_receipt(hashlib.sha256(receipt.read_bytes()).hexdigest())
         with self.assertRaisesRegex(
             PROVENANCE.ProvenanceError, "receipt binding mismatch"
         ):
@@ -726,7 +871,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             original_sealed_receipt
         ).hexdigest()
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
-        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        bind_receipt(hashlib.sha256(receipt.read_bytes()).hexdigest())
 
         original_artifact = run_root / "taxonomy/full.jsonl"
         original_artifact.write_text("tampered\n", encoding="ascii")
@@ -736,26 +881,26 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         original_artifact.write_text("taxonomy/full.jsonl\n", encoding="ascii")
         original_receipt = receipt.read_bytes()
         receipt.write_bytes(b'{"schema":1,"schema":2}\n')
-        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        bind_receipt(hashlib.sha256(receipt.read_bytes()).hexdigest())
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "duplicate JSON key"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         receipt.write_bytes(original_receipt)
-        receipt_args.expected_sha256 = receipt_sha256
+        bind_receipt(receipt_sha256)
 
         payload["build_features"].append("production-evidence")
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
-        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        bind_receipt(hashlib.sha256(receipt.read_bytes()).hexdigest())
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "exact locked evidence features"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         payload["build_features"].pop()
 
         payload["attempt"] = {**payload["attempt"], "id": "f" * 32}
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
-        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        bind_receipt(hashlib.sha256(receipt.read_bytes()).hexdigest())
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "attempt mismatch"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         receipt.write_bytes(original_receipt)
-        receipt_args.expected_sha256 = receipt_sha256
+        bind_receipt(receipt_sha256)
 
         link = run_root / "prepare-link.json"
         link.symlink_to(receipt)

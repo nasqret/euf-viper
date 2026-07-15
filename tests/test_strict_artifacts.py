@@ -107,6 +107,32 @@ class StrictArtifactPublicationTests(unittest.TestCase):
         self.assertFalse(output.exists())
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
 
+    def test_post_publish_callback_failure_rolls_back_new_inode(self) -> None:
+        output = self.root / "evidence.json"
+        callbacks: list[str] = []
+
+        def before() -> None:
+            callbacks.append("before")
+
+        def after() -> None:
+            callbacks.append("after")
+            raise STRICT.StrictArtifactError("injected post-publication failure")
+
+        with self.assertRaisesRegex(
+            STRICT.StrictArtifactError, "injected post-publication failure"
+        ):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "post-publication callback",
+                immutable=True,
+                pre_publish=before,
+                post_publish=after,
+            )
+        self.assertEqual(callbacks, ["before", "after"])
+        self.assertFalse(output.exists())
+        self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
     def test_concurrent_immutable_publish_has_one_inode_winner(self) -> None:
         output = self.root / "evidence.json"
         barrier = threading.Barrier(2)

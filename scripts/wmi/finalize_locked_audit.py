@@ -17,8 +17,11 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[2]
 CERT_DIR = ROOT / "scripts" / "cert"
+WMI_DIR = ROOT / "scripts" / "wmi"
 if str(CERT_DIR) not in sys.path:
     sys.path.insert(0, str(CERT_DIR))
+if str(WMI_DIR) not in sys.path:
+    sys.path.insert(0, str(WMI_DIR))
 
 from strict_artifacts import (  # noqa: E402
     StrictArtifactError,
@@ -28,6 +31,10 @@ from strict_artifacts import (  # noqa: E402
     open_read_nofollow,
     read_open_descriptor,
     strict_json_loads,
+)
+from hermetic_provenance import (  # noqa: E402
+    ProvenanceError,
+    verify_preparation_environment_compatibility,
 )
 
 
@@ -543,13 +550,13 @@ def _canonical_analysis_bytes(value: Any) -> bytes:
         rendered = json.dumps(
             value,
             allow_nan=False,
-            ensure_ascii=True,
+            ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         )
     except (TypeError, ValueError) as error:
         raise AuditFinalizeError(f"cannot canonicalize analysis binding: {error}") from error
-    return (rendered + "\n").encode("ascii")
+    return (rendered + "\n").encode("utf-8")
 
 
 def _open_artifact(path: Path, context: str, run_root: Path) -> BoundArtifact:
@@ -576,7 +583,7 @@ def _open_analysis(path: Path, kind: str, run_root: Path) -> BoundAnalysis:
     try:
         try:
             value = strict_json_loads(
-                artifact.raw.decode("ascii"), f"{kind} global analysis"
+                artifact.raw.decode("utf-8"), f"{kind} global analysis"
             )
         except (UnicodeError, StrictArtifactError) as error:
             raise AuditFinalizeError(str(error)) from error
@@ -841,7 +848,7 @@ def _validate_analysis_schema(
 
 def _lock_sha256(artifact: BoundArtifact) -> str:
     try:
-        value = strict_json_loads(artifact.raw.decode("ascii"), artifact.context)
+        value = strict_json_loads(artifact.raw.decode("utf-8"), artifact.context)
     except (UnicodeError, StrictArtifactError) as error:
         raise AuditFinalizeError(str(error)) from error
     if type(value) is not dict:
@@ -857,7 +864,7 @@ def _lock_sha256(artifact: BoundArtifact) -> str:
 
 def _parse_parent_lock(artifact: BoundArtifact) -> dict[str, Any]:
     try:
-        value = strict_json_loads(artifact.raw.decode("ascii"), artifact.context)
+        value = strict_json_loads(artifact.raw.decode("utf-8"), artifact.context)
     except (UnicodeError, StrictArtifactError) as error:
         raise AuditFinalizeError(str(error)) from error
     parent = _exact_object(value, PARENT_LOCK_KEYS, artifact.context)
@@ -1208,7 +1215,7 @@ def _canonical_receipt_object(
     artifact: BoundArtifact, expected_keys: set[str]
 ) -> dict[str, Any]:
     try:
-        value = strict_json_loads(artifact.raw.decode("ascii"), artifact.context)
+        value = strict_json_loads(artifact.raw.decode("utf-8"), artifact.context)
     except (UnicodeError, StrictArtifactError) as error:
         raise AuditFinalizeError(str(error)) from error
     result = _exact_object(value, expected_keys, artifact.context)
@@ -1330,7 +1337,6 @@ def _verify_preparation_receipt(
             )
         for field in (
             "attempt",
-            "environment",
             "execution_environment",
             "runtime_tools",
         ):
@@ -1343,6 +1349,16 @@ def _verify_preparation_receipt(
             raise AuditFinalizeError("preparation receipt prepare job disagrees")
         if _integer(value["shards"], "preparation receipt shards", 1) != shards:
             raise AuditFinalizeError("preparation receipt shard count disagrees")
+        try:
+            verify_preparation_environment_compatibility(
+                value["environment"],
+                provenance,
+                prepare_job=prepare_job,
+                shards=shards,
+                receipt_sha256=expected_receipt_sha256,
+            )
+        except ProvenanceError as error:
+            raise AuditFinalizeError(str(error)) from error
         paths = _exact_object(
             value["paths"],
             {"checkout", "run_root", "submission_manifest"},
@@ -1606,13 +1622,18 @@ def create_scheduler_receipt(
             raise AuditFinalizeError(
                 "scheduler receipt output is not the locked audit receipt path"
             )
+
+        def verify_sources() -> None:
+            _verify_opened_artifacts(opened)
+
         atomic_write_nofollow(
             output,
             canonical_json_bytes(payload),
             "locked audit scheduler receipt",
             immutable=True,
             mode=0o400,
-            pre_publish=lambda: _verify_opened_artifacts(opened),
+            pre_publish=verify_sources,
+            post_publish=verify_sources,
         )
         return payload
     except AuditFinalizeError:
@@ -1832,6 +1853,7 @@ def finalize(
             immutable=True,
             mode=0o400,
             pre_publish=verify_sources,
+            post_publish=verify_sources,
         )
         _, index_fd = open_read_nofollow(output, "locked audit index")
         try:

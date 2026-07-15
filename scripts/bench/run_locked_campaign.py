@@ -2294,6 +2294,7 @@ def atomic_write_immutable(
             f"final output {path}",
             immutable=True,
             pre_publish=pre_publish,
+            post_publish=pre_publish,
         )
     except StrictArtifactError as error:
         raise CampaignError(str(error)) from error

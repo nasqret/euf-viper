@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -91,6 +92,15 @@ def write_corpus_view(
             }
         )
     )
+
+
+def release_smoke_corpus_views(
+    shared: Path, full_only: Path, official_only: Path
+) -> dict[str, list[Path]]:
+    return {
+        "full": [shared, full_only],
+        "official": [shared, official_only],
+    }
 
 
 def run(
@@ -474,16 +484,28 @@ def main() -> int:
 
         corpus = root / "corpus"
         instance = corpus / "family" / "sat-0.smt2"
-        second_instance = corpus / "family" / "sat-1.smt2"
+        full_only_instance = corpus / "family" / "sat-full.smt2"
+        official_only_instance = corpus / "family" / "sat-official.smt2"
         instance.parent.mkdir(parents=True)
         instance.write_bytes(sat_source.read_bytes())
-        second_instance.write_text(
+        full_only_instance.write_text(
             "(set-logic QF_UF)\n"
             "(set-info :status sat)\n"
             "(declare-fun q () Bool)\n"
             "(assert q)\n"
             "(check-sat)\n",
             encoding="ascii",
+        )
+        official_only_instance.write_text(
+            "(set-logic QF_UF)\n"
+            "(set-info :status sat)\n"
+            "(declare-fun r () Bool)\n"
+            "(assert r)\n"
+            "(check-sat)\n",
+            encoding="ascii",
+        )
+        corpus_views = release_smoke_corpus_views(
+            instance, full_only_instance, official_only_instance
         )
         manifests = {
             kind: run_root / "manifests" / f"{kind}.jsonl"
@@ -497,20 +519,14 @@ def main() -> int:
             kind: run_root / "taxonomy" / f"{kind}-split.json"
             for kind in ("full", "official")
         }
-        write_corpus_view(
-            "full",
-            [instance, second_instance],
-            manifests["full"],
-            taxonomies["full"],
-            taxonomy_splits["full"],
-        )
-        write_corpus_view(
-            "official",
-            [instance],
-            manifests["official"],
-            taxonomies["official"],
-            taxonomy_splits["official"],
-        )
+        for kind in ("full", "official"):
+            write_corpus_view(
+                kind,
+                corpus_views[kind],
+                manifests[kind],
+                taxonomies[kind],
+                taxonomy_splits[kind],
+            )
         if (
             manifests["full"] == manifests["official"]
             or sha256(manifests["full"]) == sha256(manifests["official"])
@@ -615,7 +631,7 @@ def main() -> int:
                 allowed={0, 1},
             )
             report_payload = json.loads(analysis.read_bytes())
-            expected_instances = 2 if kind == "full" else 1
+            expected_instances = 2
             if (
                 report_payload.get("inputs", {}).get("instances")
                 != expected_instances
@@ -676,20 +692,42 @@ def main() -> int:
             source_snapshot.get("files"), list
         ):
             raise SystemExit("sealed build source snapshot is malformed")
+        sha256sum = shutil.which("sha256sum")
+        if sha256sum is None:
+            raise SystemExit("release smoke requires sha256sum")
+        manifest_path = args.sealed_build_manifest.resolve(strict=True)
+        manifest_sha256 = sha256(manifest_path)
+        attempt_id = "c" * 32
+        common_environment = {
+            "EUF_VIPER_ATTEMPT_ID": attempt_id,
+            "EUF_VIPER_ATTEMPT_ROOT": str(root.resolve(strict=True)),
+            "EUF_VIPER_CHECKOUT": str(repository),
+            "EUF_VIPER_EXPECTED_REVISION": sealed_build["revision"],
+            "EUF_VIPER_PYTHON": str(python),
+            "EUF_VIPER_PYTHON_SHA256": sha256(python),
+            "EUF_VIPER_PROVENANCE_HELPER_SHA256": sha256(
+                repository / "scripts/wmi/hermetic_provenance.py"
+            ),
+            "EUF_VIPER_SHA256SUM": str(Path(sha256sum).resolve(strict=True)),
+            "EUF_VIPER_SUBMISSION_MANIFEST": str(manifest_path),
+            "EUF_VIPER_SUBMISSION_MANIFEST_SHA256": manifest_sha256,
+        }
         provenance = {
             "attempt": {
                 "checkout": str(repository),
-                "id": "linux-release-smoke",
-            },
-            "environment": {
-                "kind": "hosted-linux-ci",
-                "platform": sys.platform,
+                "id": attempt_id,
+                "root": str(root.resolve(strict=True)),
             },
             "execution_environment": {
                 name: os.environ.get(name, "")
                 for name in ("HOME", "PATH", "RUNNER_OS", "RUNNER_ARCH")
             },
-            "manifest_sha256": sha256(args.sealed_build_manifest),
+            "manifest": str(manifest_path),
+            "manifest_sha256": manifest_sha256,
+            "parameters": {
+                "shared_corpus": str(corpus.resolve(strict=True)),
+                "shards": "2",
+            },
             "revision": sealed_build["revision"],
             "runtime_tools": {"python": executable_record(python)},
             "source_blob_count": len(source_snapshot["files"]),
@@ -697,6 +735,7 @@ def main() -> int:
                 canonical(source_snapshot["files"])
             ).hexdigest(),
             "source_tree": sealed_build["source_tree"],
+            "stage": "audit",
         }
         execution_closure = run_root / "execution-closure.json"
         execution_closure.write_bytes(
@@ -730,7 +769,13 @@ def main() -> int:
                 "official_manifest": artifact_record(manifests["official"]),
                 "root": str(corpus.resolve(strict=True)),
             },
-            "environment": provenance["environment"],
+            "environment": {
+                **common_environment,
+                "EUF_VIPER_LOCKED_SHARDS": "2",
+                "EUF_VIPER_SHARED_CORPUS": provenance["parameters"][
+                    "shared_corpus"
+                ],
+            },
             "execution_environment": provenance["execution_environment"],
             "feature_report": executable_record(feature_report),
             "hostname": os.uname().nodename,
@@ -738,9 +783,7 @@ def main() -> int:
             "paths": {
                 "checkout": str(repository),
                 "run_root": str(run_root.resolve(strict=True)),
-                "submission_manifest": str(
-                    args.sealed_build_manifest.resolve(strict=True)
-                ),
+                "submission_manifest": provenance["manifest"],
             },
             "revision": provenance["revision"],
             "runtime_tools": provenance["runtime_tools"],
@@ -781,6 +824,12 @@ def main() -> int:
         preparation_receipt.write_bytes(canonical(preparation))
         preparation_receipt.chmod(0o400)
         preparation_sha256 = sha256(preparation_receipt)
+        provenance["environment"] = {
+            **common_environment,
+            "EUF_VIPER_LOCKED_SHARDS": "2",
+            "EUF_VIPER_PREPARE_JOB_ID": "1",
+            "EUF_VIPER_PREPARE_RECEIPT_SHA256": preparation_sha256,
+        }
         analysis_binding_arguments: list[str | Path] = []
         for kind in ("full", "official"):
             analysis_binding_arguments.extend(

@@ -457,6 +457,7 @@ def atomic_write_nofollow(
     immutable: bool,
     mode: int = 0o600,
     pre_publish: Callable[[], None] | None = None,
+    post_publish: Callable[[], None] | None = None,
 ) -> Path:
     if mode < 0 or mode > 0o777:
         raise StrictArtifactError(f"{context}: publication mode is invalid")
@@ -490,6 +491,10 @@ def atomic_write_nofollow(
                 _, existing_bytes = read_regular_nofollow(absolute, context)
                 if existing_bytes != content:
                     raise StrictArtifactError(f"{context}: immutable artifact drift")
+                if pre_publish is not None:
+                    pre_publish()
+                if post_publish is not None:
+                    post_publish()
                 return absolute
 
         descriptor = os.open(temporary_name, flags, mode, dir_fd=parent_fd)
@@ -551,6 +556,11 @@ def atomic_write_nofollow(
             )
         finally:
             os.close(post_fd)
+        _require_same_regular_identity(
+            parent_fd, absolute.name, staging_metadata, context
+        )
+        if post_publish is not None:
+            post_publish()
         _require_same_regular_identity(
             parent_fd, absolute.name, staging_metadata, context
         )

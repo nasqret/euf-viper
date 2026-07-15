@@ -9,6 +9,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,86 @@ ANALYZER_FIXTURE_SPEC.loader.exec_module(ANALYZER_FIXTURE)
 
 def sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+COMMON_ENVIRONMENT_NAMES = (
+    "EUF_VIPER_ATTEMPT_ID",
+    "EUF_VIPER_ATTEMPT_ROOT",
+    "EUF_VIPER_CHECKOUT",
+    "EUF_VIPER_EXPECTED_REVISION",
+    "EUF_VIPER_PYTHON",
+    "EUF_VIPER_PYTHON_SHA256",
+    "EUF_VIPER_PROVENANCE_HELPER_SHA256",
+    "EUF_VIPER_SHA256SUM",
+    "EUF_VIPER_SUBMISSION_MANIFEST",
+    "EUF_VIPER_SUBMISSION_MANIFEST_SHA256",
+)
+
+
+def production_provenance(
+    root: Path, *, shards: int, receipt_sha256: str
+) -> dict[str, object]:
+    revision = "2" * 40
+    manifest_sha256 = "1" * 64
+    common_environment = {
+        "EUF_VIPER_ATTEMPT_ID": "a" * 32,
+        "EUF_VIPER_ATTEMPT_ROOT": str(root),
+        "EUF_VIPER_CHECKOUT": str(root),
+        "EUF_VIPER_EXPECTED_REVISION": revision,
+        "EUF_VIPER_PYTHON": sys.executable,
+        "EUF_VIPER_PYTHON_SHA256": "b" * 64,
+        "EUF_VIPER_PROVENANCE_HELPER_SHA256": "c" * 64,
+        "EUF_VIPER_SHA256SUM": "/usr/bin/sha256sum",
+        "EUF_VIPER_SUBMISSION_MANIFEST": str(root / "submission-manifest.json"),
+        "EUF_VIPER_SUBMISSION_MANIFEST_SHA256": manifest_sha256,
+    }
+    return {
+        "attempt": {
+            "checkout": str(root),
+            "id": "a" * 32,
+            "root": str(root),
+        },
+        "environment": {
+            **common_environment,
+            "EUF_VIPER_LOCKED_SHARDS": str(shards),
+            "EUF_VIPER_PREPARE_JOB_ID": "10",
+            "EUF_VIPER_PREPARE_RECEIPT_SHA256": receipt_sha256,
+        },
+        "execution_environment": {"scheduler": "test"},
+        "manifest": str(root / "submission-manifest.json"),
+        "manifest_sha256": manifest_sha256,
+        "parameters": {
+            "shared_corpus": str(root / "corpus"),
+            "shards": str(shards),
+        },
+        "revision": revision,
+        "runtime_tools": {"python": "test"},
+        "source_blob_count": 3,
+        "source_blobs_sha256": "4" * 64,
+        "source_tree": "5" * 40,
+        "stage": "audit",
+    }
+
+
+def preparation_environment(
+    provenance: dict[str, object], shards: int
+) -> dict[str, str]:
+    current = provenance["environment"]
+    parameters = provenance["parameters"]
+    assert isinstance(current, dict) and isinstance(parameters, dict)
+    return {
+        **{name: str(current[name]) for name in COMMON_ENVIRONMENT_NAMES},
+        "EUF_VIPER_LOCKED_SHARDS": str(shards),
+        "EUF_VIPER_SHARED_CORPUS": str(parameters["shared_corpus"]),
+    }
+
+
+def bind_preparation_receipt(
+    provenance: dict[str, object], receipt_sha256: str
+) -> dict[str, object]:
+    result = json.loads(json.dumps(provenance))
+    result["environment"]["EUF_VIPER_PREPARE_RECEIPT_SHA256"] = receipt_sha256
+    return result
 
 
 def lock_bytes(**fields: object) -> tuple[bytes, str]:
@@ -208,7 +289,7 @@ def render_generated_sharded_analysis(
     source_root = root / "generated" / kind
     source_root.mkdir(parents=True, exist_ok=True)
     source_parent, _, _ = ANALYZER_FIXTURE.write_locked_fixture(source_root)
-    parent_value = json.loads(source_parent.read_text(encoding="ascii"))
+    parent_value = json.loads(source_parent.read_text(encoding="utf-8"))
     manifest_path = root / "manifests" / f"{kind}.jsonl"
     taxonomy_path = root / "taxonomy" / f"{kind}.jsonl"
     taxonomy_split_path = root / "taxonomy" / f"{kind}-split.json"
@@ -340,7 +421,7 @@ def render_preparation_receipt(
             "production-evidence",
         ],
         "corpus": corpus,
-        "environment": provenance["environment"],
+        "environment": preparation_environment(provenance, shards),
         "execution_environment": provenance["execution_environment"],
         "feature_report": {},
         "hostname": "fixture-host",
@@ -348,7 +429,7 @@ def render_preparation_receipt(
         "paths": {
             "checkout": str(root),
             "run_root": str(root),
-            "submission_manifest": str(root / "submission-manifest.json"),
+            "submission_manifest": provenance["manifest"],
         },
         "revision": provenance["revision"],
         "runtime_tools": provenance["runtime_tools"],
@@ -388,23 +469,18 @@ class FinalizeLockedAuditTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
-        self.provenance = {
-            "attempt": "attempt-1",
-            "environment": {"kind": "test"},
-            "execution_environment": {"scheduler": "test"},
-            "manifest_sha256": "1" * 64,
-            "revision": "2" * 40,
-            "runtime_tools": {"python": "test"},
-            "source_blob_count": 3,
-            "source_blobs_sha256": "4" * 64,
-            "source_tree": "5" * 40,
-        }
+        self.provenance = production_provenance(
+            self.root, shards=1, receipt_sha256="0" * 64
+        )
         self.analyses = {
             kind: render_analysis(self.root, kind) for kind in ("full", "official")
         }
         self.output = self.root / "audit" / "index.json"
         self.preparation_receipt = render_preparation_receipt(
             self.root, self.provenance, prepare_job=10, shards=1
+        )
+        self.provenance = bind_preparation_receipt(
+            self.provenance, sha256(self.preparation_receipt.read_bytes())
         )
         self.scheduler_receipt = self.root / "audit" / "scheduler.json"
 
@@ -431,6 +507,9 @@ class FinalizeLockedAuditTests(unittest.TestCase):
         receipt_sha256 = preparation_sha256 or sha256(
             self.preparation_receipt.read_bytes()
         )
+        self.provenance = bind_preparation_receipt(
+            self.provenance, receipt_sha256
+        )
         FINALIZER.create_scheduler_receipt(
             self.scheduler_receipt,
             self.provenance,
@@ -453,6 +532,9 @@ class FinalizeLockedAuditTests(unittest.TestCase):
         preparation_sha256 = kwargs.pop(
             "preparation_receipt_sha256",
             sha256(self.preparation_receipt.read_bytes()),
+        )
+        self.provenance = bind_preparation_receipt(
+            self.provenance, preparation_sha256
         )
         scheduler_sha256 = kwargs.pop("scheduler_receipt_sha256", None)
         if write_scheduler:
@@ -826,9 +908,13 @@ class FinalizeLockedAuditTests(unittest.TestCase):
         for kind in ("full", "official"):
             self.assertEqual(payload["analyses"][kind]["validated_process_exit"], 1)
 
-    def test_two_shard_analyzer_to_finalizer_end_to_end(self) -> None:
+    def test_non_ascii_two_shard_analyzer_to_finalizer_end_to_end(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            run_root = Path(temporary).resolve()
+            run_root = (Path(temporary) / "zażółć").resolve()
+            run_root.mkdir()
+            provenance = production_provenance(
+                run_root, shards=2, receipt_sha256="0" * 64
+            )
             reports = {
                 kind: render_generated_sharded_analysis(run_root, kind)
                 for kind in ("full", "official")
@@ -848,13 +934,16 @@ class FinalizeLockedAuditTests(unittest.TestCase):
                     "process_exit": expected_exit,
                 }
             preparation_receipt = render_preparation_receipt(
-                run_root, self.provenance, prepare_job=10, shards=2
+                run_root, provenance, prepare_job=10, shards=2
             )
             preparation_sha256 = sha256(preparation_receipt.read_bytes())
+            provenance = bind_preparation_receipt(
+                provenance, preparation_sha256
+            )
             scheduler_receipt = run_root / "audit" / "scheduler.json"
             FINALIZER.create_scheduler_receipt(
                 scheduler_receipt,
-                self.provenance,
+                provenance,
                 run_root,
                 10,
                 2,
@@ -866,7 +955,7 @@ class FinalizeLockedAuditTests(unittest.TestCase):
             output = run_root / "audit" / "index.json"
             payload = FINALIZER.finalize(
                 output,
-                self.provenance,
+                provenance,
                 run_root,
                 10,
                 2,
@@ -877,6 +966,7 @@ class FinalizeLockedAuditTests(unittest.TestCase):
                 sha256(scheduler_receipt.read_bytes()),
                 bindings,
             )
+            self.assertIn("zażółć".encode(), scheduler_receipt.read_bytes())
             self.assertEqual(payload["shards"], 2)
             for kind in ("full", "official"):
                 identity = payload["analyses"][kind]["input_artifacts"][
@@ -917,18 +1007,24 @@ class FinalizeLockedAuditTests(unittest.TestCase):
                     FINALIZER.canonical_json_bytes(value)
                 )
                 self.preparation_receipt.chmod(0o400)
+                preparation_sha256 = sha256(
+                    self.preparation_receipt.read_bytes()
+                )
+                provenance = bind_preparation_receipt(
+                    self.provenance, preparation_sha256
+                )
                 with self.assertRaisesRegex(
                     FINALIZER.AuditFinalizeError, diagnostic
                 ):
                     FINALIZER.finalize(
                         self.output,
-                        self.provenance,
+                        provenance,
                         self.root,
                         10,
                         1,
                         11,
                         self.preparation_receipt,
-                        sha256(self.preparation_receipt.read_bytes()),
+                        preparation_sha256,
                         self.scheduler_receipt,
                         scheduler_sha256,
                         bindings,
@@ -940,11 +1036,15 @@ class FinalizeLockedAuditTests(unittest.TestCase):
         scheduler_sha256 = self.write_scheduler(bindings)
         receipt = json.loads(self.preparation_receipt.read_text(encoding="ascii"))
         receipt["revision"] = "d" * 40
+        receipt["environment"]["EUF_VIPER_EXPECTED_REVISION"] = "d" * 40
         self.preparation_receipt.chmod(0o600)
         self.preparation_receipt.write_bytes(FINALIZER.canonical_json_bytes(receipt))
         self.preparation_receipt.chmod(0o400)
         provenance = json.loads(json.dumps(self.provenance))
         provenance["revision"] = "d" * 40
+        provenance["environment"]["EUF_VIPER_EXPECTED_REVISION"] = "d" * 40
+        preparation_sha256 = sha256(self.preparation_receipt.read_bytes())
+        provenance = bind_preparation_receipt(provenance, preparation_sha256)
         with self.assertRaisesRegex(
             FINALIZER.AuditFinalizeError,
             "parent repository commit disagrees with provenance revision",
@@ -957,7 +1057,7 @@ class FinalizeLockedAuditTests(unittest.TestCase):
                 1,
                 11,
                 self.preparation_receipt,
-                sha256(self.preparation_receipt.read_bytes()),
+                preparation_sha256,
                 self.scheduler_receipt,
                 scheduler_sha256,
                 bindings,
@@ -1076,6 +1176,36 @@ class FinalizeLockedAuditTests(unittest.TestCase):
         ):
             self.finalize(pre_publish_hook=replace)
         self.assertFalse(self.output.exists())
+
+    def test_path_replacement_at_link_boundary_rolls_back_index(self) -> None:
+        bindings = self.current_bindings()
+        scheduler_sha256 = self.write_scheduler(bindings)
+        target = self.root / "audit" / "full" / "global.json"
+        strict_os = FINALIZER.atomic_write_nofollow.__globals__["os"]
+        real_link = strict_os.link
+        replaced = False
+
+        def replace_then_link(*args: object, **kwargs: object) -> None:
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                target.unlink()
+                target.write_bytes(b'{"replaced":true}\n')
+                target.chmod(0o400)
+            real_link(*args, **kwargs)
+
+        with mock.patch.object(strict_os, "link", side_effect=replace_then_link):
+            with self.assertRaisesRegex(
+                FINALIZER.AuditFinalizeError, "no longer names descriptor"
+            ):
+                self.finalize(
+                    validated_analyses=bindings,
+                    write_scheduler=False,
+                    scheduler_receipt_sha256=scheduler_sha256,
+                )
+        self.assertTrue(replaced)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(target.read_bytes(), b'{"replaced":true}\n')
 
     def test_in_place_analysis_mutation_before_publish_is_rejected(self) -> None:
         target = self.root / "audit" / "official" / "global.json"
