@@ -1,3 +1,4 @@
+mod bool_dag_projection;
 #[cfg(test)]
 mod bool_dag_telemetry;
 mod eq_abstraction;
@@ -6939,6 +6940,39 @@ fn stats_file(path: &str) -> Result<i32, String> {
     Ok(0)
 }
 
+fn project_bool_dag_file(path: &str) -> Result<i32, String> {
+    let input =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    // The diagnostic deliberately pins parser selection instead of consulting solve-path env vars.
+    let problem = parse_problem_with_scoped_let_mode(&input, ScopedLetMode::Auto)?;
+    if !problem.unsupported.is_empty() {
+        return Err(format!(
+            "T6 projection requires fully supported QF_UF input: {}",
+            problem.unsupported.join("; ")
+        ));
+    }
+    let bool_problem = problem
+        .bool_problem
+        .as_ref()
+        .ok_or_else(|| "T6 projection requires a Boolean source formula".to_owned())?;
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    match bool_dag_projection::project(bool_problem, &problem.arena) {
+        Ok(report) => {
+            report
+                .write_to(&mut output)
+                .map_err(|error| format!("failed to write T6 projection: {error}"))?;
+            Ok(0)
+        }
+        Err(failure) => {
+            failure
+                .write_to(&mut output)
+                .map_err(|error| format!("failed to write T6 abstention: {error}"))?;
+            Ok(3)
+        }
+    }
+}
+
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
     if path != "-" {
         return fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"));
@@ -7216,6 +7250,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
+  euf-viper project-bool-dag FILE
   euf-viper parse-check FILE|-
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -7231,6 +7266,7 @@ fn usage() -> &'static str {
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
+  euf-viper project-bool-dag FILE
   euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
@@ -7265,6 +7301,13 @@ fn run() -> Result<i32, String> {
         "stats" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             stats_file(file)
+        }
+        "project-bool-dag" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            if args.len() != 3 {
+                return Err("usage: euf-viper project-bool-dag FILE".to_owned());
+            }
+            project_bool_dag_file(file)
         }
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
