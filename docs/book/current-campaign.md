@@ -253,6 +253,19 @@ opportunity evidence, complete selector-cost accounting, timing separation, a
 lexically sound reference parser, and independent forest reconstruction before
 the track can be reopened.
 
+Repair `fa01e99` corrected lexical macro scope, median arithmetic, terminal
+four-forest reconstruction, and wall/CPU/RSS collection, and its retained local
+artifacts internally report three qualifying M3 sources. Independent review
+still rejects the result. Historical reuse records omit the prior candidate
+pools needed to reconstruct each selection; synthetic canary rows can pass on
+embedded certificate fields with nonexistent transcripts; repeat medians do not
+bind complete source identity; and a 9.17% off-arm materialization cost can
+create the entire `1.10x` speed gate while the combined two-arm overhead stays
+below 5%. Two successes plus one timeout also authorize `ready`, and the cited
+artifacts are ephemeral rather than repository-bound. The exact commit is not
+publishable and authorizes no hosted qualification, canary, full timing, or WMI
+action. A further isolated repair is active.
+
 ## Long-Timeout Graph
 
 Full and official 1,200-second timeout-only arrays were `145785` and `145787`.

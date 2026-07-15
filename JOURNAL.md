@@ -1496,6 +1496,16 @@
   non-finite JSON passes, regeneration is path-dependent, and the Rust/Slurm
   census still hardcodes v1 hard-10/8-of-10. Job `146075` remains historical
   development provenance only.
+- T7 repair `fa01e99` passed its local Rust/Python matrices and corrected macro
+  scope, median arithmetic, terminal forest reconstruction, and resource
+  collection. Independent review nevertheless demonstrated that doubled and
+  rehashed selector history passes, synthetic rows with nonexistent
+  transcripts self-attest certification, repeat medians admit source
+  substitution, and asymmetric materialization can manufacture the entire
+  `1.10x` gate. Two qualifying M3 controls plus one timeout also return ready,
+  and the cited evidence is ephemeral. Branch publication, hosted qualification,
+  canary, full timing, and WMI are NO-GO; the original worker is repairing all
+  six findings.
 
 ## Next Entry Template
 

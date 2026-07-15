@@ -1027,3 +1027,12 @@
   break the frozen contract, regeneration is checkout-path-dependent, and the
   exact Rust/Slurm consumer still requires manifest v1 hard-10 and 8-of-10.
   Old job `146075` cannot confirm the accepted population.
+- T7 repair `fa01e99` remains publication/canary/WMI NO-GO. Review demonstrated
+  self-attested unreconstructed selector history, synthetic certificate rows
+  with nonexistent transcripts, source substitution inside repeat medians,
+  arm-asymmetric instrumentation that manufactures a `1.10x` pass, readiness
+  with two successes plus one timeout, and ephemeral artifacts. Preserve the
+  verified lexical scope and terminal four-forest reconstruction, but require
+  source-bound reconstruction of all history/certificates, stable repeat
+  identity, per-arm fully inclusive overhead, all-three M3 success, durable
+  evidence, and another review.

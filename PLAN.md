@@ -638,7 +638,18 @@ Do not compose two candidates in P2. Attribution must remain exact.
     emitting a transcript. The initial opportunity gate is therefore NO-GO and
     no canary or WMI job was launched. Its analyzer, empty-report admission,
     overhead accounting, parser oracle, timing isolation, and forest-identity
-    defects also require repair before this track can be reconsidered.
+    defects also require repair before this track can be reconsidered. Repair
+    `fa01e99` fixed lexical macro scope, median arithmetic, terminal four-forest
+    reconstruction, and resource collection, but independent review remains
+    NO-GO. Prior selector history is not reconstructible, synthetic canary rows
+    can self-attest certification, repeat groups do not bind complete source
+    identity, and arm-asymmetric materialization can manufacture the full
+    `1.10x` gate while the combined overhead remains below 5%. Two successes
+    plus one failed M3 source also return `ready`, and evidence paths are
+    ephemeral. Do not publish or run this revision. Reconstruct every historical
+    pool/selection and certificate from source-bound artifacts, enforce stable
+    identity and per-arm inclusive overhead, require all three M3 sources, and
+    repeat review.
   - [ ] Require nonzero disagreements, zero replay/certificate/fallback/wrong/
     error/missing/off-only outcomes, selected width equal to the common minimum,
     selector work below 5%, at least 20% fewer validations or propagations,
