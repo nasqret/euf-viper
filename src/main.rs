@@ -9485,6 +9485,50 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+    #[test]
+    fn finite_orbit_certificate_proves_nontrivial_predicate_congruence() {
+        let source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun f (U) U)
+            (declare-fun p (U) Bool)
+            (assert (distinct c0 c1))
+            (assert (or (= (f c0) c0) (= (f c0) c1)))
+            (assert (or (= (f c1) c0) (= (f c1) c1)))
+            (assert (= (f c0) (f c1)))
+            (assert (or (p c0) (not (p c0)) (p c1) (not (p c1))))
+            (assert
+                (or
+                    (and (p (f c0)) (not (p (f c1))))
+                    (and (not (p (f c0))) (p (f c1)))))
+            (check-sat)
+        "#;
+        let directory = CertificateTestDirectory::new("finite-orbit-predicate-congruence");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, source).expect("write finite-orbit congruence source");
+
+        certify_file_with_seed_budget_and_finite(
+            source_path.to_str().unwrap(),
+            prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+            true,
+        )
+        .expect("finite-orbit congruence certificate");
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(path_with_suffix(&prefix, ".euf.json")).unwrap())
+                .unwrap();
+        assert!(manifest["clauses"]["equality_channels"].as_u64().unwrap() > 0);
+        assert!(manifest["clauses"]["predicate_channels"].as_u64().unwrap() > 0);
+        let dimacs = fs::read_to_string(path_with_suffix(&prefix, ".cnf")).unwrap();
+        assert!(!dimacs.lines().any(|line| line.trim() == "0"));
+    }
+
     #[cfg(all(feature = "certificates", not(feature = "finite-symmetry")))]
     #[test]
     fn finite_orbit_certificate_requires_symmetry_feature() {
