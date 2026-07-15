@@ -27,6 +27,7 @@ mod quotient_state_search;
 mod smt2_stream;
 #[cfg(test)]
 mod stabilizer_order;
+mod t9_ackermann;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use kissat::{Solver as KissatSolver, Var as KissatVar};
@@ -54,8 +55,74 @@ use std::io::{BufReader, BufWriter, Write};
 #[cfg(feature = "certificates")]
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+#[cfg(test)]
+use std::sync::{RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
+
+static SAT_DISPATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+static SAT_DISPATCH_TEST_GATE: RwLock<()> = RwLock::new(());
+
+#[cfg(test)]
+thread_local! {
+    static T9_PROJECTION_MEASUREMENT_ACTIVE: std::cell::Cell<bool> = const {
+        std::cell::Cell::new(false)
+    };
+}
+
+fn record_sat_dispatch() {
+    #[cfg(test)]
+    {
+        let measurement_active = T9_PROJECTION_MEASUREMENT_ACTIVE.with(std::cell::Cell::get);
+        if !measurement_active {
+            let _guard = SAT_DISPATCH_TEST_GATE
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            SAT_DISPATCH_COUNT.fetch_add(1, AtomicOrdering::Relaxed);
+            return;
+        }
+    }
+    SAT_DISPATCH_COUNT.fetch_add(1, AtomicOrdering::Relaxed);
+}
+
+#[cfg(test)]
+struct ProjectionDispatchTestScope {
+    _guard: RwLockWriteGuard<'static, ()>,
+    previous: bool,
+}
+
+#[cfg(test)]
+impl ProjectionDispatchTestScope {
+    fn enter() -> Self {
+        let guard = SAT_DISPATCH_TEST_GATE
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = T9_PROJECTION_MEASUREMENT_ACTIVE.with(|active| active.replace(true));
+        Self {
+            _guard: guard,
+            previous,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ProjectionDispatchTestScope {
+    fn drop(&mut self) {
+        T9_PROJECTION_MEASUREMENT_ACTIVE.with(|active| active.set(self.previous));
+    }
+}
+
+fn measure_sat_dispatches<T>(operation: impl FnOnce() -> T) -> (T, usize) {
+    #[cfg(test)]
+    let _scope = ProjectionDispatchTestScope::enter();
+    let before = SAT_DISPATCH_COUNT.load(AtomicOrdering::Relaxed);
+    let result = operation();
+    let after = SAT_DISPATCH_COUNT.load(AtomicOrdering::Relaxed);
+    (result, after.checked_sub(before).unwrap_or(usize::MAX))
+}
 
 type SymId = u32;
 type TermId = usize;
@@ -2727,6 +2794,7 @@ fn equality_transitivity_clauses(cnf: &CnfProblem, term_count: usize) -> Vec<Vec
     clauses
 }
 
+#[cfg(any(test, feature = "certificates"))]
 fn add_finite_domain_axioms(
     cnf: &mut CnfProblem,
     arena: &TermArena,
@@ -2735,6 +2803,11 @@ fn add_finite_domain_axioms(
     let mut context = finite_analysis::FiniteAnalysisContext::default();
     add_finite_domain_axioms_with_context(cnf, arena, bool_problem, &mut context)
 }
+
+const FINITE_SYMMETRY_MIN_APPS_DEFAULT: usize = 1_000;
+const FINITE_SYMMETRY_MAX_DOMAIN_DEFAULT: usize = 11;
+const FINITE_SYMMETRY_MODE_DEFAULT: &str = "hybrid";
+const FINITE_SYMMETRY_LEX_MIN_DOMAIN_DEFAULT: usize = 8;
 
 fn add_finite_domain_axioms_with_context(
     cnf: &mut CnfProblem,
@@ -2750,13 +2823,13 @@ fn add_finite_domain_axioms_with_context(
     let predicate_channeling =
         env::var("EUF_VIPER_FINITE_PREDICATE_CHANNELING").as_deref() == Ok("1");
     #[cfg(feature = "finite-symmetry")]
-    if arena.apps.len() >= 1_000 {
-        let symmetry_mode =
-            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
+    if pinned_default_uses_finite_symmetry(arena.apps.len()) {
+        let symmetry_mode = env::var("EUF_VIPER_FINITE_SYMMETRY")
+            .unwrap_or_else(|_| FINITE_SYMMETRY_MODE_DEFAULT.to_owned());
         let symmetry_min_apps = env::var("EUF_VIPER_FINITE_SYMMETRY_MIN_APPS")
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(1_000);
+            .unwrap_or(FINITE_SYMMETRY_MIN_APPS_DEFAULT);
         if arena.apps.len() >= symmetry_min_apps
             && matches!(symmetry_mode.as_str(), "1" | "constants" | "hybrid" | "lex")
         {
@@ -2785,6 +2858,12 @@ enum FiniteEqualityChanneling {
     Off,
     ValueOnly,
     All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FiniteSymmetryConfiguration {
+    Ambient,
+    PinnedDefaults,
 }
 
 #[cfg(feature = "finite-symmetry")]
@@ -3161,6 +3240,7 @@ fn add_finite_table_lex_leaders(
     cnf.clauses.len() - start_clause_count
 }
 
+#[cfg(test)]
 fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     cnf: &mut CnfProblem,
     arena: &TermArena,
@@ -3187,14 +3267,79 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     predicate_channeling: bool,
     context: &mut finite_analysis::FiniteAnalysisContext,
 ) -> usize {
+    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
+    {
+        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
+        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
+        _ => None,
+    };
+    add_finite_domain_axioms_with_runtime_options::<FINITE_SYMMETRY>(
+        cnf,
+        arena,
+        bool_problem,
+        equality_channeling,
+        predicate_channeling,
+        context,
+        permutation_support_mode,
+        FiniteSymmetryConfiguration::Ambient,
+    )
+}
+
+fn pinned_default_uses_finite_symmetry(application_count: usize) -> bool {
+    cfg!(feature = "finite-symmetry") && application_count >= FINITE_SYMMETRY_MIN_APPS_DEFAULT
+}
+
+fn add_finite_domain_axioms_with_pinned_defaults(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    context: &mut finite_analysis::FiniteAnalysisContext,
+) -> usize {
+    if pinned_default_uses_finite_symmetry(arena.apps.len()) {
+        return add_finite_domain_axioms_with_runtime_options::<true>(
+            cnf,
+            arena,
+            bool_problem,
+            FiniteEqualityChanneling::ValueOnly,
+            false,
+            context,
+            None,
+            FiniteSymmetryConfiguration::PinnedDefaults,
+        );
+    }
+    add_finite_domain_axioms_with_runtime_options::<false>(
+        cnf,
+        arena,
+        bool_problem,
+        FiniteEqualityChanneling::ValueOnly,
+        false,
+        context,
+        None,
+        FiniteSymmetryConfiguration::PinnedDefaults,
+    )
+}
+
+fn add_finite_domain_axioms_with_runtime_options<const FINITE_SYMMETRY: bool>(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    equality_channeling: FiniteEqualityChanneling,
+    predicate_channeling: bool,
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    permutation_support_mode: Option<finite_analysis::PermutationSupportMode>,
+    _symmetry_configuration: FiniteSymmetryConfiguration,
+) -> usize {
     context.domain_analysis(arena, bool_problem);
     #[cfg(feature = "finite-symmetry")]
     let max_domain = if FINITE_SYMMETRY {
-        env::var("EUF_VIPER_FINITE_DOMAIN_MAX")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(11)
-            .min(32)
+        match _symmetry_configuration {
+            FiniteSymmetryConfiguration::Ambient => env::var("EUF_VIPER_FINITE_DOMAIN_MAX")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(FINITE_SYMMETRY_MAX_DOMAIN_DEFAULT)
+                .min(32),
+            FiniteSymmetryConfiguration::PinnedDefaults => FINITE_SYMMETRY_MAX_DOMAIN_DEFAULT,
+        }
     } else {
         8
     };
@@ -3238,12 +3383,6 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     #[cfg(feature = "finite-symmetry")]
     let domain_symmetry = domain_swap_maps.is_some();
 
-    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
-    {
-        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
-        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
-        _ => None,
-    };
     if permutation_support_mode.is_some() {
         context.guarded_summary(arena, bool_problem);
     }
@@ -3346,8 +3485,11 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
 
     #[cfg(feature = "finite-symmetry")]
     if domain_symmetry {
-        let symmetry_mode =
-            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
+        let symmetry_mode = match _symmetry_configuration {
+            FiniteSymmetryConfiguration::Ambient => env::var("EUF_VIPER_FINITE_SYMMETRY")
+                .unwrap_or_else(|_| FINITE_SYMMETRY_MODE_DEFAULT.to_owned()),
+            FiniteSymmetryConfiguration::PinnedDefaults => FINITE_SYMMETRY_MODE_DEFAULT.to_owned(),
+        };
         if finite_hybrid_uses_diagonal(
             &symmetry_mode,
             domain.len(),
@@ -3399,10 +3541,15 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
                 symmetry_clauses as u128,
                 domain.len(),
             );
-            let lex_min_domain = env::var("EUF_VIPER_FINITE_LEX_MIN_DOMAIN")
-                .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(8);
+            let lex_min_domain = match _symmetry_configuration {
+                FiniteSymmetryConfiguration::Ambient => env::var("EUF_VIPER_FINITE_LEX_MIN_DOMAIN")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(FINITE_SYMMETRY_LEX_MIN_DOMAIN_DEFAULT),
+                FiniteSymmetryConfiguration::PinnedDefaults => {
+                    FINITE_SYMMETRY_LEX_MIN_DOMAIN_DEFAULT
+                }
+            };
             if matches!(symmetry_mode.as_str(), "hybrid" | "lex") && domain.len() >= lex_min_domain
             {
                 let lex_clauses = add_finite_table_lex_leaders(
@@ -4014,6 +4161,7 @@ impl<'a> DpllSolver<'a> {
     }
 
     fn solve(&mut self) -> CnfSearchResult {
+        record_sat_dispatch();
         let mut assignment = vec![0i8; self.cnf.var_count() + 1];
         let Some(pending) = self.initial_units(&mut assignment) else {
             return CnfSearchResult::Unsat;
@@ -4390,6 +4538,18 @@ fn auto_prefers_cadical(app_count: usize, finite_added: usize, app_threshold: us
         || (finite_added > 0 && !cfg!(all(target_os = "linux", target_arch = "x86_64")))
 }
 
+fn t9_backend_route(backend: &str, auto_uses_cadical: bool) -> t9_ackermann::BackendRoute {
+    match backend {
+        "kissat" => t9_ackermann::BackendRoute::Kissat,
+        "cadical" => t9_ackermann::BackendRoute::Cadical,
+        "cadical-refine" => t9_ackermann::BackendRoute::CadicalRefine,
+        "varisat" => t9_ackermann::BackendRoute::Varisat,
+        "auto" if auto_uses_cadical => t9_ackermann::BackendRoute::Cadical,
+        "auto" => t9_ackermann::BackendRoute::Kissat,
+        _ => t9_ackermann::BackendRoute::Dpll,
+    }
+}
+
 fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
     match setting {
         Some("cadical-refine") => true,
@@ -4512,6 +4672,7 @@ fn solve_kissat_euf_once(
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
+    record_sat_dispatch();
     let result = solver.sat();
     profile_phase("kissat_solve", sat_start, 0);
     let Some(solution) = result else {
@@ -4598,6 +4759,7 @@ fn solve_kissat_euf_once(
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
+    record_sat_dispatch();
     let Ok(result) = solver.solve() else {
         return EagerSolveOutcome::Unavailable;
     };
@@ -4730,6 +4892,7 @@ fn solve_cadical_euf_once(
     }
 
     let sat_start = Instant::now();
+    record_sat_dispatch();
     let result = solver.solve().ok()?;
     profile_phase("cadical_solve", sat_start, 0);
     profile_measurement(
@@ -4920,6 +5083,7 @@ fn solve_cadical_euf_refining_with_limit(
         telemetry.rounds = round;
         telemetry.sat_calls += 1;
         let sat_start = Instant::now();
+        record_sat_dispatch();
         let result = solver.solve().ok()?;
         telemetry.sat_time_ns += sat_start.elapsed().as_nanos();
         match result {
@@ -5054,6 +5218,7 @@ fn solve_varisat_euf(
     let mut sat_time_ns = 0u128;
     for round in 1..=max_theory_rounds {
         let sat_start = Instant::now();
+        record_sat_dispatch();
         let sat_result = solver.solve();
         sat_time_ns += sat_start.elapsed().as_nanos();
         match sat_result {
@@ -5159,6 +5324,7 @@ fn discover_certificate_theory_conflicts(
 
     let mut learned = HashSet::<Vec<i32>>::default();
     for round in 1..=max_rounds {
+        record_sat_dispatch();
         match solver.solve() {
             Ok(false) => {
                 return Ok(CertificateSaturation::Unsat {
@@ -5264,6 +5430,7 @@ fn write_cadical_drat(path: &Path, cnf: &CnfProblem) -> Result<(), String> {
                 .add_clause(rustsat_clause(clause))
                 .map_err(|error| format!("failed to load certificate CNF: {error}"))?;
         }
+        record_sat_dispatch();
         solver
             .solve()
             .map_err(|error| format!("CaDiCaL proof run failed: {error}"))?
@@ -5362,6 +5529,7 @@ fn solve_dimacs_file(path: &str) -> Result<i32, String> {
             .map_err(|error| format!("failed to load DIMACS clause: {error}"))?;
     }
     let start = Instant::now();
+    record_sat_dispatch();
     let result = solver
         .solve()
         .map_err(|error| format!("CaDiCaL failed: {error}"))?;
@@ -6088,11 +6256,13 @@ fn solve_problem(problem: Problem, direct_root_cnf: bool) -> SolveReport {
 fn solve_problem_with_root_cnf_options(
     problem: Problem,
     root_cnf_options: RootCnfOptions,
+    t9_mode: t9_ackermann::Mode,
 ) -> SolveReport {
     solve_problem_with_options_and_eq_abstraction(
         problem,
         root_cnf_options,
         selected_eq_abstraction_mode(),
+        t9_mode,
     )
 }
 
@@ -6106,6 +6276,7 @@ fn solve_problem_with_eq_abstraction(
         problem,
         RootCnfOptions::existing_behavior(direct_root_cnf),
         eq_abstraction_mode,
+        t9_ackermann::Mode::Off,
     )
 }
 
@@ -6113,6 +6284,7 @@ fn solve_problem_with_options_and_eq_abstraction(
     problem: Problem,
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
+    t9_mode: t9_ackermann::Mode,
 ) -> SolveReport {
     debug_assert!(problem.terms_are_well_sorted());
     let stats_base = SolveStats {
@@ -6147,6 +6319,7 @@ fn solve_problem_with_options_and_eq_abstraction(
                     root_cnf_options,
                     eq_abstraction_mode,
                     &mut finite_context,
+                    t9_mode,
                 )
             {
                 return SolveReport {
@@ -6254,12 +6427,38 @@ fn solve_dynamic_full_ackermann_with_negated_root(
     (completed, outcome)
 }
 
+fn t9_attempt_for_solve(
+    mode: t9_ackermann::Mode,
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    finite_added: usize,
+    backend: t9_ackermann::BackendRoute,
+    analyze: impl FnOnce() -> finite_analysis::FiniteAnalysis,
+) -> Option<t9_ackermann::Attempt> {
+    if mode != t9_ackermann::Mode::CliqueAuto {
+        return None;
+    }
+    if let Err(rejection) = t9_ackermann::solve_precheck(finite_added, arena.apps.len(), backend) {
+        rejection.profile_if_enabled();
+        return None;
+    }
+    let analysis = analyze();
+    let facts = t9_ackermann::StructuralFacts::from_analysis(
+        &analysis,
+        finite_added,
+        arena.apps.len(),
+        backend,
+    );
+    Some(t9_ackermann::attempt(mode, cnf, arena, facts))
+}
+
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     root_cnf_options: RootCnfOptions,
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
+    t9_mode: t9_ackermann::Mode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
@@ -6325,40 +6524,56 @@ fn solve_bool_problem(
         let refinement_mode = selected_refinement_mode();
         let full_ackermann_setting = env::var("EUF_VIPER_FULL_ACKERMANN").ok();
         let full_ackermann_forced = force_full_ackermann(full_ackermann_setting.as_deref());
-        if full_ackermann_forced {
-            add_full_ackermann_completion(&mut cnf, arena);
-        } else if !cnf.finite_equalities_complete
-            && matches!(
-                env::var("EUF_VIPER_CHORDAL_TRANSITIVITY").as_deref(),
-                Ok("1" | "on")
-            )
-        {
-            let fill_start = Instant::now();
-            let max_fill_edges = env::var("EUF_VIPER_CHORDAL_MAX_FILL")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(1_000_000usize);
-            let fill_edges =
-                add_sparse_transitivity_fill(&mut cnf, arena.terms.len(), max_fill_edges);
-            profile_phase(
-                "chordal_transitivity_fill",
-                fill_start,
-                fill_edges.unwrap_or(usize::MAX),
-            );
-        }
-        let eager_congruence = !full_ackermann_forced
-            && use_eager_congruence_for_first_pass(finite_added, &cnf, arena);
-        profile_measurement(
-            "eager_congruence_first_pass",
-            u128::from(eager_congruence),
-            finite_added,
-        );
         let auto_cadical_threshold = env::var("EUF_VIPER_AUTO_CADICAL_APP_THRESHOLD")
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(1_000usize);
         let auto_uses_cadical = backend == "auto"
             && auto_prefers_cadical(arena.apps.len(), finite_added, auto_cadical_threshold);
+        let actual_backend = t9_backend_route(&backend, auto_uses_cadical);
+        let mut t9_activated = false;
+        if let Some(attempt) =
+            t9_attempt_for_solve(t9_mode, &cnf, arena, finite_added, actual_backend, || {
+                finite_context.analyze(arena, bool_problem).clone()
+            })
+        {
+            attempt.report.profile_if_enabled();
+            if let Some(candidate) = attempt.candidate {
+                cnf = candidate;
+                t9_activated = true;
+            }
+        }
+        if !t9_activated {
+            if full_ackermann_forced {
+                add_full_ackermann_completion(&mut cnf, arena);
+            } else if !cnf.finite_equalities_complete
+                && matches!(
+                    env::var("EUF_VIPER_CHORDAL_TRANSITIVITY").as_deref(),
+                    Ok("1" | "on")
+                )
+            {
+                let fill_start = Instant::now();
+                let max_fill_edges = env::var("EUF_VIPER_CHORDAL_MAX_FILL")
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .unwrap_or(1_000_000usize);
+                let fill_edges =
+                    add_sparse_transitivity_fill(&mut cnf, arena.terms.len(), max_fill_edges);
+                profile_phase(
+                    "chordal_transitivity_fill",
+                    fill_start,
+                    fill_edges.unwrap_or(usize::MAX),
+                );
+            }
+        }
+        let eager_congruence = !full_ackermann_forced
+            && !t9_activated
+            && use_eager_congruence_for_first_pass(finite_added, &cnf, arena);
+        profile_measurement(
+            "eager_congruence_first_pass",
+            u128::from(eager_congruence),
+            finite_added,
+        );
         if backend == "auto" && auto_uses_cadical {
             if let Some(result) = solve_cadical_euf_once(
                 &cnf,
@@ -6385,13 +6600,15 @@ fn solve_bool_problem(
                 EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
                     let mut completed_cnf = None;
                     let mut prior_sat_calls = 1;
-                    if dynamic_full_ackermann_before_refinement(
-                        full_ackermann_setting.as_deref(),
-                        refinement_mode,
-                        cnf.clauses.len(),
-                        arena.apps.len(),
-                        finite_added,
-                    ) {
+                    if !t9_activated
+                        && dynamic_full_ackermann_before_refinement(
+                            full_ackermann_setting.as_deref(),
+                            refinement_mode,
+                            cnf.clauses.len(),
+                            arena.apps.len(),
+                            finite_added,
+                        )
+                    {
                         profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
                         let (completed, completed_outcome) =
                             solve_dynamic_full_ackermann_with_negated_root(
@@ -6799,20 +7016,22 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
 
 fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
-    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options)
+    let t9_mode = t9_ackermann::selected_mode()?;
+    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, t9_mode)
 }
 
 fn solve_file_with_root_cnf_options(
     path: &str,
     with_stats: bool,
     root_cnf_options: RootCnfOptions,
+    t9_mode: t9_ackermann::Mode,
 ) -> Result<i32, String> {
     let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let start = Instant::now();
     let parse_start = Instant::now();
     let problem = parse_problem(&input)?;
     profile_phase("parse", parse_start, input.len());
-    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
     let elapsed = start.elapsed();
     print_report(&report, elapsed, with_stats);
     Ok(match report.result {
@@ -6851,6 +7070,7 @@ fn structural_router_prefers_euf(input: &[u8]) -> bool {
 
 fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
+    let t9_mode = t9_ackermann::selected_mode()?;
     let input = fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let use_euf = structural_router_prefers_euf(&input);
     if env::var_os("EUF_VIPER_PORTFOLIO_TRACE").is_some() {
@@ -6860,17 +7080,19 @@ fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, Stri
         );
     }
     if use_euf {
-        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options);
+        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, t9_mode);
     }
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        record_sat_dispatch();
         let error = Command::new(yices).arg(path).exec();
         Err(format!("failed to exec Yices fallback `{yices}`: {error}"))
     }
     #[cfg(not(unix))]
     {
+        record_sat_dispatch();
         let status = Command::new(yices)
             .arg(path)
             .status()
@@ -6971,6 +7193,101 @@ fn project_bool_dag_file(path: &str) -> Result<i32, String> {
             Ok(3)
         }
     }
+}
+
+#[cfg(test)]
+fn project_t9_problem(problem: &Problem) -> Result<t9_ackermann::ProjectionReport, String> {
+    let (result, sat_calls) =
+        measure_sat_dispatches(|| project_t9_problem_without_sat_measurement(problem));
+    let mut report = result?;
+    report.record_observed_sat_calls(sat_calls);
+    Ok(report)
+}
+
+fn project_t9_problem_without_sat_measurement(
+    problem: &Problem,
+) -> Result<t9_ackermann::ProjectionReport, String> {
+    if !problem.terms_are_well_sorted() {
+        return Err("T9 projection encountered an unsupported sort configuration".to_owned());
+    }
+    if !problem.unsupported.is_empty() {
+        return Err(format!(
+            "T9 projection requires fully supported QF_UF input: {}",
+            problem.unsupported.join("; ")
+        ));
+    }
+    let bool_problem = problem
+        .bool_problem
+        .as_ref()
+        .ok_or_else(|| "T9 projection requires a Boolean source formula".to_owned())?;
+    if !bool_problem.unsupported.is_empty() {
+        return Err(format!(
+            "T9 projection requires fully supported QF_UF input: {}",
+            bool_problem.unsupported.join("; ")
+        ));
+    }
+
+    let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
+    for assertion in &bool_problem.assertions {
+        // Stage 0 pins current default root-CNF behavior and ignores solve-path env vars.
+        cnf.add_direct_assertion_with_negated_root(assertion, false);
+    }
+    let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+    let finite_added = add_finite_domain_axioms_with_pinned_defaults(
+        &mut cnf,
+        &problem.arena,
+        bool_problem,
+        &mut finite_context,
+    );
+    let analysis = finite_context.analyze(&problem.arena, bool_problem).clone();
+    let pinned_auto_uses_cadical =
+        auto_prefers_cadical(problem.arena.apps.len(), finite_added, 1_000);
+    let backend = t9_backend_route("auto", pinned_auto_uses_cadical);
+    let facts = t9_ackermann::StructuralFacts::from_analysis(
+        &analysis,
+        finite_added,
+        problem.arena.apps.len(),
+        backend,
+    );
+    Ok(t9_ackermann::attempt(t9_ackermann::Mode::CliqueAuto, &cnf, &problem.arena, facts).report)
+}
+
+fn read_project_t9_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
+    if path != "-" {
+        return fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"));
+    }
+    let mut input = String::new();
+    stdin
+        .read_to_string(&mut input)
+        .map_err(|error| format!("failed to read T9 projection stdin: {error}"))?;
+    Ok(input)
+}
+
+fn project_t9_source(input: &str) -> Result<t9_ackermann::ProjectionReport, String> {
+    let (result, sat_calls) = measure_sat_dispatches(|| {
+        let problem = parse_problem_with_scoped_let_mode(input, ScopedLetMode::Auto)?;
+        project_t9_problem_without_sat_measurement(&problem)
+    });
+    let mut report = result?;
+    report.record_observed_sat_calls(sat_calls);
+    Ok(report)
+}
+
+fn project_t9_file(path: &str) -> Result<i32, String> {
+    let input = if path == "-" {
+        read_project_t9_input(path, &mut io::stdin().lock())?
+    } else {
+        read_project_t9_input(path, &mut io::empty())?
+    };
+    let report = project_t9_source(&input)?;
+    let selected = report.selected();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    report
+        .write_to(&mut output)
+        .map_err(|error| format!("failed to write T9 projection: {error}"))?;
+    Ok(if selected { 0 } else { 3 })
 }
 
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
@@ -7134,6 +7451,7 @@ fn gen_cmd(args: &[String]) -> Result<i32, String> {
 
 fn bench_cmd(args: &[String]) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
+    let t9_mode = t9_ackermann::selected_mode()?;
     let cases = parse_flag_usize(args, "--cases", 20)?;
     let size = parse_flag_usize(args, "--size", 10_000)?;
     let mut total_terms = 0usize;
@@ -7147,7 +7465,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
         let elapsed = start.elapsed();
         println!(
             "case={i} result={} elapsed_ns={} terms={} apps={} passes={} merges={}",
@@ -7173,6 +7491,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
 
 fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
+    let t9_mode = t9_ackermann::selected_mode()?;
     let cases = parse_flag_usize(args, "--cases", 8)?;
     let branches = parse_flag_usize(args, "--branches", 512)?;
     let depth = parse_flag_usize(args, "--depth", 4)?;
@@ -7187,7 +7506,7 @@ fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
         let elapsed = start.elapsed();
         println!(
             "or_case={i} kind={} result={} elapsed_ns={} terms={} eqs={} diseqs={} passes={} merges={}",
@@ -7251,6 +7570,7 @@ fn usage() -> &'static str {
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper project-bool-dag FILE
+  euf-viper project-t9 FILE|-
   euf-viper parse-check FILE|-
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -7267,6 +7587,7 @@ fn usage() -> &'static str {
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper project-bool-dag FILE
+  euf-viper project-t9 FILE|-
   euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
@@ -7308,6 +7629,13 @@ fn run() -> Result<i32, String> {
                 return Err("usage: euf-viper project-bool-dag FILE".to_owned());
             }
             project_bool_dag_file(file)
+        }
+        "project-t9" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            if args.len() != 3 {
+                return Err("usage: euf-viper project-t9 FILE|-".to_owned());
+            }
+            project_t9_file(file)
         }
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -9608,12 +9936,55 @@ mod tests {
     }
 
     #[test]
-    fn routes_large_and_non_linux_finite_problems_to_cadical() {
+    fn routes_auto_backend_and_t9_facts_through_the_same_branch() {
         assert!(auto_prefers_cadical(1_000, 0, 1_000));
         assert!(!auto_prefers_cadical(10, 0, 1_000));
         assert_eq!(
             auto_prefers_cadical(10, 1, 1_000),
             !cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        );
+        assert_eq!(
+            t9_backend_route("auto", true),
+            t9_ackermann::BackendRoute::Cadical
+        );
+        assert_eq!(
+            t9_backend_route("auto", false),
+            t9_ackermann::BackendRoute::Kissat
+        );
+        assert_eq!(
+            t9_backend_route("kissat", true),
+            t9_ackermann::BackendRoute::Kissat
+        );
+    }
+
+    #[test]
+    fn t9_cheap_precheck_does_not_request_expensive_analysis() {
+        let cnf = CnfProblem::new();
+        let arena = TermArena::default();
+        let requests = std::cell::Cell::new(0usize);
+        let attempt = t9_attempt_for_solve(
+            t9_ackermann::Mode::CliqueAuto,
+            &cnf,
+            &arena,
+            1,
+            t9_ackermann::BackendRoute::Kissat,
+            || {
+                requests.set(requests.get() + 1);
+                panic!("cheap T9 rejection requested structural analysis")
+            },
+        );
+        assert!(attempt.is_none());
+        assert_eq!(requests.get(), 0);
+    }
+
+    #[test]
+    fn pinned_default_finite_symmetry_route_has_exact_threshold() {
+        assert!(!pinned_default_uses_finite_symmetry(
+            FINITE_SYMMETRY_MIN_APPS_DEFAULT - 1
+        ));
+        assert_eq!(
+            pinned_default_uses_finite_symmetry(FINITE_SYMMETRY_MIN_APPS_DEFAULT),
+            cfg!(feature = "finite-symmetry")
         );
     }
 
@@ -10418,6 +10789,46 @@ mod tests {
             source
         );
         assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    #[test]
+    fn project_t9_dash_reads_the_supplied_stdin_bytes() {
+        let source = b"(set-logic QF_UF)\n(assert true)\n(check-sat)\n";
+        let mut stdin = std::io::Cursor::new(source);
+        assert_eq!(
+            read_project_t9_input("-", &mut stdin).unwrap().as_bytes(),
+            source
+        );
+        assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    #[test]
+    fn project_t9_sat_counter_observes_real_dispatch_then_zero_projection_delta() {
+        let mut arena = TermArena::default();
+        let true_term = arena.intern(0, Vec::new());
+        let false_term = arena.intern(1, Vec::new());
+        let cnf = CnfProblem::new();
+        let (result, sat_calls) = measure_sat_dispatches(|| {
+            let mut solver = DpllSolver::new(&cnf, &arena, true_term, false_term);
+            solver.solve()
+        });
+        assert_eq!(result, CnfSearchResult::Sat);
+        assert_eq!(sat_calls, 1);
+
+        let report = project_t9_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        let mut output = Vec::new();
+        report.write_to(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("sat_calls 0\n"));
+        let before = output
+            .lines()
+            .find_map(|line| line.strip_prefix("baseline_before_sha256 "))
+            .unwrap();
+        let after = output
+            .lines()
+            .find_map(|line| line.strip_prefix("baseline_after_sha256 "))
+            .unwrap();
+        assert_eq!(before, after);
     }
 
     #[test]
