@@ -91,7 +91,7 @@ class EncodedProblem:
         return (None, *self.atoms)
 
     def atom_for_variable(self, variable: int) -> Atom:
-        if not isinstance(variable, int) or isinstance(variable, bool):
+        if type(variable) is not int:
             raise IndependentQfufError("variable ID must be an integer")
         if not 1 <= variable <= self.variable_count:
             raise IndependentQfufError(f"variable {variable} is out of range")
@@ -1240,6 +1240,95 @@ class _UnionFind:
         return True
 
 
+def _clone_assertions(
+    assertions: tuple[BoolExpr, ...], terms: tuple[Term, ...]
+) -> tuple[BoolExpr, ...]:
+    clones: dict[int, BoolExpr] = {}
+    states: dict[int, int] = {}
+
+    def clone_atom_key(key: object) -> _AtomKey:
+        if type(key) is not _AtomKey or type(key.kind) is not str:
+            raise IndependentQfufError("assertion atom is not canonical and immutable")
+        if key.kind == "equality":
+            if (
+                type(key.left) is not int
+                or type(key.right) is not int
+                or key.term is not None
+                or not 0 <= key.left < len(terms)
+                or not 0 <= key.right < len(terms)
+                or terms[key.left].sort != terms[key.right].sort
+            ):
+                raise IndependentQfufError("assertion equality atom is malformed")
+        elif key.kind == "bool_term":
+            if (
+                key.left is not None
+                or key.right is not None
+                or type(key.term) is not int
+                or not 0 <= key.term < len(terms)
+                or terms[key.term].sort != BOOL_SORT
+            ):
+                raise IndependentQfufError("assertion Boolean atom is malformed")
+        else:
+            raise IndependentQfufError(f"unknown assertion atom kind `{key.kind}`")
+        return _AtomKey(key.kind, key.left, key.right, key.term)
+
+    for root in assertions:
+        stack: list[tuple[BoolExpr, bool]] = [(root, False)]
+        while stack:
+            expression, expanded = stack.pop()
+            if type(expression) is not BoolExpr:
+                raise IndependentQfufError(
+                    "assertion table is not canonical and immutable"
+                )
+            identity = id(expression)
+            if expanded:
+                children = tuple(clones[id(child)] for child in expression.arguments)
+                clones[identity] = BoolExpr(expression.op, children)
+                states[identity] = 2
+                continue
+
+            state = states.get(identity, 0)
+            if state == 2:
+                continue
+            if state == 1:
+                raise IndependentQfufError("assertion graph contains a cycle")
+            if type(expression.op) is not str or type(expression.arguments) is not tuple:
+                raise IndependentQfufError(
+                    "assertion table is not canonical and immutable"
+                )
+
+            op = expression.op
+            arguments = expression.arguments
+            if op == "const":
+                if len(arguments) != 1 or type(arguments[0]) is not bool:
+                    raise IndependentQfufError("constant assertion is malformed")
+                clones[identity] = BoolExpr(op, (arguments[0],))
+                states[identity] = 2
+                continue
+            if op == "atom":
+                if len(arguments) != 1:
+                    raise IndependentQfufError("atomic assertion is malformed")
+                clones[identity] = BoolExpr(op, (clone_atom_key(arguments[0]),))
+                states[identity] = 2
+                continue
+            if op == "not":
+                valid_shape = len(arguments) == 1
+            elif op == "ite":
+                valid_shape = len(arguments) == 3
+            elif op in {"and", "or", "iff"}:
+                valid_shape = True
+            else:
+                raise IndependentQfufError(f"unknown assertion operator `{op}`")
+            if not valid_shape or any(type(child) is not BoolExpr for child in arguments):
+                raise IndependentQfufError(f"{op} assertion is malformed")
+
+            states[identity] = 1
+            stack.append((expression, True))
+            stack.extend((child, False) for child in reversed(arguments))
+
+    return tuple(clones[id(assertion)] for assertion in assertions)
+
+
 def _canonical_problem_snapshot(problem: EncodedProblem) -> EncodedProblem:
     """Detach trusted validation state from caller-owned container identity."""
 
@@ -1334,33 +1423,7 @@ def _canonical_problem_snapshot(problem: EncodedProblem) -> EncodedProblem:
             raise IndependentQfufError("base clauses are not canonical and immutable")
         clauses.append(tuple(clause))
 
-    assertion_stack = list(problem.assertions)
-    while assertion_stack:
-        expression = assertion_stack.pop()
-        if (
-            type(expression) is not BoolExpr
-            or type(expression.op) is not str
-            or type(expression.arguments) is not tuple
-        ):
-            raise IndependentQfufError("assertion table is not canonical and immutable")
-        for argument in expression.arguments:
-            if type(argument) is BoolExpr:
-                assertion_stack.append(argument)
-            elif type(argument) is _AtomKey:
-                if (
-                    type(argument.kind) is not str
-                    or any(
-                        value is not None and type(value) is not int
-                        for value in (argument.left, argument.right, argument.term)
-                    )
-                ):
-                    raise IndependentQfufError(
-                        "assertion atom is not canonical and immutable"
-                    )
-            elif type(argument) is not bool:
-                raise IndependentQfufError(
-                    "assertion argument is not canonical and immutable"
-                )
+    assertions = _clone_assertions(problem.assertions, tuple(terms))
     if any(type(term) is not int for term in problem.bool_data_terms):
         raise IndependentQfufError("Bool-as-data term table is not canonical")
 
@@ -1372,7 +1435,7 @@ def _canonical_problem_snapshot(problem: EncodedProblem) -> EncodedProblem:
         tuple(clauses),
         problem.true_term,
         problem.false_term,
-        problem.assertions,
+        assertions,
         tuple(problem.bool_data_terms),
     )
 
@@ -1439,6 +1502,10 @@ def _validate_problem(problem: EncodedProblem) -> EncodedProblem:
                 raise IndependentQfufError(
                     f"equality variable {atom.variable} is incomplete"
                 )
+            if atom.term is not None:
+                raise IndependentQfufError(
+                    f"equality variable {atom.variable} carries BoolTerm metadata"
+                )
             if not 0 <= atom.left < len(problem.terms) or not 0 <= atom.right < len(
                 problem.terms
             ):
@@ -1453,6 +1520,10 @@ def _validate_problem(problem: EncodedProblem) -> EncodedProblem:
             if atom.term is None or not 0 <= atom.term < len(problem.terms):
                 raise IndependentQfufError(
                     f"BoolTerm variable {atom.variable} references an invalid term"
+                )
+            if atom.left is not None or atom.right is not None:
+                raise IndependentQfufError(
+                    f"BoolTerm variable {atom.variable} carries equality metadata"
                 )
             if problem.terms[atom.term].sort != BOOL_SORT:
                 raise IndependentQfufError(
@@ -1506,7 +1577,7 @@ def _assignment_values(
         )
     values = [False] * (problem.variable_count + 1)
     for variable, literal in enumerate(assignment, start=1):
-        if not isinstance(literal, int) or isinstance(literal, bool) or literal == 0:
+        if type(literal) is not int or literal == 0:
             raise IndependentQfufError(
                 f"assignment entry {variable} is not a nonzero integer literal"
             )
@@ -1573,8 +1644,7 @@ def _clause_literals(
     literals: list[int] = []
     for position, literal in enumerate(clause, start=1):
         if (
-            not isinstance(literal, int)
-            or isinstance(literal, bool)
+            type(literal) is not int
             or literal == 0
             or abs(literal) > problem.variable_count
         ):
@@ -1611,12 +1681,18 @@ def _validate_euf_lemma_literals(
             union_find.union(
                 atom.term, problem.true_term if literal < 0 else problem.false_term
             )
-    _close_congruence(problem, union_find)
-    if not any(
+    if any(
         union_find.find(left) == union_find.find(right)
         for left, right in disequalities
     ):
-        raise IndependentQfufError("clause is not a valid EUF lemma")
+        return
+    _close_congruence(problem, union_find)
+    if any(
+        union_find.find(left) == union_find.find(right)
+        for left, right in disequalities
+    ):
+        return
+    raise IndependentQfufError("clause is not a valid EUF lemma")
 
 
 def validate_euf_lemma(problem: EncodedProblem, clause: Sequence[int]) -> None:
@@ -1743,7 +1819,7 @@ def validate_unsat_dimacs(
     """Check the exact local base prefix and every EUF-only suffix clause."""
 
     problem = _validate_problem(problem)
-    if not isinstance(variables, int) or isinstance(variables, bool) or variables < 0:
+    if type(variables) is not int or variables < 0:
         raise IndependentQfufError("DIMACS variable count must be a nonnegative integer")
     if variables != problem.variable_count:
         raise IndependentQfufError(
