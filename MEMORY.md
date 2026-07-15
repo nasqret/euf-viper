@@ -1059,3 +1059,18 @@
   and locked Rust 1.96. WMI has Rust 1.93 and quota blocks a rustup 1.96 fetch;
   direct toolchain/environment binding, Rust no-follow opening, and independent
   report recomputation remain required. Job `146075` is historical hard-10.
+- T1 `d53b32b6` is diagnostic-only and WMI NO-GO. Its canary/full split and
+  analyzer arithmetic are sound, but scheduler/whole-node facts are copied
+  rather than observed, task identity and CPU allocation can be forged, watch
+  attachment and external tool bytes race, Rust 1.96/final-link flags are not
+  fully pinned, and publication is not resumable. Hosted run `29398685115`
+  built but failed its ELF gate on retained `DT_NEEDED`; no T1 WMI job exists.
+- T5 `891c34e7` is diagnostic-only. Independent review found an ignored Python
+  bytecode import before checkout validation. Hosted run `29398119605` created
+  zero jobs because `${{ runner.temp }}` is invalid in job-level `env`; actionlint
+  v1.7.12 reproduces the exact context error. No scan or WMI job exists.
+- T8 `203158c3` is diagnostic-only and lineage/frontier NO-GO. Complete semantic
+  reconstruction, frozen-manifest row binding, retained replayable ledgers,
+  external build/Slurm provenance, active `push`/`pop`, final path identity, and
+  feature-off build isolation remain incomplete. Hosted run `29398694222` is
+  green only for generic/Rust diagnostics. No corpus or WMI run exists.

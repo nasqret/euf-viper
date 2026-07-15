@@ -371,7 +371,17 @@ independent evidence checks, and a frozen family holdout.
   `+crt-static` flags reached host proc-macro compilation. No release artifact,
   canary, or WMI row exists. Repair the mode/population contract, opened-byte
   execution, exact monitor set, scheduler receipt, and target-scoped static
-  build before review.
+  build before review. Successor `d53b32b6` is preserved on
+  `research-typed-parser-timing` only as a diagnostic reproducer. Independent
+  review accepts its canary/full population split and timing arithmetic but
+  rejects all WMI execution: requested scheduler fields are copied rather than
+  observed, arbitrary array-task IDs and underallocated whole-node claims pass,
+  inotify watches can attach after a root swap, Rust 1.96 and final-link-only
+  flags are not bound, external build tools retain mutate-and-restore gaps, and
+  interrupted publication is neither resumable nor terminally receipted. A new
+  repair owns those exact boundaries. Exact hosted run `29398685115` built the
+  release but failed the final ELF gate because `DT_NEEDED` entries remained;
+  no T1 canary or full timing job exists.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 
@@ -558,7 +568,15 @@ independent evidence checks, and a frozen family holdout.
   extras, unique physical source coverage and unsupported top-level forms are
   not closed, the tiny canary underbinds revision and scheduler identity, and
   hosted identity/action pinning is incomplete. No corpus scan, canary, census,
-  or T5 timing row exists.
+  or T5 timing row exists. Successor `891c34e7` is diagnostic-only. Review
+  verified its transitive quoted-macro scan, 7,503-source ledger, scheduler
+  receipt, namespace, canary, and local tests, but found that the environment
+  canary imports `t5_linux_publication` before checkout validation; ignored
+  unchecked-hash bytecode can therefore execute absent source. Exact hosted run
+  `29398119605` failed workflow compilation with zero jobs because job-level
+  `env` used `${{ runner.temp }}`, where the `runner` context is unavailable.
+  Repair both defects and repeat exact-head hosted review before any source scan
+  or WMI action.
 
 ### T6: Theory-Conditioned Boolean DAG
 
@@ -701,7 +719,16 @@ Do not compose two candidates in P2. Attribution must remain exact.
     denial-only preregistration control.
   - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
     source assertion and parser-generated auxiliary. T1 parser parity alone
-    does not provide this ledger.
+    does not provide this ledger. Diagnostic implementation `203158c3` is
+    preserved on `research-t8-assertion-lineage`, but independent review rejects
+    it as correctness-qualified lineage. The default verifier does not
+    reconstruct complete typed-object semantics; the final audit is not bound
+    row-by-row to the frozen manifest and discards replayable ledgers; build and
+    Slurm provenance are self-reported; `push`/`pop` is diagnostic-only while
+    popped assertions survive; pathname identity has a final replacement race;
+    and feature-off builds still scan ambient Git state. Exact hosted run
+    `29398694222` passed generic campaign and Rust steps but does not execute an
+    admissible census or close the review findings. Repair is isolated.
   - [ ] Require a checked P12 finite-domain certificate and independent review
     of T1 before scalar implementation. Corrected T4 evidence is complete but
     proves no non-Boolean range on all 12 P12 sources, so a separate source-

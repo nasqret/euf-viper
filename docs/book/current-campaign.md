@@ -395,6 +395,18 @@ reached the host `partial_ref_derive` proc-macro build. No release artifact,
 canary, or timing row was produced. The next repair must close all four evidence
 boundaries and scope static flags to the final target executable.
 
+Successor `d53b32b6` is published only as a diagnostic reproducer. Independent
+review confirmed the exact canary/full population split, complete-population
+parity gates, and analyzer arithmetic. It rejected cluster execution because
+the receipt copies requested placement instead of observing the complete Slurm
+state; arbitrary task IDs and one-of-64-CPU whole-node claims pass; inotify can
+watch a root different from the scanned inode; Rust 1.96 and final-link-only
+flags are not fully pinned; build tools can be replaced and restored around
+pathname execution; and interrupted publication cannot resume or publish a
+terminal release/cancel receipt. Exact hosted run `29398685115` completed the
+release build but failed the guarded ELF check because `DT_NEEDED` entries were
+still present. No T1 timing job exists.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle
@@ -459,6 +471,16 @@ relationships, unique physical source coverage, unsupported top-level forms,
 canary revision identity, hosted `GITHUB_SHA`, and all action pins are not fully
 closed. Thus the green run is mechanism smoke only, not a scanner, census, or
 performance result.
+
+Successor `891c34e7` is also diagnostic-only. Independent review reproduced the
+transitive quoted-macro scanner, 7,503-record ledger, scheduler receipt,
+namespace closure, canary split, and local matrices. It found one remaining
+execution boundary: the environment canary imports project code before checkout
+validation, so ignored unchecked-hash Python bytecode can supply absent source.
+Exact hosted run `29398119605` then failed during workflow compilation and
+created zero jobs. Actionlint v1.7.12 identifies `${{ runner.temp }}` in
+job-level `env`; only step execution exposes the `runner` context. No hosted
+test, corpus scan, canary, census, or timing evidence was produced.
 
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
@@ -534,6 +556,20 @@ implementation nor SIMD. T1 review, the missing assertion-lineage ledger, and a
 separate checked domain-seven proof still block T8. Independent review is GO
 only for retaining this denial-only control, with hosted run `29290493620`
 green.
+
+The first assertion-lineage implementation, `203158c3`, is preserved on
+`research-t8-assertion-lineage` only as a failed-review reproducer. Its producer
+handles the tested byte spans, lexical scopes, repeated roots, transitive macro
+ownership, and typed materialization objects, and feature-off CLI behavior
+matches its parent. It does not yet establish complete lineage: ordinary
+verification skips full semantic reconstruction; the 7,503-record audit does
+not compare rows with the frozen manifest and discards the per-source ledgers;
+build and Slurm identity are self-reported; `push`/`pop` does not maintain the
+active assertion stack; final pathname replacement can escape the last identity
+check; and default builds still scan ambient Git state. Exact hosted run
+`29398694222` passed its generic campaign and Rust steps, but it performs no
+admissible lineage census and changes none of those findings. The scalar
+frontier and SIMD remain unauthorized.
 
 Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an

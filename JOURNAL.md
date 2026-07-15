@@ -1532,6 +1532,27 @@
   binding, Rust no-follow opening, and report recomputation also block WMI.
   No projection ran; repair resumed locally and old job `146075` remains
   historical hard-10 only.
+- Published T1 diagnostic `d53b32b6` on `research-typed-parser-timing` after
+  review accepted its population split and analyzer arithmetic but rejected
+  every WMI action. Scheduler placement and whole-node fields are requested,
+  not independently observed; task identity and physical-core allocation are
+  forgeable; watch attachment, external tool execution, Rust 1.96/final-link
+  pinning, and resumable terminal publication remain incomplete. Exact hosted
+  run `29398685115` built the release, then failed because the ELF retained
+  `DT_NEEDED` entries. No T1 WMI job ran.
+- Published T5 diagnostic `891c34e7` on
+  `research-t5-component-quotient-census-recovered`. Review found one remaining
+  ignored-bytecode import path in the environment canary. Exact run
+  `29398119605` then failed at workflow compilation with zero jobs. Actionlint
+  v1.7.12 reproduced the cause at line 131: `runner` is unavailable in
+  job-level `env`. No hosted test, corpus scan, canary, or WMI census ran.
+- Published T8 diagnostic `203158c3` on `research-t8-assertion-lineage` only as
+  a failed-review reproducer. Producer edge-case tests and feature-off CLI
+  parity pass, but generic verification does not reconstruct complete lineage,
+  final records are not frozen-manifest-bound or replayable, provenance is
+  self-reported, active `push`/`pop` semantics are absent, and pathname/build
+  races remain. Hosted run `29398694222` passed only the bounded generic/Rust
+  workflow. No lineage census, frontier implementation, or WMI job ran.
 
 ## Next Entry Template
 
