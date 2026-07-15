@@ -178,7 +178,15 @@ result cache can satisfy V1-V4.
   semantic-rejection exit and exact diagnostic; hosted run `29384633378` then
   passed all six Rust feature matrices and the real combined-release locked
   smoke. This authorizes neither merge nor WMI. A phase-separated, immutable-
-  snapshot v4 repair is active; no production-evidence corpus run exists.
+  snapshot v4 candidate `cd62e3c` was published for diagnostics only. Exact-head
+  hosted run `29389748725` failed the Python gate after 414 tests with three
+  failures and four errors: an undefined hash validator, missing plan metadata,
+  source-path substitution, and resume-schedule corruption. The workflow never
+  reached Rust or release smoke, so the conditional one-input WMI preflight was
+  not submitted. Review additionally rejects candidate-forgeable build metadata,
+  an unenforced Rust compiler baseline, incomplete execution closure, and
+  nontransactional publication. V4 repair remains isolated; no production-
+  evidence corpus run exists.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke
@@ -586,11 +594,17 @@ Do not compose two candidates in P2. Attribution must remain exact.
     current-level count, second-highest level, negative reuse, then lexical
     order. Current eager/model-cut paths are ineligible because they expose no
     decision levels or alternative reasons.
-  - [ ] Stop after one shadow pass unless at least two of the three frozen
+  - [x] Stop after one shadow pass unless at least two of the three frozen
     multi-round controls have two distinct replay-valid minimum-width candidates
     and an `off`/`on` disagreement. Only a surviving opportunity gate authorizes
     a 32-observation four-source ABBA canary; only that canary authorizes the
-    frozen 24-source, 192-observation panel.
+    frozen 24-source, 192-observation panel. Exact implementation `6269084`
+    rebuilt the independently reproduced 24-source manifest digest
+    `bea69013...a657`, but the first M3 source timed out at 60 seconds before
+    emitting a transcript. The initial opportunity gate is therefore NO-GO and
+    no canary or WMI job was launched. Its analyzer, empty-report admission,
+    overhead accounting, parser oracle, timing isolation, and forest-identity
+    defects also require repair before this track can be reconsidered.
   - [ ] Require nonzero disagreements, zero replay/certificate/fallback/wrong/
     error/missing/off-only outcomes, selected width equal to the common minimum,
     selector work below 5%, at least 20% fewer validations or propagations,

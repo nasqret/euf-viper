@@ -1437,6 +1437,33 @@
   returned success instead of semantic exit 3. The conditional WMI canary was
   not submitted. A fifth isolated repair now owns monitor readiness, executed
   byte binding, runtime closure, and truthful exclusive placement.
+- Published production-evidence v4 diagnostic commit `cd62e3c` to
+  `research-production-evidence-v4`. Exact run `29389748725` failed in the
+  414-test Python gate with three failures, four errors, and four skips. The
+  exact regressions are an undefined `_require_hash`, missing `plan["python"]`,
+  attacker source bytes reaching a supposedly bound execution, timeout values
+  replacing source paths during resume, and the resulting audit/resume
+  failures. Rust, exact-release, comparator, CLI, and locked-smoke steps never
+  ran. Review independently rejects forgeable embedded build metadata,
+  unenforced compiler identity, incomplete runtime closure, and
+  nontransactional publication. The conditional one-input WMI preflight was
+  not submitted; repair remains isolated.
+- Built exact T7 commit `6269084` in a clean detached checkout and mechanically
+  reconstructed its verified M3/T9/A12 manifest from the 7,503-row source
+  manifest. SHA-256 `bea69013...a657` exactly matches independent
+  reconstruction. The permitted local M3 pass timed out on the first frozen
+  `peg_solitaire.2` source at 60 seconds, produced no transcript, and exited 2.
+  Thus no qualifying conflict or policy disagreement was established and no
+  canary or WMI timing was authorized. Independent campaign review also found
+  incorrect median aggregation, self-hashed empty-report admission, incomplete
+  selector-cost accounting, timing contamination, a lexical parser defect, and
+  self-attested forest identity; all remain repair requirements.
+- Live WMI refresh found replacement full array `147307` complete with terminal
+  zero exit codes while global audit `147308` was still running. Official array
+  `147309` was still advancing and audit `147310`, 1,200-second dispatcher
+  `147311`, and certificate arrays/audits `147315`-`147320` remained pending or
+  dependency-held. No partial audit, benchmark row, or certificate row was
+  interpreted.
 
 ## Next Entry Template
 

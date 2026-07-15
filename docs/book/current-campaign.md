@@ -140,7 +140,14 @@ hosted run `29384179332` found a negative-smoke exit expectation bug. Commit
 and exact-head run `29384633378` passed every feature matrix plus the real
 combined-release recorder/checker/runner/analyzer smoke in `5m43s`. That green
 run changes no promotion decision. A phase-separated immutable-snapshot repair
-is the next evidence step; no production-evidence corpus run exists.
+produced diagnostic commit `cd62e3c`. Exact-head run `29389748725` failed its
+414-test Python gate with three failures and four errors before any Rust or
+release step: hash validation was undefined, plan metadata was incomplete,
+bound source bytes were replaceable, and resume reconstructed the wrong
+arguments. Independent review also rejects forgeable embedded build metadata,
+an unenforced compiler baseline, incomplete execution closure, and
+nontransactional publication. The conditional one-input WMI preflight was not
+submitted; no production-evidence corpus run exists.
 
 ## Causal Controls
 
@@ -235,6 +242,16 @@ Required gates are `1.10x` target geometric speed, at least 20% fewer
 validations or propagations, under 5% selector work, A12 p95 overhead at most
 `1.10`, and zero wrong, missing, replay, certificate, fallback, or off-only
 outcomes. No vivification, integration, or WMI run is bundled with this test.
+
+Exact initial implementation `6269084` rebuilt and source-verified the frozen
+24-source manifest at SHA-256 `bea69013...a657`, matching an independent
+reconstruction. The permitted local M3 diagnostic timed out on the first
+`peg_solitaire.2` source at 60 seconds before producing a transcript. It
+therefore fails the opportunity gate and authorizes no ABBA canary or WMI run.
+Review also requires corrected median aggregation, fail-closed nonempty
+opportunity evidence, complete selector-cost accounting, timing separation, a
+lexically sound reference parser, and independent forest reconstruction before
+the track can be reopened.
 
 ## Long-Timeout Graph
 

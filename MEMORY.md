@@ -991,3 +991,16 @@
   exclusive schedule on sole node `c1n1`. Bind actual executed bytes, repair
   monitor readiness, and use truthful placement before another review. No T1
   timing WMI job exists.
+- Production-evidence v4 `cd62e3c` remains diagnostic-only and WMI NO-GO.
+  Exact hosted run `29389748725` failed before Rust after 414 Python tests with
+  three failures and four errors: undefined hash validation, missing plan
+  metadata, source-path substitution, and resume corruption. Review also blocks
+  forgeable embedded build metadata, unenforced compiler identity, incomplete
+  execution closure, and nontransactional publication. No preflight or corpus
+  run exists.
+- Initial T7 commit `6269084` fails its opportunity gate. Its freshly rebuilt,
+  source-verified 24-row manifest has SHA-256 `bea69013...a657`, matching the
+  independent reconstruction, but the first M3 source timed out at 60 seconds
+  before producing a transcript. Analyzer aggregation, empty-report admission,
+  cost accounting, parser scope, timing isolation, and forest reconstruction
+  also remain defective. No canary or WMI job is authorized.
