@@ -347,7 +347,17 @@ independent evidence checks, and a frozen family holdout.
   time. The conditional one-shard WMI canary is therefore stopped. Bind every
   executed script/runtime byte, require monitor-owned readiness evidence, and
   use an evidence-valid placement schedule before another hosted review. No T1
-  timing WMI job exists.
+  timing WMI job exists. Repair `ea28651` was independently accepted only for
+  branch publication and hosted diagnostics. Review found that arbitrary
+  canary shard identifiers can still assemble a full 128-shard
+  `research_only_pass`, checked helper scripts are later reopened by pathname,
+  readiness binds only a count rather than the exact watch set, and runtime
+  evidence underbinds the submitted array plus cancellation ownership. Exact
+  hosted run `29392563168` then failed the guarded release build because global
+  `+crt-static` flags reached host proc-macro compilation. No release artifact,
+  canary, or WMI row exists. Repair the mode/population contract, opened-byte
+  execution, exact monitor set, scheduler receipt, and target-scoped static
+  build before review.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 
@@ -525,7 +535,16 @@ independent evidence checks, and a frozen family holdout.
   scope independently in both parsers, preserve local cancellation ownership
   through receipt persistence, split mandatory Linux publication diagnostics
   from provisioned semantic integration, and review again. No T5 WMI
-  submission exists.
+  submission exists. Repair `48f3cec` passed hosted run `29392694401` for
+  mandatory ordinary-Linux publication/procfs and root tests; the provisioned
+  7,503-source job truthfully skipped without a corpus. Independent review
+  still rejects the scanner and every cluster action: transitive free-global
+  dependencies escape through intermediate macros, release/cancel do not
+  revalidate full scheduler ownership, the remote namespace admits unchecked
+  extras, unique physical source coverage and unsupported top-level forms are
+  not closed, the tiny canary underbinds revision and scheduler identity, and
+  hosted identity/action pinning is incomplete. No corpus scan, canary, census,
+  or T5 timing row exists.
 
 ### T6: Theory-Conditioned Boolean DAG
 
@@ -538,7 +557,15 @@ independent evidence checks, and a frozen family holdout.
   validation, unproved `DOMAIN7_HUGE` membership, path aliases, and a gate not
   bound to population size. It is branch-only and nonpromotable; job `146075`
   remains untouched while the generator is repaired. Exact-head hosted contract
-  run `29390630178` is green and changes none of those restrictions.
+  run `29390630178` is green and changes none of those restrictions. Repair
+  `b587847` produced a byte-identical hardened 12-source artifact with SHA-256
+  `1b3f4e52...05c21`; independent review accepts those exact population bytes
+  and reproduced all physical structural metrics. The branch remains no-go:
+  caller-supplied digest overrides can redefine frozen inputs, non-finite JSON
+  passes, corpus-manifest regeneration is checkout-path-dependent, and the
+  Rust/Slurm consumer still hardcodes manifest v1, 10 sources, and an 8-source
+  gate. Do not publish or submit this revision. A separate reviewed consumer
+  repair must support v2 and the derived 10-of-12 gate.
 - [ ] Require at least 25% projected CNF reduction on `ceil(4N/5)` frozen
   hard-table cases, which is 10/12 for the current population, and more benefit
   than rejected unconditional quotienting. Derive both `N` and the threshold

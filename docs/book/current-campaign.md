@@ -353,6 +353,16 @@ canary. A fifth repair must bind actual executed bytes, obtain monitor-owned
 readiness evidence, and replace the placement claim with an enforceable
 schedule before another hosted review. No T1 timing WMI job exists.
 
+Repair `ea28651` received branch/hosted-diagnostic approval only. Review found
+that caller-selected canary shard IDs can assemble all 128 shards under a
+nonpromotable label, helper scripts are checked and then reopened by pathname,
+monitor readiness does not bind the exact watch set, and scheduler evidence plus
+cancellation ownership remain incomplete. Exact-head run `29392563168` then
+failed at guarded release compilation: global `+crt-static` target features
+reached the host `partial_ref_derive` proc-macro build. No release artifact,
+canary, or timing row was produced. The next repair must close all four evidence
+boundaries and scope static flags to the final target executable.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle
@@ -406,6 +416,18 @@ receipt persistence is complete, and the hosted 7,503-source integration test
 is skipped unless externally provisioned and uses synthetic scheduler evidence
 when enabled. Linux mechanism smoke is therefore green while T5 and WMI remain
 NO-GO. The scope/release/CI repair is active.
+
+That repair, `48f3cec`, passed exact hosted run `29392694401` for mandatory
+ordinary-Linux publication/procfs diagnostics and the root test matrices. The
+provisioned 7,503-source job truthfully skipped because the corpus was absent.
+Independent review still rejects corpus and WMI execution: transitive
+free-global dependencies can escape through intermediate macros; release and
+cancellation do not revalidate complete scheduler ownership; remote namespace
+relationships, unique physical source coverage, unsupported top-level forms,
+canary revision identity, hosted `GITHUB_SHA`, and all action pins are not fully
+closed. Thus the green run is mechanism smoke only, not a scanner, census, or
+performance result.
+
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit. Diagnostic commit `b71a491` reproduced exactly 90,036 observation keys
@@ -417,6 +439,16 @@ paths pass, and the 10-of-12 gate is not derived from population size. The
 checkpoint is branch-only. A repair must derive the gate as `ceil(4N/5)` and
 close every input/structure boundary; old job `146075` remains untouched.
 Exact-head hosted contract run `29390630178` passed and changes no decision.
+
+Repair `b587847` generated the hardened 12-source artifact
+`1b3f4e52...05c21`. Independent review reproduced all 90,036 observations,
+frozen provenance, physical hashes, domain-7 table structure, zero guarded
+clauses, byte-identical output, and the derived `ceil(8N/10) = 10` gate. Those
+exact population bytes are accepted. The branch and census remain no-go because
+the CLI permits caller-selected digest contracts, JSON accepts non-finite
+constants, corpus-manifest regeneration embeds checkout paths, and the exact
+Rust/Slurm consumer still requires manifest v1, 10 sources, and an 8-source
+gate. A separate reviewed v2 consumer revision is required before WMI.
 
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or

@@ -1475,6 +1475,27 @@
   checkpoint was pushed only to `research-t6-theory-dag`; a separate repair is
   active and job `146075` remains untouched. Exact-head hosted contract run
   `29390630178` passed, which records branch health but changes no gate.
+- T1 repair `ea28651` was published only after review allowed an exact-SHA
+  hosted diagnostic. The review still found substitutable canary shard IDs,
+  pathname-reopened helpers, count-only monitor readiness, and underbound array
+  plus cancellation evidence. Hosted run `29392563168` failed at guarded Rust
+  release compilation because global `+crt-static` flags leaked into host
+  proc-macro compilation. No release, canary, or WMI row exists; a sixth repair
+  is isolated and active.
+- T5 repair `48f3cec` passed hosted run `29392694401` for mandatory Linux
+  publication/procfs and root tests; its provisioned 7,503-source job skipped
+  honestly without the corpus. Independent review rejected transitive
+  free-global scanning, scheduler ownership at release/cancel, namespace
+  closure, unique physical source and unsupported-form accounting, canary
+  identity, and hosted revision/action pinning. No corpus scan or WMI action
+  followed; repair remains isolated.
+- Independent review accepts only T6 repair `b587847`'s exact 12-source artifact
+  `1b3f4e52...05c21`. It reproduced the full 90,036-observation matrix,
+  provenance, all physical structure, and the derived 10-of-12 threshold. The
+  branch remains no-go because digest overrides can redefine frozen inputs,
+  non-finite JSON passes, regeneration is path-dependent, and the Rust/Slurm
+  census still hardcodes v1 hard-10/8-of-10. Job `146075` remains historical
+  development provenance only.
 
 ## Next Entry Template
 

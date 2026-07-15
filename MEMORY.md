@@ -1011,3 +1011,19 @@
   gate block promotion. It is preserved on `research-t6-theory-dag`; repair is
   isolated and old job `146075` remains untouched. Exact-head hosted contract
   run `29390630178` is green but is not promotion evidence.
+- T1 timing repair `ea28651` remains WMI NO-GO. Review found substitutable
+  canary shard IDs, pathname-reopened helpers, count-only monitor readiness,
+  and incomplete array/cancellation binding. Exact hosted run `29392563168`
+  failed before producing a release because global `+crt-static` flags reached
+  host proc-macro compilation. No timing or canary row exists.
+- T5 repair `48f3cec` passed hosted Linux mechanism run `29392694401`, while
+  its provisioned corpus job truthfully skipped. It remains corpus/WMI NO-GO:
+  transitive macro free globals, scheduler revalidation, namespace closure,
+  unique physical coverage, unsupported top-level forms, canary identity, and
+  hosted revision/action pinning are incomplete. No T5 census row exists.
+- Accept only T6 repair `b587847`'s exact 12-source population artifact SHA-256
+  `1b3f4e52c8c856e09205baf88b4cff8604f6d864e93373a980ba8d974e205c21`.
+  Do not publish or run that branch: caller digest overrides and non-finite JSON
+  break the frozen contract, regeneration is checkout-path-dependent, and the
+  exact Rust/Slurm consumer still requires manifest v1 hard-10 and 8-of-10.
+  Old job `146075` cannot confirm the accepted population.
