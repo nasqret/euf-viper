@@ -21,3 +21,8 @@ The next program is the [Best-Overall Campaign](best-overall-campaign.md). It
 adds the official QF_UF selection and OpenSMT, modernizes the SAT control,
 closes independent proof/model gaps, and tests proof-carrying component-local
 representation migration under held-out and full-corpus gates.
+
+The opt-in [Assertion Lineage](assertion-lineage.md) layer implements the
+source-exact T8 prerequisite at the typed Boolean/EUF boundary. Its 7,503-source
+WMI census is preregistered but has not been submitted, so it authorizes no T8
+search or solver claim.

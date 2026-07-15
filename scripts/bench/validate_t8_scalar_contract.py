@@ -29,7 +29,9 @@ EXPECTED_CONTRACT: dict[str, Any] = {
             "fea1b2ec59df0187e62d38bd7a996f3fa30c9cbdecee6520dca485364c59d355"
         ),
         "typed_parser_independent_review": "rejected_evidence_integrity",
-        "command_and_auxiliary_assertion_lineage": "missing",
+        "command_and_auxiliary_assertion_lineage": (
+            "implemented_pending_7503_source_census"
+        ),
         "corrected_finite_range_job": 146071,
         "corrected_finite_range_status": (
             "completed_zero_error_no_p12_ranges"

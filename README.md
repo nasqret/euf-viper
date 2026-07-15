@@ -47,6 +47,23 @@ scripts/cert/check_certificate.py results/cert-basic.euf.json
 scripts/cert/run_official_smoke.sh
 ```
 
+The source-only T8 assertion-lineage prerequisite is separately opt-in:
+
+```bash
+cargo +1.96.0 build --release --locked --features lineage
+target/release/euf-viper lineage SOURCE.smt2 \
+  --source-sha256 EXPECTED_SHA256 \
+  --source-bytes EXPECTED_BYTES \
+  --out SOURCE.lineage.json
+python3 scripts/cert/verify_assertion_lineage.py \
+  --source SOURCE.smt2 \
+  --ledger SOURCE.lineage.json
+```
+
+This command only constructs and verifies typed Boolean/EUF lineage. It does
+not solve the source. The full 7,503-source WMI census is preregistered in
+`campaigns/t8-assertion-lineage-census-v1.json` and has not been submitted.
+
 Expected solver output is one of:
 
 - `sat`

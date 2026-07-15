@@ -1,0 +1,66 @@
+{
+  "campaign_id": "t8-assertion-lineage-census-v1",
+  "execution": {
+    "allowed_binary_subcommand": "lineage",
+    "heavy_compute_site": "WMI",
+    "local_full_corpus_allowed": false,
+    "sat_or_unsat_result_fields_allowed": false,
+    "shard_count": 64,
+    "slurm_submission_status": "not_submitted",
+    "solver_invocation_allowed": false
+  },
+  "gates": {
+    "expected_verified_records": 7503,
+    "hash_errors_allowed": 0,
+    "lineage_errors_allowed": 0,
+    "missing_records_allowed": 0,
+    "parse_errors_allowed": 0,
+    "solver_invocations_allowed": 0,
+    "unsupported_accounting_errors_allowed": 0,
+    "verifier_errors_allowed": 0
+  },
+  "identity": {
+    "build_git_dirty_allowed": false,
+    "build_git_revision_must_equal_campaign_revision": true,
+    "build_source_revision_unique_count": 1,
+    "canonical_json_required": true,
+    "duplicate_json_keys_allowed": false,
+    "non_finite_json_values_allowed": false,
+    "parser_source_revision_unique_count": 1,
+    "python_path_unique_count": 1,
+    "python_sha256_unique_count": 1,
+    "python_version_unique_count": 1,
+    "source_binding": "no-follow-single-open-buffer.v1",
+    "stale_source_allowed": false
+  },
+  "parser_environment": {
+    "EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT": "1024",
+    "EUF_VIPER_PROFILE": null,
+    "EUF_VIPER_SCOPED_LET": "auto"
+  },
+  "population": {
+    "expected_physical_sources": 7503,
+    "expected_records": 7503,
+    "expected_unique_device_inode_pairs": 7503,
+    "expected_unique_relative_paths": 7503,
+    "full_manifest_path": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+    "full_manifest_sha256": "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db",
+    "logic": "QF_UF",
+    "release_metadata_path": "benchmarks/qf_uf_2025_metadata.json",
+    "release_metadata_sha256": "a5c467bd2936e80b0697320bc5896cc8400d968654ff7aa37dab6c2362e32dd7"
+  },
+  "schema_version": 1,
+  "scope": {
+    "frontier_search_allowed": false,
+    "performance_claims_allowed": false,
+    "simd_allowed": false,
+    "source_only": true,
+    "typed_ir_boundary": "Problem/BoolProblem"
+  },
+  "status": "preregistered_not_submitted",
+  "unsupported_policy": {
+    "accounted_parser_diagnostics_allowed": true,
+    "diagnostic_message_and_command_identity_required": true,
+    "unsupported_accounting_mismatches_allowed": 0
+  }
+}

@@ -1497,6 +1497,18 @@
   census still hardcodes v1 hard-10/8-of-10. Job `146075` remains historical
   development provenance only.
 
+- 2026-07-15: Implemented the bounded T8 assertion-lineage prerequisite on the
+  isolated `research-t8-assertion-lineage` branch. The `lineage` feature uses
+  the authoritative typed tree parser and no-follow, expected-hash source
+  snapshots; ordinary parses construct no recorder. Canonical ledgers bind
+  source/build/parser identities, exact assertion spans and raw ASTs, all typed
+  Boolean/EUF auxiliaries, macro ancestry, and current unsupported diagnostics.
+  A separate Python parser/reconstructor passes the adversarial macro-shadow,
+  nested-let, repeated-span, Bool-as-data, and term-ITE fixture. The frozen
+  64-shard WMI contract requires exactly 7,503 unique physical sources and zero
+  parse/hash/lineage/verifier/unsupported-accounting errors without solving.
+  It has not been submitted; frontier/SIMD work remains blocked.
+
 ## Next Entry Template
 
 - Benchmark corpus:

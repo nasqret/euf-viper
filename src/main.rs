@@ -1,3 +1,5 @@
+#[cfg(feature = "lineage")]
+mod assertion_lineage;
 #[cfg(test)]
 mod bool_dag_telemetry;
 mod eq_abstraction;
@@ -50,8 +52,10 @@ use std::fs;
 use std::io::{self, Read};
 #[cfg(feature = "certificates")]
 use std::io::{BufReader, BufWriter, Write};
+#[cfg(any(feature = "certificates", feature = "lineage"))]
+use std::path::Path;
 #[cfg(feature = "certificates")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
@@ -350,6 +354,8 @@ struct ParseCtx {
     check_sat_seen: bool,
     exit_seen: bool,
     contradiction: bool,
+    #[cfg(feature = "lineage")]
+    lineage: Option<assertion_lineage::Recorder>,
     #[cfg(test)]
     assertion_sort_validations: usize,
 }
@@ -398,7 +404,86 @@ impl ParseCtx {
     }
 
     fn add_unsupported(&mut self, msg: impl Into<String>) {
-        self.unsupported.push(msg.into());
+        let msg = msg.into();
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_diagnostic("problem", &msg);
+        }
+        self.unsupported.push(msg);
+    }
+
+    fn add_bool_unsupported(&mut self, msg: impl Into<String>) {
+        let msg = msg.into();
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_diagnostic("boolean", &msg);
+        }
+        self.bool_unsupported.push(msg);
+    }
+
+    fn push_bool_assertion(&mut self, expr: BoolExpr, transformation_kind: &'static str) {
+        #[cfg(feature = "lineage")]
+        let index = self.bool_assertions.len();
+        self.bool_assertions.push(expr);
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_bool_assertion(index, transformation_kind);
+        }
+        #[cfg(not(feature = "lineage"))]
+        let _ = transformation_kind;
+    }
+
+    fn truncate_bool_assertions(&mut self, len: usize) {
+        self.bool_assertions.truncate(len);
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.truncate_bool_assertions(len);
+        }
+    }
+
+    fn push_equality(&mut self, left: TermId, right: TermId, transformation_kind: &'static str) {
+        #[cfg(feature = "lineage")]
+        let index = self.eqs.len();
+        self.eqs.push((left, right));
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_euf_fact("equality", index, left, right, transformation_kind);
+        }
+        #[cfg(not(feature = "lineage"))]
+        let _ = transformation_kind;
+    }
+
+    fn push_disequality(&mut self, left: TermId, right: TermId, transformation_kind: &'static str) {
+        #[cfg(feature = "lineage")]
+        let index = self.diseqs.len();
+        self.diseqs.push((left, right));
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_euf_fact("disequality", index, left, right, transformation_kind);
+        }
+        #[cfg(not(feature = "lineage"))]
+        let _ = transformation_kind;
+    }
+
+    fn mark_contradiction(&mut self, transformation_kind: &'static str) {
+        self.contradiction = true;
+        #[cfg(feature = "lineage")]
+        if let Some(lineage) = &mut self.lineage {
+            lineage.record_contradiction(transformation_kind);
+        }
+        #[cfg(not(feature = "lineage"))]
+        let _ = transformation_kind;
+    }
+
+    fn bool_definition(&mut self, symbol: SymId) -> Option<BoolExpr> {
+        let definition = self.bool_definitions.get(&symbol).cloned();
+        #[cfg(feature = "lineage")]
+        if definition.is_some()
+            && let Some(lineage) = &mut self.lineage
+        {
+            lineage.record_macro_use(symbol);
+        }
+        definition
     }
 
     fn parse_sort(&mut self, sexp: &Sexp, context: &str) -> Result<SortId, String> {
@@ -659,7 +744,7 @@ impl ParseCtx {
                     Ok(expr) => {
                         let preprocess_branch_intersections =
                             should_preprocess_branch_intersections(&expr);
-                        self.bool_assertions.push(expr);
+                        self.push_bool_assertion(expr, "source_assertion_root");
                         let term_limit = env::var("EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT")
                             .ok()
                             .and_then(|value| value.parse().ok())
@@ -674,9 +759,9 @@ impl ParseCtx {
                         }
                     }
                     Err(err) => {
-                        self.bool_assertions.truncate(aux_start);
+                        self.truncate_bool_assertions(aux_start);
                         self.validate_assertion_sort(&items[1])?;
-                        self.bool_unsupported.push(err);
+                        self.add_bool_unsupported(err);
                         let mut env = HashMap::default();
                         self.collect_formula(&items[1], true, &mut env)?;
                     }
@@ -770,7 +855,18 @@ impl ParseCtx {
                 self.ensure_bool_value_terms();
                 let already_declared = self.fun_decls.get(self.symbols.intern(name)).is_some();
                 let mut env = HashMap::default();
-                match self.parse_bool_expr(&items[4], &mut env) {
+                #[cfg(feature = "lineage")]
+                let definition_symbol = self.symbols.intern(name);
+                #[cfg(feature = "lineage")]
+                if let Some(lineage) = &mut self.lineage {
+                    lineage.begin_definition(definition_symbol);
+                }
+                let parsed_definition = self.parse_bool_expr(&items[4], &mut env);
+                #[cfg(feature = "lineage")]
+                if let Some(lineage) = &mut self.lineage {
+                    lineage.end_definition();
+                }
+                match parsed_definition {
                     Ok(body) => {
                         if already_declared {
                             return Err(format!("function `{name}` is already declared"));
@@ -784,8 +880,7 @@ impl ParseCtx {
                             return Err(format!("function `{name}` is already declared"));
                         }
                         self.add_unsupported(format!("define-fun `{name}`: {err}"));
-                        self.bool_unsupported
-                            .push(format!("define-fun `{name}`: {err}"));
+                        self.add_bool_unsupported(format!("define-fun `{name}`: {err}"));
                     }
                 }
             }
@@ -808,11 +903,11 @@ impl ParseCtx {
         match sexp {
             Sexp::Atom(atom) if atom == "true" && polarity => Ok(()),
             Sexp::Atom(atom) if atom == "false" && polarity => {
-                self.contradiction = true;
+                self.mark_contradiction("asserted_false");
                 Ok(())
             }
             Sexp::Atom(atom) if atom == "true" => {
-                self.contradiction = true;
+                self.mark_contradiction("negated_true");
                 Ok(())
             }
             Sexp::Atom(atom) if atom == "false" => Ok(()),
@@ -916,7 +1011,7 @@ impl ParseCtx {
         };
         if branches.is_empty() {
             analysis.proved_unsat = true;
-            self.contradiction = true;
+            self.mark_contradiction("empty_positive_or");
             return Ok(analysis);
         }
 
@@ -962,7 +1057,7 @@ impl ParseCtx {
 
         if satisfiable_roots.is_empty() {
             analysis.proved_unsat = true;
-            self.contradiction = true;
+            self.mark_contradiction("all_positive_or_branches_pruned");
             return Ok(analysis);
         }
 
@@ -988,7 +1083,7 @@ impl ParseCtx {
             };
             for &term in rest {
                 if existing.insert(normalized_pair(representative, term)) {
-                    self.eqs.push((representative, term));
+                    self.push_equality(representative, term, "positive_or_branch_intersection");
                     added += 1;
                     if added >= COMMON_PAIR_LIMIT {
                         break 'classes;
@@ -1121,7 +1216,7 @@ impl ParseCtx {
                 }
                 None => {
                     let sym = self.symbols.intern(name);
-                    if let Some(body) = self.bool_definitions.get(&sym).cloned() {
+                    if let Some(body) = self.bool_definition(sym) {
                         Ok(body)
                     } else if self.is_bool_symbol(sym, 0) {
                         self.bool_app_expr(sym, name, Vec::new())
@@ -1223,7 +1318,7 @@ impl ParseCtx {
                     _ => {
                         let sym = self.symbols.intern(head);
                         if items.len() == 1 {
-                            if let Some(body) = self.bool_definitions.get(&sym).cloned() {
+                            if let Some(body) = self.bool_definition(sym) {
                                 return Ok(body);
                             }
                         }
@@ -1365,7 +1460,7 @@ impl ParseCtx {
                     return Ok(value);
                 }
                 let sym = self.symbols.intern(atom);
-                if let Some(body) = self.bool_definitions.get(&sym).cloned() {
+                if let Some(body) = self.bool_definition(sym) {
                     Ok(BindingValue::Bool(body))
                 } else if self.is_bool_symbol(sym, 0) {
                     Ok(BindingValue::Bool(self.bool_app_expr(
@@ -1411,7 +1506,7 @@ impl ParseCtx {
                 }
                 let sym = self.symbols.intern(head);
                 if items.len() == 1 {
-                    if let Some(body) = self.bool_definitions.get(&sym).cloned() {
+                    if let Some(body) = self.bool_definition(sym) {
                         return Ok(BindingValue::Bool(body));
                     }
                 }
@@ -1490,11 +1585,14 @@ impl ParseCtx {
                         self.fresh_internal_term("ite", self.arena.terms[then_term].sort);
                     let then_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, then_term));
                     let else_eq = BoolExpr::Atom(BoolAtomKey::Eq(ite_term, else_term));
-                    self.bool_assertions.push(BoolExpr::Or(vec![
-                        BoolExpr::Not(Box::new(cond.clone())),
-                        then_eq,
-                    ]));
-                    self.bool_assertions.push(BoolExpr::Or(vec![cond, else_eq]));
+                    self.push_bool_assertion(
+                        BoolExpr::Or(vec![BoolExpr::Not(Box::new(cond.clone())), then_eq]),
+                        "term_ite_then_axiom",
+                    );
+                    self.push_bool_assertion(
+                        BoolExpr::Or(vec![cond, else_eq]),
+                        "term_ite_else_axiom",
+                    );
                     return Ok(ite_term);
                 }
                 let fun = self.symbols.intern(head);
@@ -1651,10 +1749,10 @@ impl ParseCtx {
             BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => term,
             expr => {
                 let term = self.fresh_internal_term("bool_expr", BOOL_SORT);
-                self.bool_assertions.push(BoolExpr::Iff(vec![
-                    BoolExpr::Atom(BoolAtomKey::BoolTerm(term)),
-                    expr,
-                ]));
+                self.push_bool_assertion(
+                    BoolExpr::Iff(vec![BoolExpr::Atom(BoolAtomKey::BoolTerm(term)), expr]),
+                    "bool_materialization_axiom",
+                );
                 term
             }
         };
@@ -1664,6 +1762,11 @@ impl ParseCtx {
 
     fn ensure_bool_value_terms(&mut self) -> (TermId, TermId) {
         if let Some(terms) = self.bool_value_terms {
+            #[cfg(feature = "lineage")]
+            if let Some(lineage) = &mut self.lineage {
+                lineage.add_current_origin_to_internal_term(terms.0);
+                lineage.add_current_origin_to_internal_term(terms.1);
+            }
             return terms;
         }
         let true_term = self.fresh_internal_term("true", BOOL_SORT);
@@ -1687,7 +1790,12 @@ impl ParseCtx {
                     result_sort: sort,
                 },
             );
-            return self.arena.intern_typed(sym, Vec::new(), sort);
+            let term = self.arena.intern_typed(sym, Vec::new(), sort);
+            #[cfg(feature = "lineage")]
+            if let Some(lineage) = &mut self.lineage {
+                lineage.record_internal_term(term, kind);
+            }
+            return term;
         }
     }
 
@@ -1706,10 +1814,10 @@ impl ParseCtx {
         if polarity {
             let first = terms[0];
             for &term in &terms[1..] {
-                self.eqs.push((first, term));
+                self.push_equality(first, term, "asserted_equality_pair");
             }
         } else if terms.len() == 2 {
-            self.diseqs.push((terms[0], terms[1]));
+            self.push_disequality(terms[0], terms[1], "negated_binary_equality");
         } else {
             self.add_unsupported("negated n-ary equality is disjunctive");
         }
@@ -1730,11 +1838,11 @@ impl ParseCtx {
         if polarity {
             for i in 0..terms.len() {
                 for j in (i + 1)..terms.len() {
-                    self.diseqs.push((terms[i], terms[j]));
+                    self.push_disequality(terms[i], terms[j], "asserted_distinct_pair");
                 }
             }
         } else if terms.len() == 2 {
-            self.eqs.push((terms[0], terms[1]));
+            self.push_equality(terms[0], terms[1], "negated_binary_distinct");
         } else {
             self.add_unsupported("negated distinct with more than two arguments is disjunctive");
         }
@@ -7192,7 +7300,7 @@ fn parse_flag_usize(args: &[String], flag: &str, default: usize) -> Result<usize
     Ok(default)
 }
 
-#[cfg(feature = "certificates")]
+#[cfg(any(feature = "certificates", feature = "lineage"))]
 fn parse_required_flag<'a>(args: &'a [String], flag: &str) -> Result<&'a str, String> {
     let position = args
         .iter()
@@ -7203,6 +7311,49 @@ fn parse_required_flag<'a>(args: &'a [String], flag: &str) -> Result<&'a str, St
         .ok_or_else(|| format!("{flag} requires a value"))
 }
 
+#[cfg(feature = "lineage")]
+fn lineage_cmd(args: &[String]) -> Result<i32, String> {
+    if args.len() < 3 {
+        return Err(
+            "usage: euf-viper lineage FILE --source-sha256 HASH --source-bytes N --out PATH"
+                .to_owned(),
+        );
+    }
+    let source = &args[2];
+    if source.starts_with("--") {
+        return Err("lineage source file is required before options".to_owned());
+    }
+    let expected_sha256 = parse_required_flag(&args[3..], "--source-sha256")?;
+    let expected_bytes = parse_required_flag(&args[3..], "--source-bytes")?
+        .parse::<usize>()
+        .map_err(|error| format!("invalid --source-bytes value: {error}"))?;
+    let output = parse_required_flag(&args[3..], "--out")?;
+    let allowed = ["--source-sha256", "--source-bytes", "--out"];
+    let mut seen = HashSet::default();
+    let mut index = 3usize;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        if !allowed.contains(&flag) {
+            return Err(format!("unknown lineage option `{flag}`"));
+        }
+        if !seen.insert(flag) {
+            return Err(format!("duplicate lineage option `{flag}`"));
+        }
+        if args.get(index + 1).is_none() {
+            return Err(format!("{flag} requires a value"));
+        }
+        index += 2;
+    }
+    assertion_lineage::write_lineage(
+        Path::new(source),
+        expected_sha256,
+        expected_bytes,
+        Path::new(output),
+        selected_scoped_let_mode()?,
+    )?;
+    Ok(0)
+}
+
 fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
     let value = value.ok_or_else(|| format!("missing {label}"))?;
     value
@@ -7210,7 +7361,7 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
         .map_err(|e| format!("invalid {label}: {e}"))
 }
 
-#[cfg(not(feature = "certificates"))]
+#[cfg(all(not(feature = "certificates"), not(feature = "lineage")))]
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
@@ -7225,13 +7376,48 @@ fn usage() -> &'static str {
   euf-viper bench-or [--cases N] [--branches N] [--depth N]"
 }
 
-#[cfg(feature = "certificates")]
+#[cfg(all(feature = "certificates", not(feature = "lineage")))]
 fn usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
   euf-viper stats FILE
   euf-viper parse-check FILE|-
+  euf-viper dump-eager-cnf FILE --out PATH
+  euf-viper solve-dimacs FILE
+  euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
+  euf-viper gen chain N [--sat]
+  euf-viper gen grid WIDTH DEPTH
+  euf-viper gen diamond BRANCHES DEPTH
+  euf-viper gen pruned-or BRANCHES
+  euf-viper bench [--cases N] [--size N]
+  euf-viper bench-or [--cases N] [--branches N] [--depth N]"
+}
+
+#[cfg(all(not(feature = "certificates"), feature = "lineage"))]
+fn usage() -> &'static str {
+    "usage:
+  euf-viper solve [--stats] FILE
+  euf-viper portfolio --yices PATH [--stats] FILE
+  euf-viper stats FILE
+  euf-viper parse-check FILE|-
+  euf-viper lineage FILE --source-sha256 HASH --source-bytes N --out PATH
+  euf-viper gen chain N [--sat]
+  euf-viper gen grid WIDTH DEPTH
+  euf-viper gen diamond BRANCHES DEPTH
+  euf-viper gen pruned-or BRANCHES
+  euf-viper bench [--cases N] [--size N]
+  euf-viper bench-or [--cases N] [--branches N] [--depth N]"
+}
+
+#[cfg(all(feature = "certificates", feature = "lineage"))]
+fn usage() -> &'static str {
+    "usage:
+  euf-viper solve [--stats] FILE
+  euf-viper portfolio --yices PATH [--stats] FILE
+  euf-viper stats FILE
+  euf-viper parse-check FILE|-
+  euf-viper lineage FILE --source-sha256 HASH --source-bytes N --out PATH
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
   euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
@@ -7273,6 +7459,8 @@ fn run() -> Result<i32, String> {
             }
             parse_check_file(file)
         }
+        #[cfg(feature = "lineage")]
+        "lineage" => lineage_cmd(&args),
         #[cfg(feature = "certificates")]
         "dump-eager-cnf" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;

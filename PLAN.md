@@ -665,9 +665,12 @@ Do not compose two candidates in P2. Attribution must remain exact.
     evidence paths are mandatory and a valid contract still authorizes neither
     implementation nor SIMD. Independent review is GO for retaining this
     denial-only preregistration control.
-  - [ ] Add command-byte-span/raw-AST identities and complete lineage for every
-    source assertion and parser-generated auxiliary. T1 parser parity alone
-    does not provide this ledger.
+  - [x] Add opt-in command-byte-span/raw-AST identities and complete typed-IR
+    lineage for source roots, parser-generated Boolean assertions, internal
+    terms, EUF facts, contradiction events, and unsupported diagnostics. The
+    independent fixture reconstructor passes locally. The exact 7,503-source
+    census is frozen in `t8-assertion-lineage-census-v1.json` but remains
+    unsubmitted, so this implementation is not yet promoted evidence.
   - [ ] Require a checked P12 finite-domain certificate and independent review
     of T1 before scalar implementation. Corrected T4 evidence is complete but
     proves no non-Boolean range on all 12 P12 sources, so a separate source-

@@ -815,10 +815,17 @@
   design is a no-forget typed partial-algebra transducer with command-level
   source/auxiliary lineage, complete residual state, an independent tiny-domain
   total-model-set oracle, checked SAT models, and checked UNSAT cube-cover DAGs.
-  Do not implement it before independent T1 review, the missing assertion
+  Do not implement it before independent T1 review, a promoted assertion
   ledger, and corrected T4 finite-range evidence. Scalar gates are 200/261
   source-complete one-table cases, 10/12 P12 below one million states, and build
   cost at most 10% of Yices2 on at least 7/12; SIMD remains conditional.
+- The opt-in T8 assertion-lineage implementation now records exact command
+  spans/raw ASTs and complete typed `Problem`/`BoolProblem` auxiliary ancestry,
+  with a separate Python source parser and adversarial reconstructor. Its
+  7,503-source, 64-shard WMI census is frozen by
+  `t8-assertion-lineage-census-v1.json` and explicitly unsubmitted. Treat the
+  prerequisite as implemented-pending-census, not as promoted lineage evidence
+  and not as authorization for frontier search or SIMD.
 - T5 revision `e930abf` remains no-go after independent review. Direct digest
   and pinned-Python checks passed, but coordinated semantic mutations could
   still reach `completed`, the final check/publish boundary was mutable, failed

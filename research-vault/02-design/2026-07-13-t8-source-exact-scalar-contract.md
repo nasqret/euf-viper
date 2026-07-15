@@ -27,6 +27,11 @@ No implementation starts until:
 - corrected T4 census `146071` supplies exact checked finite ranges; and
 - the frozen source populations and independent tiny oracle are hash bound.
 
+The command and auxiliary assertion-lineage implementation is now available as
+an opt-in source-only prerequisite, but its frozen 7,503-source WMI census is
+preregistered and unsubmitted. This changes the prerequisite from missing to
+implemented-pending-census; it does not authorize the scalar frontier engine.
+
 T4 has now completed with 7,503 rows and zero parse errors. It found zero
 non-uniform value-cell savings and is rejected as a Hall/PB implementation.
 More importantly for T8, all 12 P12 rows report

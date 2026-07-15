@@ -5,6 +5,7 @@ chapters:
   - file: theory
   - file: soundness
   - file: implementation
+  - file: assertion-lineage
   - file: benchmarking
   - file: frontier
   - file: novelty-campaign
