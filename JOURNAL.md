@@ -1048,6 +1048,49 @@
   nine-page Jupyter Book build. No T6 projection, publication, push, or WMI
   submission/cancellation occurred.
 
+## 2026-07-15 T6 Diagnostic Execution-Envelope Repair
+
+- Resumed from clean published diagnostic commit `58aee6e9` without changing
+  the accepted v2 artifact, its generator, or its
+  `33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78`
+  SHA-256. Hosted workflow code now checks out and asserts the exact event head,
+  runs both exact T6 Python modules, runs the focused T6 Rust target, and runs
+  the locked all-feature suite with `cargo +1.96.0`. No hosted run was triggered.
+- Added fail-closed external WMI toolchain contract
+  `db825fa64cf03e20d07842d063638ecdf7193a1eba4966be5d9e5f7e5c108baa`.
+  It is explicitly ineligible/pending: WMI exposes Rust 1.93 and the reported
+  1.96.0 rustup installation attempt failed with `EDQUOT`. Future eligibility
+  requires independently reviewed direct Cargo/rustc/native-tool paths,
+  hashes, exact `cargo -V`/`rustc -vV`, and evidence. Runtime inspection rejects
+  symlink or same-identity rustup proxies, records generated Cargo config,
+  wrappers and linkers, and launches direct Cargo under an exact environment
+  allowlist with attempt-private `HOME`, `CARGO_HOME`, and target directory.
+- Slurm submission now uses `--export=NONE` with revision and corpus root as
+  explicit positional values. The job cannot pass its local readiness gate
+  under the current contract. No script installs Rust, mutates global Rustup,
+  inherits caller build flags, or selects a caller-provided expected tool hash.
+- The Rust census opens the descriptor root once and each source component with
+  no-follow descriptor-relative `openat`. It hashes one stable opened snapshot,
+  verifies exact size and pre/post metadata, and rejects duplicate device/inode
+  identities before parsing.
+- Final Slurm validation now strictly parses both artifacts and independently
+  recomputes every A/B/C/D row reduction, D-over-B/C margins, qualification,
+  all-12 qualifying count, 10-of-12 decision, and accepted/completed status
+  transition. Forged row summaries, aggregate summaries, nonfinite numbers,
+  duplicate keys, leaked build variables, and Cargo config drift are covered by
+  focused regressions.
+- Job `146075` has the hash-pinned disposition
+  `b22f3bfdb10d2a379d5777e206eacd1e85453ee69c7380d8b68d995bda3fcbda`:
+  historical hard10, current state not queried, not v2 evidence, and never
+  automatically cancellable.
+- Validation passed locally with Rust 1.96.0: 31 focused Python tests; 11
+  focused Rust tests with the external census ignored; all 312 Python tests;
+  232 default Rust tests with 3 external probes ignored; 249 all-feature Rust
+  tests with 5 external corpus/probe tests ignored; Rust formatting; three
+  shell syntax checks; and the warnings-as-errors nine-page Jupyter Book build.
+  No projection/census, SSH, WMI query/submission/cancellation, push, or
+  publication occurred.
+
 ## Next Entry Template
 
 - Benchmark corpus:

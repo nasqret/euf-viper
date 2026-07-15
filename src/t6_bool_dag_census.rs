@@ -9,9 +9,37 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::env;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+use std::ffi::{CString, c_char, c_int};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+use std::os::unix::ffi::OsStrExt;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -60,7 +88,53 @@ const TWO_WATCH_RULE: &str =
 const MAX_SOURCE_BYTES: usize = 16 * 1_048_576;
 const MAX_DIAGNOSTIC_CHARS: usize = 512;
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const O_CLOEXEC_FLAG: c_int = 0x80000;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const O_DIRECTORY_FLAG: c_int = 0x10000;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const O_NOFOLLOW_FLAG: c_int = 0x20000;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const O_CLOEXEC_FLAG: c_int = 0x1000000;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const O_DIRECTORY_FLAG: c_int = 0x100000;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+const O_NOFOLLOW_FLAG: c_int = 0x100;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+unsafe extern "C" {
+    fn openat(directory: c_int, path: *const c_char, flags: c_int, ...) -> c_int;
+}
+
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug)]
+struct SourceSnapshot {
+    bytes: Vec<u8>,
+    identity: (u64, u64),
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+struct CorpusDescriptor {
+    root: File,
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+struct CorpusDescriptor;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -448,9 +522,17 @@ fn run_census(
         .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
     let manifest = decode_manifest(&manifest_bytes)?;
 
+    let corpus = CorpusDescriptor::open(corpus_root)?;
+    let mut physical_identities = HashSet::with_capacity(manifest.sources.len());
     let mut sources = Vec::with_capacity(manifest.sources.len());
     for source in &manifest.sources {
-        sources.push(analyze_source(corpus_root, source)?);
+        let snapshot = corpus.read_source(source)?;
+        require_unique_physical_source(
+            &mut physical_identities,
+            snapshot.identity,
+            &source.relative_path,
+        )?;
+        sources.push(analyze_source(source, snapshot.bytes)?);
     }
     let report = build_report(
         revision,
@@ -461,6 +543,19 @@ fn run_census(
     )?;
     let bytes = serialize_report(&report)?;
     atomic_write(output_path, &bytes)
+}
+
+fn require_unique_physical_source(
+    identities: &mut HashSet<(u64, u64)>,
+    identity: (u64, u64),
+    relative_path: &str,
+) -> Result<(), String> {
+    if !identities.insert(identity) {
+        return Err(format!(
+            "duplicate physical source identity for {relative_path}"
+        ));
+    }
+    Ok(())
 }
 
 fn decode_manifest(bytes: &[u8]) -> Result<FrozenManifest, String> {
@@ -760,20 +855,186 @@ fn canonical_path_list_sha256(sources: &[FrozenSource]) -> String {
     format!("{:x}", digest.finalize())
 }
 
-fn read_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let file =
-        File::open(path).map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.take((MAX_SOURCE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    if bytes.len() > MAX_SOURCE_BYTES {
-        return Err(format!(
-            "source exceeds {MAX_SOURCE_BYTES} bytes: {}",
-            path.display()
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+impl CorpusDescriptor {
+    fn open(path: &Path) -> Result<Self, String> {
+        let root = OpenOptions::new()
+            .read(true)
+            .custom_flags(O_CLOEXEC_FLAG | O_DIRECTORY_FLAG | O_NOFOLLOW_FLAG)
+            .open(path)
+            .map_err(|error| {
+                format!(
+                    "failed to open corpus descriptor root {} without following links: {error}",
+                    path.display()
+                )
+            })?;
+        let metadata = root
+            .metadata()
+            .map_err(|error| format!("failed to stat corpus descriptor root: {error}"))?;
+        if !metadata.is_dir() {
+            return Err("corpus descriptor root is not a directory".to_owned());
+        }
+        Ok(Self { root })
+    }
+
+    fn read_source(&self, source: &FrozenSource) -> Result<SourceSnapshot, String> {
+        validate_relative_path(&source.relative_path)?;
+        let components = Path::new(&source.relative_path)
+            .components()
+            .map(|component| match component {
+                Component::Normal(value) => Ok(value),
+                _ => Err(format!("unsafe relative path {:?}", source.relative_path)),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (file_name, directories) = components
+            .split_last()
+            .ok_or_else(|| format!("empty source path {:?}", source.relative_path))?;
+        let mut directory = self
+            .root
+            .try_clone()
+            .map_err(|error| format!("failed to duplicate corpus root descriptor: {error}"))?;
+        for component in directories {
+            directory = openat_component(&directory, component, true).map_err(|error| {
+                format!(
+                    "failed to open directory component {:?} for {}: {error}",
+                    component, source.relative_path
+                )
+            })?;
+        }
+        let file = openat_component(&directory, file_name, false).map_err(|error| {
+            format!(
+                "failed to open physical source {} without following links: {error}",
+                source.relative_path
+            )
+        })?;
+        snapshot_source(file, source)
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+)))]
+impl CorpusDescriptor {
+    fn open(_path: &Path) -> Result<Self, String> {
+        Err("T6 census requires Unix descriptor-relative no-follow opening".to_owned())
+    }
+
+    fn read_source(&self, _source: &FrozenSource) -> Result<SourceSnapshot, String> {
+        Err("T6 census requires Unix descriptor-relative no-follow opening".to_owned())
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+fn openat_component(
+    directory: &File,
+    component: &std::ffi::OsStr,
+    is_directory: bool,
+) -> std::io::Result<File> {
+    let name = CString::new(component.as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path component contains NUL",
+        )
+    })?;
+    let mut flags = O_CLOEXEC_FLAG | O_NOFOLLOW_FLAG;
+    if is_directory {
+        flags |= O_DIRECTORY_FLAG;
+    }
+    // SAFETY: name is NUL-terminated, directory remains open, and no creation mode is needed.
+    let descriptor = unsafe { openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+    if descriptor < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: openat returned a new owned descriptor on success.
+    let file = unsafe { File::from_raw_fd(descriptor) };
+    let metadata = file.metadata()?;
+    if (is_directory && !metadata.is_dir()) || (!is_directory && !metadata.is_file()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            if is_directory {
+                "path component is not a directory"
+            } else {
+                "source is not a regular file"
+            },
         ));
     }
-    Ok(bytes)
+    Ok(file)
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+fn metadata_state(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
+    (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.size(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    )
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "ios"
+))]
+fn snapshot_source(mut file: File, source: &FrozenSource) -> Result<SourceSnapshot, String> {
+    let before = file
+        .metadata()
+        .map_err(|error| format!("failed to stat {}: {error}", source.relative_path))?;
+    if !before.is_file() {
+        return Err(format!(
+            "source is not a regular file: {}",
+            source.relative_path
+        ));
+    }
+    if before.size() != source.source_bytes as u64 {
+        return Err(format!(
+            "source byte mismatch for {}: expected {}, observed {}",
+            source.relative_path,
+            source.source_bytes,
+            before.size()
+        ));
+    }
+    let mut bytes = Vec::with_capacity(source.source_bytes);
+    (&mut file)
+        .take((MAX_SOURCE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read {}: {error}", source.relative_path))?;
+    let after = file
+        .metadata()
+        .map_err(|error| format!("failed to restat {}: {error}", source.relative_path))?;
+    if metadata_state(&before) != metadata_state(&after) || bytes.len() as u64 != after.size() {
+        return Err(format!(
+            "source changed while its opened snapshot was read: {}",
+            source.relative_path
+        ));
+    }
+    verify_source_bytes(source, &bytes)?;
+    Ok(SourceSnapshot {
+        bytes,
+        identity: (after.dev(), after.ino()),
+    })
 }
 
 fn verify_source_bytes(source: &FrozenSource, bytes: &[u8]) -> Result<(), String> {
@@ -795,10 +1056,7 @@ fn verify_source_bytes(source: &FrozenSource, bytes: &[u8]) -> Result<(), String
     Ok(())
 }
 
-fn analyze_source(corpus_root: &Path, source: &FrozenSource) -> Result<SourceRecord, String> {
-    let path = corpus_root.join(&source.relative_path);
-    let bytes = read_bounded(&path)?;
-    verify_source_bytes(source, &bytes)?;
+fn analyze_source(source: &FrozenSource, bytes: Vec<u8>) -> Result<SourceRecord, String> {
     let input = String::from_utf8(bytes)
         .map_err(|error| format!("invalid UTF-8 in {}: {error}", source.relative_path))?;
     let problem =
@@ -1277,6 +1535,145 @@ mod tests {
             verify_source_bytes(source, b"ab")
                 .unwrap_err()
                 .contains("byte mismatch")
+        );
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    struct TestDirectory(PathBuf);
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let path = env::temp_dir().join(format!(
+                "euf-viper-t6-{label}-{}-{sequence}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    fn fixture_source(relative_path: &str, bytes: &[u8]) -> FrozenSource {
+        let mut source = frozen_manifest().sources[0].clone();
+        source.relative_path = relative_path.to_owned();
+        source.source_bytes = bytes.len();
+        source.source_structure.source_bytes = bytes.len();
+        source.source_sha256 = sha256_hex(bytes);
+        source
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn descriptor_reader_rejects_symlink_root_directory_and_file_components() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TestDirectory::new("nofollow");
+        let corpus = temporary.0.join("corpus");
+        let actual = corpus.join("actual");
+        fs::create_dir(&corpus).unwrap();
+        fs::create_dir(&actual).unwrap();
+        let bytes = b"(set-logic QF_UF)\n";
+        fs::write(actual.join("source.smt2"), bytes).unwrap();
+
+        let descriptor = CorpusDescriptor::open(&corpus).unwrap();
+        let direct = fixture_source("actual/source.smt2", bytes);
+        assert_eq!(descriptor.read_source(&direct).unwrap().bytes, bytes);
+
+        symlink(&actual, corpus.join("linked-directory")).unwrap();
+        let linked_directory = fixture_source("linked-directory/source.smt2", bytes);
+        assert!(descriptor.read_source(&linked_directory).is_err());
+
+        symlink(actual.join("source.smt2"), corpus.join("linked-file.smt2")).unwrap();
+        let linked_file = fixture_source("linked-file.smt2", bytes);
+        assert!(descriptor.read_source(&linked_file).is_err());
+
+        symlink(&corpus, temporary.0.join("linked-root")).unwrap();
+        assert!(CorpusDescriptor::open(&temporary.0.join("linked-root")).is_err());
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    #[test]
+    fn opened_snapshot_binds_size_hash_and_unique_device_inode() {
+        let temporary = TestDirectory::new("identity");
+        let corpus = temporary.0.join("corpus");
+        fs::create_dir(&corpus).unwrap();
+        let bytes = b"(set-logic QF_UF)\n";
+        fs::write(corpus.join("first.smt2"), bytes).unwrap();
+        fs::hard_link(corpus.join("first.smt2"), corpus.join("second.smt2")).unwrap();
+        let descriptor = CorpusDescriptor::open(&corpus).unwrap();
+        let first = fixture_source("first.smt2", bytes);
+        let second = fixture_source("second.smt2", bytes);
+        let first_snapshot = descriptor.read_source(&first).unwrap();
+        let second_snapshot = descriptor.read_source(&second).unwrap();
+        assert_eq!(first_snapshot.identity, second_snapshot.identity);
+
+        let mut identities = HashSet::new();
+        require_unique_physical_source(&mut identities, first_snapshot.identity, "first.smt2")
+            .unwrap();
+        assert!(
+            require_unique_physical_source(
+                &mut identities,
+                second_snapshot.identity,
+                "second.smt2"
+            )
+            .unwrap_err()
+            .contains("duplicate physical source identity")
+        );
+
+        let mut wrong_size = first.clone();
+        wrong_size.source_bytes += 1;
+        assert!(
+            descriptor
+                .read_source(&wrong_size)
+                .unwrap_err()
+                .contains("byte mismatch")
+        );
+        let mut wrong_hash = first;
+        wrong_hash.source_sha256 = "0".repeat(64);
+        assert!(
+            descriptor
+                .read_source(&wrong_hash)
+                .unwrap_err()
+                .contains("SHA-256 mismatch")
         );
     }
 

@@ -13,9 +13,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact event head
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.96.0
       - name: Validate campaign specification
         run: >-
           python3 scripts/bench/validate_campaign_spec.py
@@ -40,6 +51,11 @@ jobs:
             tests.test_audit_staged_shadow_campaign \
             tests.test_wmi_continuation_scripts \
             tests.test_wmi_certificate_scripts
+      - name: Test exact T6 Python contracts
+        run: |
+          python3 -m unittest \
+            tests.test_derive_t6_p0_qg_manifest \
+            tests.test_wmi_t6_bool_dag_census
       - name: Check campaign scripts
         run: |
           bash -n scripts/bench/install_solvers.sh
@@ -58,5 +74,11 @@ jobs:
           bash -n scripts/wmi/submit_certificate_shadow.sh
           bash -n scripts/wmi/euf_viper_certificate_staged_audit.sbatch
           bash -n scripts/wmi/submit_staged_certificate_audit.sh
-      - name: Test Rust solver
-        run: cargo test --all-features
+          bash -n scripts/wmi/euf_viper_t6_bool_dag_census.sbatch
+          bash -n scripts/wmi/submit_t6_bool_dag_census.sh
+      - name: Test exact T6 Rust target
+        run: >-
+          cargo +1.96.0 test --locked --all-features
+          t6_bool_dag_census::tests::
+      - name: Test all-feature Rust solver
+        run: cargo +1.96.0 test --locked --all-features

@@ -283,6 +283,17 @@ result: the projection is unexecuted and implementation/promotion eligibility
 remains false. Kill if generic factoring matches it or reduced CNF does not
 reduce wall time.
 
+The published `58aee6e9` artifact is therefore a population/consumer diagnostic
+only. Hosted validation must bind the exact event head and execute both focused
+T6 Python modules, the focused T6 Rust target, and the locked all-feature suite
+under Rust 1.96.0. WMI is separately fail-closed: its observed 1.93 toolchain is
+not eligible, an attempted rustup 1.96.0 installation failed with `EDQUOT`, and
+global Rustup state must not be changed. A future run requires an externally
+provisioned direct Cargo/rustc bundle with independently reviewed paths, hashes,
+versions, native linkers, Cargo configuration, wrappers, and build environment.
+Job `146075` is permanently classified as historical hard10 and must never be
+automatically cancelled; no live scheduler state was queried for this note.
+
 ## T7. SAT-Impact-Aware Explanations And Theory Vivification
 
 Once T2 exists, compare shortest explanations with an objective that estimates

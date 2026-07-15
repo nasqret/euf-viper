@@ -1,0 +1,63 @@
+{
+  "binaries": {
+    "ar": null,
+    "cargo": null,
+    "cc": null,
+    "cxx": null,
+    "ranlib": null,
+    "rust_linker": null,
+    "rustc": null
+  },
+  "build_environment_allowlist": [
+    "AR",
+    "CARGO_BUILD_JOBS",
+    "CARGO_HOME",
+    "CARGO_INCREMENTAL",
+    "CARGO_TARGET_DIR",
+    "CC",
+    "CXX",
+    "EUF_VIPER_EXPECTED_REVISION",
+    "EUF_VIPER_T6_CORPUS_ROOT",
+    "EUF_VIPER_T6_MANIFEST",
+    "EUF_VIPER_T6_OUTPUT",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "PATH",
+    "RANLIB",
+    "RAYON_NUM_THREADS",
+    "RUSTC",
+    "RUST_MIN_STACK",
+    "TMPDIR",
+    "TZ"
+  ],
+  "cargo_config_policy": "attempt_private_generated_exact",
+  "cargo_home_policy": "attempt_private_empty",
+  "eligibility": "ineligible",
+  "independent_verification": {
+    "evidence_sha256": null,
+    "reviewer": null,
+    "status": "pending"
+  },
+  "ineligibility_reason": "WMI exposes Rust 1.93 and rustup installation of 1.96.0 fails with EDQUOT; an externally provisioned direct binary bundle has not been independently verified",
+  "provision_root": null,
+  "provisioning_mode": "external_only_no_rustup_mutation",
+  "required_absent_environment": [
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+    "LD_LIBRARY_PATH",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTDOCFLAGS",
+    "RUSTFLAGS",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN"
+  ],
+  "schema": "euf-viper.t6-wmi-rust-toolchain.v1",
+  "target": null,
+  "target_dir_policy": "attempt_private",
+  "toolchain": "1.96.0",
+  "workspace_cargo_config_policy": "forbidden"
+}

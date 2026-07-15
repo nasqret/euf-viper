@@ -278,6 +278,15 @@ independent evidence checks, and a frozen family holdout.
   The accepted manifest is a population contract only; its source-only
   projection remains unexecuted and implementation/promotion eligibility is
   false.
+- [x] Publish `58aee6e9` only as a population/consumer diagnostic. Hosted CI
+  binds the exact event head and runs the focused T6 Python/Rust contracts plus
+  the locked all-feature Rust suite with toolchain 1.96.0.
+- [ ] Provision an external direct Rust 1.96.0 bundle on WMI and obtain an
+  independent hash/version review. WMI remains ineligible: the available 1.93
+  toolchain is insufficient and installing 1.96.0 through rustup failed with
+  `EDQUOT`. No script may install or mutate global Rustup state.
+- [x] Classify WMI job `146075` as historical hard10. Its live state was not
+  queried, it is not v2 evidence, and it must never be cancelled automatically.
 - [ ] Run dual source-EUF/Boolean-gate congruence census.
 - [ ] Require at least 25% projected CNF reduction on at least
   `ceil(8 * 12 / 10) = 10` of the 12 accepted current-P0 sources and more

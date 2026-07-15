@@ -96,6 +96,12 @@ alone, but their component-local, proof-carrying interchange inside one search.
 | T7 | SAT-impact explanations and EUF vivification | Boolean/EUF/combined factorial |
 | T8 | Canonical frontier and bit-sliced finite quotient search | Scalar state-reuse/frontier census, then >= 70% useful lanes |
 
+The published T6 commit `58aee6e9` is diagnostic population/consumer evidence,
+not a census result. WMI execution remains ineligible until an externally
+provisioned direct Cargo/rustc 1.96.0 bundle is independently checked. Job
+`146075` remains historical hard10 evidence with no automatic cancellation
+authority; its current scheduler state was not queried.
+
 The rollback and Hall ingredients are known. IPASIR-UP provides the required
 partial-trail interface, and recent cardinality work supplies stronger controls.
 [Clausal Congruence Closure](https://doi.org/10.4230/LIPIcs.SAT.2024.6)

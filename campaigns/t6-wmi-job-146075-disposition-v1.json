@@ -1,0 +1,12 @@
+{
+  "artifact": {
+    "path": "campaigns/t6-theory-dag-hard10-v1.json",
+    "sha256": "198b0824c8847f249cc0c4405dcdea4e9b3101979c0b437cdeebd26165892476"
+  },
+  "automatic_cancellation_allowed": false,
+  "classification": "historical_hard10",
+  "current_state": "not_queried",
+  "job_id": 146075,
+  "replacement_evidence": "none; the accepted v2 population artifact is diagnostic and its projection remains unexecuted",
+  "schema": "euf-viper.t6-wmi-job-disposition.v1"
+}
