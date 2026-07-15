@@ -2234,6 +2234,8 @@ enum CertificateAtom {
 #[derive(Debug, Serialize)]
 struct CertificateClauseCounts {
     base: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    finite_domain: Option<usize>,
     transitivity: usize,
     congruence: usize,
     theory_conflicts: usize,
@@ -5174,6 +5176,40 @@ const CERTIFICATE_EAGER_DEFAULT_LITERAL_BUDGET: usize = 1_048_576;
 const CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION: usize = 4_096;
 #[cfg(feature = "certificates")]
 const CERTIFICATE_EAGER_MAX_CANDIDATE_VISITS: usize = 4_194_304;
+#[cfg(feature = "certificates")]
+const CERTIFICATE_FINITE_ENV_VARS: [&str; 9] = [
+    "EUF_VIPER_FINITE_DOMAIN",
+    "EUF_VIPER_FINITE_DOMAIN_MAX",
+    "EUF_VIPER_FINITE_EQUALITY_CHANNELING",
+    "EUF_VIPER_FINITE_LEX_MIN_DOMAIN",
+    "EUF_VIPER_FINITE_PERMUTATION_CLIQUE_LIMIT",
+    "EUF_VIPER_FINITE_PERMUTATION_SUPPORT",
+    "EUF_VIPER_FINITE_PREDICATE_CHANNELING",
+    "EUF_VIPER_FINITE_SYMMETRY",
+    "EUF_VIPER_FINITE_SYMMETRY_MIN_APPS",
+];
+
+#[cfg(feature = "certificates")]
+fn certificate_finite_environment_from_overrides(overridden: &[&str]) -> Result<(), String> {
+    if overridden.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "finite-orbit certificate mode does not accept environment overrides: {}",
+            overridden.join(", ")
+        ))
+    }
+}
+
+#[cfg(feature = "certificates")]
+fn certificate_finite_environment_is_closed() -> Result<(), String> {
+    let overridden = CERTIFICATE_FINITE_ENV_VARS
+        .iter()
+        .copied()
+        .filter(|name| env::var_os(name).is_some())
+        .collect::<Vec<_>>();
+    certificate_finite_environment_from_overrides(&overridden)
+}
 
 #[cfg(feature = "certificates")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6004,9 +6040,14 @@ fn certificate_atoms(cnf: &CnfProblem) -> Vec<CertificateAtom> {
 }
 
 #[cfg(feature = "certificates")]
-fn certify_file(path: &str, prefix: &str, max_rounds: usize) -> Result<i32, String> {
+fn certify_file(
+    path: &str,
+    prefix: &str,
+    max_rounds: usize,
+    finite_orbit: bool,
+) -> Result<i32, String> {
     let seed_budget = certificate_seed_budget()?;
-    certify_file_with_seed_budget(path, prefix, max_rounds, seed_budget)
+    certify_file_with_seed_budget_and_finite(path, prefix, max_rounds, seed_budget, finite_orbit)
 }
 
 #[cfg(feature = "certificates")]
@@ -6015,6 +6056,17 @@ fn certify_file_with_seed_budget(
     prefix: &str,
     max_rounds: usize,
     seed_budget: CertificateSeedBudget,
+) -> Result<i32, String> {
+    certify_file_with_seed_budget_and_finite(path, prefix, max_rounds, seed_budget, false)
+}
+
+#[cfg(feature = "certificates")]
+fn certify_file_with_seed_budget_and_finite(
+    path: &str,
+    prefix: &str,
+    max_rounds: usize,
+    seed_budget: CertificateSeedBudget,
+    finite_orbit: bool,
 ) -> Result<i32, String> {
     if max_rounds == 0 {
         return Err("--max-theory-rounds must be at least 1".to_owned());
@@ -6054,6 +6106,13 @@ fn certify_file_with_seed_budget(
         cnf.add_assertion(assertion);
     }
     let base_count = cnf.clauses.len();
+    let finite_domain_count = if finite_orbit {
+        certificate_finite_environment_is_closed()?;
+        add_finite_domain_axioms(&mut cnf, &problem.arena, bool_problem)
+    } else {
+        0
+    };
+    let theory_seed_start = cnf.clauses.len();
     let seeds = certificate_theory_seeds_with_budget(&cnf, &problem.arena, seed_budget);
     if let Some(reason) = seeds.fallback
         && matches!(
@@ -6096,15 +6155,22 @@ fn certify_file_with_seed_budget(
         &problem.arena,
         bool_problem.true_term,
         bool_problem.false_term,
-        base_count,
+        theory_seed_start,
         max_rounds,
     )?;
+    if finite_domain_count > 0 && matches!(saturation, CertificateSaturation::Sat { .. }) {
+        return Err(
+            "finite-orbit certificate mode currently emits only independently checkable UNSAT artifacts"
+                .to_owned(),
+        );
+    }
     let dynamic_conflict_count = match &saturation {
         CertificateSaturation::Sat { conflict_count, .. }
         | CertificateSaturation::Unsat { conflict_count, .. } => *conflict_count,
     };
     let accounted_clause_count = base_count
-        .checked_add(transitivity_count)
+        .checked_add(finite_domain_count)
+        .and_then(|count| count.checked_add(transitivity_count))
         .and_then(|count| count.checked_add(congruence_count))
         .and_then(|count| count.checked_add(dynamic_conflict_count))
         .ok_or_else(|| "certificate clause accounting overflow".to_owned())?;
@@ -6168,7 +6234,11 @@ fn certify_file_with_seed_budget(
                 })
                 .collect();
             let manifest = CertificateManifest {
-                format: "euf-viper-euf-cnf-v2",
+                format: if finite_domain_count > 0 {
+                    "euf-viper-euf-cnf-v3"
+                } else {
+                    "euf-viper-euf-cnf-v2"
+                },
                 result: "unsat",
                 encoding: "canonical-tseitin-v1",
                 source: source_path.display().to_string(),
@@ -6184,13 +6254,14 @@ fn certify_file_with_seed_budget(
                 atoms: certificate_atoms(&cnf),
                 clauses: CertificateClauseCounts {
                     base: base_count,
+                    finite_domain: (finite_domain_count > 0).then_some(finite_domain_count),
                     transitivity: transitivity_count,
                     congruence: congruence_count,
                     theory_conflicts: conflict_count,
                     total: cnf.clauses.len(),
                 },
                 theory_rounds,
-                finite_domain_axioms: 0,
+                finite_domain_axioms: finite_domain_count,
             };
             serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
                 .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
@@ -6208,7 +6279,7 @@ fn certify_file_with_seed_budget(
             eprintln!("transitivity_clauses={transitivity_count}");
             eprintln!("congruence_clauses={congruence_count}");
             eprintln!("dynamic_theory_conflicts={conflict_count}");
-            eprintln!("finite_domain_axioms=0");
+            eprintln!("finite_domain_axioms={finite_domain_count}");
         }
     }
     Ok(0)
@@ -7878,7 +7949,7 @@ fn usage() -> &'static str {
   euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
-  euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N]
+  euf-viper certify FILE --out-prefix PATH [--max-theory-rounds N] [--finite-orbit]
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
   euf-viper gen diamond BRANCHES DEPTH
@@ -7933,7 +8004,10 @@ fn run() -> Result<i32, String> {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             let prefix = parse_required_flag(&args[3..], "--out-prefix")?;
             let max_rounds = parse_flag_usize(&args[3..], "--max-theory-rounds", 100_000)?;
-            certify_file(file, prefix, max_rounds)
+            let finite_orbit = args[3..]
+                .iter()
+                .any(|argument| argument == "--finite-orbit");
+            certify_file(file, prefix, max_rounds, finite_orbit)
         }
         "gen" => gen_cmd(&args[1..]),
         "bench" => bench_cmd(&args[1..]),
@@ -8618,6 +8692,96 @@ mod tests {
             let non_utf8 = std::ffi::OsString::from_vec(vec![0xff]);
             assert!(certificate_seed_budget_from_values(Some(non_utf8.as_os_str()), None).is_err());
         }
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn finite_orbit_certificate_environment_is_closed() {
+        assert!(certificate_finite_environment_from_overrides(&[]).is_ok());
+        let error = certificate_finite_environment_from_overrides(&[
+            "EUF_VIPER_FINITE_DOMAIN_MAX",
+            "EUF_VIPER_FINITE_SYMMETRY",
+        ])
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "finite-orbit certificate mode does not accept environment overrides: \
+             EUF_VIPER_FINITE_DOMAIN_MAX, EUF_VIPER_FINITE_SYMMETRY"
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn finite_orbit_certificate_uses_v3_and_preserves_v2_by_default() {
+        let source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun c2 () U)
+            (declare-fun f (U) U)
+            (assert (distinct c0 c1 c2))
+            (assert (or (= (f c0) c0) (= (f c0) c1) (= (f c0) c2)))
+            (assert (or (= (f c1) c0) (= (f c1) c1) (= (f c1) c2)))
+            (assert (or (= (f c2) c0) (= (f c2) c1) (= (f c2) c2)))
+            (assert false)
+            (check-sat)
+        "#;
+        let directory = CertificateTestDirectory::new("finite-orbit-v3");
+        let source_path = directory.path("input.smt2");
+        let v2_prefix = directory.path("v2");
+        let v3_prefix = directory.path("v3");
+        fs::write(&source_path, source).expect("write finite-orbit source");
+
+        certify_file_with_seed_budget(
+            source_path.to_str().unwrap(),
+            v2_prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+        )
+        .expect("default v2 certificate");
+        certify_file_with_seed_budget_and_finite(
+            source_path.to_str().unwrap(),
+            v3_prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+            true,
+        )
+        .expect("finite-orbit v3 certificate");
+
+        let v2_manifest = fs::read(path_with_suffix(&v2_prefix, ".euf.json")).unwrap();
+        let v3_manifest = fs::read(path_with_suffix(&v3_prefix, ".euf.json")).unwrap();
+        let v3_dimacs = fs::read(path_with_suffix(&v3_prefix, ".cnf")).unwrap();
+        let v3_proof = fs::read(path_with_suffix(&v3_prefix, ".drat")).unwrap();
+        certify_file_with_seed_budget_and_finite(
+            source_path.to_str().unwrap(),
+            v3_prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+            true,
+        )
+        .expect("repeated finite-orbit v3 certificate");
+        assert_eq!(
+            fs::read(path_with_suffix(&v3_prefix, ".euf.json")).unwrap(),
+            v3_manifest
+        );
+        assert_eq!(
+            fs::read(path_with_suffix(&v3_prefix, ".cnf")).unwrap(),
+            v3_dimacs
+        );
+        assert_eq!(
+            fs::read(path_with_suffix(&v3_prefix, ".drat")).unwrap(),
+            v3_proof
+        );
+
+        let v2: serde_json::Value = serde_json::from_slice(&v2_manifest).unwrap();
+        let v3: serde_json::Value = serde_json::from_slice(&v3_manifest).unwrap();
+        assert_eq!(v2["format"], "euf-viper-euf-cnf-v2");
+        assert_eq!(v2["finite_domain_axioms"], 0);
+        assert!(v2["clauses"].get("finite_domain").is_none());
+        assert_eq!(v3["format"], "euf-viper-euf-cnf-v3");
+        assert!(v3["finite_domain_axioms"].as_u64().unwrap() > 0);
+        assert_eq!(v3["clauses"]["finite_domain"], v3["finite_domain_axioms"]);
     }
 
     #[cfg(feature = "certificates")]
