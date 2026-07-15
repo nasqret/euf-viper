@@ -68,7 +68,7 @@ BASE_AUDIT="$RUN_ROOT/audit/index.json"
 CHAIN_ROOT="$RUN_ROOT/continuations/chain-$CHAIN_ID"
 mkdir -p "$CHAIN_ROOT/submissions" "$CHAIN_ROOT/audit" "$CHAIN_ROOT/analysis"
 
-python3 - "$BASE_AUDIT" "$BASE_PREPARE_JOB_ID" "$EXPECTED_REVISION" <<'PY'
+python3 - "$BASE_AUDIT" "$BASE_PREPARE_JOB_ID" "$BASE_AUDIT_JOB_ID" "$EXPECTED_REVISION" <<'PY'
 import hashlib
 import json
 import sys
@@ -76,36 +76,194 @@ from pathlib import Path
 
 path = Path(sys.argv[1]).resolve()
 prepare_job_id = int(sys.argv[2])
-revision = sys.argv[3]
+audit_job_id = int(sys.argv[3])
+revision = sys.argv[4]
+
+TOP_LEVEL_KEYS = {
+    "analyses",
+    "attempt",
+    "environment",
+    "job_id",
+    "preparation_receipt",
+    "prepare_job_id",
+    "revision",
+    "run_root",
+    "scheduler_receipt",
+    "schema",
+    "shards",
+    "source",
+    "status",
+    "submission_manifest_sha256",
+}
+ANALYSIS_KEYS = {
+    "bytes",
+    "device",
+    "inode",
+    "input_artifacts",
+    "instances",
+    "path",
+    "promoted",
+    "raw_records",
+    "sha256",
+    "shards",
+    "status",
+    "validated_process_exit",
+}
+PREPARATION_RECEIPT_KEYS = {
+    "bytes", "device", "inode", "job_id", "path", "revision", "sha256", "status"
+}
+SCHEDULER_RECEIPT_KEYS = {
+    "bytes", "device", "inode", "job_id", "path", "sha256", "status"
+}
+
+
+def reject_constant(value):
+    raise ValueError(f"non-finite JSON number {value}")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def exact_object(value, keys, context):
+    if type(value) is not dict or set(value) != keys:
+        raise SystemExit(f"{context} has an incompatible shape")
+    return value
+
+
+def integer(value, context, minimum=0):
+    if type(value) is not int or value < minimum:
+        raise SystemExit(f"{context} is invalid")
+    return value
+
+
+def string(value, context):
+    if type(value) is not str or not value:
+        raise SystemExit(f"{context} is invalid")
+    return value
+
+
+def digest(value, context, length=64):
+    value = string(value, context)
+    if len(value) != length or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise SystemExit(f"{context} is invalid")
+    return value
+
+
 try:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raw = path.read_bytes()
+    payload = json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=unique_object,
+        parse_constant=reject_constant,
+    )
+except (OSError, UnicodeError, ValueError) as error:
     raise SystemExit(f"cannot read validated base audit {path}: {error}")
-if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+canonical = (
+    json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    + "\n"
+).encode("utf-8")
+if canonical != raw:
+    raise SystemExit("base audit is not canonical JSON")
+exact_object(payload, TOP_LEVEL_KEYS, "base audit")
+if payload["schema"] != "euf-viper.locked-p0-audit.v4":
     raise SystemExit("base audit has an incompatible schema")
-if payload.get("status") != "complete":
+if payload["status"] != "complete":
     raise SystemExit("base audit is not complete")
-if payload.get("prepare_job_id") != prepare_job_id:
+if payload["prepare_job_id"] != prepare_job_id:
     raise SystemExit("base audit prepare job id mismatch")
-if payload.get("revision") != revision:
+if payload["job_id"] != audit_job_id:
+    raise SystemExit("base audit job id mismatch")
+if payload["revision"] != revision:
     raise SystemExit("base audit revision mismatch")
-analyses = payload.get("analyses")
-if not isinstance(analyses, dict) or set(analyses) != {"full", "official"}:
-    raise SystemExit("base audit must contain full and official analyses")
+digest(payload["revision"], "base audit revision", length=40)
+integer(payload["shards"], "base audit shards", minimum=1)
+string(payload["run_root"], "base audit run root")
+digest(payload["submission_manifest_sha256"], "base audit submission manifest SHA-256")
+
+attempt = exact_object(payload["attempt"], {"checkout", "id", "root"}, "base audit attempt")
+for field in attempt:
+    string(attempt[field], f"base audit attempt {field}")
+environment = payload["environment"]
+if type(environment) is not dict or not environment or any(
+    type(key) is not str or not key or type(value) is not str
+    for key, value in environment.items()
+):
+    raise SystemExit("base audit environment has an incompatible shape")
+source = exact_object(
+    payload["source"], {"blob_count", "blobs_sha256", "tree"}, "base audit source"
+)
+integer(source["blob_count"], "base audit source blob count", minimum=1)
+digest(source["blobs_sha256"], "base audit source blobs SHA-256")
+digest(source["tree"], "base audit source tree", length=40)
+
+preparation = exact_object(
+    payload["preparation_receipt"], PREPARATION_RECEIPT_KEYS, "base audit preparation receipt"
+)
+scheduler = exact_object(
+    payload["scheduler_receipt"], SCHEDULER_RECEIPT_KEYS, "base audit scheduler receipt"
+)
+for context, receipt in (("preparation", preparation), ("scheduler", scheduler)):
+    for field in ("bytes", "device", "inode"):
+        integer(receipt[field], f"base audit {context} receipt {field}")
+    string(receipt["path"], f"base audit {context} receipt path")
+    digest(receipt["sha256"], f"base audit {context} receipt SHA-256")
+if preparation["job_id"] != prepare_job_id or preparation["revision"] != revision:
+    raise SystemExit("base audit preparation receipt identity mismatch")
+if preparation["status"] != "prepared":
+    raise SystemExit("base audit preparation receipt status is invalid")
+if scheduler["job_id"] != audit_job_id or scheduler["status"] != "bound":
+    raise SystemExit("base audit scheduler receipt identity mismatch")
+
+analyses = exact_object(
+    payload["analyses"], {"full", "official"}, "base audit analyses"
+)
 for kind, record in analyses.items():
-    if not isinstance(record, dict):
-        raise SystemExit(f"base audit {kind} analysis record is invalid")
-    analysis_path = Path(str(record.get("path", ""))).resolve()
+    record = exact_object(record, ANALYSIS_KEYS, f"base audit {kind} analysis")
+    analysis_path = Path(
+        string(record["path"], f"base audit {kind} analysis path")
+    ).resolve()
     try:
-        digest = hashlib.sha256(analysis_path.read_bytes()).hexdigest()
+        analysis_bytes = analysis_path.read_bytes()
     except OSError as error:
         raise SystemExit(f"cannot read base {kind} analysis: {error}")
-    if digest != record.get("sha256"):
+    if hashlib.sha256(analysis_bytes).hexdigest() != digest(
+        record["sha256"], f"base audit {kind} analysis SHA-256"
+    ):
         raise SystemExit(f"base {kind} analysis SHA-256 mismatch")
+    expected_bytes = integer(
+        record["bytes"], f"base audit {kind} analysis bytes", minimum=1
+    )
+    if len(analysis_bytes) != expected_bytes:
+        raise SystemExit(f"base {kind} analysis byte count mismatch")
+    for field in ("device", "inode"):
+        integer(record[field], f"base audit {kind} analysis {field}")
     for field in ("instances", "raw_records", "shards"):
-        value = record.get(field)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            raise SystemExit(f"base {kind} analysis has invalid {field}")
+        integer(record[field], f"base audit {kind} analysis {field}", minimum=1)
+    if type(record["promoted"]) is not bool:
+        raise SystemExit(f"base audit {kind} analysis promoted flag is invalid")
+    expected_status = "promoted" if record["promoted"] else "rejected"
+    expected_exit = 0 if record["promoted"] else 1
+    if (
+        record["status"] != expected_status
+        or record["validated_process_exit"] != expected_exit
+    ):
+        raise SystemExit(f"base audit {kind} analysis status is invalid")
+    if type(record["input_artifacts"]) is not dict:
+        raise SystemExit(f"base audit {kind} analysis inputs are invalid")
 PY
 
 CORPORA=(full official)

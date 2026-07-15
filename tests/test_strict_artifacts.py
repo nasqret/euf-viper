@@ -177,6 +177,164 @@ class StrictArtifactPublicationTests(unittest.TestCase):
         self.assertEqual(output.read_bytes(), b"publisher\n")
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
 
+    def test_failed_pre_publish_attempts_leave_no_staging_names(self) -> None:
+        mutable_output = self.root / "mutable.json"
+        mutable_output.write_bytes(b"previous\n")
+        mutable_output.chmod(0o600)
+
+        def reject() -> None:
+            raise STRICT.StrictArtifactError("injected pre-publish failure")
+
+        for index in range(20):
+            with self.subTest(immutable=True, attempt=index):
+                with self.assertRaisesRegex(
+                    STRICT.StrictArtifactError, "injected pre-publish failure"
+                ):
+                    STRICT.atomic_write_nofollow(
+                        self.root / "immutable.json",
+                        b"publisher\n",
+                        "failed immutable pre-publish",
+                        immutable=True,
+                        pre_publish=reject,
+                    )
+            with self.subTest(immutable=False, attempt=index):
+                with self.assertRaisesRegex(
+                    STRICT.StrictArtifactError, "injected pre-publish failure"
+                ):
+                    STRICT.atomic_write_nofollow(
+                        mutable_output,
+                        b"publisher\n",
+                        "failed mutable pre-publish",
+                        immutable=False,
+                        pre_publish=reject,
+                    )
+
+        self.assertEqual(mutable_output.read_bytes(), b"previous\n")
+        self.assertEqual(list(self.root.iterdir()), [mutable_output])
+
+    def test_mutable_pre_publish_preclaim_survives_and_never_reaches_final(self) -> None:
+        output = self.root / "summary.json"
+        output.write_bytes(b"previous\n")
+        output.chmod(0o600)
+        private = self.root / STRICT.PRIVATE_STAGING_DIRECTORY
+        staging = private / STRICT.PRIVATE_MUTABLE_NAME
+
+        def preclaim() -> None:
+            private.mkdir(mode=0o700)
+            staging.write_bytes(b"replacement\n")
+            staging.chmod(0o600)
+
+        with self.assertRaisesRegex(STRICT.StrictArtifactError, "File exists"):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "mutable staging preclaim",
+                immutable=False,
+                pre_publish=preclaim,
+            )
+
+        self.assertEqual(staging.read_bytes(), b"replacement\n")
+        self.assertEqual(output.read_bytes(), b"previous\n")
+
+    def test_mutable_os_replace_boundary_cannot_move_a_replacement(self) -> None:
+        output = self.root / "summary.json"
+        output.write_bytes(b"previous\n")
+        output.chmod(0o600)
+        replacement = self.root / "replacement.json"
+        replacement.write_bytes(b"replacement\n")
+        replacement.chmod(0o600)
+        real_replace = os.replace
+        interposed = False
+
+        def replace_source_then_publish(
+            source: str,
+            destination: str,
+            *,
+            src_dir_fd: int,
+            dst_dir_fd: int,
+        ) -> None:
+            nonlocal interposed
+            interposed = True
+            os.unlink(source, dir_fd=src_dir_fd)
+            os.rename(replacement, source, dst_dir_fd=src_dir_fd)
+            real_replace(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        with mock.patch.object(
+            STRICT.os,
+            "replace",
+            side_effect=replace_source_then_publish,
+        ):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "private mutable publication",
+                immutable=False,
+            )
+
+        self.assertFalse(interposed)
+        self.assertEqual(replacement.read_bytes(), b"replacement\n")
+        self.assertEqual(output.read_bytes(), b"publisher\n")
+        private = self.root / STRICT.PRIVATE_STAGING_DIRECTORY
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(private.iterdir()), [])
+
+    def test_failed_mutable_rename_occupies_one_bounded_fail_closed_slot(self) -> None:
+        output = self.root / "summary.json"
+        output.write_bytes(b"previous\n")
+        output.chmod(0o600)
+
+        with mock.patch.object(
+            STRICT,
+            "_rename_private_mutable",
+            side_effect=STRICT.StrictArtifactError("injected rename failure"),
+        ):
+            with self.assertRaisesRegex(
+                STRICT.StrictArtifactError, "injected rename failure"
+            ):
+                STRICT.atomic_write_nofollow(
+                    output,
+                    b"publisher\n",
+                    "failed private mutable rename",
+                    immutable=False,
+                )
+
+        private = self.root / STRICT.PRIVATE_STAGING_DIRECTORY
+        pending = private / STRICT.PRIVATE_MUTABLE_NAME
+        self.assertEqual(pending.read_bytes(), b"publisher\n")
+        with self.assertRaisesRegex(STRICT.StrictArtifactError, "File exists"):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"second publisher\n",
+                "blocked private mutable retry",
+                immutable=False,
+            )
+        self.assertEqual(list(private.iterdir()), [pending])
+        self.assertEqual(pending.read_bytes(), b"publisher\n")
+        self.assertEqual(output.read_bytes(), b"previous\n")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux O_TMPFILE test")
+    def test_immutable_publication_never_unlinks_a_staging_path(self) -> None:
+        output = self.root / "evidence.json"
+
+        with mock.patch.object(
+            STRICT.os,
+            "unlink",
+            side_effect=AssertionError("immutable publication attempted pathname cleanup"),
+        ):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "descriptor-only immutable publication",
+                immutable=True,
+            )
+
+        self.assertEqual(output.read_bytes(), b"publisher\n")
+
     def test_callback_failure_has_no_stale_check_unlink_window(self) -> None:
         output = self.root / "evidence.json"
         original = STRICT._same_regular_identity
@@ -380,9 +538,7 @@ else:
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(sorted(outcomes), ["published", "rejected"])
         self.assertIn(output.read_bytes(), {b"left\n", b"right\n"})
-        preserved = list(self.root.glob(".*.tmp-*"))
-        self.assertEqual(len(preserved), 1)
-        self.assertNotEqual(preserved[0].read_bytes(), output.read_bytes())
+        self.assertEqual(list(self.root.iterdir()), [output])
 
 
 if __name__ == "__main__":

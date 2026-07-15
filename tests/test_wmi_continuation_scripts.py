@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import hashlib
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -19,6 +20,14 @@ AUDIT = WMI / "euf_viper_continuation_audit.sbatch"
 FINALIZE = WMI / "euf_viper_continuation_finalize.sbatch"
 SUBMIT = WMI / "submit_locked_continuations.sh"
 SCRIPTS = (DISPATCH, SHARD, AUDIT, FINALIZE, SUBMIT)
+FINALIZER_TEST_PATH = ROOT / "tests" / "test_finalize_locked_audit.py"
+FINALIZER_TEST_SPEC = importlib.util.spec_from_file_location(
+    "continuation_finalizer_fixture", FINALIZER_TEST_PATH
+)
+assert FINALIZER_TEST_SPEC is not None and FINALIZER_TEST_SPEC.loader is not None
+FINALIZER_TESTS = importlib.util.module_from_spec(FINALIZER_TEST_SPEC)
+sys.modules[FINALIZER_TEST_SPEC.name] = FINALIZER_TESTS
+FINALIZER_TEST_SPEC.loader.exec_module(FINALIZER_TESTS)
 
 
 def write_executable(path: Path, content: str) -> None:
@@ -70,9 +79,9 @@ class ContinuationScriptContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
             fake_bin = work / "bin"
-            revision = "a" * 40
-            prepare_job = 100
-            audit_job = 101
+            revision = "2" * 40
+            prepare_job = 10
+            audit_job = 11
             dispatcher_job = 500
             run_root = work / "results" / f"p0-{prepare_job}"
             base_audit_dir = run_root / "audit"
@@ -160,30 +169,15 @@ class ContinuationScriptContractTests(unittest.TestCase):
                 """,
             )
 
-            analysis_paths = {}
-            for kind in ("full", "official"):
-                path = base_audit_dir / f"{kind}.json"
-                path.write_text('{"status":"rejected"}\n', encoding="utf-8")
-                analysis_paths[kind] = path
-            base_audit = {
-                "schema_version": 1,
-                "status": "complete",
-                "prepare_job_id": prepare_job,
-                "revision": revision,
-                "analyses": {
-                    kind: {
-                        "path": str(path),
-                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                        "instances": 2,
-                        "raw_records": 8,
-                        "shards": 2,
-                    }
-                    for kind, path in analysis_paths.items()
-                },
-            }
-            (base_audit_dir / "index.json").write_text(
-                json.dumps(base_audit), encoding="utf-8"
+            finalized = FINALIZER_TESTS.FinalizeLockedAuditTests()
+            finalized.setUp()
+            self.addCleanup(finalized.tearDown)
+            finalized_payload = finalized.finalize()
+            self.assertEqual(
+                finalized_payload["schema"], "euf-viper.locked-p0-audit.v4"
             )
+            self.assertEqual(finalized_payload["status"], "complete")
+            shutil.copy2(finalized.output, base_audit_dir / "index.json")
 
             env = os.environ.copy()
             env.update(
@@ -202,6 +196,54 @@ class ContinuationScriptContractTests(unittest.TestCase):
                     "TEST_SBATCH_COUNTER": str(sbatch_counter),
                 }
             )
+
+            valid_index = json.loads(finalized.output.read_text(encoding="utf-8"))
+            invalid_indexes = {
+                "legacy schema": {
+                    **{key: value for key, value in valid_index.items() if key != "schema"},
+                    "schema_version": 1,
+                },
+                "extra top-level field": {**valid_index, "unexpected": None},
+                "incomplete analysis shape": {
+                    **valid_index,
+                    "analyses": {
+                        **valid_index["analyses"],
+                        "full": {
+                            key: value
+                            for key, value in valid_index["analyses"]["full"].items()
+                            if key != "bytes"
+                        },
+                    },
+                },
+            }
+            base_audit_path = base_audit_dir / "index.json"
+            for name, invalid_index in invalid_indexes.items():
+                with self.subTest(base_audit=name):
+                    base_audit_path.chmod(0o600)
+                    base_audit_path.write_text(
+                        json.dumps(
+                            invalid_index,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    base_audit_path.chmod(0o400)
+                    rejected = subprocess.run(
+                        ["bash", str(project_dispatch)],
+                        text=True,
+                        capture_output=True,
+                        env=env,
+                        check=False,
+                    )
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    self.assertIn("incompatible", rejected.stderr)
+                    self.assertFalse(sbatch_log.exists())
+
+            base_audit_path.chmod(0o600)
+            shutil.copy2(finalized.output, base_audit_path)
             completed = subprocess.run(
                 ["bash", str(project_dispatch)],
                 text=True,

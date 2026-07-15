@@ -1177,25 +1177,25 @@ class FinalizeLockedAuditTests(unittest.TestCase):
             self.finalize(pre_publish_hook=replace)
         self.assertFalse(self.output.exists())
 
-    def test_path_replacement_at_link_boundary_preserves_index_for_retry(self) -> None:
+    def test_path_replacement_at_publication_boundary_preserves_index_for_retry(self) -> None:
         target = self.root / "audit" / "full" / "global.json"
         original_target = self.root / "original-full-global.json"
         original_target.hardlink_to(target)
         bindings = self.current_bindings()
         scheduler_sha256 = self.write_scheduler(bindings)
-        strict_os = FINALIZER.atomic_write_nofollow.__globals__["os"]
-        real_link = strict_os.link
+        strict_globals = FINALIZER.atomic_write_nofollow.__globals__
+        real_publish = strict_globals["_publish_descriptor_noreplace"]
         replaced = False
         downstream_receipt = self.root / "audit" / "downstream.json"
 
-        def replace_then_link(*args: object, **kwargs: object) -> None:
+        def replace_then_publish(*args: object, **kwargs: object) -> None:
             nonlocal replaced
             if not replaced:
                 replaced = True
                 target.unlink()
                 target.write_bytes(b'{"replaced":true}\n')
                 target.chmod(0o400)
-            real_link(*args, **kwargs)
+            real_publish(*args, **kwargs)
 
         def finalize_then_publish_downstream() -> None:
             payload = self.finalize(
@@ -1205,7 +1205,10 @@ class FinalizeLockedAuditTests(unittest.TestCase):
             )
             downstream_receipt.write_bytes(FINALIZER.canonical_json_bytes(payload))
 
-        with mock.patch.object(strict_os, "link", side_effect=replace_then_link):
+        with mock.patch.dict(
+            strict_globals,
+            {"_publish_descriptor_noreplace": replace_then_publish},
+        ):
             with self.assertRaisesRegex(
                 FINALIZER.AuditFinalizeError, "no longer names descriptor"
             ):

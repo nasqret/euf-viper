@@ -3,14 +3,15 @@
 
 from __future__ import annotations
 
+import ctypes
 import errno
 import fcntl
 import hashlib
 import json
 import os
-import secrets
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,6 +27,10 @@ F_SEAL_SHRINK = getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
 F_SEAL_GROW = getattr(fcntl, "F_SEAL_GROW", 0x0004)
 F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 0x0008)
 REQUIRED_MEMFD_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
+AT_EMPTY_PATH = 0x1000
+CLONE_NOFOLLOW = 0x0001
+PRIVATE_STAGING_DIRECTORY = ".strict-artifacts-private"
+PRIVATE_MUTABLE_NAME = "pending"
 
 
 def _descriptor_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
@@ -438,6 +443,199 @@ def _require_same_regular_identity(
         )
 
 
+def _open_private_staging(parent_fd: int, parent: Path, context: str) -> int:
+    """Return an unnamed regular file on the publication filesystem."""
+
+    descriptor = -1
+    try:
+        if sys.platform.startswith("linux"):
+            if not hasattr(os, "O_TMPFILE"):
+                raise StrictArtifactError(
+                    f"{context}: Linux O_TMPFILE staging is unavailable"
+                )
+            flags = os.O_RDWR | os.O_TMPFILE | os.O_NOFOLLOW
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            descriptor = os.open(".", flags, 0o600, dir_fd=parent_fd)
+        elif sys.platform == "darwin":
+            temporary = tempfile.TemporaryFile(mode="w+b", dir=parent)
+            try:
+                descriptor = os.dup(temporary.fileno())
+                if hasattr(os, "set_inheritable"):
+                    os.set_inheritable(descriptor, False)
+            finally:
+                temporary.close()
+        else:
+            raise StrictArtifactError(
+                f"{context}: unnamed publication staging is unsupported on {sys.platform}"
+            )
+
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 0:
+            raise StrictArtifactError(
+                f"{context}: private staging descriptor retained a pathname"
+            )
+        result = descriptor
+        descriptor = -1
+        return result
+    except OSError as error:
+        raise StrictArtifactError(
+            f"{context}: cannot create private staging descriptor: {error}"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _libc_function(name: str, context: str) -> Any:
+    try:
+        function = getattr(ctypes.CDLL(None, use_errno=True), name)
+    except (AttributeError, OSError) as error:
+        raise StrictArtifactError(
+            f"{context}: required descriptor publication primitive {name} is unavailable"
+        ) from error
+    return function
+
+
+def _raise_libc_error(name: str) -> None:
+    error_number = ctypes.get_errno()
+    raise OSError(error_number, os.strerror(error_number), name)
+
+
+def _publish_descriptor_noreplace(
+    descriptor: int,
+    parent_fd: int,
+    name: str,
+    context: str,
+) -> None:
+    """Create one name from an unnamed descriptor without replacing anything."""
+
+    encoded_name = os.fsencode(name)
+    if sys.platform.startswith("linux"):
+        linkat = _libc_function("linkat", context)
+        linkat.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+        )
+        linkat.restype = ctypes.c_int
+        if linkat(descriptor, b"", parent_fd, encoded_name, AT_EMPTY_PATH) != 0:
+            _raise_libc_error(name)
+        return
+    if sys.platform == "darwin":
+        fclonefileat = _libc_function("fclonefileat", context)
+        fclonefileat.argtypes = (
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+        )
+        fclonefileat.restype = ctypes.c_int
+        if fclonefileat(descriptor, parent_fd, encoded_name, CLONE_NOFOLLOW) != 0:
+            _raise_libc_error(name)
+        return
+    raise StrictArtifactError(
+        f"{context}: descriptor publication is unsupported on {sys.platform}"
+    )
+
+
+def _open_private_publication_directory(parent_fd: int, context: str) -> int:
+    """Open the bounded owner-only namespace used for mutable publication."""
+
+    try:
+        try:
+            os.mkdir(PRIVATE_STAGING_DIRECTORY, mode=0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        descriptor = os.open(
+            PRIVATE_STAGING_DIRECTORY,
+            _directory_flags(),
+            dir_fd=parent_fd,
+        )
+    except OSError as error:
+        raise StrictArtifactError(
+            f"{context}: cannot open private mutable staging directory: {error}"
+        ) from error
+
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise StrictArtifactError(
+                f"{context}: private mutable staging directory is not owner-only"
+            )
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _rename_private_mutable(
+    staging_fd: int,
+    parent_fd: int,
+    final_name: str,
+    context: str,
+) -> None:
+    """Atomically replace final_name from an owner-only descriptor namespace."""
+
+    renameat = _libc_function("renameat", context)
+    renameat.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+    )
+    renameat.restype = ctypes.c_int
+    if (
+        renameat(
+            staging_fd,
+            os.fsencode(PRIVATE_MUTABLE_NAME),
+            parent_fd,
+            os.fsencode(final_name),
+        )
+        != 0
+    ):
+        _raise_libc_error(final_name)
+
+
+def _publish_mutable_descriptor(
+    descriptor: int,
+    parent_fd: int,
+    final_name: str,
+    context: str,
+) -> None:
+    """Publish after callbacks without exposing a writer-accessible source name.
+
+    The source namespace is owner-only, is addressed through a held directory
+    descriptor, and is never removed by pathname.  No caller code runs between
+    descriptor materialization and rename.  A failed rename leaves the single
+    ``pending`` slot occupied so later attempts fail closed instead of deleting
+    an object whose ownership could have become ambiguous.  The filesystem
+    boundary excludes code already running with the publisher's effective UID;
+    such code can mutate the canonical output directly and is not isolatable by
+    pathname permissions.
+    """
+
+    staging_fd = _open_private_publication_directory(parent_fd, context)
+    try:
+        _publish_descriptor_noreplace(
+            descriptor,
+            staging_fd,
+            PRIVATE_MUTABLE_NAME,
+            context,
+        )
+        os.fsync(staging_fd)
+        _rename_private_mutable(staging_fd, parent_fd, final_name, context)
+        os.fsync(staging_fd)
+    finally:
+        os.close(staging_fd)
+
+
 def atomic_write_nofollow(
     path: Path,
     content: bytes,
@@ -454,10 +652,6 @@ def atomic_write_nofollow(
     parent_fd, fingerprints = _open_directory_chain(
         absolute.parent, f"{context} parent", create=False
     )
-    temporary_name = f".{absolute.name}.tmp-{os.getpid()}-{secrets.token_hex(8)}"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    if hasattr(os, "O_CLOEXEC"):
-        flags |= os.O_CLOEXEC
     descriptor = -1
     existing_descriptor = -1
     staging_metadata: os.stat_result | None = None
@@ -514,7 +708,7 @@ def atomic_write_nofollow(
                     os.close(post_fd)
                 return absolute
 
-        descriptor = os.open(temporary_name, flags, mode, dir_fd=parent_fd)
+        descriptor = _open_private_staging(parent_fd, absolute.parent, context)
         offset = 0
         while offset < len(content):
             written = os.write(descriptor, content[offset:])
@@ -533,28 +727,34 @@ def atomic_write_nofollow(
             raise StrictArtifactError(f"{context}: parent path changed before publish")
         if pre_publish is not None:
             pre_publish()
+
+        post_fd, post_fingerprints = _open_directory_chain(
+            absolute.parent, f"{context} pre-publish parent recheck", create=False
+        )
+        os.close(post_fd)
+        if post_fingerprints != fingerprints:
+            raise StrictArtifactError(
+                f"{context}: parent path changed during pre-publish callback"
+            )
         if immutable:
-            os.link(
-                temporary_name,
-                absolute.name,
-                src_dir_fd=parent_fd,
-                dst_dir_fd=parent_fd,
-                follow_symlinks=False,
+            _publish_descriptor_noreplace(
+                descriptor, parent_fd, absolute.name, context
             )
         else:
-            os.replace(
-                temporary_name,
+            _publish_mutable_descriptor(
+                descriptor,
+                parent_fd,
                 absolute.name,
-                src_dir_fd=parent_fd,
-                dst_dir_fd=parent_fd,
+                context,
             )
-        staging_metadata = os.fstat(descriptor)
-        if immutable:
-            _require_same_regular_identity(
-                parent_fd, temporary_name, staging_metadata, context
-            )
-            os.unlink(temporary_name, dir_fd=parent_fd)
+        if sys.platform.startswith("linux"):
             staging_metadata = os.fstat(descriptor)
+        else:
+            staging_metadata = os.stat(
+                absolute.name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
         _require_same_regular_identity(
             parent_fd, absolute.name, staging_metadata, context
         )
@@ -597,9 +797,9 @@ def atomic_write_nofollow(
     except OSError as error:
         raise StrictArtifactError(f"{context}: atomic publish failed: {error}") from error
     finally:
-        # POSIX pathname unlink cannot target the inode held by descriptor.  On
-        # failure, preserve every live name rather than risk deleting a racing
-        # replacement; a later immutable retry reopens and revalidates output.
+        # The unpublished staging object has no pathname.  Mutable publication
+        # uses one bounded slot in an owner-only descriptor namespace and never
+        # cleans that slot by name after failure.
         if descriptor >= 0:
             os.close(descriptor)
         if existing_descriptor >= 0:
