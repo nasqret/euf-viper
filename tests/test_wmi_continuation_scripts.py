@@ -4,12 +4,14 @@ import importlib.util
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,12 +86,17 @@ class ContinuationScriptContractTests(unittest.TestCase):
             audit_job = 11
             dispatcher_job = 500
             run_root = work / "results" / f"p0-{prepare_job}"
-            base_audit_dir = run_root / "audit"
-            base_audit_dir.mkdir(parents=True)
 
             project_dispatch = work / "scripts" / "wmi" / DISPATCH.name
-            project_dispatch.parent.mkdir(parents=True)
-            shutil.copy2(DISPATCH, project_dispatch)
+            for source in (
+                DISPATCH,
+                WMI / "finalize_locked_audit.py",
+                WMI / "hermetic_provenance.py",
+                ROOT / "scripts" / "cert" / "strict_artifacts.py",
+            ):
+                destination = work / source.relative_to(ROOT)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
 
             write_executable(
                 fake_bin / "git",
@@ -169,15 +176,26 @@ class ContinuationScriptContractTests(unittest.TestCase):
                 """,
             )
 
+            class PinnedTemporaryDirectory:
+                name = str(run_root)
+
+                def cleanup(self) -> None:
+                    pass
+
             finalized = FINALIZER_TESTS.FinalizeLockedAuditTests()
-            finalized.setUp()
+            with mock.patch.object(
+                FINALIZER_TESTS.tempfile,
+                "TemporaryDirectory",
+                return_value=PinnedTemporaryDirectory(),
+            ):
+                finalized.setUp()
             self.addCleanup(finalized.tearDown)
             finalized_payload = finalized.finalize()
+            self.assertEqual(finalized.root, run_root.resolve())
             self.assertEqual(
                 finalized_payload["schema"], "euf-viper.locked-p0-audit.v4"
             )
             self.assertEqual(finalized_payload["status"], "complete")
-            shutil.copy2(finalized.output, base_audit_dir / "index.json")
 
             env = os.environ.copy()
             env.update(
@@ -197,7 +215,55 @@ class ContinuationScriptContractTests(unittest.TestCase):
                 }
             )
 
-            valid_index = json.loads(finalized.output.read_text(encoding="utf-8"))
+            base_audit_path = finalized.output
+            valid_index_bytes = base_audit_path.read_bytes()
+            valid_index = json.loads(valid_index_bytes.decode("utf-8"))
+
+            def run_dispatch(
+                dispatch: Path = project_dispatch,
+                run_env: dict[str, str] = env,
+                *,
+                timeout: float = 10.0,
+            ) -> subprocess.CompletedProcess[str]:
+                try:
+                    return subprocess.run(
+                        ["bash", str(dispatch)],
+                        text=True,
+                        capture_output=True,
+                        env=run_env,
+                        check=False,
+                        timeout=timeout,
+                    )
+                except subprocess.TimeoutExpired as error:
+                    self.fail(f"dispatcher blocked on adversarial evidence: {error}")
+
+            def reject_current(name: str, expected_error: str | None = None) -> None:
+                with self.subTest(evidence=name):
+                    rejected = run_dispatch()
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    if expected_error is not None:
+                        self.assertIn(expected_error, rejected.stderr)
+                    self.assertFalse(sbatch_log.exists())
+
+            def write_index(value: dict[str, object]) -> None:
+                base_audit_path.chmod(0o600)
+                base_audit_path.write_text(
+                    json.dumps(
+                        value,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                base_audit_path.chmod(0o400)
+
+            def restore_index() -> None:
+                base_audit_path.chmod(0o600)
+                base_audit_path.write_bytes(valid_index_bytes)
+                base_audit_path.chmod(0o400)
+
             invalid_indexes = {
                 "legacy schema": {
                     **{key: value for key, value in valid_index.items() if key != "schema"},
@@ -216,41 +282,160 @@ class ContinuationScriptContractTests(unittest.TestCase):
                     },
                 },
             }
-            base_audit_path = base_audit_dir / "index.json"
             for name, invalid_index in invalid_indexes.items():
-                with self.subTest(base_audit=name):
-                    base_audit_path.chmod(0o600)
-                    base_audit_path.write_text(
-                        json.dumps(
-                            invalid_index,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                            sort_keys=True,
-                        )
-                        + "\n",
-                        encoding="utf-8",
-                    )
-                    base_audit_path.chmod(0o400)
-                    rejected = subprocess.run(
-                        ["bash", str(project_dispatch)],
-                        text=True,
-                        capture_output=True,
-                        env=env,
-                        check=False,
-                    )
-                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
-                    self.assertIn("incompatible", rejected.stderr)
-                    self.assertFalse(sbatch_log.exists())
+                try:
+                    write_index(invalid_index)
+                    reject_current(name, "incompatible")
+                finally:
+                    restore_index()
 
-            base_audit_path.chmod(0o600)
-            shutil.copy2(finalized.output, base_audit_path)
-            completed = subprocess.run(
-                ["bash", str(project_dispatch)],
-                text=True,
-                capture_output=True,
-                env=env,
-                check=False,
+            copied_work = work / "copied-run"
+            shutil.copytree(work / "scripts", copied_work / "scripts")
+            copied_index = (
+                copied_work
+                / "results"
+                / f"p0-{prepare_job}"
+                / "audit"
+                / "index.json"
             )
+            copied_index.parent.mkdir(parents=True)
+            shutil.copy2(base_audit_path, copied_index)
+            copied_env = {**env, "SLURM_SUBMIT_DIR": str(copied_work)}
+            copied_dispatch = (
+                copied_work / "scripts" / "wmi" / project_dispatch.name
+            )
+            copied_rejection = run_dispatch(copied_dispatch, copied_env)
+            self.assertNotEqual(copied_rejection.returncode, 0)
+            self.assertIn("trusted run root", copied_rejection.stderr)
+            self.assertEqual(copied_index.read_bytes(), valid_index_bytes)
+            self.assertFalse(
+                (
+                    copied_work
+                    / "results"
+                    / f"p0-{prepare_job}"
+                    / "continuations"
+                ).exists()
+            )
+            self.assertFalse(sbatch_log.exists())
+
+            analysis_path = run_root / "audit" / "full" / "global.json"
+            analysis_bytes = analysis_path.read_bytes()
+            analysis_inode = analysis_path.stat().st_ino
+            analysis_backup = analysis_path.with_name(".global.json.dispatch-original")
+            os.link(analysis_path, analysis_backup)
+            analysis_path.unlink()
+            analysis_path.write_bytes(analysis_bytes)
+            analysis_path.chmod(0o400)
+            replacement_inode = analysis_path.stat().st_ino
+            self.assertNotEqual(replacement_inode, analysis_inode)
+            try:
+                reject_current(
+                    "same-byte analysis replacement",
+                    "analysis or input binding drifted",
+                )
+                self.assertEqual(analysis_path.stat().st_ino, replacement_inode)
+                self.assertEqual(analysis_path.read_bytes(), analysis_bytes)
+            finally:
+                analysis_path.unlink()
+                os.link(analysis_backup, analysis_path)
+                analysis_backup.unlink()
+            self.assertEqual(analysis_path.stat().st_ino, analysis_inode)
+
+            raw_path = run_root / "official-2s" / "shard-0000" / "raw.jsonl"
+            raw_bytes = raw_path.read_bytes()
+            raw_mode = stat.S_IMODE(raw_path.stat().st_mode)
+            modified_raw = raw_bytes + b'{"record_type":"drift"}\n'
+            try:
+                raw_path.write_bytes(modified_raw)
+                raw_path.chmod(raw_mode)
+                reject_current("modified shard raw", "raw hash is stale")
+                self.assertEqual(raw_path.read_bytes(), modified_raw)
+            finally:
+                raw_path.write_bytes(raw_bytes)
+                raw_path.chmod(raw_mode)
+
+            scheduler_path = run_root / "audit" / "scheduler.json"
+            scheduler_bytes = scheduler_path.read_bytes()
+            scheduler_inode = scheduler_path.stat().st_ino
+            scheduler_backup = scheduler_path.with_name(
+                ".scheduler.json.dispatch-original"
+            )
+            os.link(scheduler_path, scheduler_backup)
+            scheduler_path.unlink()
+            scheduler_path.write_bytes(scheduler_bytes)
+            scheduler_path.chmod(0o400)
+            scheduler_replacement_inode = scheduler_path.stat().st_ino
+            self.assertNotEqual(scheduler_replacement_inode, scheduler_inode)
+            try:
+                reject_current(
+                    "same-byte scheduler receipt replacement",
+                    "scheduler receipt binding drifted",
+                )
+                self.assertEqual(
+                    scheduler_path.stat().st_ino, scheduler_replacement_inode
+                )
+                self.assertEqual(scheduler_path.read_bytes(), scheduler_bytes)
+            finally:
+                scheduler_path.unlink()
+                os.link(scheduler_backup, scheduler_path)
+                scheduler_backup.unlink()
+            self.assertEqual(scheduler_path.stat().st_ino, scheduler_inode)
+
+            os.link(scheduler_path, scheduler_backup)
+            scheduler_path.unlink()
+            unrelated_scheduler = b"{}\n"
+            scheduler_path.write_bytes(unrelated_scheduler)
+            scheduler_path.chmod(0o400)
+            unrelated_inode = scheduler_path.stat().st_ino
+            try:
+                reject_current(
+                    "unrelated scheduler receipt",
+                    "SHA-256 differs from external binding",
+                )
+                self.assertEqual(scheduler_path.stat().st_ino, unrelated_inode)
+                self.assertEqual(scheduler_path.read_bytes(), unrelated_scheduler)
+            finally:
+                scheduler_path.unlink()
+                os.link(scheduler_backup, scheduler_path)
+                scheduler_backup.unlink()
+
+            os.link(scheduler_path, scheduler_backup)
+            scheduler_path.unlink()
+            os.mkfifo(scheduler_path, 0o400)
+            try:
+                reject_current("FIFO scheduler receipt", "not a regular file")
+                self.assertTrue(stat.S_ISFIFO(scheduler_path.lstat().st_mode))
+            finally:
+                scheduler_path.unlink()
+                os.link(scheduler_backup, scheduler_path)
+                scheduler_backup.unlink()
+
+            index_backup = base_audit_path.with_name(".index.json.dispatch-original")
+            os.link(base_audit_path, index_backup)
+            base_audit_path.unlink()
+            base_audit_path.symlink_to(index_backup.name)
+            try:
+                reject_current("symlinked base index")
+                self.assertTrue(base_audit_path.is_symlink())
+            finally:
+                base_audit_path.unlink()
+                os.link(index_backup, base_audit_path)
+                index_backup.unlink()
+
+            os.link(base_audit_path, index_backup)
+            base_audit_path.unlink()
+            os.mkfifo(base_audit_path, 0o400)
+            try:
+                reject_current("FIFO base index")
+                self.assertTrue(stat.S_ISFIFO(base_audit_path.lstat().st_mode))
+            finally:
+                base_audit_path.unlink()
+                os.link(index_backup, base_audit_path)
+                index_backup.unlink()
+
+            chain_root = run_root / "continuations" / f"chain-{dispatcher_job}"
+            self.assertFalse(chain_root.exists())
+            completed = run_dispatch()
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
             submissions = sbatch_log.read_text(encoding="utf-8").splitlines()
@@ -268,7 +453,6 @@ class ContinuationScriptContractTests(unittest.TestCase):
             self.assertEqual(len(next_stages), 1)
             self.assertIn("--dependency=afterok:702:703", next_stages[0])
 
-            chain_root = run_root / "continuations" / f"chain-{dispatcher_job}"
             metadata = json.loads(
                 (chain_root / "submissions" / "60.json").read_text(
                     encoding="utf-8"
