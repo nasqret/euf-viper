@@ -964,3 +964,9 @@
   lane cannot support sub-1% promotion. Hosted run `29386186960` created zero
   jobs because `runner.temp` is unavailable in job-level `env`. Repair all
   boundaries and obtain a new independent review; no T1 WMI job exists.
+- PoS 2026 DDFW/target-phase work does not authorize a local-search track.
+  Only six of the 22 shared misses are SAT, below both coverage thresholds, and
+  Yices2's common-time lead is UNSAT-dominated. Ordinary DDFW/rephasing is a
+  control. Reopen only after a charged perfect-EUF-model phase oracle beats
+  no-phase and shuffled-phase controls with one conversion, `2x` median speed,
+  zero solve loss, and sub-1% p95 import overhead.

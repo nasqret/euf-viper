@@ -154,6 +154,23 @@ speed is `0.928694`, common-total speed is `0.963416`, median speed is
 were dependency-cancelled. Wholesale Kissat 4 replacement is rejected; an
 individual inprocessing pass requires a new one-factor control.
 
+### DDFW And Phase Search
+
+The 2026 CaDiCaL study by Pollitt, Fleury, Schidler, Biere, et al. makes DDFW,
+target phases, and rephasing a stronger ordinary SAT control. It does not open
+a production track for this corpus. Only six of the frozen 22 common misses are
+SAT, whereas ten conversions are needed to lead Z3 and 21 to lead Yices2.
+Against Yices2 at 60 seconds, the common-time deficit is `739.461s` on SAT and
+`2,624.977s` on UNSAT. A semantic local-search implementation therefore fails
+the opportunity ceiling before coding.
+
+The only retained reopen test is a charged three-arm oracle: no imported phase,
+deterministically shuffled source-atom phases, and phases projected from a
+complete independently validated EUF model. It must convert at least one of the
+six SAT Goel timeouts, beat both controls by `2x` on median, lose no solve, and
+stay below `1%` p95 phase-import overhead. Ordinary DDFW remains a factorial
+control. No implementation or WMI run is authorized.
+
 ### Rollback EUF
 
 The explicit `cadical-rollback` backend is an engineering control, not a

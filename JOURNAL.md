@@ -1394,6 +1394,14 @@
   placed `${{ runner.temp }}` in `jobs.validate.env`, but GitHub permits no
   `runner` context at that key. A fresh isolated repair now owns the monitor,
   ELF closure, immutable roots, bounded-canary placement, and valid Linux CI.
+- Refreshed the local-search boundary against Pollitt, Fleury, Schidler, Biere,
+  et al., *Improving Local Search and adding DDFW to CaDiCaL* (PoS 2026).
+  DDFW and target-phase exchange strengthen the required Boolean control but
+  do not justify a new track here: only six of the frozen 22 common misses are
+  SAT, so perfect SAT discovery cannot meet either rank threshold, and the
+  Yices2 common-time deficit is predominantly UNSAT. Retain only a charged
+  no-phase/shuffled-phase/perfect-EUF-phase oracle as a reopen condition; no
+  implementation or job was launched.
 
 ## Next Entry Template
 

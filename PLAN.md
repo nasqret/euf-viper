@@ -266,6 +266,15 @@ independent evidence checks, and a frozen family holdout.
   cheap falsification result, not WMI promotion evidence.
 - [ ] Require independent SAT-model/proof checks and broad end-to-end gain;
   formula-size reduction alone cannot pass.
+- [x] Reject a broad DDFW/local-search track after the 2026 CaDiCaL refresh.
+  Only six of the frozen 22 common misses are SAT, below the ten conversions
+  needed to lead Z3 and the 21 needed to lead Yices2; Yices2's 60-second common
+  timing advantage is also `739.461s` on SAT versus `2,624.977s` on UNSAT.
+  Ordinary DDFW, rephasing, and local-search phase import are controls, not
+  novelty. Reopen only if a charged perfect-EUF-model phase oracle beats both
+  no-phase and shuffled-phase arms, converts at least one of the six SAT Goel
+  timeouts, reaches `2x` median speed, loses no solve, and stays below `1%` p95
+  phase overhead. No DDFW implementation or WMI campaign is authorized.
 
 ### T1: Typed IR And Staged Formula Machine
 
