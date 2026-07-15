@@ -7,6 +7,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -662,6 +663,23 @@ class ManifestAndTamperTests(unittest.TestCase):
             QFUF.validate_unsat_dimacs(
                 self.problem, self.problem.variable_count, invalid_suffix
             )
+
+    def test_unsat_helper_validates_the_problem_once_for_all_theory_lemmas(self) -> None:
+        premise, consequence = self.equalities
+        valid_lemma = (-premise, consequence)
+        clauses = (*self.problem.clauses, valid_lemma, valid_lemma, valid_lemma)
+
+        with mock.patch.object(
+            QFUF, "_validate_problem", wraps=QFUF._validate_problem
+        ) as validate_problem:
+            self.assertEqual(
+                QFUF.validate_unsat_dimacs(
+                    self.problem, self.problem.variable_count, clauses
+                ),
+                3,
+            )
+
+        self.assertEqual(validate_problem.call_count, 1)
 
     def test_dimacs_parser_is_strict_and_supports_split_clauses(self) -> None:
         variables, clauses = QFUF.parse_dimacs(

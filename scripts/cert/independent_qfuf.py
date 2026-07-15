@@ -1448,11 +1448,11 @@ def _clause_literals(
     return tuple(literals)
 
 
-def validate_euf_lemma(problem: EncodedProblem, clause: Sequence[int]) -> None:
-    """Validate a clause by refuting its negation in reconstructed EUF."""
+def _validate_euf_lemma_literals(
+    problem: EncodedProblem, literals: Sequence[int]
+) -> None:
+    """Replay a normalized EUF lemma against an already validated problem."""
 
-    _validate_problem(problem)
-    literals = _clause_literals(problem, clause, "EUF lemma")
     union_find = _UnionFind(problem)
     disequalities: list[tuple[int, int]] = [
         (problem.true_term, problem.false_term)
@@ -1480,6 +1480,14 @@ def validate_euf_lemma(problem: EncodedProblem, clause: Sequence[int]) -> None:
         for left, right in disequalities
     ):
         raise IndependentQfufError("clause is not a valid EUF lemma")
+
+
+def validate_euf_lemma(problem: EncodedProblem, clause: Sequence[int]) -> None:
+    """Validate a clause by refuting its negation in reconstructed EUF."""
+
+    _validate_problem(problem)
+    literals = _clause_literals(problem, clause, "EUF lemma")
+    _validate_euf_lemma_literals(problem, literals)
 
 
 def euf_lemma_is_valid(problem: EncodedProblem, clause: Sequence[int]) -> bool:
@@ -1623,7 +1631,7 @@ def validate_unsat_dimacs(
             )
     for index, clause in enumerate(normalized[base_count:], start=base_count + 1):
         try:
-            validate_euf_lemma(problem, clause)
+            _validate_euf_lemma_literals(problem, clause)
         except IndependentQfufError as error:
             raise IndependentQfufError(
                 f"DIMACS clause {index} is not a valid EUF theory clause: {error}"
