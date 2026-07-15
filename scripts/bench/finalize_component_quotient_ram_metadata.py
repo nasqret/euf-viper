@@ -1,227 +1,199 @@
 #!/usr/bin/env python3
-"""Emit WMI completion metadata only for the exact verified census bundle."""
+"""Independently verify and descriptor-publish one T5 archive and marker."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import platform
+import stat
 import sys
+import tarfile
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.bench import census_component_quotient_ram as census  # noqa: E402
+from scripts.bench import component_quotient_contract as contract  # noqa: E402
+from scripts.bench import independent_component_quotient_verifier as independent  # noqa: E402
+from scripts.bench import t5_linux_publication as publication  # noqa: E402
 
 
-METADATA_SCHEMA = "euf-viper.component-quotient-ram-wmi-run.v1"
-EXPECTED_RECEIPT_KEYS = {
-    "schema",
-    "verified",
-    "campaign_id",
-    "interpretation",
-    "sources",
-    "targets",
-    "validity_pass",
-    "implementation_allowed",
-    "decoder_oracle_sha256",
-    "hashes",
-}
-AGGREGATE_HASH_KEYS = {
-    "lock_sha256",
-    "input_manifest_sha256",
-    "portable_source_set_sha256",
-    "analyzer_sha256",
-    "parser_sha256",
-    "taxonomy_builder_sha256",
-    "records_jsonl_sha256",
-    "terminal_record_sha256",
-    "derived_target_manifest_sha256",
-}
-RECEIPT_HASH_KEYS = AGGREGATE_HASH_KEYS | {
-    "aggregate_json_sha256",
-    "recomputed_gates_sha256",
-}
-
-
-class MetadataFinalizationError(ValueError):
-    """Raised when completion metadata cannot be bound to verified bytes."""
+class BundlePublicationError(ValueError):
+    """Raised when the T5 artifact cannot be proven and published."""
 
 
 @dataclass(frozen=True)
-class Snapshot:
+class PublishedBundle:
     path: Path
-    payload: bytes
-
-    @property
-    def sha256(self) -> str:
-        return hashlib.sha256(self.payload).hexdigest()
-
-
-def _is_lower_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
+    current_marker: Path
+    sha256: str
+    marker_sha256: str
+    metadata: dict[str, object]
+    marker: dict[str, object]
 
 
-def _read_snapshot(path: Path, context: str) -> Snapshot:
-    resolved = Path(path).resolve(strict=False)
+def _read_regular(path: Path, context: str) -> bytes:
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     try:
-        payload = resolved.read_bytes()
+        descriptor = os.open(path, flags)
     except OSError as error:
-        raise MetadataFinalizationError(
-            f"cannot read {context} {resolved}: {error}"
-        ) from error
-    return Snapshot(resolved, payload)
-
-
-def _strict_canonical_json(payload: bytes, context: str) -> dict[str, object]:
+        raise BundlePublicationError(f"cannot open {context} {path}: {error}") from error
     try:
-        text = payload.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise MetadataFinalizationError(f"{context} must be ASCII") from error
-    try:
-        value = census.family_manifest.strict_json_loads(text)
-    except (json.JSONDecodeError, ValueError) as error:
-        raise MetadataFinalizationError(f"malformed {context}: {error}") from error
-    if type(value) is not dict:
-        raise MetadataFinalizationError(f"{context} must be a JSON object")
-    if census.canonical_json_bytes(value) != payload:
-        raise MetadataFinalizationError(f"{context} must be canonical JSON")
-    return value
-
-
-def _strict_canonical_jsonl(payload: bytes, context: str) -> list[dict[str, object]]:
-    try:
-        text = payload.decode("ascii")
-    except UnicodeDecodeError as error:
-        raise MetadataFinalizationError(f"{context} must be ASCII") from error
-    if payload and not text.endswith("\n"):
-        raise MetadataFinalizationError(f"{context} ends with a partial line")
-    rows: list[dict[str, object]] = []
-    for line_number, line in enumerate(text.splitlines(), 1):
-        if not line:
-            raise MetadataFinalizationError(
-                f"{context} line {line_number} is blank"
-            )
-        try:
-            value = census.family_manifest.strict_json_loads(line)
-        except (json.JSONDecodeError, ValueError) as error:
-            raise MetadataFinalizationError(
-                f"{context} line {line_number} is malformed: {error}"
-            ) from error
-        if type(value) is not dict:
-            raise MetadataFinalizationError(
-                f"{context} line {line_number} must be an object"
-            )
-        if census.canonical_json_bytes(value).decode("ascii") != line + "\n":
-            raise MetadataFinalizationError(
-                f"{context} line {line_number} is not canonical JSON"
-            )
-        rows.append(value)
-    return rows
-
-
-def _validate_receipt(
-    receipt: dict[str, object], expected_sources: int
-) -> dict[str, str]:
-    if set(receipt) != EXPECTED_RECEIPT_KEYS:
-        raise MetadataFinalizationError("verification receipt keys differ")
-    if (
-        receipt["schema"] != census.BUNDLE_VERIFICATION_SCHEMA
-        or receipt["verified"] is not True
-        or receipt["campaign_id"]
-        != "t5-component-quotient-ram-opportunity-census-v1"
-        or receipt["interpretation"] != census.INTERPRETATION
-        or type(receipt["sources"]) is not int
-        or receipt["sources"] != expected_sources
-        or type(receipt["targets"]) is not int
-        or receipt["targets"] < 0
-        or receipt["validity_pass"] is not True
-        or type(receipt["implementation_allowed"]) is not bool
-        or receipt["decoder_oracle_sha256"]
-        != census.DECODER_ORACLE_FROZEN_SHA256
-    ):
-        raise MetadataFinalizationError(
-            "component quotient strict bundle verification did not pass"
-        )
-    hashes = receipt["hashes"]
-    if type(hashes) is not dict or set(hashes) != RECEIPT_HASH_KEYS:
-        raise MetadataFinalizationError("verification receipt hash keys differ")
-    if any(not _is_lower_sha256(value) for value in hashes.values()):
-        raise MetadataFinalizationError(
-            "verification receipt contains an invalid SHA-256"
-        )
-    return hashes  # type: ignore[return-value]
+        descriptor_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(descriptor_stat.st_mode):
+            raise BundlePublicationError(f"{context} is not a regular file")
+        payload = publication.read_fd(descriptor)
+        if os.fstat(descriptor).st_size != len(payload):
+            raise BundlePublicationError(f"{context} changed while captured")
+        return payload
+    finally:
+        os.close(descriptor)
 
 
 def _capture_python_identity(
     expected_realpath: Path,
     expected_version: str,
     expected_sha256: str,
-) -> tuple[dict[str, str], Snapshot]:
-    if not expected_realpath.is_absolute():
-        raise MetadataFinalizationError("pinned Python realpath must be absolute")
-    if not expected_version or not _is_lower_sha256(expected_sha256):
-        raise MetadataFinalizationError("pinned Python identity is malformed")
+) -> dict[str, str]:
     try:
         resolved = expected_realpath.resolve(strict=True)
         running = Path(sys.executable).resolve(strict=True)
     except OSError as error:
-        raise MetadataFinalizationError(
-            f"cannot resolve pinned Python executable: {error}"
-        ) from error
+        raise BundlePublicationError(f"cannot resolve pinned Python: {error}") from error
     if resolved != expected_realpath or running != expected_realpath:
-        raise MetadataFinalizationError(
-            f"Python realpath drift: expected {expected_realpath}, running {running}"
-        )
-    if not resolved.is_file() or not os.access(resolved, os.X_OK):
-        raise MetadataFinalizationError("pinned Python realpath is not executable")
+        raise BundlePublicationError("pinned Python realpath drift")
     if platform.python_version() != expected_version:
-        raise MetadataFinalizationError(
-            "Python version drift: "
-            f"expected {expected_version}, got {platform.python_version()}"
-        )
-    snapshot = _read_snapshot(resolved, "Python executable")
-    if snapshot.sha256 != expected_sha256:
-        raise MetadataFinalizationError(
-            f"Python SHA-256 drift: expected {expected_sha256}, got {snapshot.sha256}"
-        )
-    return (
-        {
-            "realpath": str(resolved),
-            "version": expected_version,
-            "sha256": expected_sha256,
-        },
-        snapshot,
-    )
+        raise BundlePublicationError("pinned Python version drift")
+    digest = hashlib.sha256(_read_regular(resolved, "Python executable")).hexdigest()
+    if digest != expected_sha256:
+        raise BundlePublicationError("pinned Python SHA-256 drift")
+    return {
+        "realpath": str(resolved),
+        "version": expected_version,
+        "sha256": expected_sha256,
+    }
 
 
-def _assert_snapshot_unchanged(snapshot: Snapshot, context: str) -> None:
-    current = _read_snapshot(snapshot.path, context)
-    if (
-        current.sha256 != snapshot.sha256
-        or len(current.payload) != len(snapshot.payload)
-    ):
-        raise MetadataFinalizationError(
-            f"{context} changed during metadata finalization"
-        )
+def _tar_info(name: str, size: int) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mode = 0o444
+    info.mtime = 0
+    info.uid = 0
+    info.gid = 0
+    info.uname = ""
+    info.gname = ""
+    return info
 
 
-def finalize_metadata(
+def _write_archive(descriptor: int, members: MappingStringBytes) -> None:
+    try:
+        with os.fdopen(os.dup(descriptor), "w+b") as handle:
+            with tarfile.open(
+                fileobj=handle, mode="w", format=tarfile.USTAR_FORMAT
+            ) as archive:
+                for name, payload in sorted(members.items()):
+                    archive.addfile(_tar_info(name, len(payload)), io.BytesIO(payload))
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (OSError, ValueError, tarfile.TarError) as error:
+        raise BundlePublicationError(f"cannot write unnamed archive: {error}") from error
+
+
+MappingStringBytes = dict[str, bytes]
+
+
+def _strict_receipt(payload: bytes) -> dict[str, object]:
+    value = independent.strict_json(payload, "standalone independent receipt")
+    if type(value) is not dict:
+        raise BundlePublicationError("standalone independent receipt is not an object")
+    if contract.canonical_json_bytes(value) != payload:
+        raise BundlePublicationError("standalone independent receipt is not canonical")
+    stored_digest = value.get("receipt_sha256")
+    unhashed = dict(value)
+    unhashed.pop("receipt_sha256", None)
+    if stored_digest != hashlib.sha256(contract.canonical_json_bytes(unhashed)).hexdigest():
+        raise BundlePublicationError("standalone independent receipt digest drift")
+    return value
+
+
+def _archive_members(
+    snapshot: independent.IndependentSnapshot,
+    independent_receipt_bytes: bytes,
+    runtime_bindings: dict[str, dict[str, object]],
+    run_log_bytes: bytes,
+    verification_log_bytes: bytes,
+    metadata: dict[str, object],
+) -> MappingStringBytes:
+    members: MappingStringBytes = {
+        "inputs/campaign-lock.json": snapshot.lock_bytes,
+        "inputs/manifest.jsonl": snapshot.manifest_bytes,
+        "outputs/records.jsonl": snapshot.records_bytes,
+        "outputs/aggregate.json": snapshot.aggregate_bytes,
+        "outputs/targets.jsonl": snapshot.targets_bytes,
+        "provenance/portable-source-set.jsonl": snapshot.portable_source_bytes,
+        "provenance/runtime-revision-blobs.json": contract.canonical_json_bytes(
+            runtime_bindings
+        ),
+        "verification/independent-decision.json": independent_receipt_bytes,
+        "logs/analyzer.txt": run_log_bytes,
+        "logs/independent-verifier.txt": verification_log_bytes,
+    }
+    for relative_path in contract.RUNTIME_PROJECT_FILES:
+        if relative_path.startswith("scripts/"):
+            payload = _read_regular(
+                snapshot.repository_root / relative_path, f"runtime source {relative_path}"
+            )
+            binding = runtime_bindings[relative_path]
+            if (
+                binding.get("sha256") != hashlib.sha256(payload).hexdigest()
+                or binding.get("bytes") != len(payload)
+            ):
+                raise BundlePublicationError(
+                    f"runtime source changed after revision verification: {relative_path}"
+                )
+            members[f"code/{relative_path.removeprefix('scripts/')}"] = payload
+    for source in snapshot.sources:
+        members[f"sources/{source.relative_path}"] = source.source_bytes
+    metadata["members"] = {
+        name: hashlib.sha256(payload).hexdigest()
+        for name, payload in sorted(members.items())
+    }
+    members["metadata.json"] = json.dumps(
+        metadata, indent=2, sort_keys=True
+    ).encode("ascii") + b"\n"
+    return members
+
+
+def _require_identity(value: int, context: str) -> int:
+    if type(value) is not int or value < 1:
+        raise BundlePublicationError(f"{context} must be a positive integer")
+    return value
+
+
+def publish_verified_bundle(
     *,
-    metadata_out: Path,
+    final_bundle: Path,
+    current_marker: Path,
+    attempt_id: str,
+    submission_nonce: str,
+    namespace_root: Path,
+    namespace_id: str,
+    namespace_device: int,
+    namespace_inode: int,
+    results_device: int,
+    results_inode: int,
     repository_root: Path,
     manifest_path: Path,
+    expected_manifest_sha256: str,
     lock_path: Path,
     records_path: Path,
     aggregate_path: Path,
@@ -229,189 +201,333 @@ def finalize_metadata(
     verification_path: Path,
     run_log_path: Path,
     verification_log_path: Path,
-    expected_sources: int,
     revision: str,
     job_id: int,
     python_realpath: Path,
     python_version: str,
     python_sha256: str,
-) -> dict[str, object]:
-    if expected_sources < 1:
-        raise MetadataFinalizationError("expected source count must be positive")
+    boundary_hook: Callable[[str], None] | None = None,
+) -> PublishedBundle:
+    """Publish immutable archive/marker inodes or fail with only stale orphans."""
+
+    if not sys.platform.startswith("linux"):
+        raise BundlePublicationError("T5 publication requires real Linux O_TMPFILE")
+    hostile = contract.hostile_environment_names(dict(os.environ))
+    if hostile:
+        raise BundlePublicationError(
+            "hostile ambient environment is forbidden: " + ", ".join(hostile)
+        )
+    try:
+        contract.require_safe_token(attempt_id, "attempt id", minimum=6)
+        contract.require_lower_sha256(submission_nonce, "submission nonce")
+        contract.require_lower_sha256(namespace_id, "remote namespace id")
+        contract.require_lower_sha256(expected_manifest_sha256, "manifest digest")
+        contract.require_lower_sha256(python_sha256, "Python digest")
+    except contract.ContractError as error:
+        raise BundlePublicationError(str(error)) from error
+    if expected_manifest_sha256 != contract.MANIFEST_SHA256:
+        raise BundlePublicationError("manifest digest differs from the fixed revision blob")
+    _require_identity(job_id, "job id")
+    expected_namespace = (
+        _require_identity(namespace_device, "namespace device"),
+        _require_identity(namespace_inode, "namespace inode"),
+    )
+    expected_results = (
+        _require_identity(results_device, "results device"),
+        _require_identity(results_inode, "results inode"),
+    )
+    if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+        raise BundlePublicationError("revision must be a full lowercase Git SHA-1")
+    expected_bundle_name = (
+        f"component-quotient-census-{job_id}-attempt-{attempt_id}.tar"
+    )
+    expected_marker_name = f"component-quotient-census-{job_id}.current"
+    final_bundle = Path(os.path.abspath(final_bundle))
+    current_marker = Path(os.path.abspath(current_marker))
+    namespace_root = Path(os.path.abspath(namespace_root))
+    repository_root = Path(os.path.abspath(repository_root))
+    if repository_root != ROOT.resolve(strict=True):
+        raise BundlePublicationError(
+            "executing finalizer and verified repository root must be identical"
+        )
+    if Path(os.path.abspath(lock_path)) != repository_root / contract.LOCK_RELATIVE_PATH:
+        raise BundlePublicationError("campaign lock path is not the fixed revision path")
+    if Path(os.path.abspath(manifest_path)) != repository_root / contract.MANIFEST_RELATIVE_PATH:
+        raise BundlePublicationError("manifest path is not the fixed corpus path")
+    if final_bundle.name != expected_bundle_name or current_marker.name != expected_marker_name:
+        raise BundlePublicationError("archive or marker name violates the fixed contract")
     if (
-        len(revision) != 40
-        or any(character not in "0123456789abcdef" for character in revision)
+        final_bundle.parent != namespace_root / "results"
+        or current_marker.parent != final_bundle.parent
     ):
-        raise MetadataFinalizationError("revision must be a full lowercase Git SHA-1")
-    if job_id < 1:
-        raise MetadataFinalizationError("job id must be positive")
-
-    python_identity, python_snapshot = _capture_python_identity(
-        python_realpath, python_version, python_sha256
-    )
-    lock = census.load_campaign_lock(lock_path)
-    if lock.expected_sources != expected_sources:
-        raise MetadataFinalizationError(
-            "campaign lock and requested source counts differ"
+        raise BundlePublicationError("publication paths leave the bound result namespace")
+    try:
+        recomputed_namespace_id = contract.namespace_identity_sha256(
+            namespace_path=str(namespace_root),
+            namespace_device=expected_namespace[0],
+            namespace_inode=expected_namespace[1],
+            results_device=expected_results[0],
+            results_inode=expected_results[1],
+            submission_nonce=submission_nonce,
         )
-    sources, manifest_bytes, portable_bytes = census.load_manifest(
-        manifest_path, repository_root, expected_sources
-    )
-    if hashlib.sha256(portable_bytes).hexdigest() != lock.portable_source_set_sha256:
-        raise MetadataFinalizationError(
-            "current portable source commitment differs from campaign lock"
+    except contract.ContractError as error:
+        raise BundlePublicationError(str(error)) from error
+    if recomputed_namespace_id != namespace_id:
+        raise BundlePublicationError("remote namespace identity digest drift")
+
+    pinned: publication.PinnedResultRoot | None = None
+    archive_descriptor: int | None = None
+    archive_writable_descriptor: int | None = None
+    marker_descriptor: int | None = None
+    marker_writable_descriptor: int | None = None
+    try:
+        pinned = publication.PinnedResultRoot.open(
+            namespace_root,
+            expected_namespace=expected_namespace,
+            expected_results=expected_results,
         )
-
-    snapshots = {
-        "manifest": Snapshot(Path(manifest_path).resolve(strict=False), manifest_bytes),
-        "lock": Snapshot(Path(lock_path).resolve(strict=False), lock.raw_bytes),
-        "analyzer": _read_snapshot(Path(census.__file__), "analyzer"),
-        "verifier": _read_snapshot(
-            ROOT / "scripts/bench/verify_component_quotient_ram_bundle.py",
-            "bundle verifier",
-        ),
-        "metadata_finalizer": _read_snapshot(Path(__file__), "metadata finalizer"),
-        "parser": _read_snapshot(census.PARSER_PATH, "independent parser"),
-        "taxonomy_builder": _read_snapshot(
-            census.TAXONOMY_PATH, "taxonomy builder"
-        ),
-        "records": _read_snapshot(records_path, "record stream"),
-        "aggregate": _read_snapshot(aggregate_path, "aggregate"),
-        "targets": _read_snapshot(targets_path, "target manifest"),
-        "run": _read_snapshot(run_log_path, "analyzer log"),
-        "verification": _read_snapshot(verification_path, "verification receipt"),
-        "verification_run": _read_snapshot(
-            verification_log_path, "verification log"
-        ),
-        "python_executable": python_snapshot,
-    }
-    output_resolved = Path(metadata_out).resolve(strict=False)
-    occupied = {snapshot.path for snapshot in snapshots.values()}
-    occupied.update(source.source_path for source in sources)
-    if output_resolved in occupied:
-        raise MetadataFinalizationError("metadata output must not overwrite an input")
-
-    receipt = _strict_canonical_json(
-        snapshots["verification"].payload, "verification receipt"
-    )
-    receipt_hashes = _validate_receipt(receipt, expected_sources)
-    records = census.verify_record_stream(
-        snapshots["records"].payload, expected_sources, lock
-    )
-    targets = _strict_canonical_jsonl(
-        snapshots["targets"].payload, "target manifest"
-    )
-    aggregate = _strict_canonical_json(
-        snapshots["aggregate"].payload, "aggregate"
-    )
-    gates = aggregate.get("gates")
-    aggregate_hashes = aggregate.get("hashes")
-    if type(gates) is not dict or type(aggregate_hashes) is not dict:
-        raise MetadataFinalizationError("aggregate gates or hashes are malformed")
-    validity = gates.get("validity")
-    if type(validity) is not dict or type(validity.get("pass")) is not bool:
-        raise MetadataFinalizationError("aggregate validity gate is malformed")
-    if type(gates.get("implementation_allowed")) is not bool:
-        raise MetadataFinalizationError(
-            "aggregate implementation gate is malformed"
+        if boundary_hook is not None:
+            boundary_hook("directories_opened")
+        pinned.verify_paths()
+        runtime_bindings = contract.verify_runtime_revision_blobs(
+            repository_root, revision
         )
-
-    terminal_record_sha256 = (
-        records[-1].get("record_sha256") if records else None
-    )
-    if not _is_lower_sha256(terminal_record_sha256):
-        raise MetadataFinalizationError("record stream terminal hash is malformed")
-    current_hashes = {
-        "lock_sha256": snapshots["lock"].sha256,
-        "input_manifest_sha256": snapshots["manifest"].sha256,
-        "portable_source_set_sha256": hashlib.sha256(portable_bytes).hexdigest(),
-        "analyzer_sha256": snapshots["analyzer"].sha256,
-        "parser_sha256": snapshots["parser"].sha256,
-        "taxonomy_builder_sha256": snapshots["taxonomy_builder"].sha256,
-        "records_jsonl_sha256": snapshots["records"].sha256,
-        "terminal_record_sha256": terminal_record_sha256,
-        "derived_target_manifest_sha256": snapshots["targets"].sha256,
-        "aggregate_json_sha256": snapshots["aggregate"].sha256,
-        "recomputed_gates_sha256": hashlib.sha256(
-            census.canonical_json_bytes(gates)
-        ).hexdigest(),
-    }
-    if set(current_hashes) != RECEIPT_HASH_KEYS:
-        raise MetadataFinalizationError("recomputed receipt hash keys differ")
-    if set(aggregate_hashes) != AGGREGATE_HASH_KEYS:
-        raise MetadataFinalizationError("aggregate receipt-bound hash keys differ")
-    for key in sorted(AGGREGATE_HASH_KEYS):
-        if aggregate_hashes[key] != current_hashes[key]:
-            raise MetadataFinalizationError(
-                f"aggregate hash mismatch for {key}: "
-                f"expected {aggregate_hashes[key]}, got {current_hashes[key]}"
-            )
-    for key in sorted(RECEIPT_HASH_KEYS):
-        if receipt_hashes[key] != current_hashes[key]:
-            raise MetadataFinalizationError(
-                f"verification receipt hash mismatch for {key}: "
-                f"expected {receipt_hashes[key]}, got {current_hashes[key]}"
-            )
-    if (
-        receipt["campaign_id"] != lock.campaign_id
-        or receipt["sources"] != len(records)
-        or receipt["targets"] != len(targets)
-        or receipt["validity_pass"] is not validity["pass"]
-        or receipt["implementation_allowed"]
-        is not gates["implementation_allowed"]
-        or receipt["decoder_oracle_sha256"] != lock.decoder_oracle_sha256
-    ):
-        raise MetadataFinalizationError(
-            "verification receipt and captured aggregate/lock relations differ"
+        runtime_bindings_sha256 = hashlib.sha256(
+            contract.canonical_json_bytes(runtime_bindings)
+        ).hexdigest()
+        python_identity = _capture_python_identity(
+            python_realpath, python_version, python_sha256
         )
-
-    payload: dict[str, object] = {
-        "schema": METADATA_SCHEMA,
-        "status": "completed",
-        "revision": revision,
-        "job_id": job_id,
-        "hostname": platform.node(),
-        "python": python_identity,
-        "validation": {
-            "expected_sources": expected_sources,
-            "observed_sources": receipt["sources"],
-            "targets": receipt["targets"],
-            "validity_pass": receipt["validity_pass"],
-            "decoder_oracle_sha256": receipt["decoder_oracle_sha256"],
-            "implementation_allowed": receipt["implementation_allowed"],
-            "verification_receipt_sha256": snapshots["verification"].sha256,
-            "receipt_bound_hashes": current_hashes,
-        },
-        "artifacts": {
-            name: {"path": str(snapshot.path), "sha256": snapshot.sha256}
-            for name, snapshot in sorted(snapshots.items())
-        },
-    }
-
-    for source in sources:
-        current = _read_snapshot(source.source_path, source.relative_path)
+        snapshot = independent.capture_snapshot(
+            repository_root=repository_root,
+            lock_path=lock_path,
+            manifest_path=manifest_path,
+            records_path=records_path,
+            aggregate_path=aggregate_path,
+            targets_path=targets_path,
+            expected_manifest_sha256=expected_manifest_sha256,
+        )
+        fresh_receipt = independent.verify_snapshot(snapshot)
         if (
-            current.sha256 != source.source_sha256
-            or len(current.payload) != len(source.source_bytes)
+            fresh_receipt.get("decisive") is not True
+            or fresh_receipt.get("validity_pass") is not True
         ):
-            raise MetadataFinalizationError(
-                f"source changed during metadata finalization: {source.relative_path}"
-            )
-    for name, snapshot in sorted(snapshots.items()):
-        _assert_snapshot_unchanged(snapshot, name)
-
-    metadata_bytes = (
-        json.dumps(payload, indent=2, sort_keys=True).encode("ascii") + b"\n"
-    )
-    census._atomic_write(((metadata_out, metadata_bytes),))
-    return payload
+            raise BundlePublicationError("independent decision is not decisive and valid")
+        fresh_receipt_bytes = contract.canonical_json_bytes(fresh_receipt)
+        supplied_receipt_bytes = _read_regular(
+            verification_path, "standalone independent receipt"
+        )
+        supplied_receipt = _strict_receipt(supplied_receipt_bytes)
+        if supplied_receipt != fresh_receipt:
+            raise BundlePublicationError("standalone and fresh independent receipts differ")
+        namespace_json = pinned.identity_json(namespace_id)
+        metadata: dict[str, object] = {
+            "schema": contract.BUNDLE_METADATA_SCHEMA,
+            "status": "verified_publication_nondecisive_without_scheduler_status",
+            "authoritative_without_scheduler_status": False,
+            "revision": revision,
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "submission_nonce": submission_nonce,
+            "remote_namespace": namespace_json,
+            "python": python_identity,
+            "contract": {
+                "lock_sha256": contract.LOCK_SHA256,
+                "manifest_sha256": expected_manifest_sha256,
+                "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
+                "runtime_revision_blobs_sha256": runtime_bindings_sha256,
+            },
+            "independent_verification": fresh_receipt,
+        }
+        members = _archive_members(
+            snapshot,
+            fresh_receipt_bytes,
+            runtime_bindings,
+            _read_regular(run_log_path, "analyzer log"),
+            _read_regular(verification_log_path, "independent verifier log"),
+            metadata,
+        )
+        archive_writable_descriptor = publication.open_unnamed_linkable_file(
+            pinned.results_descriptor
+        )
+        _write_archive(archive_writable_descriptor, members)
+        archive_sha256, archive_unlinked_stat = publication.seal_unnamed_file(
+            archive_writable_descriptor
+        )
+        if archive_unlinked_stat.st_nlink != 0:
+            raise BundlePublicationError("archive acquired a staging link")
+        if boundary_hook is not None:
+            boundary_hook("archive_ready")
+        pinned.verify_paths()
+        publication.link_unnamed_inode_no_replace(
+            archive_writable_descriptor,
+            pinned.results_descriptor,
+            final_bundle.name,
+        )
+        archive_descriptor = publication.reopen_linked_inode_read_only(
+            archive_writable_descriptor,
+            pinned.results_descriptor,
+            final_bundle.name,
+        )
+        os.close(archive_writable_descriptor)
+        archive_writable_descriptor = None
+        if boundary_hook is not None:
+            boundary_hook("archive_linked")
+        publication.fsync_directory(pinned.results_descriptor)
+        archive_stat = publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=final_bundle.name,
+            expected_descriptor=archive_descriptor,
+            expected_sha256=archive_sha256,
+        )
+        if boundary_hook is not None:
+            boundary_hook("archive_verified")
+        pinned.verify_paths()
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=final_bundle.name,
+            expected_descriptor=archive_descriptor,
+            expected_sha256=archive_sha256,
+        )
+        marker: dict[str, object] = {
+            "schema": contract.MARKER_SCHEMA,
+            "status": "verified_publication_nondecisive_without_scheduler_status",
+            "authoritative_without_successful_job_status": False,
+            "final_archive": {
+                "name": final_bundle.name,
+                "sha256": archive_sha256,
+                "bytes": archive_stat.st_size,
+                "device": archive_stat.st_dev,
+                "inode": archive_stat.st_ino,
+                "mode": "0444",
+                "link_count": 1,
+            },
+            "revision": revision,
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "submission_nonce": submission_nonce,
+            "remote_namespace": namespace_json,
+            "contract": metadata["contract"],
+            "independent_receipt_sha256": fresh_receipt["receipt_sha256"],
+            "bundle_metadata_sha256": hashlib.sha256(
+                members["metadata.json"]
+            ).hexdigest(),
+        }
+        marker_bytes = contract.canonical_json_bytes(marker)
+        (
+            marker_writable_descriptor,
+            marker_sha256,
+            _,
+        ) = publication.prepare_unnamed_bytes(pinned.results_descriptor, marker_bytes)
+        if boundary_hook is not None:
+            boundary_hook("marker_ready")
+        pinned.verify_paths()
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=final_bundle.name,
+            expected_descriptor=archive_descriptor,
+            expected_sha256=archive_sha256,
+        )
+        publication.link_unnamed_inode_no_replace(
+            marker_writable_descriptor,
+            pinned.results_descriptor,
+            current_marker.name,
+        )
+        marker_descriptor = publication.reopen_linked_inode_read_only(
+            marker_writable_descriptor,
+            pinned.results_descriptor,
+            current_marker.name,
+        )
+        os.close(marker_writable_descriptor)
+        marker_writable_descriptor = None
+        if boundary_hook is not None:
+            boundary_hook("marker_linked")
+        publication.fsync_directory(pinned.results_descriptor)
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=current_marker.name,
+            expected_descriptor=marker_descriptor,
+            expected_sha256=marker_sha256,
+            expected_payload=marker_bytes,
+        )
+        if boundary_hook is not None:
+            boundary_hook("marker_verified")
+        pinned.verify_paths()
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=final_bundle.name,
+            expected_descriptor=archive_descriptor,
+            expected_sha256=archive_sha256,
+        )
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=current_marker.name,
+            expected_descriptor=marker_descriptor,
+            expected_sha256=marker_sha256,
+            expected_payload=marker_bytes,
+        )
+        if boundary_hook is not None:
+            boundary_hook("before_return")
+        pinned.verify_paths()
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=final_bundle.name,
+            expected_descriptor=archive_descriptor,
+            expected_sha256=archive_sha256,
+        )
+        publication.verify_named_file(
+            directory_descriptor=pinned.results_descriptor,
+            name=current_marker.name,
+            expected_descriptor=marker_descriptor,
+            expected_sha256=marker_sha256,
+            expected_payload=marker_bytes,
+        )
+        return PublishedBundle(
+            final_bundle,
+            current_marker,
+            archive_sha256,
+            marker_sha256,
+            metadata,
+            marker,
+        )
+    except (
+        independent.IndependentVerificationError,
+        contract.ContractError,
+        publication.PublicationError,
+        OSError,
+    ) as error:
+        raise BundlePublicationError(str(error)) from error
+    finally:
+        for descriptor in (
+            marker_descriptor,
+            marker_writable_descriptor,
+            archive_descriptor,
+            archive_writable_descriptor,
+        ):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        if pinned is not None:
+            pinned.close()
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--metadata-out", type=Path, required=True)
+    parser.add_argument("--final-bundle", type=Path, required=True)
+    parser.add_argument("--current-marker", type=Path, required=True)
+    parser.add_argument("--attempt-id", required=True)
+    parser.add_argument("--submission-nonce", required=True)
+    parser.add_argument("--namespace-root", type=Path, required=True)
+    parser.add_argument("--namespace-id", required=True)
+    parser.add_argument("--namespace-device", type=int, required=True)
+    parser.add_argument("--namespace-inode", type=int, required=True)
+    parser.add_argument("--results-device", type=int, required=True)
+    parser.add_argument("--results-inode", type=int, required=True)
     parser.add_argument("--repository-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--expected-manifest-sha256", required=True)
     parser.add_argument("--lock", type=Path, required=True)
     parser.add_argument("--records", type=Path, required=True)
     parser.add_argument("--aggregate", type=Path, required=True)
@@ -419,7 +535,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verification", type=Path, required=True)
     parser.add_argument("--run-log", type=Path, required=True)
     parser.add_argument("--verification-log", type=Path, required=True)
-    parser.add_argument("--expected-sources", type=int, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--job-id", type=int, required=True)
     parser.add_argument("--python-realpath", type=Path, required=True)
@@ -431,10 +546,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        payload = finalize_metadata(
-            metadata_out=args.metadata_out,
+        publish_verified_bundle(
+            final_bundle=args.final_bundle,
+            current_marker=args.current_marker,
+            attempt_id=args.attempt_id,
+            submission_nonce=args.submission_nonce,
+            namespace_root=args.namespace_root,
+            namespace_id=args.namespace_id,
+            namespace_device=args.namespace_device,
+            namespace_inode=args.namespace_inode,
+            results_device=args.results_device,
+            results_inode=args.results_inode,
             repository_root=args.repository_root,
             manifest_path=args.manifest,
+            expected_manifest_sha256=args.expected_manifest_sha256,
             lock_path=args.lock,
             records_path=args.records,
             aggregate_path=args.aggregate,
@@ -442,19 +567,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             verification_path=args.verification,
             run_log_path=args.run_log,
             verification_log_path=args.verification_log,
-            expected_sources=args.expected_sources,
             revision=args.revision,
             job_id=args.job_id,
             python_realpath=args.python_realpath,
             python_version=args.python_version,
             python_sha256=args.python_sha256,
         )
-    except (census.CensusError, MetadataFinalizationError) as error:
-        raise SystemExit(f"component quotient metadata finalization failed: {error}")
-    print(
-        f"status={payload['status']} "
-        f"receipt_sha256={payload['validation']['verification_receipt_sha256']}"
-    )
+    except BundlePublicationError as error:
+        raise SystemExit(f"component quotient publication failed: {error}")
     return 0
 
 

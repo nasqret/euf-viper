@@ -1,11 +1,24 @@
 # T5 Component-Quotient RAM Census Contract
 
-Date: 2026-07-13
+Date: 2026-07-14
 
-Status: implemented source-only opportunity census, repaired after a second
-independent review, and awaiting re-review. No WMI decision run has been
-submitted. This is not a production solver route, a timing experiment, or
-evidence that T5 should be implemented.
+Status: source-only opportunity census repaired after the sixth independent
+review. The code now has an independent source-to-decision verifier, Linux-only
+unnamed-inode publication, a content-bearing marker, and a post-job consumer.
+Bounded macOS tests pass, but Linux CI has not yet established GO. No WMI
+decision run was submitted. This is not a production solver route, a timing
+experiment, or evidence that T5 should be implemented.
+
+## Recovery Provenance
+
+The old clone's `6249393` is invalid: its object database is missing objects
+referenced by that identifier. It is neither a reviewable revision nor evidence
+and must never be repaired, fetched from, or cited. The physical source snapshot
+was recovered into a fresh clone on branch
+`research-t5-component-quotient-census-recovered`, rooted at valid origin
+revision `e930abf2a7fe0e89efbb6a4d73540ef2fe266175`; that clone passed
+`git fsck --full` before the snapshot was reviewed. Provenance begins with the
+new commit made from the recovered files, not with `6249393`.
 
 ## Purpose
 
@@ -117,24 +130,104 @@ The campaign lock fixes:
   nullary, unused, and macro declarations, rather than only symbols with
   observed non-nullary applications;
 - the exact frozen bounded exhaustive decoder-oracle receipt for every source;
-- a separate strict bundle-verifier process that rereads the lock, manifest,
-  source files, records, targets, and aggregate; checks all parser, taxonomy,
-  analyzer, portable-source, artifact, oracle, and chain-endpoint hashes;
-  reconstructs every record from source; and recomputes the complete aggregate
-  and all gates without trusting stored `pass` booleans.
+- a separate decision verifier that does not import or call the analyzer. It
+  reparses every captured source, rebuilds typed components and equality
+  completion with separate data structures, independently counts both
+  projections, reconstructs every component, symbol, decoder, ratio, record,
+  canonical chain, target, aggregate, provenance hash, family population,
+  percentile, median, control, validity, and authorization field, and requires
+  the complete stored bytes to equal that recomputation;
+- exhaustive differential tests over all 75 equality graphs through four
+  vertices, generated Boolean/multisort/padding cases, tampered/rechained
+  records, and a synthetic 7,503-record population with the exact QG and Goel
+  cardinalities. The independent bounded decoder oracle examines 255 record
+  assignments and has frozen receipt SHA-256
+  `d869fe2de073014dcef83160535318c976897d1da946590e19f0912bc658d4f5`.
 
 The portable source-set digest hashes only relative path, byte count, and
 source SHA-256. Host-specific absolute manifest paths therefore do not make
 the local and WMI source identities appear different.
 
-The verifier emits schema
-`euf-viper.component-quotient-ram-bundle-verification.v1` only after exact
-reconstruction. Its receipt binds source and target cardinalities, the frozen
-oracle digest, validity and implementation decisions, every aggregate artifact
-hash, the aggregate JSON hash, and a separately recomputed gates hash. WMI
-metadata may acquire status `completed` only from this receipt with
-`verified=true` and recomputed `validity_pass=true`; it does not read aggregate
-validity booleans directly.
+The run consumes the tracked 7,503-row manifest
+`benchmarks/smtcomp-2025/qf_uf_manifest.jsonl`, fixed at SHA-256
+`ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6`.
+Only the SMT-LIB payload directory is supplied by the shared corpus mount; every
+payload is reopened without following its final path component and checked
+against the tracked byte count and SHA-256 before it enters the archive.
+
+The independent verifier emits
+`euf-viper.component-quotient-independent-decision.v1`. It is decisive only
+after exact full-artifact reconstruction and binds all source, manifest,
+record, target, aggregate, provenance, gate, and oracle hashes. Any cap,
+unsupported construct, field mismatch, missing captured source, or incomplete
+recomputation yields a nondecisive result and cannot authorize T5.
+
+### Immutable publication protocol
+
+Every submission first creates a private attempt directory with remote `mktemp`
+under the configured campaign root, then clones the published revision into
+that empty directory. The exact directory and random attempt ID are bound into
+the local submission receipt. Repeated or concurrent submissions of one
+revision therefore have disjoint checkouts and results namespaces; no wrapper
+resets, cleans, reuses, or removes another attempt path.
+
+All campaign Python processes run under `env -i` with `-I -B -S`. Submission
+uses an explicit `sbatch --export` allowlist and never `--export=ALL`. Entry
+guards reject ambient `GIT_*`, `BASH_ENV`, Python, Cargo, Rust, and dynamic
+loader controls before preflight. Environment-sanitized Git uses explicit
+git-dir/work-tree paths to compare the campaign lock, manifest-producing code,
+every executable/imported campaign file, and every config directly with exact
+revision blobs and modes. The read-only guard never clears index flags.
+
+Every submission receives a private remote `mktemp` namespace, 256-bit nonce,
+and inode identities for the namespace and result directory. Its canonical
+submission receipt is explicitly `submitted_pending_nondecisive`, with
+`decisive=false` and `authoritative=false`. Repeated submissions of one revision
+cannot share or clean a checkout. Neither wrapper, finalizer, analyzer, nor
+consumer removes a stage, archive, marker, receipt, or bundle by pathname.
+Partial attempt files and immutable orphans may leak and remain non-authoritative.
+
+On Linux, the finalizer creates the archive with `O_TMPFILE` in the opened result
+directory. The inode has link count zero while it is written, file-fsynced,
+chmoded `0444`, file-fsynced again, hashed, and descriptor-checked. One
+`linkat(fd, "", dirfd, final, AT_EMPTY_PATH)` atomically gives that exact inode
+its only name. The final inode must have link count one. There is no named
+staging alias, `/proc/self/fd` fallback, immediately-unlinked pathname fallback,
+replacement inode, or pathname publication fallback. Unsupported kernels or
+filesystems fail closed. Immediately after linking, the finalizer opens and
+proves a same-inode read-only descriptor, closes the writable `O_TMPFILE`
+descriptor, and only then exposes the linked boundary to subsequent checks.
+
+Linux requires `CAP_DAC_READ_SEARCH` to use `linkat(AT_EMPTY_PATH)`. The
+[Linux `open(2)` documentation](https://man7.org/linux/man-pages/man2/open.2.html)
+recommends `/proc/self/fd` plus `AT_SYMLINK_FOLLOW` when that capability is
+absent, but this preregistered contract deliberately forbids that pathname
+fallback. Therefore capability-free hosted CI is expected to fail with `EPERM`
+unless the publication policy is explicitly revised. Such a failure is a
+source-gate result, not permission to claim Linux GO or submit WMI.
+
+The archive contains the exact source bytes used by the decision verifier, not
+only their manifest hashes. The finalizer fsyncs the result directory, reopens
+the archive with `O_NOFOLLOW`, proves descriptor/name identity, link count,
+mode, length, and a fresh SHA-256, and repeatedly proves that the named namespace
+and result path still resolve to the pinned directory descriptors.
+
+The final operation publishes `.current` as another `O_TMPFILE` inode, never a
+symlink. Its canonical bytes bind final name, archive SHA-256/size/inode/mode/link
+count, revision, job, submission attempt, nonce, remote namespace and directory
+identities, lock/manifest/portable-source/runtime hashes, independent receipt,
+and bundle metadata. Marker publication is no-replace, descriptor-bound,
+file/directory-fsynced, and freshly reverified. An fsync or race failure may
+leave a visible immutable orphan; no code attempts unsafe rollback.
+
+A marker is never completion by itself. The post-job consumer first requires a
+unique root `sacct` row with `COMPLETED` and `0:0`, then reopens the bound result
+directory, marker, and archive with no-follow semantics, repeats all inode,
+link, mode, content, nonce, namespace, revision, exact-blob, member, and digest
+checks, rebuilds the independent decision from archived source bytes, and emits
+a no-replace final receipt containing both the fresh archive and marker digests.
+That receipt remains explicitly non-authoritative without successful consumer
+exit, so an fsync-failure orphan cannot self-certify.
 
 ## Preregistered Decision
 

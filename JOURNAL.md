@@ -967,6 +967,59 @@
   No T0 timing begins before the baseline audit and no promotion follows from
   validation or queue state.
 
+## 2026-07-14: T5 sixth-review publication redesign
+
+- Replaced named archive staging with Linux-only `O_TMPFILE` and one
+  `linkat(AT_EMPTY_PATH)` no-replace publication. Final archive inodes require
+  mode `0444`, link count one, descriptor/name identity, fresh SHA-256, file
+  fsync, and directory fsync. A proven same-inode read-only descriptor replaces
+  the writable `O_TMPFILE` handle before the linked boundary is exposed. No
+  pathname fallback or cleanup remains.
+- Replaced the symlink marker with a canonical immutable marker inode binding
+  archive, revision, job, submission attempt, 256-bit nonce, remote namespace
+  and directory identities, lock/manifest/runtime hashes, metadata, and the
+  independent decision. Marker visibility alone is explicitly nondecisive.
+- Added a scheduler-gated consumer that requires root-job `COMPLETED 0:0`,
+  freshly reopens and rehashes marker/archive without following links, verifies
+  exact revision blobs and archived members, reconstructs the decision from all
+  captured SMT-LIB source bytes, and publishes a final receipt with both
+  digests. Stale receipts require successful consumer exit and cannot
+  self-authorize.
+- Added an independent verifier that does not import or call the analyzer.
+  It now reconstructs complete component/symbol/decoder records, canonical
+  chains, targets, aggregate telemetry, provenance, and all gates byte for byte.
+  Differential tests cover 75 exhaustive small equality graphs, generated
+  Boolean/multisort cases, rechained projection/provenance tampering,
+  archived-source binding, a full-snapshot non-gating tamper, and all promotion
+  gates over an exact 7,503-record synthetic population.
+- Submission now uses a unique remote namespace, held job, cryptographic nonce,
+  inode-bound pending receipt, explicit `sbatch` export list, empty process
+  environments, pinned Python, and read-only exact Git blob checks. No WMI job
+  was submitted and nothing was pushed.
+- Bounded macOS verification passes 86 focused tests and all 367 Python tests;
+  12 real-Linux publication/consumer tests are skipped rather than emulated.
+  Syntax, in-memory compile, exact clean-checkout, and the warning-as-error
+  nine-page Jupyter Book build pass with no import caches left behind. Hosted
+  Ubuntu CI now owns the real unprivileged `O_TMPFILE`/`linkat`, fsync, race,
+  concurrent-publisher, and post-job consumer gate. Linux GO remains pending.
+
+## 2026-07-15: T5 source recovery provenance
+
+- The former clone's `6249393` is invalid because its object database lacks
+  referenced Git objects. It is not a source revision and must never be used,
+  repaired, fetched from, or cited as review or campaign evidence.
+- The physical uncommitted source snapshot was copied into the fresh
+  `research-t5-component-quotient-census-recovered` clone rooted at valid
+  origin commit `e930abf2a7fe0e89efbb6a4d73540ef2fe266175`. The fresh clone
+  passed `git fsck --full` before reconstruction. Only the new commit created
+  from this snapshot can establish source provenance.
+- The recovered code intentionally has no `/proc/self/fd` or named-path
+  publication fallback. Linux man-pages require `CAP_DAC_READ_SEARCH` for
+  `linkat(AT_EMPTY_PATH)`, so hosted CI must prove the exact execution policy;
+  a capability-free `EPERM` is a correct fail-closed result, not Linux GO.
+- No branch was pushed, no WMI job was submitted, and no Linux result is
+  inferred from the macOS test skips.
+
 ## Next Entry Template
 
 - Benchmark corpus:

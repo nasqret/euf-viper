@@ -131,3 +131,31 @@ Run the explicit Yices-dependent portfolio:
 target/release/euf-viper portfolio \
   --yices third_party/solvers/bin/yices-smt2 input.smt2
 ```
+
+## T5 Component-Quotient Census
+
+T5 is Linux-only and remains disabled until hosted Linux CI and independent
+review pass. Submission creates a unique remote namespace and an explicitly
+pending receipt; it does not make a performance or implementation decision.
+
+```bash
+scripts/wmi/submit_component_quotient_census.sh
+```
+
+Publication requires unprivileged `O_TMPFILE` in the result filesystem and
+`linkat(AT_EMPTY_PATH)`. There is no fallback. After the SLURM job finishes, run
+the consumer on WMI with the exact pending receipt and revision checkout:
+
+```bash
+python3 -I -B -S scripts/bench/verify_component_quotient_publication.py \
+  --submission-receipt /absolute/attempt/results/submission.json \
+  --repository-root /absolute/attempt
+```
+
+Do not consume `.current` directly. Authority requires scheduler status
+`COMPLETED 0:0`, successful consumer exit, fresh no-follow archive and marker
+rehashes, exact revision-blob checks, and independent reconstruction from the
+captured source members. The consumer also reconstructs complete record and
+aggregate bytes, not only promotion fields. Stale attempt files and immutable
+orphans are expected after failures and must not be deleted by campaign
+wrappers.

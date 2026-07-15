@@ -16,13 +16,12 @@ import itertools
 import json
 import os
 import sys
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.bench import build_family_manifest as family_manifest  # noqa: E402
+from scripts.bench import component_quotient_contract as fixed_contract  # noqa: E402
 from scripts.cert import independent_qfuf as qfuf  # noqa: E402
 
 
@@ -255,6 +255,24 @@ class ManifestSource:
 
 
 @dataclass(frozen=True)
+class CensusBundleSnapshot:
+    """Exact bytes consumed by independent bundle verification."""
+
+    repository_root: Path
+    lock_path: Path
+    manifest_path: Path
+    lock_bytes: bytes
+    manifest_bytes: bytes
+    source_payloads: tuple[tuple[Path, bytes], ...]
+    records_bytes: bytes
+    aggregate_bytes: bytes
+    targets_bytes: bytes
+    analyzer_bytes: bytes
+    parser_bytes: bytes
+    taxonomy_builder_bytes: bytes
+
+
+@dataclass(frozen=True)
 class Component:
     id: int
     sort: int
@@ -418,12 +436,12 @@ def _ratio(value: object, context: str) -> Ratio:
     return ratio
 
 
-def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
+def load_campaign_lock_bytes(
+    raw_bytes: bytes, *, path: Path = Path("<captured-campaign-lock>")
+) -> CampaignLock:
+    """Validate a campaign lock from already captured bytes."""
+
     path = Path(path)
-    try:
-        raw_bytes = path.read_bytes()
-    except OSError as error:
-        raise CensusError(f"cannot read campaign lock {path}: {error}") from error
     try:
         text = raw_bytes.decode("ascii")
     except UnicodeDecodeError as error:
@@ -725,6 +743,15 @@ def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
     )
 
 
+def load_campaign_lock(path: Path = DEFAULT_LOCK_PATH) -> CampaignLock:
+    path = Path(path)
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError as error:
+        raise CensusError(f"cannot read campaign lock {path}: {error}") from error
+    return load_campaign_lock_bytes(raw_bytes, path=path)
+
+
 def _portable_source_set_bytes(sources: Sequence[ManifestSource]) -> bytes:
     return b"".join(
         canonical_json_bytes(
@@ -738,15 +765,14 @@ def _portable_source_set_bytes(sources: Sequence[ManifestSource]) -> bytes:
     )
 
 
-def load_manifest(
-    manifest_path: Path, repository_root: Path, expected_sources: int
+def _load_manifest_bytes(
+    manifest_bytes: bytes,
+    repository_root: Path,
+    expected_sources: int,
+    source_reader: Callable[[Path], bytes],
 ) -> tuple[list[ManifestSource], bytes, bytes]:
-    """Load and hash the exact source set without host-specific path leakage."""
+    """Validate captured manifest/source bytes without reopening them."""
 
-    try:
-        manifest_bytes = Path(manifest_path).read_bytes()
-    except OSError as error:
-        raise CensusError(f"cannot read manifest {manifest_path}: {error}") from error
     try:
         text = manifest_bytes.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -777,6 +803,10 @@ def load_manifest(
         record_id = row["id"]
         if isinstance(record_id, bool) or not isinstance(record_id, (int, str)):
             raise CensusError(f"line {line_number}: invalid id")
+        if record_id != line_number - 1:
+            raise CensusError(
+                f"line {line_number}: id must equal its zero-based manifest index"
+            )
         if record_id in seen_ids:
             raise CensusError(f"line {line_number}: duplicate id {record_id!r}")
         seen_ids.add(record_id)
@@ -804,11 +834,15 @@ def load_manifest(
                 f"line {line_number}: path does not end in relative_path"
             )
         try:
-            source_bytes = source_path.read_bytes()
-        except OSError as error:
+            source_bytes = source_reader(source_path)
+        except (KeyError, OSError) as error:
             raise CensusError(
                 f"line {line_number}: cannot read {source_path}: {error}"
             ) from error
+        if type(source_bytes) is not bytes:
+            raise CensusError(
+                f"line {line_number}: captured source is not immutable bytes"
+            )
         source_sha256 = sha256_bytes(source_bytes)
         if not _is_lower_sha256(row["sha256"]):
             raise CensusError(f"line {line_number}: invalid source SHA-256")
@@ -836,6 +870,42 @@ def load_manifest(
     sources.sort(key=lambda source: source.relative_path)
     portable = _portable_source_set_bytes(sources)
     return sources, manifest_bytes, portable
+
+
+def load_manifest_bytes(
+    manifest_bytes: bytes,
+    repository_root: Path,
+    expected_sources: int,
+    source_payloads: Mapping[Path, bytes],
+) -> tuple[list[ManifestSource], bytes, bytes]:
+    """Load a manifest exclusively from captured manifest and source bytes."""
+
+    normalized = {
+        Path(path).resolve(): payload for path, payload in source_payloads.items()
+    }
+    return _load_manifest_bytes(
+        manifest_bytes,
+        repository_root,
+        expected_sources,
+        lambda path: normalized[path],
+    )
+
+
+def load_manifest(
+    manifest_path: Path, repository_root: Path, expected_sources: int
+) -> tuple[list[ManifestSource], bytes, bytes]:
+    """Load and hash the exact source set without host-specific path leakage."""
+
+    try:
+        manifest_bytes = Path(manifest_path).read_bytes()
+    except OSError as error:
+        raise CensusError(f"cannot read manifest {manifest_path}: {error}") from error
+    return _load_manifest_bytes(
+        manifest_bytes,
+        repository_root,
+        expected_sources,
+        lambda path: path.read_bytes(),
+    )
 
 
 def _checked(value: int, limit: int, code: str) -> int:
@@ -3669,8 +3739,7 @@ def _read_artifact(path: Path, context: str) -> bytes:
         raise CensusError(f"cannot read {context} {path}: {error}") from error
 
 
-def _load_canonical_json_artifact(path: Path, context: str) -> dict[str, object]:
-    payload = _read_artifact(path, context)
+def _load_canonical_json_bytes(payload: bytes, context: str) -> dict[str, object]:
     try:
         text = payload.decode("ascii")
     except UnicodeDecodeError as error:
@@ -3686,10 +3755,9 @@ def _load_canonical_json_artifact(path: Path, context: str) -> dict[str, object]
     return value
 
 
-def _load_canonical_jsonl_artifact(
-    path: Path, context: str
-) -> tuple[bytes, list[dict[str, object]]]:
-    payload = _read_artifact(path, context)
+def _load_canonical_jsonl_bytes(
+    payload: bytes, context: str
+) -> list[dict[str, object]]:
     try:
         text = payload.decode("ascii")
     except UnicodeDecodeError as error:
@@ -3711,10 +3779,10 @@ def _load_canonical_jsonl_artifact(
         if canonical_json_bytes(value).decode("ascii") != line + "\n":
             raise CensusError(f"{context} line {line_number} is not canonical JSON")
         rows.append(value)
-    return payload, rows
+    return rows
 
 
-def verify_census_bundle(
+def capture_census_bundle(
     manifest_path: Path,
     records_path: Path,
     aggregate_path: Path,
@@ -3722,18 +3790,74 @@ def verify_census_bundle(
     *,
     repository_root: Path,
     lock_path: Path = DEFAULT_LOCK_PATH,
-) -> dict[str, object]:
-    """Reopen and independently reconstruct a complete census bundle."""
+) -> CensusBundleSnapshot:
+    """Capture every byte that can affect independent bundle verification."""
 
-    lock = load_campaign_lock(lock_path)
+    repository_root = Path(repository_root).resolve()
+    lock_path = Path(lock_path).resolve(strict=False)
+    manifest_path = Path(manifest_path).resolve(strict=False)
+    lock_bytes = _read_artifact(lock_path, "campaign lock")
+    lock = load_campaign_lock_bytes(lock_bytes, path=lock_path)
+    manifest_bytes = _read_artifact(manifest_path, "manifest")
+    sources, _, _ = _load_manifest_bytes(
+        manifest_bytes,
+        repository_root,
+        lock.expected_sources,
+        lambda path: _read_artifact(path, "manifest source"),
+    )
+    return CensusBundleSnapshot(
+        repository_root=repository_root,
+        lock_path=lock_path,
+        manifest_path=manifest_path,
+        lock_bytes=lock_bytes,
+        manifest_bytes=manifest_bytes,
+        source_payloads=tuple(
+            (source.source_path, source.source_bytes) for source in sources
+        ),
+        records_bytes=_read_artifact(records_path, "record stream"),
+        aggregate_bytes=_read_artifact(aggregate_path, "aggregate"),
+        targets_bytes=_read_artifact(targets_path, "target manifest"),
+        analyzer_bytes=_read_artifact(Path(__file__), "analyzer"),
+        parser_bytes=_read_artifact(PARSER_PATH, "independent parser"),
+        taxonomy_builder_bytes=_read_artifact(TAXONOMY_PATH, "taxonomy builder"),
+    )
+
+
+def verify_census_bundle_snapshot(
+    snapshot: CensusBundleSnapshot,
+) -> dict[str, object]:
+    """Independently reconstruct a bundle using captured bytes only."""
+
+    payloads = {
+        "lock": snapshot.lock_bytes,
+        "manifest": snapshot.manifest_bytes,
+        "records": snapshot.records_bytes,
+        "aggregate": snapshot.aggregate_bytes,
+        "targets": snapshot.targets_bytes,
+        "analyzer": snapshot.analyzer_bytes,
+        "parser": snapshot.parser_bytes,
+        "taxonomy builder": snapshot.taxonomy_builder_bytes,
+    }
+    if any(type(payload) is not bytes for payload in payloads.values()):
+        raise CensusError("bundle snapshot payloads must be immutable bytes")
+    source_payloads = dict(snapshot.source_payloads)
+    if len(source_payloads) != len(snapshot.source_payloads):
+        raise CensusError("bundle snapshot contains duplicate source paths")
+    if any(type(payload) is not bytes for payload in source_payloads.values()):
+        raise CensusError("bundle source snapshots must be immutable bytes")
+
+    lock = load_campaign_lock_bytes(snapshot.lock_bytes, path=snapshot.lock_path)
     oracle = _require_decoder_oracle(run_bounded_decoder_oracle())
     if (
         oracle.sha256 != lock.decoder_oracle_sha256
         or _decoder_oracle_counts(oracle) != lock.decoder_oracle_counts
     ):
         raise ProjectionInvariant("campaign lock and decoder oracle receipt differ")
-    sources, manifest_bytes, portable_bytes = load_manifest(
-        manifest_path, repository_root, lock.expected_sources
+    sources, manifest_bytes, portable_bytes = load_manifest_bytes(
+        snapshot.manifest_bytes,
+        snapshot.repository_root,
+        lock.expected_sources,
+        source_payloads,
     )
     manifest_sha256 = sha256_bytes(manifest_bytes)
     portable_source_set_sha256 = sha256_bytes(portable_bytes)
@@ -3741,11 +3865,11 @@ def verify_census_bundle(
         raise CensusError(
             "portable source-set SHA-256 mismatch during bundle verification"
         )
-    parser_sha256 = sha256_path(PARSER_PATH)
-    taxonomy_builder_sha256 = sha256_path(TAXONOMY_PATH)
-    analyzer_sha256 = sha256_path(Path(__file__))
+    parser_sha256 = sha256_bytes(snapshot.parser_bytes)
+    taxonomy_builder_sha256 = sha256_bytes(snapshot.taxonomy_builder_bytes)
+    analyzer_sha256 = sha256_bytes(snapshot.analyzer_bytes)
 
-    records_bytes = _read_artifact(records_path, "record stream")
+    records_bytes = snapshot.records_bytes
     records = verify_record_stream(records_bytes, lock.expected_sources, lock)
     for sequence, (record, source) in enumerate(zip(records, sources)):
         expected_source = {
@@ -3789,13 +3913,13 @@ def verify_census_bundle(
                 f"record {sequence} differs from fresh source reconstruction"
             )
 
-    targets_bytes, targets = _load_canonical_jsonl_artifact(
-        targets_path, "target manifest"
-    )
+    targets_bytes = snapshot.targets_bytes
+    targets = _load_canonical_jsonl_bytes(targets_bytes, "target manifest")
     expected_targets = _target_rows(reconstructed_records)
     if targets != expected_targets:
         raise CensusError("target manifest differs from reconstructed eligible records")
-    aggregate = _load_canonical_json_artifact(aggregate_path, "aggregate")
+    aggregate_bytes = snapshot.aggregate_bytes
+    aggregate = _load_canonical_json_bytes(aggregate_bytes, "aggregate")
     terminal_record_sha256 = (
         str(reconstructed_records[-1]["record_sha256"])
         if reconstructed_records
@@ -3816,7 +3940,6 @@ def verify_census_bundle(
     )
     if aggregate != expected_aggregate:
         raise CensusError("aggregate or gates differ from full recomputation")
-    aggregate_bytes = _read_artifact(aggregate_path, "aggregate")
     if aggregate_bytes != canonical_json_bytes(expected_aggregate):
         raise CensusError("aggregate bytes differ from full recomputation")
     gates = expected_aggregate["gates"]
@@ -3843,32 +3966,63 @@ def verify_census_bundle(
     }
 
 
-def _atomic_write(artifacts: Sequence[tuple[Path, bytes]]) -> None:
-    resolved = [Path(path).resolve(strict=False) for path, _ in artifacts]
+def verify_census_bundle(
+    manifest_path: Path,
+    records_path: Path,
+    aggregate_path: Path,
+    targets_path: Path,
+    *,
+    repository_root: Path,
+    lock_path: Path = DEFAULT_LOCK_PATH,
+) -> dict[str, object]:
+    """Capture and independently reconstruct a complete census bundle."""
+
+    snapshot = capture_census_bundle(
+        manifest_path,
+        records_path,
+        aggregate_path,
+        targets_path,
+        repository_root=repository_root,
+        lock_path=lock_path,
+    )
+    return verify_census_bundle_snapshot(snapshot)
+
+
+def _write_unique_artifacts(artifacts: Sequence[tuple[Path, bytes]]) -> None:
+    resolved = [Path(os.path.abspath(path)) for path, _ in artifacts]
     if len(set(resolved)) != len(resolved):
         raise CensusError("output paths must be distinct")
-    staged: list[tuple[Path, Path]] = []
-    try:
-        for path, payload in artifacts:
-            path = Path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-            )
-            temporary = Path(temporary_name)
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            staged.append((temporary, path))
-        for temporary, path in staged:
-            os.replace(temporary, path)
-    finally:
-        for temporary, _ in staged:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+    for path, payload in artifacts:
+        path = Path(os.path.abspath(path))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags, 0o600)
+        except OSError as error:
+            raise CensusError(f"cannot create unique output {path}: {error}") from error
+        try:
+            offset = 0
+            while offset < len(payload):
+                written = os.write(descriptor, payload[offset:])
+                if written <= 0:
+                    raise CensusError(f"output write made no progress: {path}")
+                offset += written
+            os.fsync(descriptor)
+            os.fchmod(descriptor, 0o444)
+            os.fsync(descriptor)
+        except OSError as error:
+            raise CensusError(f"cannot seal unique output {path}: {error}") from error
+        finally:
+            os.close(descriptor)
+        directory = os.open(
+            path.parent,
+            os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0),
+        )
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 def run_census(
@@ -3879,7 +4033,13 @@ def run_census(
     *,
     repository_root: Path,
     lock_path: Path = DEFAULT_LOCK_PATH,
+    require_exact_contract: bool = False,
 ) -> tuple[list[dict[str, object]], dict[str, object], list[dict[str, object]]]:
+    if require_exact_contract:
+        try:
+            fixed_contract.require_exact_lock_bytes(Path(lock_path).read_bytes())
+        except (OSError, fixed_contract.ContractError) as error:
+            raise CensusError(str(error)) from error
     lock = load_campaign_lock(lock_path)
     decoder_oracle = _require_decoder_oracle(run_bounded_decoder_oracle())
     protected = {
@@ -3899,6 +4059,10 @@ def run_census(
         manifest_path, repository_root, lock.expected_sources
     )
     manifest_sha256 = sha256_bytes(manifest_bytes)
+    if require_exact_contract and manifest_sha256 != fixed_contract.MANIFEST_SHA256:
+        raise CensusError(
+            "input manifest differs from the fixed tracked T5 revision blob"
+        )
     portable_source_set_sha256 = sha256_bytes(portable_bytes)
     if portable_source_set_sha256 != lock.portable_source_set_sha256:
         raise CensusError(
@@ -3935,7 +4099,7 @@ def run_census(
         analyzer_sha256=sha256_path(Path(__file__)),
         decoder_oracle=decoder_oracle,
     )
-    _atomic_write(
+    _write_unique_artifacts(
         (
             (Path(records_out), records_bytes),
             (Path(targets_out), targets_bytes),
@@ -3972,6 +4136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.targets_out,
             repository_root=args.repository_root,
             lock_path=args.lock,
+            require_exact_contract=True,
         )
     except CensusError as error:
         parser.exit(2, f"component quotient RAM census failed: {error}\n")

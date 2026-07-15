@@ -249,8 +249,23 @@ independent evidence checks, and a frozen family holdout.
 
 ### T5: Component Quotient RAM
 
+- [x] Recover the sixth-review physical source snapshot into the fresh,
+  `git fsck --full`-clean
+  `research-t5-component-quotient-census-recovered` clone. Commit `6249393`
+  belongs only to the discarded corrupt object database, references missing
+  objects, and must never be cited, fetched, repaired, or used as evidence.
+- [x] Implement the fixed source projection, separate source-to-decision
+  verifier, captured-source archive, hermetic provenance guard, unnamed-inode
+  Linux publisher, immutable content marker, and scheduler-gated consumer.
+- [ ] Obtain real Linux CI GO for unprivileged `O_TMPFILE` plus
+  `linkat(AT_EMPTY_PATH)`, all race/fsync regressions, and the exact clean
+  post-test checkout guard. Linux documents `CAP_DAC_READ_SEARCH` as required
+  for `AT_EMPTY_PATH`; because this contract forbids the `/proc/self/fd`
+  fallback, an ordinary capability-free runner must fail closed. macOS skips
+  and a capability-bearing run are not unprivileged GO.
 - [ ] Project class-code, sorting-network, clause, watch, and decoder cost over
-  all 7,503 files.
+  all 7,503 files only after review and Linux GO; no WMI run is currently
+  authorized or submitted.
 - [ ] Implement only if a broad frozen QG/Goel stratum projects at least 25%
   fewer clauses or watches than eager triangles/Ackermann pairs.
 

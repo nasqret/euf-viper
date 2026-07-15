@@ -758,14 +758,14 @@ class CensusFixture:
         self.minimum_total_applications = minimum_total_applications
         self.minimum_max_symbol_applications = minimum_max_symbol_applications
 
-    def add(self, relative_path: str, source: str, record_id: int) -> None:
+    def add(self, relative_path: str, source: str, _record_id: int) -> None:
         path = self.root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         raw = source.encode("utf-8")
         path.write_bytes(raw)
         self.rows.append(
             {
-                "id": record_id,
+                "id": len(self.rows),
                 "path": relative_path,
                 "relative_path": relative_path,
                 "bytes": len(raw),
@@ -888,11 +888,13 @@ class BundleVerificationTests(unittest.TestCase):
     @staticmethod
     def write_records(path: Path, records: list[dict[str, object]]) -> bytes:
         payload = b"".join(CENSUS.canonical_json_bytes(record) for record in records)
+        path.chmod(0o644)
         path.write_bytes(payload)
         return payload
 
     @staticmethod
     def write_json(path: Path, value: dict[str, object]) -> None:
+        path.chmod(0o644)
         path.write_bytes(CENSUS.canonical_json_bytes(value))
 
     def test_valid_bundle_receipt_binds_all_recomputed_artifacts(self) -> None:
@@ -924,7 +926,29 @@ class BundleVerificationTests(unittest.TestCase):
             },
         )
 
-    def test_standalone_verifier_cli_emits_the_strict_receipt(self) -> None:
+    def test_captured_snapshot_verification_never_reopens_mutated_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = self.fixture(Path(temporary))
+            fixture.run("snapshot")
+            paths = fixture.paths("snapshot")
+            snapshot = CENSUS.capture_census_bundle(
+                paths["manifest"],
+                paths["records"],
+                paths["aggregate"],
+                paths["targets"],
+                repository_root=fixture.root,
+                lock_path=paths["lock"],
+            )
+            paths["aggregate"].chmod(0o644)
+            paths["aggregate"].write_bytes(b"mutated after capture\n")
+            fixture.root.joinpath(str(fixture.rows[0]["relative_path"])).write_bytes(
+                b"mutated source after capture\n"
+            )
+            receipt = CENSUS.verify_census_bundle_snapshot(snapshot)
+        self.assertTrue(receipt["verified"])
+        self.assertTrue(receipt["validity_pass"])
+
+    def test_standalone_verifier_rejects_a_non_preregistered_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = self.fixture(Path(temporary))
             fixture.run("cli")
@@ -933,6 +957,7 @@ class BundleVerificationTests(unittest.TestCase):
             completed = subprocess.run(
                 [
                     sys.executable,
+                    "-B",
                     str(
                         ROOT
                         / "scripts"
@@ -950,6 +975,8 @@ class BundleVerificationTests(unittest.TestCase):
                     str(paths["aggregate"]),
                     "--targets",
                     str(paths["targets"]),
+                    "--expected-manifest-sha256",
+                    hashlib.sha256(paths["manifest"].read_bytes()).hexdigest(),
                     "--receipt-out",
                     str(receipt_path),
                     "--require-validity",
@@ -959,11 +986,70 @@ class BundleVerificationTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertIn("verified=true", completed.stdout)
-            receipt = json.loads(receipt_path.read_text(encoding="ascii"))
-        self.assertTrue(receipt["verified"])
-        self.assertTrue(receipt["validity_pass"])
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("T5 campaign lock SHA-256 drift", completed.stderr)
+            self.assertFalse(receipt_path.exists())
+
+    def test_verifier_never_removes_or_overwrites_a_foreign_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = CensusFixture(root)
+            fixture.add(
+                "QF_UF/2018-Goel-hwbench/QF_UF_demo_ab_br_max.smt2",
+                query("(assert true)"),
+                0,
+            )
+            fixture.add(
+                "QF_UF/QG-classification/qg1/demo1.smt2",
+                query("(assert"),
+                1,
+            )
+            fixture.run("invalid-cli")
+            paths = fixture.paths("invalid-cli")
+            receipt_path = fixture.root / "verification.json"
+            receipt_path.write_bytes(
+                CENSUS.canonical_json_bytes(
+                    {"schema": CENSUS.BUNDLE_VERIFICATION_SCHEMA, "verified": True}
+                )
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(
+                        ROOT
+                        / "scripts"
+                        / "bench"
+                        / "verify_component_quotient_ram_bundle.py"
+                    ),
+                    str(paths["manifest"]),
+                    "--repository-root",
+                    str(fixture.root),
+                    "--lock",
+                    str(paths["lock"]),
+                    "--records",
+                    str(paths["records"]),
+                    "--aggregate",
+                    str(paths["aggregate"]),
+                    "--targets",
+                    str(paths["targets"]),
+                    "--expected-manifest-sha256",
+                    hashlib.sha256(paths["manifest"].read_bytes()).hexdigest(),
+                    "--receipt-out",
+                    str(receipt_path),
+                    "--require-validity",
+                ],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("T5 campaign lock SHA-256 drift", completed.stderr)
+            self.assertEqual(
+                json.loads(receipt_path.read_text(encoding="ascii")),
+                {"schema": CENSUS.BUNDLE_VERIFICATION_SCHEMA, "verified": True},
+            )
 
     def test_reconstructed_invalid_bundle_is_verified_but_not_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

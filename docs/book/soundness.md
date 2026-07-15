@@ -68,6 +68,29 @@ The candidate must pass:
 Until those gates pass, performance work remains experimental and no global
 soundness or solver-superiority claim is allowed.
 
+## T5 Evidence Authority
+
+The component-quotient census is structural evidence only. Its analyzer cannot
+emit SAT or UNSAT. Promotion-relevant counts and gates are recomputed by a
+separate module that does not import or call the analyzer. Any incomplete
+source capture, cap, unsupported parse, record/target/count/gate mismatch, or
+oracle failure is nondecisive. The verifier reconstructs every record field,
+the canonical record chain, target bytes, complete aggregate, provenance
+hashes, and all telemetry; unchecked non-gating fields cannot survive by being
+rehash-consistent.
+
+The publication marker is a regular immutable receipt, not a symlink and not a
+completion flag. It binds the archive, nonce, revision, job, unique namespace,
+directory inodes, fixed lock, manifest, runtime blobs, and independent decision.
+The writable unnamed descriptor is replaced with a proven same-inode read-only
+descriptor immediately after its single link is created and before the linked
+publication boundary is exposed.
+It becomes usable only when a post-job consumer independently observes
+`COMPLETED 0:0`, freshly rehashes no-follow archive and marker descriptors, and
+successfully exits after republishing a final digest-bearing receipt. macOS
+tests exercise portable logic only; they cannot establish the required Linux
+publication contract.
+
 ## Current Evidence
 
 - Local all-feature suite: 220 passed, four environment-gated probes ignored.

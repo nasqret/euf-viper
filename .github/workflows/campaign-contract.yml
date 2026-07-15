@@ -11,6 +11,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -18,11 +20,11 @@ jobs:
           python-version: "3.12"
       - name: Validate campaign specification
         run: >-
-          python3 scripts/bench/validate_campaign_spec.py
+          python3 -B scripts/bench/validate_campaign_spec.py
           campaigns/best-overall-qf-uf-2026-07.json
       - name: Test campaign validator
         run: |
-          python3 -m unittest \
+          python3 -B -m unittest \
             tests.test_validate_campaign_spec \
             tests.test_ingest_smtcomp_2025_qf_uf \
             tests.test_record_solver_config \
@@ -58,5 +60,21 @@ jobs:
           bash -n scripts/wmi/submit_certificate_shadow.sh
           bash -n scripts/wmi/euf_viper_certificate_staged_audit.sbatch
           bash -n scripts/wmi/submit_staged_certificate_audit.sh
+      - name: Test T5 component quotient publication on Linux
+        run: |
+          PYTHON="$(command -v python3)"
+          CLEAN_PATH="$(dirname "$PYTHON"):/usr/bin:/bin"
+          env -i PATH="$CLEAN_PATH" HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
+            "$PYTHON" -B -m unittest -v \
+              tests.test_census_component_quotient_ram \
+              tests.test_wmi_component_quotient_census
+          env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
+            bash -n \
+              scripts/wmi/check_component_quotient_checkout.sh \
+              scripts/wmi/euf_viper_component_quotient_census.sbatch \
+              scripts/wmi/submit_component_quotient_census.sh
+          REVISION="$(git rev-parse HEAD)"
+          env -i PATH=/usr/bin:/bin HOME="$HOME" LANG=C LC_ALL=C TZ=UTC \
+            scripts/wmi/check_component_quotient_checkout.sh "$REVISION"
       - name: Test Rust solver
         run: cargo test --all-features
