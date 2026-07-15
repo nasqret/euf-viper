@@ -19,6 +19,7 @@ UNSAT_SOURCE = ROOT / "tests" / "fixtures" / "basic_unsat.smt2"
 CERT_SCRIPT_DIRECTORY = ROOT / "scripts" / "cert"
 if str(CERT_SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(CERT_SCRIPT_DIRECTORY))
+import check_certificate as CERTIFICATE_CHECKER
 import independent_qfuf as QFUF
 
 
@@ -182,6 +183,27 @@ class CertificateCheckerManifestBoundaryTests(unittest.TestCase):
         self.assertEqual(report["result"], "sat")
         self.assertEqual(report["variables"], 1)
 
+    def test_artifact_snapshot_binds_the_bytes_from_one_source_open(self) -> None:
+        source = self.directory / "snapshot-source.smt2"
+        original = b"(set-logic QF_UF)\n(check-sat)\n"
+        source.write_bytes(original)
+        snapshot_directory = self.directory / "snapshots"
+        snapshot_directory.mkdir()
+
+        snapshot = CERTIFICATE_CHECKER.snapshot_artifact(
+            source, snapshot_directory, "source.smt2"
+        )
+        source.write_bytes(b"replaced after snapshot\n")
+
+        self.assertEqual(snapshot.path.read_bytes(), original)
+        self.assertEqual(snapshot.sha256, hashlib.sha256(original).hexdigest())
+        CERTIFICATE_CHECKER.require_unchanged_snapshot(snapshot, "source")
+
+        snapshot.path.chmod(0o600)
+        snapshot.path.write_bytes(b"mutated private snapshot\n")
+        with self.assertRaisesRegex(SystemExit, "private source snapshot changed"):
+            CERTIFICATE_CHECKER.require_unchanged_snapshot(snapshot, "source")
+
     def test_valid_unsat_manifest_is_accepted(self) -> None:
         completed = self.run_manifest(self.unsat_manifest())
 
@@ -192,6 +214,40 @@ class CertificateCheckerManifestBoundaryTests(unittest.TestCase):
         self.assertEqual(report["result"], "unsat")
         self.assertEqual(report["variables"], 2)
         self.assertEqual(report["replayed_theory_clauses"], 1)
+
+    def test_drat_checks_private_hash_bound_snapshots(self) -> None:
+        manifest = self.unsat_manifest()
+        expected_dimacs = self.dimacs_path.read_bytes()
+        expected_proof = self.proof_path.read_bytes()
+        self.drat_trim.write_text(
+            f"""#!{sys.executable}
+import sys
+from pathlib import Path
+
+original_dimacs = Path({str(self.dimacs_path)!r})
+original_proof = Path({str(self.proof_path)!r})
+checked_dimacs = Path(sys.argv[1])
+checked_proof = Path(sys.argv[2])
+original_dimacs.write_text("p cnf 0 0\\n", encoding="ascii")
+original_proof.write_text("mutated\\n", encoding="ascii")
+assert checked_dimacs.resolve() != original_dimacs.resolve()
+assert checked_proof.resolve() != original_proof.resolve()
+assert checked_dimacs.read_bytes() == {expected_dimacs!r}
+assert checked_proof.read_bytes() == {expected_proof!r}
+print("VERIFIED")
+""",
+            encoding="utf-8",
+        )
+        self.drat_trim.chmod(0o755)
+
+        completed = self.run_manifest(manifest)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        report = json.loads(completed.stdout)
+        self.assertEqual(report["dimacs_sha256"], manifest["dimacs_sha256"])
+        self.assertEqual(report["proof_sha256"], manifest["proof_sha256"])
+        self.assertNotEqual(self.dimacs_path.read_bytes(), expected_dimacs)
+        self.assertNotEqual(self.proof_path.read_bytes(), expected_proof)
 
     def test_valid_v3_unsat_manifest_is_accepted_and_invokes_drat(self) -> None:
         completed = self.run_manifest(self.v3_manifest())

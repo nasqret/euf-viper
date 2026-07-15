@@ -48,6 +48,7 @@ jobs:
             tests.test_derive_timeout_continuations \
             tests.test_analyze_staged_campaign \
             tests.test_independent_qfuf \
+            tests.test_check_certificate \
             tests.test_shadow_campaign \
             tests.test_audit_shadow_campaign \
             tests.test_audit_staged_shadow_campaign \

@@ -6,8 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from independent_qfuf import (
@@ -53,6 +56,36 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class ArtifactSnapshot:
+    path: Path
+    sha256: str
+
+
+def snapshot_artifact(
+    source: Path, snapshot_directory: Path, name: str
+) -> ArtifactSnapshot:
+    destination = snapshot_directory / name
+    digest = hashlib.sha256()
+    with source.open("rb") as source_handle, destination.open("xb") as output_handle:
+        for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+            output_handle.write(chunk)
+        output_handle.flush()
+        os.fsync(output_handle.fileno())
+    destination.chmod(0o400)
+    return ArtifactSnapshot(destination, digest.hexdigest())
+
+
+def require_unchanged_snapshot(snapshot: ArtifactSnapshot, label: str) -> None:
+    current = sha256(snapshot.path)
+    if current != snapshot.sha256:
+        raise SystemExit(
+            f"private {label} snapshot changed while checking: "
+            f"expected {snapshot.sha256}, got {current}"
+        )
 
 
 def strict_json_loads(text: str) -> object:
@@ -264,6 +297,8 @@ def main() -> int:
     parser.add_argument("--proof", type=Path)
     parser.add_argument("--drat-trim", default=shutil.which("drat-trim"))
     args = parser.parse_args()
+    snapshot_owner = tempfile.TemporaryDirectory(prefix="euf-viper-certificate-")
+    snapshot_directory = Path(snapshot_owner.name)
 
     try:
         manifest = strict_json_loads(args.manifest.read_text(encoding="utf-8"))
@@ -309,7 +344,10 @@ def main() -> int:
 
     try:
         source = artifact_path(source_value, args.manifest, args.source)
-        actual_source_hash = sha256(source)
+        source_snapshot = snapshot_artifact(
+            source, snapshot_directory, "source.smt2"
+        )
+        actual_source_hash = source_snapshot.sha256
     except (OSError, RuntimeError, ValueError) as error:
         raise SystemExit(f"cannot read source artifact: {error}") from error
     if actual_source_hash != expected_source_hash:
@@ -318,10 +356,11 @@ def main() -> int:
             f"expected {expected_source_hash}, got {actual_source_hash}"
         )
     try:
-        source_text = source.read_text(encoding="utf-8")
+        source_text = source_snapshot.path.read_text(encoding="utf-8")
         problem = parse_and_encode(source_text)
     except (OSError, UnicodeError, IndependentQfufError) as error:
         raise SystemExit(f"independent SMT-LIB reconstruction failed: {error}") from error
+    require_unchanged_snapshot(source_snapshot, "source")
 
     if result == "sat":
         if sat_variables != problem.variable_count:
@@ -351,19 +390,25 @@ def main() -> int:
         proof = artifact_path(proof_value, args.manifest, args.proof)
     except (OSError, RuntimeError, ValueError) as error:
         raise SystemExit(f"cannot resolve certificate artifact: {error}") from error
-    for path, expected, label in [
-        (dimacs, expected_dimacs_hash, "DIMACS"),
-        (proof, expected_proof_hash, "proof"),
+    try:
+        dimacs_snapshot = snapshot_artifact(
+            dimacs, snapshot_directory, "formula.cnf"
+        )
+        proof_snapshot = snapshot_artifact(proof, snapshot_directory, "proof.drat")
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"cannot snapshot certificate artifact: {error}") from error
+    for snapshot, expected, label in [
+        (dimacs_snapshot, expected_dimacs_hash, "DIMACS"),
+        (proof_snapshot, expected_proof_hash, "proof"),
     ]:
-        try:
-            actual = sha256(path)
-        except (OSError, ValueError) as error:
-            raise SystemExit(f"cannot read {label} artifact: {error}") from error
-        if actual != expected:
-            raise SystemExit(f"{label} SHA-256 mismatch: expected {expected}, got {actual}")
+        if snapshot.sha256 != expected:
+            raise SystemExit(
+                f"{label} SHA-256 mismatch: expected {expected}, "
+                f"got {snapshot.sha256}"
+            )
     try:
         variables, clauses = parse_dimacs_independent(
-            dimacs.read_text(encoding="ascii")
+            dimacs_snapshot.path.read_text(encoding="ascii")
         )
         if manifest_format == V3_FORMAT:
             replayed = validate_v3_unsat_manifest(
@@ -379,7 +424,12 @@ def main() -> int:
         raise SystemExit("drat-trim is required; pass --drat-trim PATH")
     try:
         checked = subprocess.run(
-            [args.drat_trim, str(dimacs), str(proof), "-I"],
+            [
+                args.drat_trim,
+                str(dimacs_snapshot.path),
+                str(proof_snapshot.path),
+                "-I",
+            ],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -389,6 +439,8 @@ def main() -> int:
         raise SystemExit(f"cannot run drat-trim: {error}") from error
     if checked.returncode != 0 or "VERIFIED" not in checked.stdout:
         raise SystemExit(f"drat-trim rejected the proof:\n{checked.stdout}")
+    require_unchanged_snapshot(dimacs_snapshot, "DIMACS")
+    require_unchanged_snapshot(proof_snapshot, "proof")
 
     report = {
         "status": "verified",

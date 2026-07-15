@@ -50,8 +50,10 @@ use std::fs;
 use std::io::{self, Read};
 #[cfg(feature = "certificates")]
 use std::io::{BufReader, BufWriter, Write};
+#[cfg(all(feature = "certificates", unix))]
+use std::os::unix::fs::MetadataExt;
 #[cfg(feature = "certificates")]
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{self, Command};
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
@@ -6626,6 +6628,118 @@ fn path_with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
 }
 
 #[cfg(feature = "certificates")]
+fn lexically_normalize_absolute(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+#[cfg(feature = "certificates")]
+fn normalized_certificate_path(path: &Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        env::current_dir()
+            .map_err(|error| format!("failed to resolve current directory: {error}"))?
+            .join(path)
+    };
+    let normalized = lexically_normalize_absolute(&absolute);
+    let mut existing = normalized.as_path();
+    let mut suffix = Vec::<std::ffi::OsString>::new();
+    loop {
+        match fs::canonicalize(existing) {
+            Ok(mut canonical) => {
+                for part in suffix.iter().rev() {
+                    canonical.push(part);
+                }
+                return Ok(lexically_normalize_absolute(&canonical));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let part = existing.file_name().ok_or_else(|| {
+                    format!("failed to normalize certificate path {}", path.display())
+                })?;
+                suffix.push(part.to_os_string());
+                existing = existing.parent().ok_or_else(|| {
+                    format!("failed to normalize certificate path {}", path.display())
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "failed to normalize certificate path {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "certificates", unix))]
+fn existing_certificate_paths_share_identity(left: &Path, right: &Path) -> Result<bool, String> {
+    fn metadata_if_present(path: &Path) -> Result<Option<fs::Metadata>, String> {
+        match fs::metadata(path) {
+            Ok(metadata) => Ok(Some(metadata)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!(
+                "failed to inspect certificate path {}: {error}",
+                path.display()
+            )),
+        }
+    }
+
+    let Some(left) = metadata_if_present(left)? else {
+        return Ok(false);
+    };
+    let Some(right) = metadata_if_present(right)? else {
+        return Ok(false);
+    };
+    Ok(left.dev() == right.dev() && left.ino() == right.ino())
+}
+
+#[cfg(all(feature = "certificates", not(unix)))]
+fn existing_certificate_paths_share_identity(_left: &Path, _right: &Path) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(feature = "certificates")]
+fn ensure_distinct_certificate_paths(source: &Path, outputs: &[&Path]) -> Result<(), String> {
+    let source_normalized = normalized_certificate_path(source)?;
+    for (index, output) in outputs.iter().enumerate() {
+        let output_normalized = normalized_certificate_path(output)?;
+        if source_normalized == output_normalized
+            || existing_certificate_paths_share_identity(source, output)?
+        {
+            return Err(format!(
+                "certificate source {} aliases output {}",
+                source.display(),
+                output.display()
+            ));
+        }
+        for previous in &outputs[..index] {
+            if normalized_certificate_path(previous)? == output_normalized
+                || existing_certificate_paths_share_identity(previous, output)?
+            {
+                return Err(format!(
+                    "certificate outputs {} and {} alias each other",
+                    previous.display(),
+                    output.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "certificates")]
 struct CertificateOutputTransaction {
     dimacs_path: PathBuf,
     proof_path: PathBuf,
@@ -6635,11 +6749,15 @@ struct CertificateOutputTransaction {
 
 #[cfg(feature = "certificates")]
 impl CertificateOutputTransaction {
-    fn begin(prefix: &Path) -> Result<Self, String> {
+    fn begin(source: &Path, prefix: &Path) -> Result<Self, String> {
+        let dimacs_path = path_with_suffix(prefix, ".cnf");
+        let proof_path = path_with_suffix(prefix, ".drat");
+        let manifest_path = path_with_suffix(prefix, ".euf.json");
+        ensure_distinct_certificate_paths(source, &[&dimacs_path, &proof_path, &manifest_path])?;
         let transaction = Self {
-            dimacs_path: path_with_suffix(prefix, ".cnf"),
-            proof_path: path_with_suffix(prefix, ".drat"),
-            manifest_path: path_with_suffix(prefix, ".euf.json"),
+            dimacs_path,
+            proof_path,
+            manifest_path,
             keep_outputs: false,
         };
         transaction.clear()?;
@@ -6705,10 +6823,11 @@ impl Drop for CertificateOutputTransaction {
 
 #[cfg(feature = "certificates")]
 fn with_certificate_output_transaction<T>(
+    source: &Path,
     prefix: &Path,
     run: impl FnOnce(&CertificateOutputTransaction) -> Result<T, String>,
 ) -> Result<T, String> {
-    let transaction = CertificateOutputTransaction::begin(prefix)?;
+    let transaction = CertificateOutputTransaction::begin(source, prefix)?;
     let result = run(&transaction);
     transaction.finish(result)
 }
@@ -6888,12 +7007,108 @@ fn certify_orbit_kernel(
 }
 
 #[cfg(feature = "certificates")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CertifyCliArguments<'a> {
+    prefix: &'a str,
+    max_rounds: usize,
+    finite_orbit: bool,
+}
+
+#[cfg(feature = "certificates")]
+fn certify_option_value<'a>(
+    args: &'a [String],
+    option_index: usize,
+    option: &str,
+) -> Result<&'a str, String> {
+    let value = args
+        .get(option_index + 1)
+        .ok_or_else(|| format!("{option} requires a value"))?;
+    if value.is_empty() || value.starts_with("--") {
+        return Err(format!("{option} requires a value"));
+    }
+    Ok(value)
+}
+
+#[cfg(feature = "certificates")]
+fn parse_certify_output_prefix(args: &[String]) -> Result<&str, String> {
+    let mut prefix = None;
+    for (index, argument) in args.iter().enumerate() {
+        if argument == "--out-prefix" {
+            if prefix.is_some() {
+                return Err("--out-prefix may be specified only once".to_owned());
+            }
+            prefix = Some(certify_option_value(args, index, "--out-prefix")?);
+        }
+    }
+    prefix.ok_or_else(|| "--out-prefix is required".to_owned())
+}
+
+#[cfg(feature = "certificates")]
+fn parse_certify_cli_arguments(args: &[String]) -> Result<CertifyCliArguments<'_>, String> {
+    let mut prefix = None;
+    let mut max_rounds = None;
+    let mut finite_orbit = false;
+    let mut index = 0usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--out-prefix" => {
+                if prefix.is_some() {
+                    return Err("--out-prefix may be specified only once".to_owned());
+                }
+                prefix = Some(certify_option_value(args, index, "--out-prefix")?);
+                index += 2;
+            }
+            "--max-theory-rounds" => {
+                if max_rounds.is_some() {
+                    return Err("--max-theory-rounds may be specified only once".to_owned());
+                }
+                let value = certify_option_value(args, index, "--max-theory-rounds")?;
+                let parsed = value
+                    .parse::<usize>()
+                    .map_err(|error| format!("invalid value for --max-theory-rounds: {error}"))?;
+                if parsed == 0 {
+                    return Err("--max-theory-rounds must be at least 1".to_owned());
+                }
+                max_rounds = Some(parsed);
+                index += 2;
+            }
+            "--finite-orbit" => {
+                if finite_orbit {
+                    return Err("--finite-orbit may be specified only once".to_owned());
+                }
+                finite_orbit = true;
+                index += 1;
+            }
+            argument if argument.starts_with("--") => {
+                return Err(format!("unknown certify option `{argument}`"));
+            }
+            argument => {
+                return Err(format!("unexpected certify argument `{argument}`"));
+            }
+        }
+    }
+    Ok(CertifyCliArguments {
+        prefix: prefix.ok_or_else(|| "--out-prefix is required".to_owned())?,
+        max_rounds: max_rounds.unwrap_or(100_000),
+        finite_orbit,
+    })
+}
+
+#[cfg(feature = "certificates")]
 fn certify_file_from_cli_args(path: &str, prefix: &str, args: &[String]) -> Result<i32, String> {
-    with_certificate_output_transaction(Path::new(prefix), |outputs| {
-        let max_rounds = parse_flag_usize(args, "--max-theory-rounds", 100_000)?;
-        let finite_orbit = args.iter().any(|argument| argument == "--finite-orbit");
+    with_certificate_output_transaction(Path::new(path), Path::new(prefix), |outputs| {
+        let parsed = parse_certify_cli_arguments(args)?;
+        if parsed.prefix != prefix {
+            return Err("certify output prefix changed during argument parsing".to_owned());
+        }
         let seed_budget = certificate_seed_budget()?;
-        certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, finite_orbit, outputs)
+        certify_file_with_seed_budget_inner(
+            path,
+            parsed.max_rounds,
+            seed_budget,
+            parsed.finite_orbit,
+            outputs,
+        )
     })
 }
 
@@ -6904,7 +7119,7 @@ fn certify_file_with_seed_budget(
     max_rounds: usize,
     seed_budget: CertificateSeedBudget,
 ) -> Result<i32, String> {
-    with_certificate_output_transaction(Path::new(prefix), |outputs| {
+    with_certificate_output_transaction(Path::new(path), Path::new(prefix), |outputs| {
         certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, false, outputs)
     })
 }
@@ -6917,7 +7132,7 @@ fn certify_file_with_seed_budget_and_finite(
     seed_budget: CertificateSeedBudget,
     finite_orbit: bool,
 ) -> Result<i32, String> {
-    with_certificate_output_transaction(Path::new(prefix), |outputs| {
+    with_certificate_output_transaction(Path::new(path), Path::new(prefix), |outputs| {
         certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, finite_orbit, outputs)
     })
 }
@@ -8849,7 +9064,7 @@ fn run_with_args(args: &[String]) -> Result<i32, String> {
         #[cfg(feature = "certificates")]
         "certify" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
-            let prefix = parse_required_flag(&args[3..], "--out-prefix")?;
+            let prefix = parse_certify_output_prefix(&args[3..])?;
             certify_file_from_cli_args(file, prefix, &args[3..])
         }
         "gen" => gen_cmd(&args[1..]),
@@ -9721,6 +9936,204 @@ mod tests {
             );
             assert_no_certificate_outputs(&prefix);
         }
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_cli_rejects_unknown_duplicate_and_misvalued_options() {
+        let directory = CertificateTestDirectory::new("strict-certificate-cli");
+        let source_path = directory.path("input.smt2");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write strict CLI test input");
+
+        for (label, options, expected_error) in [
+            (
+                "unknown",
+                vec!["--out-prefix", "PREFIX", "--finite-orbt"],
+                "unknown certify option `--finite-orbt`",
+            ),
+            (
+                "duplicate-finite",
+                vec!["--out-prefix", "PREFIX", "--finite-orbit", "--finite-orbit"],
+                "--finite-orbit may be specified only once",
+            ),
+            (
+                "duplicate-rounds",
+                vec![
+                    "--out-prefix",
+                    "PREFIX",
+                    "--max-theory-rounds",
+                    "8",
+                    "--max-theory-rounds",
+                    "9",
+                ],
+                "--max-theory-rounds may be specified only once",
+            ),
+            (
+                "extra-positional",
+                vec!["--out-prefix", "PREFIX", "extra"],
+                "unexpected certify argument `extra`",
+            ),
+        ] {
+            let prefix = directory.path(label);
+            preseed_certificate_outputs(&prefix);
+            let prefix_text = prefix.to_str().unwrap();
+            let args = std::iter::once("euf-viper")
+                .chain(std::iter::once("certify"))
+                .chain(std::iter::once(source_path.to_str().unwrap()))
+                .chain(options.into_iter().map(|argument| {
+                    if argument == "PREFIX" {
+                        prefix_text
+                    } else {
+                        argument
+                    }
+                }))
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+
+            assert_eq!(run_with_args(&args), Err(expected_error.to_owned()));
+            assert_no_certificate_outputs(&prefix);
+        }
+
+        let missing_value = [
+            "euf-viper",
+            "certify",
+            source_path.to_str().unwrap(),
+            "--out-prefix",
+            "--finite-orbit",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            run_with_args(&missing_value),
+            Err("--out-prefix requires a value".to_owned())
+        );
+
+        let duplicate_prefix = directory.path("duplicate-prefix");
+        preseed_certificate_outputs(&duplicate_prefix);
+        let duplicate_prefix_args = [
+            "euf-viper",
+            "certify",
+            source_path.to_str().unwrap(),
+            "--out-prefix",
+            duplicate_prefix.to_str().unwrap(),
+            "--out-prefix",
+            duplicate_prefix.to_str().unwrap(),
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            run_with_args(&duplicate_prefix_args),
+            Err("--out-prefix may be specified only once".to_owned())
+        );
+        for suffix in [".cnf", ".drat", ".euf.json"] {
+            assert_eq!(
+                fs::read_to_string(path_with_suffix(&duplicate_prefix, suffix)).unwrap(),
+                format!("stale {suffix}\n")
+            );
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_source_output_alias_is_rejected_before_cleanup() {
+        let directory = CertificateTestDirectory::new("certificate-source-alias");
+        let prefix = directory.path("collision");
+        let source_path = path_with_suffix(&prefix, ".cnf");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE)
+            .expect("write aliased certificate source");
+        fs::write(path_with_suffix(&prefix, ".drat"), b"stale-proof").expect("write stale proof");
+        fs::write(path_with_suffix(&prefix, ".euf.json"), b"stale-manifest")
+            .expect("write stale manifest");
+        let original_source = fs::read(&source_path).unwrap();
+        let args = [
+            "euf-viper",
+            "certify",
+            source_path.to_str().unwrap(),
+            "--out-prefix",
+            prefix.to_str().unwrap(),
+            "--max-theory-rounds",
+            "0",
+        ]
+        .map(str::to_owned);
+
+        let error = run_with_args(&args).expect_err("source/output alias must fail");
+
+        assert!(error.contains("certificate source"));
+        assert!(error.contains("aliases output"));
+        assert_eq!(fs::read(&source_path).unwrap(), original_source);
+        assert!(path_with_suffix(&prefix, ".drat").exists());
+        assert!(path_with_suffix(&prefix, ".euf.json").exists());
+
+        let nested = directory.path("nested");
+        fs::create_dir(&nested).expect("create lexical-alias parent");
+        let normalized_alias = nested.join("..").join("collision");
+        let error = certify_file_with_seed_budget(
+            source_path.to_str().unwrap(),
+            normalized_alias.to_str().unwrap(),
+            0,
+            CertificateSeedBudget::default(),
+        )
+        .expect_err("lexically normalized source/output alias must fail");
+        assert!(error.contains("aliases output"));
+        assert_eq!(fs::read(&source_path).unwrap(), original_source);
+    }
+
+    #[cfg(all(feature = "certificates", unix))]
+    #[test]
+    fn certificate_source_symlink_and_hardlink_aliases_are_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let directory = CertificateTestDirectory::new("certificate-link-alias");
+        let source_path = directory.path("input.smt2");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write linked certificate source");
+        let original_source = fs::read(&source_path).unwrap();
+
+        for (label, link_output) in [("symlink", true), ("hardlink", false)] {
+            let prefix = directory.path(label);
+            let output = path_with_suffix(&prefix, ".cnf");
+            if link_output {
+                symlink(&source_path, &output).expect("create source symlink alias");
+            } else {
+                fs::hard_link(&source_path, &output).expect("create source hardlink alias");
+            }
+
+            let error = certify_file_with_seed_budget(
+                source_path.to_str().unwrap(),
+                prefix.to_str().unwrap(),
+                0,
+                CertificateSeedBudget::default(),
+            )
+            .expect_err("linked source/output alias must fail");
+
+            assert!(error.contains("aliases output"));
+            assert!(output.exists());
+            assert_eq!(fs::read(&source_path).unwrap(), original_source);
+        }
+    }
+
+    #[cfg(all(feature = "certificates", unix))]
+    #[test]
+    fn certificate_output_hardlink_alias_is_rejected_before_cleanup() {
+        let directory = CertificateTestDirectory::new("certificate-output-alias");
+        let source_path = directory.path("input.smt2");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE).expect("write certificate source");
+        let prefix = directory.path("collision");
+        let dimacs_path = path_with_suffix(&prefix, ".cnf");
+        let proof_path = path_with_suffix(&prefix, ".drat");
+        fs::write(&dimacs_path, b"shared stale output").expect("write stale DIMACS output");
+        fs::hard_link(&dimacs_path, &proof_path).expect("alias certificate outputs");
+        let original = fs::read(&dimacs_path).unwrap();
+
+        let error = certify_file_with_seed_budget(
+            source_path.to_str().unwrap(),
+            prefix.to_str().unwrap(),
+            0,
+            CertificateSeedBudget::default(),
+        )
+        .expect_err("output aliases must fail before cleanup");
+
+        assert!(error.contains("certificate outputs"));
+        assert!(error.contains("alias each other"));
+        assert_eq!(fs::read(&dimacs_path).unwrap(), original);
+        assert_eq!(fs::read(&proof_path).unwrap(), original);
     }
 
     #[cfg(feature = "certificates")]
