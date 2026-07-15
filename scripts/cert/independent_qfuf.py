@@ -1315,8 +1315,10 @@ def _clone_assertions(
                 valid_shape = len(arguments) == 1
             elif op == "ite":
                 valid_shape = len(arguments) == 3
-            elif op in {"and", "or", "iff"}:
+            elif op in {"and", "or"}:
                 valid_shape = True
+            elif op == "iff":
+                valid_shape = len(arguments) >= 2
             else:
                 raise IndependentQfufError(f"unknown assertion operator `{op}`")
             if not valid_shape or any(type(child) is not BoolExpr for child in arguments):
@@ -1577,7 +1579,11 @@ def _assignment_values(
         )
     values = [False] * (problem.variable_count + 1)
     for variable, literal in enumerate(assignment, start=1):
-        if type(literal) is not int or literal == 0:
+        if type(literal) is not int:
+            raise IndependentQfufError(
+                f"assignment entry {variable} is not an exact integer literal"
+            )
+        if literal == 0:
             raise IndependentQfufError(
                 f"assignment entry {variable} is not a nonzero integer literal"
             )
@@ -1643,11 +1649,11 @@ def _clause_literals(
         raise IndependentQfufError(f"{context} must be a sequence of literals")
     literals: list[int] = []
     for position, literal in enumerate(clause, start=1):
-        if (
-            type(literal) is not int
-            or literal == 0
-            or abs(literal) > problem.variable_count
-        ):
+        if type(literal) is not int:
+            raise IndependentQfufError(
+                f"{context} has a non-integer literal at position {position}"
+            )
+        if literal == 0 or abs(literal) > problem.variable_count:
             raise IndependentQfufError(
                 f"{context} has invalid literal `{literal}` at position {position}"
             )
@@ -1783,7 +1789,7 @@ def parse_dimacs(source: str) -> tuple[int, tuple[tuple[int, ...], ...]]:
 
 
 def _v2_manifest(manifest: Mapping[str, object], result: str) -> None:
-    if not isinstance(manifest, Mapping):
+    if type(manifest) is not dict:
         raise IndependentQfufError("certificate manifest must be an object")
     if manifest.get("format") != V2_FORMAT:
         raise IndependentQfufError("unsupported certificate manifest format")
@@ -1818,6 +1824,19 @@ def validate_unsat_dimacs(
 ) -> int:
     """Check the exact local base prefix and every EUF-only suffix clause."""
 
+    problem, normalized = _validated_unsat_clause_stream(problem, variables, clauses)
+    base_count = len(problem.clauses)
+    _validate_euf_suffix(problem, normalized, base_count)
+    return len(normalized) - base_count
+
+
+def _validated_unsat_clause_stream(
+    problem: EncodedProblem,
+    variables: int,
+    clauses: Sequence[Sequence[int]],
+) -> tuple[EncodedProblem, tuple[tuple[int, ...], ...]]:
+    """Return one detached problem snapshot and its normalized DIMACS stream."""
+
     problem = _validate_problem(problem)
     if type(variables) is not int or variables < 0:
         raise IndependentQfufError("DIMACS variable count must be a nonnegative integer")
@@ -1842,14 +1861,230 @@ def validate_unsat_dimacs(
             raise IndependentQfufError(
                 f"DIMACS base clause {index + 1} differs from reconstruction"
             )
-    for index, clause in enumerate(normalized[base_count:], start=base_count + 1):
+    return problem, normalized
+
+
+def _validate_euf_suffix(
+    problem: EncodedProblem,
+    clauses: Sequence[tuple[int, ...]],
+    base_count: int,
+) -> None:
+    for index, clause in enumerate(clauses[base_count:], start=base_count + 1):
         try:
             _validate_euf_lemma_literals(problem, clause)
         except IndependentQfufError as error:
             raise IndependentQfufError(
                 f"DIMACS clause {index} is not a valid EUF theory clause: {error}"
             ) from error
-    return len(normalized) - base_count
+
+
+def _certificate_equality_variables(
+    problem: EncodedProblem,
+) -> dict[tuple[int, int], int]:
+    equality_variables: dict[tuple[int, int], int] = {}
+    bool_terms: set[int] = set()
+    for atom in problem.atoms:
+        if atom.kind == "equality":
+            assert atom.left is not None and atom.right is not None
+            key = tuple(sorted((atom.left, atom.right)))
+            if key in equality_variables:
+                raise IndependentQfufError(
+                    f"duplicate equality atom metadata for terms {key[0]} and {key[1]}"
+                )
+            equality_variables[key] = atom.variable
+        elif atom.kind == "bool_term":
+            assert atom.term is not None
+            if atom.term in bool_terms:
+                raise IndependentQfufError(
+                    f"duplicate BoolTerm atom metadata for term {atom.term}"
+                )
+            bool_terms.add(atom.term)
+    return equality_variables
+
+
+def _is_transitivity_clause(problem: EncodedProblem, clause: tuple[int, ...]) -> bool:
+    if len(set(clause)) != len(clause):
+        return False
+    if len(clause) == 1:
+        literal = clause[0]
+        atom = problem.atoms[abs(literal) - 1]
+        return (
+            literal > 0
+            and atom.kind == "equality"
+            and atom.left == atom.right
+        )
+    if len(clause) != 3 or sum(literal > 0 for literal in clause) != 1:
+        return False
+    atoms = [problem.atoms[abs(literal) - 1] for literal in clause]
+    if any(atom.kind != "equality" for atom in atoms):
+        return False
+    pairs = [
+        tuple(sorted((atom.left, atom.right)))
+        for atom in atoms
+        if atom.left is not None and atom.right is not None
+    ]
+    if (
+        len(pairs) != 3
+        or len(set(pairs)) != 3
+        or any(left == right for left, right in pairs)
+        or len({term for pair in pairs for term in pair}) != 3
+    ):
+        return False
+    return all(
+        sum(term in pair for pair in pairs) == 2
+        for term in {endpoint for pair in pairs for endpoint in pair}
+    )
+
+
+def _required_argument_equalities(
+    problem: EncodedProblem,
+    left_id: int,
+    right_id: int,
+    equality_variables: Mapping[tuple[int, int], int],
+) -> frozenset[int] | None:
+    if left_id == right_id:
+        return None
+    left = problem.terms[left_id]
+    right = problem.terms[right_id]
+    if left.function != right.function or len(left.args) != len(right.args):
+        return None
+    required: set[int] = set()
+    for left_arg, right_arg in zip(left.args, right.args):
+        if left_arg == right_arg:
+            continue
+        variable = equality_variables.get(tuple(sorted((left_arg, right_arg))))
+        if variable is None:
+            return None
+        required.add(variable)
+    return frozenset(required) if required else None
+
+
+def _is_congruence_clause(
+    problem: EncodedProblem,
+    clause: tuple[int, ...],
+    equality_variables: Mapping[tuple[int, int], int],
+) -> bool:
+    literals = set(clause)
+    if len(literals) != len(clause) or any(-literal in literals for literal in literals):
+        return False
+    equality_literals = [
+        literal
+        for literal in clause
+        if problem.atoms[abs(literal) - 1].kind == "equality"
+    ]
+    bool_literals = [
+        literal
+        for literal in clause
+        if problem.atoms[abs(literal) - 1].kind == "bool_term"
+    ]
+    if len(equality_literals) + len(bool_literals) != len(clause):
+        return False
+    negative_conditions = {
+        abs(literal) for literal in equality_literals if literal < 0
+    }
+    positive_equalities = [literal for literal in equality_literals if literal > 0]
+
+    if not bool_literals and len(positive_equalities) == 1:
+        result = problem.atoms[positive_equalities[0] - 1]
+        assert result.left is not None and result.right is not None
+        required = _required_argument_equalities(
+            problem, result.left, result.right, equality_variables
+        )
+        return required is not None and negative_conditions == required
+
+    if (
+        positive_equalities
+        or len(bool_literals) != 2
+        or sum(literal > 0 for literal in bool_literals) != 1
+    ):
+        return False
+    left_atom = problem.atoms[abs(bool_literals[0]) - 1]
+    right_atom = problem.atoms[abs(bool_literals[1]) - 1]
+    assert left_atom.term is not None and right_atom.term is not None
+    required = _required_argument_equalities(
+        problem, left_atom.term, right_atom.term, equality_variables
+    )
+    return required is not None and negative_conditions == required
+
+
+_UNSAT_CLAUSE_CATEGORIES: Final = (
+    "base",
+    "transitivity",
+    "congruence",
+    "theory_conflicts",
+    "total",
+)
+
+
+def _unsat_manifest_counts(
+    manifest: Mapping[str, object],
+    problem: EncodedProblem,
+    variables: int,
+    clauses: Sequence[tuple[int, ...]],
+) -> dict[str, int]:
+    if type(manifest.get("variables")) is not int or manifest["variables"] != variables:
+        raise IndependentQfufError(
+            "UNSAT manifest variable count differs from DIMACS reconstruction"
+        )
+    finite_domain_axioms = manifest.get("finite_domain_axioms")
+    if type(finite_domain_axioms) is not int or finite_domain_axioms != 0:
+        raise IndependentQfufError(
+            "UNSAT manifest finite_domain_axioms must be the integer zero"
+        )
+    raw_counts = manifest.get("clauses")
+    if type(raw_counts) is not dict or set(raw_counts) != set(
+        _UNSAT_CLAUSE_CATEGORIES
+    ):
+        raise IndependentQfufError(
+            "UNSAT manifest clauses must contain exactly base, transitivity, "
+            "congruence, theory_conflicts, and total"
+        )
+    counts: dict[str, int] = {}
+    for category in _UNSAT_CLAUSE_CATEGORIES:
+        value = raw_counts[category]
+        if type(value) is not int or value < 0:
+            raise IndependentQfufError(
+                f"UNSAT manifest clause count {category} must be a nonnegative integer"
+            )
+        counts[category] = value
+    if counts["base"] != problem.base_count:
+        raise IndependentQfufError(
+            "UNSAT manifest base count differs from independent reconstruction"
+        )
+    if counts["total"] != len(clauses):
+        raise IndependentQfufError(
+            "UNSAT manifest total count differs from DIMACS reconstruction"
+        )
+    if sum(counts[name] for name in _UNSAT_CLAUSE_CATEGORIES[:-1]) != counts["total"]:
+        raise IndependentQfufError(
+            "UNSAT manifest clause categories do not sum to total"
+        )
+    return counts
+
+
+def _validate_unsat_clause_categories(
+    problem: EncodedProblem,
+    clauses: Sequence[tuple[int, ...]],
+    counts: Mapping[str, int],
+) -> None:
+    equality_variables = _certificate_equality_variables(problem)
+    transitivity_start = counts["base"]
+    congruence_start = transitivity_start + counts["transitivity"]
+    theory_start = congruence_start + counts["congruence"]
+    for index, clause in enumerate(
+        clauses[transitivity_start:congruence_start], start=transitivity_start + 1
+    ):
+        if not _is_transitivity_clause(problem, clause):
+            raise IndependentQfufError(
+                f"DIMACS clause {index} is not a transitivity seed"
+            )
+    for index, clause in enumerate(
+        clauses[congruence_start:theory_start], start=congruence_start + 1
+    ):
+        if not _is_congruence_clause(problem, clause, equality_variables):
+            raise IndependentQfufError(
+                f"DIMACS clause {index} is not a direct congruence seed"
+            )
 
 
 def validate_v2_unsat_manifest(
@@ -1858,10 +2093,14 @@ def validate_v2_unsat_manifest(
     variables: int,
     clauses: Sequence[Sequence[int]],
 ) -> int:
-    """Validate v2 UNSAT data while distrusting all manifest counts/term maps."""
+    """Validate v2 UNSAT data and independently bind its clause accounting."""
 
     _v2_manifest(manifest, "unsat")
-    return validate_unsat_dimacs(problem, variables, clauses)
+    problem, normalized = _validated_unsat_clause_stream(problem, variables, clauses)
+    counts = _unsat_manifest_counts(manifest, problem, variables, normalized)
+    _validate_unsat_clause_categories(problem, normalized, counts)
+    _validate_euf_suffix(problem, normalized, problem.base_count)
+    return len(normalized) - problem.base_count
 
 
 def validate_unsat_manifest(

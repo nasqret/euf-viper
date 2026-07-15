@@ -637,10 +637,17 @@ class ManifestAndTamperTests(unittest.TestCase):
         manifest = {
             "format": QFUF.V2_FORMAT,
             "result": "unsat",
-            "variables": -10,
+            "variables": self.problem.variable_count,
             "terms": [{"tampered": True}],
             "atoms": "untrusted",
-            "clauses": {"base": 0, "total": 0},
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": self.problem.base_count,
+                "transitivity": 0,
+                "congruence": 1,
+                "theory_conflicts": 0,
+                "total": len(clauses),
+            },
         }
         self.assertEqual(
             QFUF.validate_v2_unsat_manifest(
@@ -663,6 +670,198 @@ class ManifestAndTamperTests(unittest.TestCase):
             QFUF.validate_unsat_dimacs(
                 self.problem, self.problem.variable_count, invalid_suffix
             )
+
+    def test_unsat_manifest_rejects_count_and_finite_domain_tampering(self) -> None:
+        premise, consequence = self.equalities
+        clauses = (*self.problem.clauses, (-premise, consequence))
+        manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": self.problem.variable_count,
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": self.problem.base_count,
+                "transitivity": 0,
+                "congruence": 1,
+                "theory_conflicts": 0,
+                "total": len(clauses),
+            },
+        }
+        QFUF.validate_v2_unsat_manifest(
+            manifest, self.problem, self.problem.variable_count, clauses
+        )
+
+        mutations = (
+            ("Boolean finite-domain count", {**manifest, "finite_domain_axioms": False}),
+            ("wrong variable count", {**manifest, "variables": self.problem.variable_count + 1}),
+            (
+                "missing category",
+                {
+                    **manifest,
+                    "clauses": {
+                        key: value
+                        for key, value in manifest["clauses"].items()
+                        if key != "congruence"
+                    },
+                },
+            ),
+            (
+                "extra category",
+                {**manifest, "clauses": {**manifest["clauses"], "other": 0}},
+            ),
+            (
+                "Boolean category count",
+                {**manifest, "clauses": {**manifest["clauses"], "congruence": True}},
+            ),
+            (
+                "wrong base count",
+                {
+                    **manifest,
+                    "clauses": {
+                        **manifest["clauses"],
+                        "base": self.problem.base_count - 1,
+                    },
+                },
+            ),
+            (
+                "wrong total count",
+                {**manifest, "clauses": {**manifest["clauses"], "total": len(clauses) + 1}},
+            ),
+            (
+                "category sum mismatch",
+                {**manifest, "clauses": {**manifest["clauses"], "theory_conflicts": 1}},
+            ),
+        )
+        for label, mutation in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(QFUF.IndependentQfufError):
+                    QFUF.validate_v2_unsat_manifest(
+                        mutation, self.problem, self.problem.variable_count, clauses
+                    )
+
+    def test_unsat_manifest_rejects_redistributed_seed_categories(self) -> None:
+        premise, consequence = self.equalities
+        congruence = (-premise, consequence)
+        clauses = (*self.problem.clauses, congruence)
+        manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": self.problem.variable_count,
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": self.problem.base_count,
+                "transitivity": 1,
+                "congruence": 0,
+                "theory_conflicts": 0,
+                "total": len(clauses),
+            },
+        }
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "transitivity seed"):
+            QFUF.validate_v2_unsat_manifest(
+                manifest, self.problem, self.problem.variable_count, clauses
+            )
+
+        triangle = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const c U)
+                (assert (or (= a b) (= b c) (= a c)))
+                """
+            )
+        )
+        pairs = {}
+        for atom in triangle.atoms:
+            if atom.kind == "equality":
+                assert atom.left is not None and atom.right is not None
+                pairs[frozenset((atom.left, atom.right))] = atom.variable
+        terms = [
+            term.id
+            for term in triangle.terms
+            if triangle.functions[term.function].name in {"a", "b", "c"}
+        ]
+        a, b, c = terms
+        transitivity = (
+            -pairs[frozenset((a, b))],
+            -pairs[frozenset((b, c))],
+            pairs[frozenset((a, c))],
+        )
+        triangle_clauses = (*triangle.clauses, transitivity)
+        triangle_manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": triangle.variable_count,
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": triangle.base_count,
+                "transitivity": 1,
+                "congruence": 0,
+                "theory_conflicts": 0,
+                "total": len(triangle_clauses),
+            },
+        }
+        QFUF.validate_v2_unsat_manifest(
+            triangle_manifest, triangle, triangle.variable_count, triangle_clauses
+        )
+        triangle_manifest["clauses"] = {
+            **triangle_manifest["clauses"],
+            "transitivity": 0,
+            "congruence": 1,
+        }
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "congruence seed"):
+            QFUF.validate_v2_unsat_manifest(
+                triangle_manifest, triangle, triangle.variable_count, triangle_clauses
+            )
+
+    def test_unsat_manifest_accepts_boolean_predicate_congruence_seeds(self) -> None:
+        problem = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-fun p (U) Bool)
+                (assert (or (= a b) (p a) (p b)))
+                """
+            )
+        )
+        equality = next(
+            atom.variable for atom in problem.atoms if atom.kind == "equality"
+        )
+        predicates = {}
+        for atom in problem.atoms:
+            if atom.kind != "bool_term":
+                continue
+            assert atom.term is not None
+            term = problem.terms[atom.term]
+            if not term.args:
+                continue
+            argument = problem.terms[term.args[0]]
+            predicates[problem.functions[argument.function].name] = atom.variable
+        forward = (-equality, -predicates["a"], predicates["b"])
+        backward = (-equality, predicates["a"], -predicates["b"])
+        clauses = (*problem.clauses, forward, backward)
+        manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": problem.variable_count,
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": problem.base_count,
+                "transitivity": 0,
+                "congruence": 2,
+                "theory_conflicts": 0,
+                "total": len(clauses),
+            },
+        }
+        self.assertEqual(
+            QFUF.validate_v2_unsat_manifest(
+                manifest, problem, problem.variable_count, clauses
+            ),
+            2,
+        )
 
     def test_unsat_helper_validates_the_problem_once_for_all_theory_lemmas(self) -> None:
         premise, consequence = self.equalities
@@ -777,6 +976,8 @@ class ManifestAndTamperTests(unittest.TestCase):
             QFUF.BoolExpr("atom", (True,)),
             QFUF.BoolExpr("atom", (QFUF._AtomKey("unknown"),)),
             QFUF.BoolExpr("and", (True,)),
+            QFUF.BoolExpr("iff", ()),
+            QFUF.BoolExpr("iff", (QFUF.BoolExpr("const", (True,)),)),
         )
         for assertion in malformed:
             with self.subTest(assertion=assertion):
@@ -794,9 +995,9 @@ class ManifestAndTamperTests(unittest.TestCase):
                 return premise
 
         literal = ExecutableInt(-999)
-        with self.assertRaisesRegex(QFUF.IndependentQfufError, "invalid literal"):
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "non-integer literal"):
             QFUF.validate_euf_lemma(self.problem, (literal, consequence))
-        with self.assertRaisesRegex(QFUF.IndependentQfufError, "invalid literal"):
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "non-integer literal"):
             QFUF.validate_unsat_dimacs(
                 self.problem,
                 self.problem.variable_count,
@@ -806,7 +1007,26 @@ class ManifestAndTamperTests(unittest.TestCase):
         assignment = find_base_assignment(self.problem, require_model=True)
         self.assertIsNotNone(assignment)
         assignment[0] = ExecutableInt(999)
-        with self.assertRaisesRegex(QFUF.IndependentQfufError, "not a nonzero integer"):
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "exact integer"):
+            QFUF.validate_total_assignment(self.problem, assignment)
+
+        class HostileFormatInt(int):
+            def __format__(self, format_spec: str) -> str:
+                raise RuntimeError("hostile __format__ executed")
+
+        hostile = HostileFormatInt(premise)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "non-integer literal"):
+            QFUF.validate_euf_lemma(self.problem, (hostile, consequence))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "non-integer literal"):
+            QFUF.validate_unsat_dimacs(
+                self.problem,
+                self.problem.variable_count,
+                (*self.problem.clauses, (hostile, consequence)),
+            )
+        assignment = find_base_assignment(self.problem, require_model=True)
+        self.assertIsNotNone(assignment)
+        assignment[0] = hostile
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "exact integer"):
             QFUF.validate_total_assignment(self.problem, assignment)
 
     def test_atom_shapes_reject_metadata_for_the_wrong_kind(self) -> None:
