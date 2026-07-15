@@ -977,3 +977,10 @@
   disagree, then require a 32-row canary before the 192-row panel. No WMI before
   review. T2 did not actually retain its first eager assignment/clauses, only a
   conflict count, so no offline-selector claim may rely on that PLAN sentence.
+- T5 `446b424` passed hosted Linux diagnostic run `29388947138` but remains
+  research/WMI NO-GO. Both the candidate parser and `independent_qfuf.py` leak
+  caller-local bindings into `define-fun` expansion, so their agreement is
+  common-mode wrong on parameter/global shadowing. The submitter also releases
+  the held census before local receipt persistence, and hosted CI does not run
+  the provisioned 7,503-source/sacct path. Repair all three; no T5 WMI job
+  exists.

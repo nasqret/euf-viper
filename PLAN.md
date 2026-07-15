@@ -497,7 +497,17 @@ independent evidence checks, and a frozen family holdout.
   but effective capabilities were not recorded. Repair the manifest,
   capability-free procfs publication, full Slurm allocation identity,
   independent oracle, runtime inventory, and end-to-end Linux tests before a
-  new review. No T5 WMI submission exists.
+  new review. Commit `446b424` implemented those repairs and exact-head hosted
+  run `29388947138` passed its Linux publication diagnostics, but the next
+  review still rejected research evidence and WMI. Both candidate and audit
+  parsers incorrectly let caller-local bindings leak into `define-fun` macro
+  bodies; the submitter releases the held census before the local receipt is
+  durably validated; and hosted CI skips the provisioned 7,503-source pipeline
+  while its optional driver uses synthetic scheduler evidence. Fix lexical
+  scope independently in both parsers, preserve local cancellation ownership
+  through receipt persistence, split mandatory Linux publication diagnostics
+  from provisioned semantic integration, and review again. No T5 WMI
+  submission exists.
 
 ### T6: Theory-Conditioned Boolean DAG
 

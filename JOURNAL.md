@@ -1413,6 +1413,19 @@
   `research-t7-sat-impact-explanations` is under implementation; no WMI job is
   authorized. The audit also found that T2 retained only a conflict count, not
   the claimed first eager assignment and clauses, so offline replay is invalid.
+- T5 repair `446b424` bound the external 7,503-row manifest, added procfs
+  `O_TMPFILE` one-link publication, full Slurm identity, runtime inventory, an
+  independent projection implementation, and held-job cleanup. Independent
+  review nevertheless found a common lexical-scope defect in both SMT-LIB
+  parsers and found that the submitter releases the held job before the local
+  receipt is durably parsed and persisted. It also corrected the CI claim: the
+  7,503-source test skips without a provisioned corpus and uses synthetic
+  scheduler evidence when enabled.
+- Published exact `446b424ae270735f1296a40d3d8c21286de0d611` only to
+  `research-t5-component-quotient-census-recovered`. Hosted run `29388947138`
+  passed the Linux publication diagnostics and root test matrix. This is useful
+  procfs/filesystem smoke only; it does not authorize T5, merge, or WMI. A new
+  parser/release-order/CI-label repair is isolated and active.
 
 ## Next Entry Template
 

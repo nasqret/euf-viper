@@ -367,6 +367,18 @@ published only for diagnostic hosted execution. Run `29385400195` failed two
 Linux consumer-test contracts after 88 tests. The one-link test passed on that
 runner, but effective capabilities were not recorded, so it proves no
 capability-free path. T5 remains WMI NO-GO and under repair.
+
+Repair `446b424` selected the external 7,503-row manifest, rejected the tracked
+3,521-row official manifest, implemented procfs `O_TMPFILE` one-link
+publication, bound full Slurm allocation identity, expanded runtime inventory,
+and added a structurally separate projection checker. Exact-head hosted run
+`29388947138` passed its Linux publication diagnostics. Independent review
+still rejected research evidence: both SMT-LIB parsers leak caller-local names
+into `define-fun` bodies, the submitter releases the held census before local
+receipt persistence is complete, and the hosted 7,503-source integration test
+is skipped unless externally provisioned and uses synthetic scheduler evidence
+when enabled. Linux mechanism smoke is therefore green while T5 and WMI remain
+NO-GO. The scope/release/CI repair is active.
 T6 exact revision `9833ec3` is queued as job `146075`, with promotion disabled
 until its current 12-source manifest is derived mechanically from the frozen P0
 audit.
