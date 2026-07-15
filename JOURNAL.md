@@ -1473,7 +1473,8 @@
   overrides, full `DOMAIN7_HUGE` structure is inferred rather than proved,
   `10/12` is not mechanically population-bound, and alias paths pass. The exact
   checkpoint was pushed only to `research-t6-theory-dag`; a separate repair is
-  active and job `146075` remains untouched.
+  active and job `146075` remains untouched. Exact-head hosted contract run
+  `29390630178` passed, which records branch health but changes no gate.
 
 ## Next Entry Template
 

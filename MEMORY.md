@@ -1009,4 +1009,5 @@
   Hash-then-reopen inputs, incomplete matrix/provenance semantics, unproved
   physical `DOMAIN7_HUGE` membership, path aliases, and a non-population-bound
   gate block promotion. It is preserved on `research-t6-theory-dag`; repair is
-  isolated and old job `146075` remains untouched.
+  isolated and old job `146075` remains untouched. Exact-head hosted contract
+  run `29390630178` is green but is not promotion evidence.

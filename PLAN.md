@@ -537,7 +537,8 @@ independent evidence checks, and a frozen family holdout.
   but review rejects hash-then-reopen inputs, incomplete observation-matrix
   validation, unproved `DOMAIN7_HUGE` membership, path aliases, and a gate not
   bound to population size. It is branch-only and nonpromotable; job `146075`
-  remains untouched while the generator is repaired.
+  remains untouched while the generator is repaired. Exact-head hosted contract
+  run `29390630178` is green and changes none of those restrictions.
 - [ ] Require at least 25% projected CNF reduction on `ceil(4N/5)` frozen
   hard-table cases, which is 10/12 for the current population, and more benefit
   than rejected unconditional quotienting. Derive both `N` and the threshold

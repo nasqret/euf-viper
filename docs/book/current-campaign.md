@@ -416,6 +416,7 @@ underchecked, complete physical `DOMAIN7_HUGE` membership is not proved, alias
 paths pass, and the 10-of-12 gate is not derived from population size. The
 checkpoint is branch-only. A repair must derive the gate as `ceil(4N/5)` and
 close every input/structure boundary; old job `146075` remains untouched.
+Exact-head hosted contract run `29390630178` passed and changes no decision.
 
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or

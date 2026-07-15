@@ -10,6 +10,9 @@ correctly reconstructs the current 12-source P0 deficit set, but its generator
 does not meet the evidence boundary required for a T6 census. No merge, WMI
 submission, promotion, or hardened-evidence claim is authorized.
 
+Exact-head hosted contract run `29390630178` passed after publication. This is
+useful branch-smoke evidence only and does not close any blocking finding below.
+
 ## Independently Reproduced Facts
 
 - Sole parent: T6 implementation commit
