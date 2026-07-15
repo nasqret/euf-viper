@@ -1,6 +1,6 @@
 # Current Campaign
 
-Date: 2026-07-13
+Date: 2026-07-15
 
 This chapter is the current evidence checkpoint. Older chapters preserve exact
 historical campaigns and may describe earlier binaries. The authoritative
@@ -77,9 +77,11 @@ cancelled. Commits `6b51b39` and `8f78543` replace recursive `let` expansion
 with an iterative, simultaneous-scope-preserving machine and pin a four-hour
 wall limit. Corrected census `146071` completed at exact revision `8f78543`
 with all 7,503 rows and zero parser errors. Certificate prepares
-`146076`/`146079` completed; arrays `146077`/`146080` are priority-pending and
-audits `146078`/`146081` remain dependency-held. No partial certificate output
-is interpreted.
+`146076`/`146079` completed, but arrays `146077`/`146080` failed after `/home`
+returned `EDQUOT`; audits `146078`/`146081` were cancelled. This is an
+infrastructure failure and establishes no certificate result. Recovery requires
+fresh exact-revision roots under `/work`, complete arrays, and new terminal
+audits. No partial certificate output is interpreted.
 
 These replacement campaigns can establish that each reported source result has
 an independently checked canonical witness or refutation. They do **not** yet
@@ -179,14 +181,19 @@ final audit file SHA-256 is `fffb152c...e3831ff`.
 
 ## Long-Timeout Graph
 
-Full and official 1,200-second timeout-only arrays are `145785` and `145787`.
-Audits `145786`/`145788` and finalizer `145789` depend on their completion. Each
-task requests one CPU and 10 GiB in `cpu_idle`; the current wait is scheduler
-availability/priority, not an impossible resource shape. The graph is preserved
-without cancellation or resubmission so physical-origin evidence remains
-intact. Two full work items are complete; full range `[2-63]` is pending on
-nodes/priority, with no shard currently active. The official array is also
-priority-pending. No partial rows have been interpreted.
+Full and official 1,200-second timeout-only arrays were `145785` and `145787`.
+They eventually ran, but late shards could not create locked output under the
+`/home` campaign root. Three shards first exited nonzero, later tasks failed in
+three to nine seconds with signal 53, and exact stderr records
+`OSError: [Errno 122] Disk quota exceeded`. Audits `145786`/`145788` and
+finalizer `145789` were cancelled. The graph is preserved as failed provenance,
+but its completed partial rows are not benchmark evidence.
+
+At the 2026-07-15 refresh, `/home` used 174.49 GiB of 200 GiB and 1,838,881 of
+2,000,000 files; `/work` used 561.09 GiB of 1 TiB and 3,687,608 of 10,000,000
+files. Recovery therefore stages a fresh exact `30828a4` checkout and verified
+P0 base under `/work`, submits an entirely new continuation chain, and requires
+both global audits plus finalization. No old shard is imported into that result.
 
 ## Opportunity Gates
 

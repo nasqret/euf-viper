@@ -921,8 +921,15 @@
   identity was below the sub-1% contract. Require raw-output and shard sealing,
   the accepted manifest hash, distinct shard/round constants, monitored builds,
   homogeneous controls, and real-release Linux CI before publication or WMI.
-- Live WMI graph remains unchanged: certificate prepares `146076`/`146079` are
-  complete; arrays `146077`/`146080` and T6 `146075` are priority-pending;
-  certificate audits are dependency-held; full 1,200-second range `[2-63]` and
-  official array `145787` are pending with no active continuation shard. Never
-  interpret partial rows or alter the fixed dependency graph for queue delay.
+- WMI storage failure supersedes the old pending-state checkpoint. Long-timeout
+  arrays `145785`/`145787` and certificate arrays `146077`/`146080` failed after
+  `/home` returned `EDQUOT`; dependent audits/finalizer were cancelled. Exact
+  quota at refresh was 174.49 GiB/200 GiB and 1,838,881/2,000,000 files in
+  `/home`; `/work` had 561.09 GiB/1 TiB and 3,687,608/10,000,000 files. Preserve
+  failed trees, interpret no partial rows, and rerun complete chains from fresh
+  immutable exact-revision roots under `/work`. T6 `146075` remains separately
+  pending and small enough to preserve unless its own accounting changes.
+- T5 commit `6249393` is invalid because its isolated clone has missing Git
+  objects. Never push, repair in place, or cite it. Continue only from fresh
+  valid clone `/private/tmp/euf-viper-t5-recovered`, populated from the intact
+  physical files while excluding the corrupt object database.

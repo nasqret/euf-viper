@@ -1311,6 +1311,25 @@
   focused test passes. Exact raw stdout, the accepted corpus digest, sealed
   shard receipts, mutation-monitored builds, and real Linux execution are under
   repair.
+- Live WMI accounting on 2026-07-15 invalidated the pending-state description.
+  The 1,200-second full/official arrays `145785`/`145787` eventually ran, but
+  three ordinary shards failed and subsequent tasks exited with signal 53.
+  Exact stderr records `OSError: [Errno 122] Disk quota exceeded` while creating
+  a locked stdout file under the `/home/bnaskrecki/euf-viper-campaigns/30828a4f0c1e`
+  campaign. Audits `145786`/`145788` and finalizer `145789` were cancelled.
+  Certificate prepares `146076`/`146079` completed, but arrays
+  `146077`/`146080` then failed with the same signal-53 storage condition and
+  audits `146078`/`146081` were cancelled. No partial benchmark or certificate
+  row is evidence. Current quota is 174.49 GiB/200 GiB and
+  1,838,881/2,000,000 files in `/home`, versus 561.09 GiB/1 TiB and
+  3,687,608/10,000,000 files in `/work`. Recovery is a fresh immutable root in
+  `/work`, complete reruns, and new terminal audits; failed trees stay intact.
+- T5 repair commit `6249393` is invalid and non-publishable because its isolated
+  clone lost required Git objects and failed `git fsck`. The intact physical
+  source files were copied without the corrupt `.git` directory into fresh
+  clone `/private/tmp/euf-viper-t5-recovered`, whose object database passes
+  `git fsck`. Review and any future commit proceed only from that recovered
+  clone; `6249393` is never cited as evidence.
 
 ## Next Entry Template
 

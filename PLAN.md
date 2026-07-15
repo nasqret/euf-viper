@@ -35,12 +35,14 @@ is 22 shared Z3/Yices solves missed by euf-viper: nine Goel (six SAT, three
 UNSAT), one UNSAT PEQ, and twelve UNSAT QG `qg7` cases. With no regressions,
 euf-viper needs ten added solves to lead
 Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
-`2.04x` geometric and `4.89x` aggregate improvement. Full 1,200-second array
-`145785` has started on WMI: two dispatched work items are complete and the
-remaining range `[2-63]` is pending on nodes/priority, with no shard currently
-active. Official array `145787` remains priority-bound, with audits/finalizer
-`145786`/`145788`/`145789` dependency-held. The graph is unchanged. Rollback
-control audit `145929`
+`2.04x` geometric and `4.89x` aggregate improvement. The original 1,200-second
+graph `145785`-`145789` is invalid as aggregate evidence: late full and official
+shards failed after `/home` returned `EDQUOT`, and the audits/finalizer were
+cancelled. Certificate arrays `146077`/`146080` failed for the same storage
+reason and their audits were cancelled. Completed partial rows are quarantined
+and will not be interpreted. Recovery uses a fresh exact-revision root under
+`/work`, a complete rerun, and new terminal audits; the failed `/home` trees
+remain immutable provenance. Rollback control audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
 overheads were `11.17x`-`32.75x` against a `1.10x` cap.
@@ -172,10 +174,12 @@ result cache can satisfy V1-V4.
   certificate dependents were cancelled. Replacement full chain
   `146076`/`146077`/`146078` and official chain
   `146079`/`146080`/`146081` are held behind corrected census `146071` at exact
-  revision `8f78543`. Both prepares completed successfully; arrays
-  `146077`/`146080` remain priority-pending and audits `146078`/`146081` remain
-  dependency-held. Returned complete corpus evidence remains before this item
-  closes.
+  revision `8f78543`. Both prepares completed successfully, but every array
+  task later failed with signal 53 when Slurm could not create output under the
+  quota-constrained `/home` tree; audits `146078`/`146081` were cancelled.
+  This is infrastructure failure, not certificate evidence. A fresh `/work`
+  campaign must rerun prepare, every shard, and the global audit before this
+  item closes; no partial artifact may be reused or counted.
 - [x] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
@@ -201,10 +205,12 @@ result cache can satisfy V1-V4.
 - [ ] Resume only two-second timeouts at 60 seconds and only remaining timeouts
   at 1,200 seconds. Both 60-second continuations and audits completed and
   rejected promotion. Dispatcher `145397` generated full/official 1,200-second
-  arrays `145785`/`145787`, audits `145786`/`145788`, and finalizer `145789`;
-  two full work items are complete, full range `[2-63]` and the official array
-  are pending on node availability/priority, and the audits/finalizer remain
-  dependency-held. No partial rows have been interpreted.
+  arrays `145785`/`145787`, audits `145786`/`145788`, and finalizer `145789`.
+  The arrays eventually ran, but `/home` quota failure caused three ordinary
+  shard failures followed by signal-53 launch/output failures; both audits and
+  the finalizer were cancelled. The graph is preserved as failed provenance,
+  not benchmark evidence. Recreate the exact `30828a4` P0 input under `/work`
+  and run a wholly new continuation chain through both audits and finalization.
 - [x] Publish a new current-main opportunity atlas before tuning a route.
   Commit `d948993` binds the exact post-parser-fix full 60-second audit and the
   22-source shared Z3/Yices deficit. A bounded unresolved-track refresh is in
@@ -437,7 +443,11 @@ independent evidence checks, and a frozen family holdout.
   semantic replay. An unnamed one-link archive, content-bearing completion
   receipt, hermetic exact-blob guard, real Linux tests, and independent
   projection implementation are under repair. No WMI submission is allowed
-  before another independent review.
+  before another independent review. Commit `6249393` from the next repair is
+  not a valid Git artifact: its isolated clone lost required objects and failed
+  `git fsck`. Only the physical files were copied into a fresh valid clone at
+  `/private/tmp/euf-viper-t5-recovered`; the corrupt object database will never
+  be pushed, cited as evidence, or repaired in place.
 
 ### T6: Theory-Conditioned Boolean DAG
 
@@ -578,16 +588,18 @@ fallback can be an operational portfolio but never a standalone victory.
 1. Preserve corrected zero-error range census `146071` as a final T4 rejection:
    7,503 rows, zero parse errors, zero eligible sources, and exactly zero
    value-cell savings against the 30% threshold. Do not implement Hall/PB.
-2. Let dependency-bound full/official certificate chains
-   `146076`-`146078` and `146079`-`146081` batch-shadow and globally audit the
-   exact two-second rows only after `146071` succeeds.
+2. Quarantine failed certificate chains `146076`-`146078` and
+   `146079`-`146081`. Recreate them from exact revision `8f78543` under a fresh
+   `/work` root and require complete arrays plus terminal audits; do not reuse
+   or interpret partial `/home` output.
 3. Preserve rollback audit `145929` as a rejection: do not promote
    whole-instance rollback. Reuse its frozen target/anti-target telemetry only
    in T3 M0 after the remaining fixed-arm gates finish.
 4. Keep modern Kissat 4 rejected: valid sample `145905` lost both geometric and
    aggregate paired gates, so broad `145906` and merge `145907` stay cancelled.
-5. Preserve the existing 1,200-second continuation graph `145785`-`145789`;
-   diagnose scheduler state without changing its evidence.
+5. Preserve failed 1,200-second graph `145785`-`145789` as immutable provenance.
+   Copy and verify the exact P0 base under `/work`, submit a fresh continuation
+   chain, and accept only complete full/official audits plus finalization.
 6. Complete adversarial review and repair of production model/proof sidecars;
    canonical certificate reruns do not certify the timed production path.
 7. Finish and audit the T1 full parser shadow; independently review T5 before

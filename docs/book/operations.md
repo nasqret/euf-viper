@@ -72,6 +72,28 @@ Run the complete certificate canary collection:
 DRAT_TRIM=third_party/checkers/bin/drat-trim scripts/cert/run_smoke.sh
 ```
 
+## WMI Storage Recovery
+
+Run `quota` before every broad WMI submission. Campaigns that create many
+locked journals must use an attempt-private absolute root under `/work`, for
+example by setting `EUF_VIPER_WMI_CAMPAIGN_ROOT`. A quota failure is not a
+resumable benchmark result: preserve the failed tree, submit a fresh chain, and
+require every shard plus the terminal audit.
+
+For timeout continuations, first copy the hash-bound P0 base into the exact
+revision checkout under the new root and independently recheck its audit and
+referenced SHA-256 values. Then submit with the original prepare/audit lineage:
+
+```bash
+EUF_VIPER_WMI_CAMPAIGN_ROOT=/work/bnaskrecki/euf-viper-campaigns \
+EUF_VIPER_CONTINUATION_REVISION=30828a4f0c1e7e478a9c6f406ccb245eeefc4961 \
+bash scripts/wmi/submit_locked_continuations.sh 144990 144993
+```
+
+Do not treat a completed parent array state as sufficient. Inspect task-level
+accounting, require the full/official audit files and finalizer, and reject any
+chain with missing rows, cancelled dependencies, signal-53 exits, or `EDQUOT`.
+
 ## LTS
 
 Run CAS availability checks:
