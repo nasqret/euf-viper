@@ -22,7 +22,22 @@ class T9ProjectionWmiContractTests(unittest.TestCase):
 
     def test_exact_revision_manifest_and_tool_bytes_are_mandatory(self) -> None:
         self.assertIn("EUF_VIPER_EXPECTED_REVISION:?", self.text)
-        self.assertIn("EUF_VIPER_T9_EXPECTED_MANIFEST_SHA256:?", self.text)
+        self.assertIn(
+            'EXPECTED_MANIFEST_SHA256="32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"',
+            self.text,
+        )
+        self.assertIn(
+            'EXPECTED_SOURCE_SET_SHA256="6b3c316cd90d8093bba184522dd3238892e06b6215fc2a8e8b510e1b5b19ba60"',
+            self.text,
+        )
+        self.assertIn(
+            'EXPECTED_CONTROL_MANIFEST_SHA256="85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"',
+            self.text,
+        )
+        self.assertIn("EXPECTED_SOURCES=7503", self.text)
+        self.assertIn("EXPECTED_QG_SOURCES=6396", self.text)
+        self.assertNotIn("EUF_VIPER_T9_EXPECTED_SOURCES", self.text)
+        self.assertNotIn("EUF_VIPER_T9_EXPECTED_MANIFEST_SHA256", self.text)
         self.assertIn("EUF_VIPER_CARGO_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_RUSTC_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_PYTHON_SHA256:?", self.text)
@@ -33,7 +48,7 @@ class T9ProjectionWmiContractTests(unittest.TestCase):
     def test_census_is_no_sat_and_requires_independent_audit(self) -> None:
         self.assertIn("run_t9_projection_census.py", self.text)
         self.assertIn("audit_t9_projection_census.py", self.text)
-        self.assertIn("--expected-sources \"$EXPECTED_SOURCES\"", self.text)
+        self.assertNotIn("--expected-sources", self.text)
         self.assertIn("audit-receipt.json", self.text)
         self.assertNotIn("compare_solvers.py", self.text)
         self.assertNotIn("EUF_VIPER_T9_ACKERMANN=", self.text)
@@ -44,13 +59,18 @@ class T9ProjectionWmiContractTests(unittest.TestCase):
             '"cargo_lock"',
             '"runner"',
             '"auditor"',
+            '"control_manifest"',
+            '"design_note"',
             '"records"',
             '"summary"',
             '"audit_receipt"',
         ):
             self.assertIn(key, self.text)
         self.assertIn('"euf-viper.t9-projection-wmi-run.v1"', self.text)
-        self.assertIn("os.link(temporary, metadata_path)", self.text)
+        self.assertIn("os.O_RDWR | os.O_CREAT | os.O_EXCL", self.text)
+        self.assertIn("os.fchmod(descriptor, 0o400)", self.text)
+        self.assertNotIn("os.link(temporary, metadata_path)", self.text)
+        self.assertNotIn("unlink(", self.text)
 
 
 if __name__ == "__main__":
