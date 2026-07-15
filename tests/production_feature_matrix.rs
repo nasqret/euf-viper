@@ -109,6 +109,27 @@ fn ordinary_solve_preserves_legacy_unknown_and_extra_argument_compatibility() {
     assert!(matches!(output.stdout.as_slice(), b"sat\n" | b"unsat\n"));
 }
 
+#[cfg(feature = "production-evidence")]
+#[test]
+fn evidence_mode_fails_closed_for_an_ordinary_unsealed_cargo_build() {
+    let input = fixture("tests/fixtures/basic_sat.smt2");
+    let output_path = std::env::temp_dir().join(format!(
+        "euf-viper-unsealed-evidence-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&output_path);
+    let output = run(&[
+        "solve",
+        input.to_str().expect("UTF-8 fixture path"),
+        "--evidence-out",
+        output_path.to_str().expect("UTF-8 output path"),
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sealed Linux build"));
+    assert!(!output_path.exists());
+}
+
 #[cfg(all(unix, feature = "production-evidence"))]
 #[test]
 fn recorder_checks_the_real_compiled_viper_feature_contract() {
@@ -158,7 +179,7 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
     );
     let config = std::fs::read_to_string(&output_path)
         .expect("successful recorder should publish a configuration");
-    assert!(config.contains("euf-viper.production-evidence.v3"));
+    assert!(config.contains("euf-viper.production-evidence.v4"));
     assert!(config.contains(binary()));
     std::fs::remove_dir_all(root).expect("temporary recorder directory should be removable");
 }

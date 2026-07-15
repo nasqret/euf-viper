@@ -65,6 +65,7 @@ DYNAMIC_SAT_SOURCE = (ROOT / "tests" / "fixtures" / "production_dynamic_sat.smt2
 TEMPORARY_DIRECTORY = "/private/tmp" if sys.platform == "darwin" else None
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "sealed evidence runtime is Linux-only")
 class ProductionEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -119,6 +120,22 @@ class ProductionEvidenceTests(unittest.TestCase):
                 **os.environ,
                 "CARGO_TARGET_DIR": str(ROOT / "target"),
                 "EUF_VIPER_BUILD_CONTEXT": "clean-production-evidence-test",
+                "EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256": "2" * 64,
+                "EUF_VIPER_SEALED_GIT_REVISION": subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=cls.clean_root,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip(),
+                "EUF_VIPER_SEALED_SOURCE_MANIFEST_SHA256": "1" * 64,
+                "EUF_VIPER_SEALED_SOURCE_TREE": subprocess.run(
+                    ["git", "rev-parse", "HEAD^{tree}"],
+                    cwd=cls.clean_root,
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout.strip(),
             },
         )
         if completed.returncode != 0:

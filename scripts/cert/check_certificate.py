@@ -62,6 +62,19 @@ def artifact_path(value: str, manifest_path: Path, override: Path | None) -> Pat
     return adjacent if adjacent.exists() else path
 
 
+def inherited_procfd_descriptors(values: list[tuple[str, str]]) -> tuple[int, ...]:
+    prefix = "/proc/self/fd/"
+    descriptors: set[int] = set()
+    for label, value in values:
+        if not value.startswith(prefix):
+            continue
+        raw_descriptor = value.removeprefix(prefix)
+        if not raw_descriptor.isdigit():
+            raise ValueError(f"invalid descriptor-bound {label} path")
+        descriptors.add(int(raw_descriptor))
+    return tuple(sorted(descriptors))
+
+
 def parse_dimacs(path: Path) -> tuple[int, list[list[int]]]:
     variables = None
     expected_clauses = None
@@ -304,11 +317,22 @@ def main() -> int:
         raise SystemExit(f"independent UNSAT reconstruction failed: {error}") from error
     if not args.drat_trim:
         raise SystemExit("drat-trim is required; pass --drat-trim PATH")
+    try:
+        inherited_descriptors = inherited_procfd_descriptors(
+            [
+                ("drat-trim", args.drat_trim),
+                ("DIMACS", str(dimacs)),
+                ("proof", str(proof)),
+            ]
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     checked = subprocess.run(
         [args.drat_trim, str(dimacs), str(proof), "-I"],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        pass_fds=inherited_descriptors,
         check=False,
     )
     if checked.returncode != 0 or "VERIFIED" not in checked.stdout:

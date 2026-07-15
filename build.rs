@@ -67,6 +67,10 @@ fn source_manifest_sha256(inputs: &[&str]) -> String {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=EUF_VIPER_BUILD_CONTEXT");
+    println!("cargo:rerun-if-env-changed=EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256");
+    println!("cargo:rerun-if-env-changed=EUF_VIPER_SEALED_GIT_REVISION");
+    println!("cargo:rerun-if-env-changed=EUF_VIPER_SEALED_SOURCE_MANIFEST_SHA256");
+    println!("cargo:rerun-if-env-changed=EUF_VIPER_SEALED_SOURCE_TREE");
     let solver_inputs = [
         "Cargo.toml",
         "Cargo.lock",
@@ -77,19 +81,29 @@ fn main() {
     for path in solver_inputs {
         println!("cargo:rerun-if-changed={path}");
     }
-    for name in ["HEAD", "index"] {
-        if let Some(path) = git_output(&["rev-parse", "--path-format=absolute", "--git-path", name])
-        {
-            println!("cargo:rerun-if-changed={path}");
+    let sealed_revision = env::var("EUF_VIPER_SEALED_GIT_REVISION").ok();
+    if sealed_revision.is_none() {
+        for name in ["HEAD", "index"] {
+            if let Some(path) =
+                git_output(&["rev-parse", "--path-format=absolute", "--git-path", name])
+            {
+                println!("cargo:rerun-if-changed={path}");
+            }
         }
     }
-
-    let revision = git_output(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
+    let revision = sealed_revision
+        .clone()
+        .or_else(|| git_output(&["rev-parse", "HEAD"]))
+        .unwrap_or_else(|| "unknown".to_owned());
     let mut status_arguments = vec!["status", "--porcelain=v1", "--untracked-files=all", "--"];
     status_arguments.extend(solver_inputs);
-    let dirty = git_output(&status_arguments)
-        .map(|status| !status.is_empty())
-        .unwrap_or(true);
+    let dirty = if sealed_revision.is_some() {
+        false
+    } else {
+        git_output(&status_arguments)
+            .map(|status| !status.is_empty())
+            .unwrap_or(true)
+    };
     println!("cargo:rustc-env=EUF_VIPER_GIT_REVISION={revision}");
     println!(
         "cargo:rustc-env=EUF_VIPER_GIT_DIRTY={}",
@@ -132,5 +146,19 @@ fn main() {
     println!(
         "cargo:rustc-env=EUF_VIPER_BUILD_SOURCE_MANIFEST_SHA256={}",
         source_manifest_sha256(&solver_inputs)
+    );
+    println!(
+        "cargo:rustc-env=EUF_VIPER_BUILD_SEALED_SOURCE_MANIFEST_SHA256={}",
+        env::var("EUF_VIPER_SEALED_SOURCE_MANIFEST_SHA256")
+            .unwrap_or_else(|_| "unsealed".to_owned())
+    );
+    println!(
+        "cargo:rustc-env=EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256={}",
+        env::var("EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256")
+            .unwrap_or_else(|_| "unsealed".to_owned())
+    );
+    println!(
+        "cargo:rustc-env=EUF_VIPER_BUILD_SEALED_SOURCE_TREE={}",
+        env::var("EUF_VIPER_SEALED_SOURCE_TREE").unwrap_or_else(|_| "unsealed".to_owned())
     );
 }

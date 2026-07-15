@@ -67,7 +67,7 @@ HEX40_OR_64 = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 RESULT_TOKENS = {"sat", "unsat", "unknown", "unsupported"}
 PLACEHOLDERS = {"binary", "instance", "budget_s"}
-EVIDENCE_SCHEMA = "euf-viper.production-evidence.v3"
+EVIDENCE_SCHEMA = "euf-viper.production-evidence.v4"
 RUN_NONCE_ENV = "EUF_VIPER_RUN_NONCE"
 TRUSTED_EXECUTABLE_SHA256_ENV = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
 EVIDENCE_CONTROL_ENV = {RUN_NONCE_ENV, TRUSTED_EXECUTABLE_SHA256_ENV}
@@ -199,6 +199,7 @@ RUN_RECORD_KEYS = {
     "repetition",
     "cpu_id",
     "argv",
+    "descriptor_binding",
     "environment_sha256",
     "pid",
     "started_at",
@@ -1133,6 +1134,99 @@ def _file_fingerprint(path: Path) -> tuple[int, int, int, int, int, int]:
     )
 
 
+def _descriptor_execution_available(*, required: bool) -> bool:
+    required = required or os.environ.get("EUF_VIPER_DESCRIPTOR_EXECUTION") == "required"
+    available = sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir()
+    if required and not available:
+        raise CampaignError(
+            "locked production execution requires Linux /proc/self/fd descriptor binding"
+        )
+    return available
+
+
+def _open_verified_descriptor(path: Path, expected_sha256: str, context: str) -> int:
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise CampaignError(f"cannot open {context} by descriptor: {error}") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise CampaignError(f"{context} descriptor is not a regular file")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            size += len(block)
+        after = os.fstat(descriptor)
+        identity = lambda item: (
+            item.st_dev,
+            item.st_ino,
+            item.st_size,
+            item.st_mtime_ns,
+            item.st_ctime_ns,
+        )
+        if identity(before) != identity(after) or size != after.st_size:
+            raise CampaignError(f"{context} changed while its descriptor was bound")
+        actual = digest.hexdigest()
+        if actual != expected_sha256:
+            raise CampaignError(
+                f"{context} descriptor SHA-256 mismatch: expected {expected_sha256}, got {actual}"
+            )
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _bound_job_command(job: Job) -> tuple[list[str], tuple[int, ...], dict[str, str]]:
+    if not _descriptor_execution_available(required="evidence" in job.solver):
+        return list(job.argv), (), {
+            "mechanism": "platform_pathname",
+            "solver_sha256": job.solver["sha256"],
+            "source_sha256": job.instance["sha256"],
+        }
+    solver_path = Path(job.solver["binary"])
+    source_path = Path(job.instance["path"])
+    solver_fd = _open_verified_descriptor(
+        solver_path, job.solver["sha256"], "solver executable"
+    )
+    try:
+        source_fd = _open_verified_descriptor(
+            source_path, job.instance["sha256"], "SMT source"
+        )
+    except BaseException:
+        os.close(solver_fd)
+        raise
+    command = list(job.argv)
+    if not command or command[0] != str(solver_path):
+        os.close(source_fd)
+        os.close(solver_fd)
+        raise CampaignError("locked argv does not begin with the bound solver path")
+    command[0] = f"/proc/self/fd/{solver_fd}"
+    replaced = 0
+    for index, argument in enumerate(command[1:], start=1):
+        if argument == str(source_path):
+            command[index] = f"/proc/self/fd/{source_fd}"
+            replaced += 1
+    if replaced != 1:
+        os.close(source_fd)
+        os.close(solver_fd)
+        raise CampaignError("locked argv must bind the SMT source descriptor exactly once")
+    return command, (solver_fd, source_fd), {
+        "mechanism": "linux_procfd",
+        "solver_sha256": job.solver["sha256"],
+        "source_sha256": job.instance["sha256"],
+    }
+
+
 def _verify_hash(
     path: Path,
     expected: str,
@@ -1648,13 +1742,15 @@ def run_job(
         child_environment[TRUSTED_EXECUTABLE_SHA256_ENV] = job.solver["sha256"]
     try:
         try:
+            execution_command, bound_descriptors, descriptor_binding = _bound_job_command(job)
             process = subprocess.Popen(
-                job.argv,
+                execution_command,
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
                 env=child_environment,
                 close_fds=True,
+                pass_fds=bound_descriptors,
                 start_new_session=True,
                 preexec_fn=_preexec_setup(
                     job.cpu_id,
@@ -1670,6 +1766,8 @@ def run_job(
         except OSError as error:
             spawn_error = f"{type(error).__name__}: {error}"
         finally:
+            for descriptor in locals().get("bound_descriptors", ()):
+                os.close(descriptor)
             os.close(stdout_fd)
             os.close(stderr_fd)
 
@@ -1733,6 +1831,7 @@ def run_job(
             "repetition": job.repetition,
             "cpu_id": job.cpu_id,
             "argv": job.argv,
+            "descriptor_binding": descriptor_binding,
             "environment_sha256": job.environment_sha256,
             "pid": process.pid if process is not None else None,
             "started_at": started_at,
@@ -1857,6 +1956,15 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
         "repetition": job.repetition,
         "cpu_id": job.cpu_id,
         "argv": job.argv,
+        "descriptor_binding": {
+            "mechanism": (
+                "linux_procfd"
+                if sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir()
+                else "platform_pathname"
+            ),
+            "solver_sha256": job.solver["sha256"],
+            "source_sha256": job.instance["sha256"],
+        },
         "environment_sha256": job.environment_sha256,
     }
     for field, expected in expected_static.items():

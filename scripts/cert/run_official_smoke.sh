@@ -26,7 +26,7 @@ verify() {
 
 cd "$ROOT"
 mkdir -p "$OUT"
-cargo build --release --features certificates
+cargo build --locked --release --features certificates
 verify \
   rodin-3166111930664231918 \
   "$CORPUS/20170829-Rodin/smt3166111930664231918.smt2"

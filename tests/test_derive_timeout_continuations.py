@@ -158,6 +158,11 @@ def _run_record(
         "repetition": scheduled["repetition"],
         "cpu_id": scheduled["cpu_id"],
         "argv": scheduled["argv"],
+        "descriptor_binding": {
+            "mechanism": "platform_pathname",
+            "solver_sha256": solver["sha256"],
+            "source_sha256": instance["sha256"],
+        },
         "environment_sha256": scheduled["environment_sha256"],
         "pid": 1000 + scheduled["sequence"],
         "started_at": "2026-07-12T00:00:00+00:00",

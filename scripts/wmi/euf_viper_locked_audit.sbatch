@@ -21,10 +21,18 @@ PROVENANCE_HELPER_SHA256="${EUF_VIPER_PROVENANCE_HELPER_SHA256:?set EUF_VIPER_PR
 SUBMISSION_MANIFEST="${EUF_VIPER_SUBMISSION_MANIFEST:?set EUF_VIPER_SUBMISSION_MANIFEST}"
 SUBMISSION_MANIFEST_SHA256="${EUF_VIPER_SUBMISSION_MANIFEST_SHA256:?set EUF_VIPER_SUBMISSION_MANIFEST_SHA256}"
 PREPARE_JOB_ID="${EUF_VIPER_PREPARE_JOB_ID:?set EUF_VIPER_PREPARE_JOB_ID}"
+PREPARE_RECEIPT_SHA256="${EUF_VIPER_PREPARE_RECEIPT_SHA256:?set EUF_VIPER_PREPARE_RECEIPT_SHA256}"
 SHARDS="${EUF_VIPER_LOCKED_SHARDS:?set EUF_VIPER_LOCKED_SHARDS}"
 PROVENANCE_HELPER="$CHECKOUT/scripts/wmi/hermetic_provenance.py"
 
 case "$PREPARE_JOB_ID" in *[!0-9]*|'') echo "invalid prepare job id" >&2; exit 2 ;; esac
+case "$PREPARE_RECEIPT_SHA256" in
+  *[!0-9a-f]*|'') echo "invalid prepare receipt SHA-256" >&2; exit 2 ;;
+esac
+if [ "${#PREPARE_RECEIPT_SHA256}" -ne 64 ]; then
+  echo "invalid prepare receipt SHA-256 length" >&2
+  exit 2
+fi
 case "$SHARDS" in ''|0|0*|*[!0-9]*) echo "invalid shard count" >&2; exit 2 ;; esac
 
 hash_file() {
@@ -62,7 +70,7 @@ clean_env() {
   "$ENV_BIN" -i HOME="$PRIVATE_HOME" LANG=C LC_ALL=C PATH="$RUNTIME_PATH" \
     RUSTUP_HOME="$RUSTUP_HOME" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
     TMPDIR="$PRIVATE_TMP" TZ=UTC XDG_CACHE_HOME="$XDG_CACHE_HOME" \
-    XDG_CONFIG_HOME="$XDG_CONFIG_HOME" "$@"
+    XDG_CONFIG_HOME="$XDG_CONFIG_HOME" EUF_VIPER_DESCRIPTOR_EXECUTION=required "$@"
 }
 python_clean() {
   clean_env "$PYTHON_BIN" -B -I -S "$@"
@@ -75,7 +83,8 @@ PREPARATION_BINDING="$(python_clean "$PROVENANCE_HELPER" verify-preparation-rece
   --receipt "$PREPARE_RECEIPT" \
   --provenance "$VERIFIED_PROVENANCE" \
   --run-root "$RUN_ROOT" \
-  --prepare-job "$PREPARE_JOB_ID")"
+  --prepare-job "$PREPARE_JOB_ID" \
+  --expected-sha256 "$PREPARE_RECEIPT_SHA256")"
 
 for KIND in full official; do
   "$MKDIR_BIN" -p "$RUN_ROOT/audit/$KIND"

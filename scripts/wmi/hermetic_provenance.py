@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA = "euf-viper.wmi-attempt-provenance.v1"
+SCHEMA = "euf-viper.wmi-attempt-provenance.v2"
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 HEX_REVISION = re.compile(r"^[0-9a-f]{40,64}$")
 ATTEMPT_ID = re.compile(r"^[0-9a-f]{32}$")
@@ -33,10 +33,12 @@ REQUIRED_RUNTIME_TOOLS = frozenset(
         "env",
         "find",
         "git",
+        "ldd",
         "mkdir",
         "python",
         "ranlib",
         "rustc",
+        "unshare",
         "sbatch",
         "sha256sum",
         "tar",
@@ -46,6 +48,7 @@ REQUIRED_RUNTIME_TOOLS = frozenset(
 REQUIRED_EXECUTION_ENV = frozenset(
     {
         "CARGO_TARGET_DIR",
+        "CARGO_HOME",
         "HOME",
         "LANG",
         "LC_ALL",
@@ -77,6 +80,8 @@ PREPARATION_KEYS = frozenset(
         "runtime_tools",
         "shards",
         "solver_executables",
+        "sealed_build",
+        "execution_closure",
         "source",
         "submission_manifest_sha256",
         "viper",
@@ -108,12 +113,14 @@ STAGE_EUF_ENV = {
         {
             "EUF_VIPER_CORPUS_KIND",
             "EUF_VIPER_PREPARE_JOB_ID",
+            "EUF_VIPER_PREPARE_RECEIPT_SHA256",
         }
     ),
     "audit": frozenset(
         {
             "EUF_VIPER_LOCKED_SHARDS",
             "EUF_VIPER_PREPARE_JOB_ID",
+            "EUF_VIPER_PREPARE_RECEIPT_SHA256",
         }
     ),
 }
@@ -568,23 +575,24 @@ def manifest_summary(
     path: Path, payload: dict[str, Any], *, manifest_sha256: str | None = None
 ) -> dict[str, Any]:
     repository = payload["repository"]
-    helper = next(
-        (
-            record
-            for record in repository["source_blobs"]
-            if record["path"] == "scripts/wmi/hermetic_provenance.py"
-        ),
-        None,
-    )
-    if helper is None:
-        raise ProvenanceError("source manifest omits hermetic_provenance.py")
+    source_hashes = {
+        record["path"]: record["sha256"] for record in repository["source_blobs"]
+    }
+    required_helpers = {
+        "provenance_helper_sha256": "scripts/wmi/hermetic_provenance.py",
+        "sealed_build_helper_sha256": "scripts/wmi/sealed_linux_build.py",
+        "execution_closure_helper_sha256": "scripts/wmi/execution_closure.py",
+    }
+    missing = sorted(path for path in required_helpers.values() if path not in source_hashes)
+    if missing:
+        raise ProvenanceError("source manifest omits provenance helpers: " + ", ".join(missing))
     return {
         "attempt": payload["attempt"],
         "manifest": str(path.resolve(strict=True)),
         "manifest_sha256": manifest_sha256 or sha256_file(path),
         "revision": payload["revision"],
         "runtime_tools": payload["runtime_tools"],
-        "provenance_helper_sha256": helper["sha256"],
+        **{name: source_hashes[path] for name, path in required_helpers.items()},
         "source_blob_count": repository["source_blob_count"],
         "source_blobs_sha256": repository["source_blobs_sha256"],
         "source_tree": repository["tree"],
@@ -786,12 +794,16 @@ def verify_bound_artifact(record: Any, root: Path, label: str) -> dict[str, Any]
 
 def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
     receipt_bytes, _ = read_regular_nofollow(args.receipt, "preparation receipt")
+    if not HEX64.fullmatch(args.expected_sha256):
+        raise ProvenanceError("expected preparation receipt SHA-256 is malformed")
+    if sha256_bytes(receipt_bytes) != args.expected_sha256:
+        raise ProvenanceError("preparation receipt SHA-256 differs from external binding")
     value = strict_json_load_bytes(receipt_bytes, args.receipt)
     if canonical_bytes(value) != receipt_bytes:
         raise ProvenanceError("preparation receipt is not canonical JSON")
     require_exact_keys(value, set(PREPARATION_KEYS), "preparation receipt")
     if (
-        value["schema"] != "euf-viper.locked-p0-preparation.v2"
+        value["schema"] != "euf-viper.locked-p0-preparation.v3"
         or value["status"] != "prepared"
     ):
         raise ProvenanceError("invalid preparation receipt schema or status")
@@ -833,13 +845,189 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         "production-evidence",
     ]:
         raise ProvenanceError("preparation receipt lacks the exact locked evidence features")
+    verify_bound_executable(value["feature_report"], "feature report")
+    verify_bound_executable(value["viper"], "euf-viper")
     source = value["source"]
-    if source != {
-        "blob_count": provenance["source_blob_count"],
-        "blobs_sha256": provenance["source_blobs_sha256"],
-        "tree": provenance["source_tree"],
-    }:
+    if type(source) is not dict:
+        raise ProvenanceError("preparation receipt source summary must be an object")
+    require_exact_keys(
+        source,
+        {
+            "blob_count",
+            "blobs_sha256",
+            "tree",
+            "snapshot_manifest_sha256",
+            "build_execution_closure_sha256",
+        },
+        "preparation source summary",
+    )
+    if source["blob_count"] != provenance[
+        "source_blob_count"
+    ] or source["blobs_sha256"] != provenance["source_blobs_sha256"] or source[
+        "tree"
+    ] != provenance["source_tree"]:
         raise ProvenanceError("preparation receipt source summary mismatch")
+    sealed_build = value["sealed_build"]
+    if type(sealed_build) is not dict:
+        raise ProvenanceError("sealed build binding must be an object")
+    require_exact_keys(
+        sealed_build,
+        {
+            "path",
+            "sha256",
+            "source_snapshot_manifest_sha256",
+            "build_execution_closure_sha256",
+        },
+        "sealed build",
+    )
+    sealed_bytes, _ = read_regular_nofollow(Path(sealed_build["path"]), "sealed build manifest")
+    if sha256_bytes(sealed_bytes) != sealed_build["sha256"]:
+        raise ProvenanceError("sealed build manifest SHA-256 drifted")
+    sealed_value = strict_json_load_bytes(sealed_bytes, Path(sealed_build["path"]))
+    if canonical_bytes(sealed_value) != sealed_bytes:
+        raise ProvenanceError("sealed build manifest is not canonical JSON")
+    require_exact_keys(
+        sealed_value,
+        {
+            "schema",
+            "status",
+            "artifacts",
+            "build_execution_closure",
+            "build_execution_closure_sha256",
+            "revision",
+            "source_snapshot",
+            "source_snapshot_manifest_sha256",
+            "source_tree",
+            "toolchain",
+        },
+        "sealed build manifest",
+    )
+    if (
+        sealed_value.get("schema") != "euf-viper.sealed-linux-build.v1"
+        or sealed_value.get("status") != "built"
+        or sealed_value.get("revision") != value["revision"]
+        or sealed_value.get("source_tree") != provenance["source_tree"]
+        or sealed_value.get("source_snapshot_manifest_sha256")
+        != sealed_build["source_snapshot_manifest_sha256"]
+        or sealed_value.get("build_execution_closure_sha256")
+        != sealed_build["build_execution_closure_sha256"]
+    ):
+        raise ProvenanceError("sealed build manifest binding mismatch")
+    if (
+        source["snapshot_manifest_sha256"]
+        != sealed_build["source_snapshot_manifest_sha256"]
+        or source["build_execution_closure_sha256"]
+        != sealed_build["build_execution_closure_sha256"]
+        or sha256_bytes(canonical_bytes(sealed_value["source_snapshot"]))
+        != sealed_build["source_snapshot_manifest_sha256"]
+        or sha256_bytes(canonical_bytes(sealed_value["build_execution_closure"]))
+        != sealed_build["build_execution_closure_sha256"]
+    ):
+        raise ProvenanceError("sealed build embedded manifest hash mismatch")
+    sealed_artifacts = sealed_value["artifacts"]
+    if type(sealed_artifacts) is not dict or set(sealed_artifacts) != {
+        "euf-viper",
+        "euf-viper-build-features",
+    }:
+        raise ProvenanceError("sealed build artifact set differs")
+    for name, record in sealed_artifacts.items():
+        if type(record) is not dict:
+            raise ProvenanceError(f"sealed build artifact {name} must be an object")
+        require_exact_keys(record, {"bytes", "name", "sha256"}, f"sealed artifact {name}")
+        if record["name"] != name or not HEX64.fullmatch(record["sha256"]):
+            raise ProvenanceError(f"sealed build artifact {name} binding is invalid")
+    if (
+        sealed_artifacts["euf-viper"]["sha256"] != value["viper"]["sha256"]
+        or sealed_artifacts["euf-viper"]["bytes"] != value["viper"]["bytes"]
+        or sealed_artifacts["euf-viper-build-features"]["sha256"]
+        != value["feature_report"]["sha256"]
+        or sealed_artifacts["euf-viper-build-features"]["bytes"]
+        != value["feature_report"]["bytes"]
+    ):
+        raise ProvenanceError("sealed build artifacts differ from prepared executables")
+    closure = value["execution_closure"]
+    if type(closure) is not dict:
+        raise ProvenanceError("execution closure binding must be an object")
+    require_exact_keys(closure, {"path", "sha256"}, "execution closure")
+    closure_bytes, _ = read_regular_nofollow(Path(closure["path"]), "execution closure")
+    if sha256_bytes(closure_bytes) != closure["sha256"]:
+        raise ProvenanceError("execution closure manifest SHA-256 drifted")
+    closure_value = strict_json_load_bytes(closure_bytes, Path(closure["path"]))
+    if canonical_bytes(closure_value) != closure_bytes:
+        raise ProvenanceError("execution closure is not canonical JSON")
+    require_exact_keys(
+        closure_value,
+        {"schema", "artifacts", "executables", "libraries", "virtual_libraries"},
+        "execution closure",
+    )
+    if closure_value["schema"] != "euf-viper.linux-execution-closure.v1":
+        raise ProvenanceError("execution closure schema mismatch")
+    if set(closure_value["artifacts"]) != {
+        "checker",
+        "independent-parser",
+        "libz3",
+        "sealed-build",
+    } or set(closure_value["executables"]) != {
+        "euf-viper",
+        "feature-report",
+        "python",
+        "z3",
+        "cvc5",
+        "yices2",
+        "opensmt",
+    }:
+        raise ProvenanceError("execution closure member set differs")
+    for name, record in closure_value["artifacts"].items():
+        if type(record) is not dict:
+            raise ProvenanceError(f"execution closure artifact {name} must be an object")
+        require_exact_keys(
+            record,
+            {"bytes", "category", "name", "path", "sha256"},
+            f"execution closure artifact {name}",
+        )
+        if record["name"] != name or record["category"] != "bound_artifact":
+            raise ProvenanceError(f"execution closure artifact {name} identity differs")
+    for name, record in closure_value["executables"].items():
+        if type(record) is not dict:
+            raise ProvenanceError(f"execution closure executable {name} must be an object")
+        require_exact_keys(
+            record,
+            {
+                "bytes",
+                "category",
+                "name",
+                "path",
+                "sha256",
+                "dynamic_dependencies",
+                "ldd_sha256",
+            },
+            f"execution closure executable {name}",
+        )
+        if record["name"] != name or record["category"] != "executable":
+            raise ProvenanceError(f"execution closure executable {name} identity differs")
+    if type(closure_value["libraries"]) is not list or type(
+        closure_value["virtual_libraries"]
+    ) is not list:
+        raise ProvenanceError("execution closure library records must be arrays")
+    for index, record in enumerate(closure_value["libraries"]):
+        if type(record) is not dict:
+            raise ProvenanceError("execution closure library must be an object")
+        require_exact_keys(
+            record,
+            {"bytes", "category", "path", "sha256"},
+            f"execution closure library {index}",
+        )
+        if record["category"] != "dynamic_library":
+            raise ProvenanceError("execution closure library category differs")
+    closure_records = list(closure_value.get("artifacts", {}).values())
+    closure_records.extend(closure_value.get("executables", {}).values())
+    closure_records.extend(closure_value.get("libraries", []))
+    for record in closure_records:
+        if type(record) is not dict:
+            raise ProvenanceError("execution closure member must be an object")
+        data, metadata = read_regular_nofollow(Path(record["path"]), "execution closure member")
+        if metadata.st_size != record["bytes"] or sha256_bytes(data) != record["sha256"]:
+            raise ProvenanceError(f"execution closure member drifted: {record['path']}")
     if type(value["artifacts"]) is not dict or set(value["artifacts"]) != {
         "solver-config.json",
         "taxonomy/full.jsonl",
@@ -864,14 +1052,34 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         data, _ = read_regular_nofollow(Path(record["path"]), f"corpus {name}")
         if sha256_bytes(data) != record["sha256"]:
             raise ProvenanceError(f"corpus {name} SHA-256 drifted")
-    verify_bound_executable(value["feature_report"], "feature report")
-    verify_bound_executable(value["viper"], "euf-viper")
     if type(value["solver_executables"]) is not dict or set(
         value["solver_executables"]
     ) != {"euf-viper", "z3-default", "z3-sat-euf", "cvc5", "yices2", "opensmt"}:
         raise ProvenanceError("solver executable binding set differs")
     for name, record in value["solver_executables"].items():
         verify_bound_executable(record, f"solver {name}")
+    executable_hashes = {
+        name: record["sha256"] for name, record in closure_value["executables"].items()
+    }
+    if (
+        executable_hashes["euf-viper"] != value["viper"]["sha256"]
+        or executable_hashes["feature-report"] != value["feature_report"]["sha256"]
+        or executable_hashes["python"] != value["runtime_tools"]["python"]["sha256"]
+        or executable_hashes["z3"] != value["solver_executables"]["z3-default"]["sha256"]
+        or executable_hashes["z3"] != value["solver_executables"]["z3-sat-euf"]["sha256"]
+        or executable_hashes["cvc5"] != value["solver_executables"]["cvc5"]["sha256"]
+        or executable_hashes["yices2"] != value["solver_executables"]["yices2"]["sha256"]
+        or executable_hashes["opensmt"] != value["solver_executables"]["opensmt"]["sha256"]
+        or closure_value["artifacts"]["sealed-build"]["sha256"]
+        != sealed_build["sha256"]
+    ):
+        raise ProvenanceError("execution closure differs from prepared runtime bindings")
+    libz3 = closure_value["artifacts"]["libz3"]
+    if not any(
+        record["path"] == libz3["path"] and record["sha256"] == libz3["sha256"]
+        for record in closure_value["libraries"]
+    ):
+        raise ProvenanceError("execution closure does not dynamically bind the hashed libz3")
     return {
         "attempt": value["attempt"],
         "receipt": str(args.receipt.resolve(strict=True)),
@@ -906,6 +1114,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--provenance", required=True)
     prepare.add_argument("--run-root", type=Path, required=True)
     prepare.add_argument("--prepare-job", type=int, required=True)
+    prepare.add_argument("--expected-sha256", required=True)
 
     subparsers.add_parser("audit-submit-environment")
     return parser

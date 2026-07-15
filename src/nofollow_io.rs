@@ -19,6 +19,10 @@ mod unix {
     struct Fingerprint {
         device: u64,
         inode: u64,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        links: u64,
         length: u64,
         modified_seconds: i64,
         modified_nanoseconds: i64,
@@ -33,6 +37,10 @@ mod unix {
         Ok(Fingerprint {
             device: metadata.dev(),
             inode: metadata.ino(),
+            mode: metadata.mode(),
+            uid: metadata.uid(),
+            gid: metadata.gid(),
+            links: metadata.nlink(),
             length: metadata.len(),
             modified_seconds: metadata.mtime(),
             modified_nanoseconds: metadata.mtime_nsec(),
@@ -207,15 +215,73 @@ mod unix {
         Ok(bytes)
     }
 
-    fn unlink_at(parent: &File, name: &OsStr) {
-        if let Ok(name) = c_name(name) {
-            unsafe {
-                libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0);
-            }
+    fn unlink_at(parent: &File, name: &OsStr) -> io::Result<()> {
+        let name = c_name(name).map_err(io::Error::other)?;
+        let result = unsafe { libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) };
+        if result < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
         }
     }
 
+    fn path_names_fingerprint(
+        parent: &File,
+        name: &OsStr,
+        expected: &Fingerprint,
+    ) -> Result<bool, String> {
+        let current = match open_leaf(parent, name, libc::O_RDONLY, 0) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(format!("failed to inspect published evidence: {error}"));
+            }
+        };
+        let metadata = current
+            .metadata()
+            .map_err(|error| format!("failed to inspect published evidence: {error}"))?;
+        if !metadata.is_file() {
+            return Ok(false);
+        }
+        Ok(fingerprint(&current)? == *expected)
+    }
+
+    fn require_path_fingerprint(
+        parent: &File,
+        name: &OsStr,
+        expected: &Fingerprint,
+        path: &Path,
+    ) -> Result<(), String> {
+        if !path_names_fingerprint(parent, name, expected)? {
+            return Err(format!(
+                "published path does not name checked evidence inode: {}",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+
+    fn unlink_if_fingerprint(parent: &File, name: &OsStr, expected: &Fingerprint) -> bool {
+        if matches!(path_names_fingerprint(parent, name, expected), Ok(true)) {
+            return unlink_at(parent, name).is_ok();
+        }
+        false
+    }
+
     pub(crate) fn atomic_write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
+        atomic_write_immutable_inner(path, bytes, || Ok(()), |parent| parent.sync_all())
+    }
+
+    fn atomic_write_immutable_inner<AfterLink, SyncParent>(
+        path: &Path,
+        bytes: &[u8],
+        after_link: AfterLink,
+        sync_parent: SyncParent,
+    ) -> Result<(), String>
+    where
+        AfterLink: FnOnce() -> Result<(), String>,
+        SyncParent: FnOnce(&File) -> io::Result<()>,
+    {
         let (parent, chain, leaf) = open_parent(path, true)?;
         let leaf_c = c_name(leaf)?;
         let existing = unsafe {
@@ -247,6 +313,9 @@ mod unix {
             0o600,
         )
         .map_err(|error| format!("failed to create evidence temporary: {error}"))?;
+        let mut staging_fingerprint = Some(fingerprint(&temporary)?);
+        let mut published = false;
+        let mut complete = false;
         let result = (|| {
             temporary
                 .write_all(bytes)
@@ -254,6 +323,8 @@ mod unix {
             temporary
                 .sync_all()
                 .map_err(|error| format!("failed to sync evidence temporary: {error}"))?;
+            let staging = fingerprint(&temporary)?;
+            staging_fingerprint = Some(staging.clone());
             recheck_parent(path, &chain)?;
             let linked = unsafe {
                 libc::linkat(
@@ -271,14 +342,170 @@ mod unix {
                     io::Error::last_os_error()
                 ));
             }
-            parent
-                .sync_all()
+            published = true;
+            after_link()?;
+            let staging = fingerprint(&temporary)?;
+            staging_fingerprint = Some(staging.clone());
+            require_path_fingerprint(&parent, temporary_os, &staging, path)?;
+            unlink_at(&parent, temporary_os)
+                .map_err(|error| format!("failed to remove evidence staging link: {error}"))?;
+            let staging = fingerprint(&temporary)?;
+            staging_fingerprint = Some(staging.clone());
+            require_path_fingerprint(&parent, leaf, &staging, path)?;
+            sync_parent(&parent)
                 .map_err(|error| format!("failed to sync evidence directory: {error}"))?;
-            recheck_parent(path, &chain)?;
+            let current_parent = recheck_parent(path, &chain)?;
+            require_path_fingerprint(&current_parent, leaf, &staging, path)?;
+            require_path_fingerprint(&parent, leaf, &staging, path)?;
+            complete = true;
             Ok(())
         })();
-        unlink_at(&parent, temporary_os);
+        let mut cleanup_fingerprint = fingerprint(&temporary)
+            .ok()
+            .or_else(|| staging_fingerprint.clone());
+        if published && !complete {
+            if let Some(staging) = cleanup_fingerprint.as_ref() {
+                if unlink_if_fingerprint(&parent, leaf, staging) {
+                    cleanup_fingerprint = fingerprint(&temporary).ok();
+                }
+                let _ = parent.sync_all();
+            }
+        }
+        if let Some(staging) = cleanup_fingerprint.as_ref() {
+            unlink_if_fingerprint(&parent, temporary_os, staging);
+        }
         result
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::fs;
+        use std::sync::{Arc, Barrier};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn temporary_root(label: &str) -> std::path::PathBuf {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock follows Unix epoch")
+                .as_nanos();
+            #[cfg(target_os = "macos")]
+            let temporary_base = std::path::Path::new("/private/tmp").to_owned();
+            #[cfg(not(target_os = "macos"))]
+            let temporary_base = std::env::temp_dir();
+            let root = temporary_base.join(format!(
+                "euf-viper-nofollow-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&root).expect("test directory is created");
+            root
+        }
+
+        #[test]
+        fn final_path_replacement_is_rejected_without_deleting_attacker() {
+            let root = temporary_root("replacement");
+            let output = root.join("evidence.json");
+            let attacked = output.clone();
+            let result = atomic_write_immutable_inner(
+                &output,
+                b"publisher\n",
+                move || {
+                    fs::remove_file(&attacked).expect("published link exists");
+                    fs::write(&attacked, b"attacker\n").expect("attacker replacement is written");
+                    Ok(())
+                },
+                |parent| parent.sync_all(),
+            );
+            assert!(result.is_err());
+            assert_eq!(fs::read(&output).unwrap(), b"attacker\n");
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn parent_rename_is_rejected_and_publisher_inode_is_cleaned() {
+            let root = temporary_root("parent-rename");
+            let parent = root.join("parent");
+            let moved = root.join("moved");
+            fs::create_dir(&parent).unwrap();
+            let output = parent.join("evidence.json");
+            let parent_for_hook = parent.clone();
+            let moved_for_hook = moved.clone();
+            let result = atomic_write_immutable_inner(
+                &output,
+                b"publisher\n",
+                move || {
+                    fs::rename(&parent_for_hook, &moved_for_hook).unwrap();
+                    fs::create_dir(&parent_for_hook).unwrap();
+                    Ok(())
+                },
+                |directory| directory.sync_all(),
+            );
+            assert!(result.is_err());
+            assert!(!moved.join("evidence.json").exists());
+            assert!(!output.exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn directory_sync_failure_leaves_no_publisher_owned_final_path() {
+            let root = temporary_root("sync-failure");
+            let output = root.join("evidence.json");
+            let result = atomic_write_immutable_inner(
+                &output,
+                b"publisher\n",
+                || Ok(()),
+                |_| Err(io::Error::from_raw_os_error(libc::EIO)),
+            );
+            assert!(result.is_err());
+            assert!(!output.exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn post_link_failure_cleans_every_publisher_owned_path() {
+            let root = temporary_root("post-link-failure");
+            let output = root.join("evidence.json");
+            let result = atomic_write_immutable_inner(
+                &output,
+                b"publisher\n",
+                || Err("injected post-link failure".to_owned()),
+                |parent| parent.sync_all(),
+            );
+            assert!(result.is_err());
+            assert!(!output.exists());
+            assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
+            fs::remove_dir_all(root).unwrap();
+        }
+
+        #[test]
+        fn concurrent_immutable_publication_has_exactly_one_winner() {
+            let root = temporary_root("concurrent");
+            let output = Arc::new(root.join("evidence.json"));
+            let barrier = Arc::new(Barrier::new(2));
+            let handles = [b"left\n".to_vec(), b"right\n".to_vec()].map(|content| {
+                let output = Arc::clone(&output);
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    atomic_write_immutable(&output, &content).is_ok()
+                })
+            });
+            let outcomes = handles.map(|handle| handle.join().unwrap());
+            assert_eq!(outcomes.into_iter().filter(|value| *value).count(), 1);
+            assert!(matches!(
+                fs::read(&*output).unwrap().as_slice(),
+                b"left\n" | b"right\n"
+            ));
+            assert_eq!(
+                fs::read_dir(&root)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.file_name().to_string_lossy().starts_with('.'))
+                    .count(),
+                0
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
     }
 }
 

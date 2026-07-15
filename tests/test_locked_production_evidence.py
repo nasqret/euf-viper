@@ -73,9 +73,11 @@ EVIDENCE_SOLVER = textwrap.dedent(
         "rustc": "rustc test",
         "cargo": "cargo test",
         "source_manifest_sha256": "0" * 64,
+        "sealed_source_manifest_sha256": "1" * 64,
+        "execution_closure_sha256": "2" * 64,
     }}
     payload = {{
-        "schema": "euf-viper.production-evidence.v3",
+        "schema": "euf-viper.production-evidence.v4",
         "run_nonce": os.environ["EUF_VIPER_RUN_NONCE"],
         "status": "sat",
         "backend_status": "sat",
@@ -137,6 +139,10 @@ EVIDENCE_SOLVER = textwrap.dedent(
 )
 
 
+@unittest.skipUnless(
+    sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+    "production solver and checker execution requires Linux /proc/self/fd",
+)
 class LockedProductionEvidenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -182,7 +188,7 @@ class LockedProductionEvidenceTests(unittest.TestCase):
             solver for solver in payload["solvers"] if solver["id"] == "euf-viper"
         )
         candidate["evidence"] = {
-            "schema": "euf-viper.production-evidence.v3",
+            "schema": "euf-viper.production-evidence.v4",
             "argv_flag": "--evidence-out",
             "accepted_decisive_statuses": ["sat"],
         }

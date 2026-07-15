@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,10 @@ SPEC.loader.exec_module(AUDIT)
 
 
 class ShadowShardAuditTests(unittest.TestCase):
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "certificate solver and checker execution requires Linux /proc/self/fd",
+    )
     def test_reconstructs_complete_journal_and_rejects_summary_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = CampaignFixture(Path(temporary))
@@ -81,6 +86,10 @@ class ShadowShardAuditTests(unittest.TestCase):
             self.assertEqual(summary["selection"]["selected_instances"], 0)
             self.assertEqual(summary["counts"]["verified_instances"], 0)
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "certificate solver and checker execution requires Linux /proc/self/fd",
+    )
     def test_global_audit_requires_the_exact_source_shard_union(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -154,6 +163,10 @@ class ShadowShardAuditTests(unittest.TestCase):
                     timeout_grace_s=0.05,
                 )
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "certificate solver and checker execution requires Linux /proc/self/fd",
+    )
     def test_global_audit_supports_sparse_continuation_physical_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

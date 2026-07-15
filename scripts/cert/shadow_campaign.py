@@ -67,6 +67,22 @@ ABSTENTIONS = {"unknown", "unsupported"}
 HEX_DIGITS = frozenset("0123456789abcdef")
 MAX_EXCERPT_BYTES = 2_000
 MAX_JSON_OUTPUT_BYTES = 1024 * 1024
+CHECKER_BOOTSTRAP = """\
+import importlib.machinery
+import importlib.util
+import runpy
+import sys
+checker, dependency, *arguments = sys.argv[1:]
+loader = importlib.machinery.SourceFileLoader("independent_qfuf", dependency)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+if spec is None or spec.loader is None:
+    raise SystemExit("cannot load descriptor-bound independent checker dependency")
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+sys.argv = [checker, *arguments]
+runpy.run_path(checker, run_name="__main__")
+"""
 
 WORK_KEYS = {
     "record_type",
@@ -127,6 +143,7 @@ PROCESS_KEYS = {
     "exit_code",
     "timed_out",
     "spawn_error",
+    "descriptor_binding",
     "wall_time_s",
     "stdout_path",
     "stdout_sha256",
@@ -738,7 +755,7 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                     raise ShadowError(f"{context}: invalid production evidence {field}")
             if type(binding["bytes"]) is not int or binding["bytes"] < 1:
                 raise ShadowError(f"{context}: invalid production evidence byte count")
-            if binding["schema"] != "euf-viper.production-evidence.v3":
+            if binding["schema"] != "euf-viper.production-evidence.v4":
                 raise ShadowError(f"{context}: invalid production evidence schema")
             if binding["source_sha256"] != value["source_sha256"]:
                 raise ShadowError(f"{context}: production evidence source hash mismatch")
@@ -864,7 +881,9 @@ def build_plan_record(
     shard_works: Sequence[dict[str, Any]],
     *,
     solver_path: Path,
+    python_path: Path,
     checker_path: Path,
+    independent_parser_path: Path,
     drat_trim_path: Path | None,
     corpus_root: Path | None,
     timeout_s: float,
@@ -890,9 +909,17 @@ def build_plan_record(
             "path": str(solver_path),
             "sha256": solver["sha256"],
         },
+        "python": {
+            "path": str(python_path),
+            "sha256": sha256_file(python_path),
+        },
         "checker": {
             "path": str(checker_path),
             "sha256": sha256_file(checker_path),
+        },
+        "independent_parser": {
+            "path": str(independent_parser_path),
+            "sha256": sha256_file(independent_parser_path),
         },
         "drat_trim": (
             {
@@ -1021,9 +1048,20 @@ def run_cold_process(
     stdout_path: Path,
     stderr_path: Path,
     output_directory: Path,
+    descriptor_hashes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run one command in a fresh process group and durably capture its output."""
 
+    descriptor_available = sys.platform.startswith("linux") and Path(
+        "/proc/self/fd"
+    ).is_dir()
+    descriptor_required = bool(descriptor_hashes) or (
+        os.environ.get("EUF_VIPER_DESCRIPTOR_EXECUTION") == "required"
+    )
+    if descriptor_required and not descriptor_available:
+        raise ShadowError(
+            "certificate execution requires Linux /proc/self/fd descriptor binding"
+        )
     stdout_fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -1037,20 +1075,89 @@ def run_cold_process(
     spawn_error: str | None = None
     timed_out = False
     started = time.monotonic()
+    execution_command = list(command)
+    bound_descriptors: list[int] = []
+    descriptor_records: list[dict[str, str]] = []
+    if descriptor_available and descriptor_hashes:
+        replacements: dict[str, str] = {}
+        try:
+            for raw_path, expected_hash in sorted(descriptor_hashes.items()):
+                path = Path(raw_path)
+                flags = os.O_RDONLY | os.O_NOFOLLOW
+                if hasattr(os, "O_CLOEXEC"):
+                    flags |= os.O_CLOEXEC
+                descriptor = os.open(path, flags)
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ShadowError(f"bound execution input is not regular: {path}")
+                digest = hashlib.sha256()
+                size = 0
+                while True:
+                    block = os.read(descriptor, 1024 * 1024)
+                    if not block:
+                        break
+                    digest.update(block)
+                    size += len(block)
+                after = os.fstat(descriptor)
+                if (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                    metadata.st_ctime_ns,
+                ) != (
+                    after.st_dev,
+                    after.st_ino,
+                    after.st_size,
+                    after.st_mtime_ns,
+                    after.st_ctime_ns,
+                ) or size != after.st_size:
+                    raise ShadowError(f"bound execution input changed while read: {path}")
+                actual_hash = digest.hexdigest()
+                if actual_hash != expected_hash:
+                    raise ShadowError(
+                        f"bound execution SHA-256 mismatch for {path}: "
+                        f"expected {expected_hash}, got {actual_hash}"
+                    )
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                bound_descriptors.append(descriptor)
+                replacements[raw_path] = f"/proc/self/fd/{descriptor}"
+                descriptor_records.append(
+                    {"path": raw_path, "sha256": expected_hash}
+                )
+            execution_command = [replacements.get(argument, argument) for argument in command]
+            if not command or execution_command[0] == command[0]:
+                raise ShadowError("descriptor execution did not bind the command executable")
+            for raw_path in descriptor_hashes:
+                if raw_path not in command:
+                    raise ShadowError(
+                        f"descriptor-bound path is absent from the command: {raw_path}"
+                    )
+        except BaseException:
+            for descriptor in bound_descriptors:
+                os.close(descriptor)
+            raise
+    descriptor_binding = {
+        "mechanism": "linux_procfd" if descriptor_available else "platform_pathname",
+        "files": descriptor_records,
+    }
     try:
         try:
             process = subprocess.Popen(
-                list(command),
+                execution_command,
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_fd,
                 stderr=stderr_fd,
                 env=dict(environment),
                 close_fds=True,
+                pass_fds=tuple(bound_descriptors),
                 start_new_session=True,
             )
         except (OSError, subprocess.SubprocessError) as error:
             spawn_error = f"{type(error).__name__}: {error}"
         finally:
+            for descriptor in bound_descriptors:
+                os.close(descriptor)
             os.close(stdout_fd)
             os.close(stderr_fd)
 
@@ -1084,6 +1191,7 @@ def run_cold_process(
         "exit_code": exit_code,
         "timed_out": timed_out,
         "spawn_error": spawn_error,
+        "descriptor_binding": descriptor_binding,
         "wall_time_s": wall_time_s,
         "stdout_path": _output_relative(stdout_path, output_directory),
         "stdout_sha256": stdout_hash,
@@ -1254,10 +1362,20 @@ def _certify_command(
 
 
 def _checker_command(
-    plan: Mapping[str, Any], work: Mapping[str, Any], manifest_path: Path
+    plan: Mapping[str, Any],
+    work: Mapping[str, Any],
+    manifest_path: Path,
+    prefix: Path,
 ) -> list[str]:
     command = [
+        plan["python"]["path"],
+        "-B",
+        "-I",
+        "-S",
+        "-c",
+        CHECKER_BOOTSTRAP,
         plan["checker"]["path"],
+        plan["independent_parser"]["path"],
         str(manifest_path),
         "--source",
         work["source_path"],
@@ -1266,7 +1384,16 @@ def _checker_command(
         drat = plan["drat_trim"]
         if drat is None:
             raise ShadowError("drat-trim is required for every UNSAT certificate")
-        command.extend(["--drat-trim", drat["path"]])
+        command.extend(
+            [
+                "--dimacs",
+                f"{prefix}.cnf",
+                "--proof",
+                f"{prefix}.drat",
+                "--drat-trim",
+                drat["path"],
+            ]
+        )
     return command
 
 
@@ -1362,6 +1489,10 @@ def execute_attempt(
         stdout_path=certify_stdout,
         stderr_path=certify_stderr,
         output_directory=output_directory,
+        descriptor_hashes={
+            plan["solver"]["path"]: plan["solver"]["sha256"],
+            work["source_path"]: work["source_sha256"],
+        },
     )
 
     checker_command: list[str] | None = None
@@ -1405,7 +1536,7 @@ def execute_attempt(
             failure = ("input_drift", drift)
 
     if failure is None:
-        checker_command = _checker_command(plan, work, manifest_path)
+        checker_command = _checker_command(plan, work, manifest_path, prefix)
         checker_process = run_cold_process(
             checker_command,
             environment=checker_environment,
@@ -1414,6 +1545,22 @@ def execute_attempt(
             stdout_path=attempt_directory / "checker.stdout",
             stderr_path=attempt_directory / "checker.stderr",
             output_directory=output_directory,
+            descriptor_hashes={
+                plan["python"]["path"]: plan["python"]["sha256"],
+                plan["checker"]["path"]: plan["checker"]["sha256"],
+                plan["independent_parser"]["path"]: plan["independent_parser"]["sha256"],
+                work["source_path"]: work["source_sha256"],
+                str(manifest_path): sha256_file(manifest_path),
+                **(
+                    {
+                        f"{prefix}.cnf": sha256_file(Path(f"{prefix}.cnf")),
+                        f"{prefix}.drat": sha256_file(Path(f"{prefix}.drat")),
+                        plan["drat_trim"]["path"]: plan["drat_trim"]["sha256"],
+                    }
+                    if work["expected_result"] == "unsat"
+                    else {}
+                ),
+            },
         )
         failure = _failure_from_process("checker", checker_process)
         if failure is None:
@@ -1509,6 +1656,20 @@ def _validate_process_record(
         type(value["spawn_error"]) is not str or not value["spawn_error"]
     ):
         raise ShadowError(f"{context}: invalid spawn_error")
+    descriptor_binding = _require_exact_keys(
+        value["descriptor_binding"], {"mechanism", "files"}, f"{context} descriptor binding"
+    )
+    if descriptor_binding["mechanism"] not in {"linux_procfd", "platform_pathname"}:
+        raise ShadowError(f"{context}: invalid descriptor mechanism")
+    if type(descriptor_binding["files"]) is not list:
+        raise ShadowError(f"{context}: invalid descriptor file bindings")
+    for index, item in enumerate(descriptor_binding["files"]):
+        binding = _require_exact_keys(
+            item, {"path", "sha256"}, f"{context} descriptor file {index}"
+        )
+        if type(binding["path"]) is not str:
+            raise ShadowError(f"{context}: descriptor path must be a string")
+        _require_hash(binding["sha256"], f"{context} descriptor SHA-256")
     wall = value["wall_time_s"]
     if type(wall) not in {int, float} or not math.isfinite(wall) or wall < 0:
         raise ShadowError(f"{context}: invalid wall_time_s")
@@ -1906,7 +2067,9 @@ def build_summary(
         "parent_raw_sha256": plan["parent_raw_sha256"],
         "plan_sha256": plan["record_sha256"],
         "solver": plan["solver"],
+        "python": plan["python"],
         "checker": plan["checker"],
+        "independent_parser": plan["independent_parser"],
         "drat_trim": plan["drat_trim"],
         "selection": plan["selection"],
         "counts": {
@@ -2047,6 +2210,8 @@ def run_shadow_campaign(
             f"actual {actual_solver_hash}"
         )
     checker_path = resolve_executable(checker, "certificate checker")
+    python_path = resolve_executable(sys.executable, "Python interpreter")
+    independent_parser_path = canonical_nofollow_path(INDEPENDENT_PARSER_PATH)
 
     selected_has_unsat = any(work["expected_result"] == "unsat" for work in shard_works)
     if drat_trim is None and selected_has_unsat:
@@ -2078,7 +2243,14 @@ def run_shadow_campaign(
         if summary_path is not None
         else output_directory / f"{default_stem}.summary.json"
     )
-    protected = [lock_path, raw_path, solver_path, checker_path]
+    protected = [
+        lock_path,
+        raw_path,
+        solver_path,
+        python_path,
+        checker_path,
+        independent_parser_path,
+    ]
     if drat_trim_path is not None:
         protected.append(drat_trim_path)
     protected.extend(Path(work["source_path"]) for work in works)
@@ -2091,7 +2263,9 @@ def run_shadow_campaign(
         works,
         shard_works,
         solver_path=solver_path,
+        python_path=python_path,
         checker_path=checker_path,
+        independent_parser_path=independent_parser_path,
         drat_trim_path=drat_trim_path,
         corpus_root=corpus_root,
         timeout_s=timeout_s,
@@ -2107,7 +2281,9 @@ def run_shadow_campaign(
         lock_path: campaign["lock_file_sha256"],
         raw_path: campaign["raw_sha256"],
         solver_path: locked_solver["sha256"],
+        python_path: plan["python"]["sha256"],
         checker_path: plan["checker"]["sha256"],
+        independent_parser_path: plan["independent_parser"]["sha256"],
     }
     if drat_trim_path is not None:
         snapshots[drat_trim_path] = plan["drat_trim"]["sha256"]

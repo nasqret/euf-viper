@@ -42,7 +42,7 @@ from strict_artifacts import (  # noqa: E402
 )
 
 
-SCHEMA: Final = "euf-viper.production-evidence.v3"
+SCHEMA: Final = "euf-viper.production-evidence.v4"
 CONTRACT: Final = "deterministic-cnf-transcript-v1"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 INDEPENDENT_INTERNAL = re.compile(r"@independent_(.+)_[0-9]+\Z")
@@ -752,7 +752,16 @@ def _validate_source_atom_coverage(
 def _validate_build(value: object, expected_hash: object) -> str:
     build = _exact(
         value,
-        {"features", "target", "profile", "rustc", "cargo", "source_manifest_sha256"},
+        {
+            "features",
+            "target",
+            "profile",
+            "rustc",
+            "cargo",
+            "source_manifest_sha256",
+            "sealed_source_manifest_sha256",
+            "execution_closure_sha256",
+        },
         "solver.build",
     )
     features = build["features"]
@@ -765,6 +774,14 @@ def _validate_build(value: object, expected_hash: object) -> str:
     for field in ("target", "profile", "rustc", "cargo"):
         _string(build[field], f"solver.build.{field}")
     _hash(build["source_manifest_sha256"], "solver.build.source_manifest_sha256")
+    _hash(
+        build["sealed_source_manifest_sha256"],
+        "solver.build.sealed_source_manifest_sha256",
+    )
+    _hash(
+        build["execution_closure_sha256"],
+        "solver.build.execution_closure_sha256",
+    )
     actual = hashlib.sha256(canonical_bytes(build)).hexdigest()
     if _hash(expected_hash, "solver.build_sha256") != actual:
         raise ProductionEvidenceError("solver build manifest SHA-256 mismatch")

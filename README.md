@@ -26,12 +26,12 @@ SMT-LIB and SMT-COMP runs.
 ## Quick Start
 
 ```bash
-cargo test
-cargo run --release -- gen chain 1000 > /tmp/chain.smt2
-cargo run --release -- solve --stats /tmp/chain.smt2
-cargo run --release -- portfolio \
+cargo test --locked
+cargo run --locked --release -- gen chain 1000 > /tmp/chain.smt2
+cargo run --locked --release -- solve --stats /tmp/chain.smt2
+cargo run --locked --release -- portfolio \
   --yices third_party/solvers/bin/yices-smt2 /tmp/chain.smt2
-cargo run --release -- bench --cases 10 --size 5000
+cargo run --locked --release -- bench --cases 10 --size 5000
 target/release/euf-viper bench-or --cases 4 --branches 256 --depth 4
 python3 benches/compare_z3.py generated/synthetic --viper target/release/euf-viper
 scripts/bench/install_solvers.sh
@@ -40,7 +40,7 @@ python3 scripts/bench/compare_solvers.py \
   benchmarks/smtlib-2025/qf_uf_manifest.jsonl --timeout 2 --jobs 8
 python3 scripts/bench/validate_campaign_spec.py \
   campaigns/best-overall-qf-uf-2026-07.json
-cargo build --release --features certificates
+cargo build --locked --release --features certificates
 target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
   --out-prefix results/cert-basic
 scripts/cert/check_certificate.py results/cert-basic.euf.json
@@ -58,7 +58,8 @@ implemented soundly; it is distinct from a timeout.
 
 `solve --evidence-out PATH` is an opt-in, restricted SAT-only certifying mode;
 it is not compiled by the default Cargo features. Build with
-`--features production-evidence` to use it. The mode forces deterministic
+the sealed Linux builder and `--features production-evidence` to use it. An
+ordinary Cargo build fails closed if evidence is requested. The mode forces deterministic
 canonical routes, and sidecars bind the assignment and ground model produced by
 that exact solve. Congruence-closure SAT and UNSAT, all other UNSAT routes, and
 unsupported routes remain nondecisive `unsupported` evidence. The independent
@@ -69,18 +70,22 @@ coverage, or change the ordinary off-mode solve contract. See
 [Production Evidence](docs/book/production-evidence.md).
 
 When the exact `--evidence-out` flag is absent, argument handling and byte-level
-stdout, stderr, and exit status remain compatible with baseline `f8d9205`,
+stdout, stderr, and exit status are compared against an independently checked
+out and pinned-toolchain build of baseline `f8d9205`,
 including legacy unknown and extra solve arguments. Evidence-specific strict
 argument parsing applies only to invocations containing that flag. The ordinary
 help text is therefore unchanged; evidence mode is documented separately here.
 
-The locked evidence campaign builds its binary with
-`--features certificates,production-evidence` and rejects a binary whose
+The locked evidence campaign builds its binary from an attempt-private,
+read-only Linux snapshot with `cargo build --locked --offline` and
+`--features certificates,production-evidence`, and rejects a binary whose
 opt-in `euf-viper-build-features` companion report omits either feature before
 solver installation or campaign freezing. Each WMI submission uses a fresh
 mode-0700 attempt root and checkout, an explicit environment allowlist, and
 source/runtime/receipt hashes; reused revision directories and `--export=ALL`
-are forbidden. Ordinary solves do not allocate evidence transcripts,
+are forbidden. Preparation is submitted alone; arrays are a separate command
+that requires an externally captured exact preparation-receipt SHA-256.
+Ordinary solves do not allocate evidence transcripts,
 duplicate backend clause streams, retain DPLL models, or perform canonical
 evidence sorting.
 

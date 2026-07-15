@@ -190,6 +190,7 @@ RUN_RECORD_KEYS = {
     "repetition",
     "cpu_id",
     "argv",
+    "descriptor_binding",
     "environment_sha256",
     "pid",
     "started_at",
@@ -1583,7 +1584,7 @@ def _load_lock_payload(payload: dict[str, Any], lock_path: Path) -> dict[str, An
                 solver["evidence"], LOCK_EVIDENCE_KEYS, f"{context}.evidence"
             )
             if evidence != {
-                "schema": "euf-viper.production-evidence.v3",
+                "schema": "euf-viper.production-evidence.v4",
                 "argv_flag": "--evidence-out",
                 "accepted_decisive_statuses": ["sat"],
             }:
@@ -2092,6 +2093,38 @@ def _validate_locked_record(
     for field, value in expected_static.items():
         if not _same_json(record[field], value):
             raise CampaignInputError([f"{context}: locked field {field!r} mismatch"])
+
+    descriptor_binding = _require_exact_keys(
+        record["descriptor_binding"],
+        {"mechanism", "solver_sha256", "source_sha256"},
+        f"{context}.descriptor_binding",
+    )
+    if descriptor_binding["mechanism"] not in {
+        "linux_procfd",
+        "platform_pathname",
+    }:
+        raise CampaignInputError(
+            [f"{context}.descriptor_binding: unsupported execution mechanism"]
+        )
+    _require_hash_value(
+        descriptor_binding["solver_sha256"],
+        f"{context}.descriptor_binding.solver_sha256",
+    )
+    _require_hash_value(
+        descriptor_binding["source_sha256"],
+        f"{context}.descriptor_binding.source_sha256",
+    )
+    if (
+        descriptor_binding["solver_sha256"] != solver["sha256"]
+        or descriptor_binding["source_sha256"] != instance["sha256"]
+    ):
+        raise CampaignInputError(
+            [f"{context}.descriptor_binding: source or solver hash mismatch"]
+        )
+    if "evidence" in solver and descriptor_binding["mechanism"] != "linux_procfd":
+        raise CampaignInputError(
+            [f"{context}.descriptor_binding: production execution was not descriptor-bound"]
+        )
 
     for field in ("started_at", "finished_at"):
         _require_string_value(record[field], f"{context}.{field}")

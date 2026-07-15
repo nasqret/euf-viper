@@ -23,6 +23,8 @@ SUBMISSION_MANIFEST_SHA256="${EUF_VIPER_SUBMISSION_MANIFEST_SHA256:?set EUF_VIPE
 SHARDS="${EUF_VIPER_LOCKED_SHARDS:?set EUF_VIPER_LOCKED_SHARDS}"
 SHARED_CORPUS="${EUF_VIPER_SHARED_CORPUS:?set EUF_VIPER_SHARED_CORPUS}"
 PROVENANCE_HELPER="$CHECKOUT/scripts/wmi/hermetic_provenance.py"
+SEALED_BUILD_HELPER="$CHECKOUT/scripts/wmi/sealed_linux_build.py"
+EXECUTION_CLOSURE_HELPER="$CHECKOUT/scripts/wmi/execution_closure.py"
 
 hash_file() {
   local OUTPUT
@@ -55,22 +57,34 @@ environment = value["execution_environment"]
 tools = value["runtime_tools"]
 fields = [
     environment["HOME"], environment["PATH"], environment["RUSTUP_HOME"],
-    environment["CARGO_TARGET_DIR"], environment["TMPDIR"],
+    environment["CARGO_HOME"], environment["CARGO_TARGET_DIR"], environment["TMPDIR"],
     environment["XDG_CACHE_HOME"], environment["XDG_CONFIG_HOME"],
     tools["bash"]["realpath"], tools["cargo"]["realpath"], tools["git"]["realpath"],
     tools["chmod"]["realpath"], tools["env"]["realpath"], tools["mkdir"]["realpath"],
+    tools["ldd"]["realpath"], tools["unshare"]["realpath"],
+    tools["cc"]["realpath"], tools["cxx"]["realpath"], tools["ar"]["realpath"],
+    tools["ranlib"]["realpath"], tools["rustc"]["realpath"], tools["find"]["realpath"],
+    value["sealed_build_helper_sha256"], value["execution_closure_helper_sha256"],
 ]
 if any("\t" in item or "\n" in item for item in fields):
     raise SystemExit("unsafe execution-environment field")
 print("\t".join(fields))
 ' "$VERIFIED_PROVENANCE")"
-IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_TARGET_DIR \
+IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_HOME CARGO_TARGET_DIR \
   PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME BASH_BIN CARGO_BIN GIT_BIN \
-  CHMOD_BIN ENV_BIN MKDIR_BIN \
+  CHMOD_BIN ENV_BIN MKDIR_BIN LDD_BIN UNSHARE_BIN CC_BIN CXX_BIN AR_BIN \
+  RANLIB_BIN RUSTC_BIN FIND_BIN SEALED_BUILD_HELPER_SHA256 \
+  EXECUTION_CLOSURE_HELPER_SHA256 \
   <<<"$EXECUTION_FIELDS"
 
+if [ "$(hash_file "$SEALED_BUILD_HELPER")" != "$SEALED_BUILD_HELPER_SHA256" ] || \
+   [ "$(hash_file "$EXECUTION_CLOSURE_HELPER")" != "$EXECUTION_CLOSURE_HELPER_SHA256" ]; then
+  echo "receipt-bound build helper SHA-256 mismatch" >&2
+  exit 2
+fi
+
 "$MKDIR_BIN" -p "$PRIVATE_HOME" "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" \
-  "$CARGO_TARGET_DIR" "$ATTEMPT_ROOT/results" "$ATTEMPT_ROOT/solvers" \
+  "$CARGO_HOME" "$CARGO_TARGET_DIR" "$ATTEMPT_ROOT/results" "$ATTEMPT_ROOT/solvers" \
   "$ATTEMPT_ROOT/corpus"
 "$CHMOD_BIN" 0700 "$PRIVATE_HOME" "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" \
   "$ATTEMPT_ROOT/results" "$ATTEMPT_ROOT/solvers" "$ATTEMPT_ROOT/corpus"
@@ -81,6 +95,7 @@ clean_env() {
     LANG=C \
     LC_ALL=C \
     PATH="$RUNTIME_PATH" \
+    CARGO_HOME="$CARGO_HOME" \
     RUSTUP_HOME="$RUSTUP_HOME" \
     CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
     TMPDIR="$PRIVATE_TMP" \
@@ -102,9 +117,29 @@ python_clean scripts/bench/validate_campaign_spec.py \
   campaigns/best-overall-qf-uf-2026-07.json \
   --out "$RUN_ROOT/validated-campaign.json"
 
-clean_env "$CARGO_BIN" build --release --features certificates,production-evidence
-VIPER_BINARY="$CARGO_TARGET_DIR/release/euf-viper"
-VIPER_FEATURE_REPORT="$CARGO_TARGET_DIR/release/euf-viper-build-features"
+SEALED_ARTIFACT_DIR="$ATTEMPT_ROOT/build/sealed-release"
+"$MKDIR_BIN" -p "$SEALED_ARTIFACT_DIR" "$ATTEMPT_ROOT/build/sealed-staging"
+python_clean "$SEALED_BUILD_HELPER" build \
+  --repository "$CHECKOUT" \
+  --revision "$EXPECTED_REVISION" \
+  --artifact-dir "$SEALED_ARTIFACT_DIR" \
+  --staging-root "$ATTEMPT_ROOT/build/sealed-staging" \
+  --cargo-home "$CARGO_HOME" \
+  --rustup-home "$RUSTUP_HOME" \
+  --home "$PRIVATE_HOME" \
+  --git "$GIT_BIN" \
+  --cargo "$CARGO_BIN" \
+  --rustc "$RUSTC_BIN" \
+  --unshare "$UNSHARE_BIN" \
+  --ldd "$LDD_BIN" \
+  --cc "$CC_BIN" \
+  --cxx "$CXX_BIN" \
+  --ar "$AR_BIN" \
+  --ranlib "$RANLIB_BIN" \
+  >"$RUN_ROOT/sealed-build-summary.json"
+VIPER_BINARY="$SEALED_ARTIFACT_DIR/euf-viper"
+VIPER_FEATURE_REPORT="$SEALED_ARTIFACT_DIR/euf-viper-build-features"
+SEALED_BUILD_MANIFEST="$SEALED_ARTIFACT_DIR/sealed-build-manifest.json"
 if [ ! -x "$VIPER_FEATURE_REPORT" ]; then
   echo "locked build omitted the production-evidence feature report" >&2
   exit 2
@@ -166,6 +201,28 @@ python_clean scripts/bench/record_solver_config.py \
   --out "$RUN_ROOT/solver-config.json" \
   >"$RUN_ROOT/solver-config-summary.json"
 
+Z3_LIBZ3="$($FIND_BIN "$SOLVER_ROOT" -type f \( -name 'libz3.so' -o -name 'libz3.so.*' \) -print -quit)"
+if [ -z "$Z3_LIBZ3" ]; then
+  echo "Z3 execution closure does not contain libz3" >&2
+  exit 2
+fi
+EXECUTION_CLOSURE_MANIFEST="$RUN_ROOT/execution-closure.json"
+python_clean "$EXECUTION_CLOSURE_HELPER" create \
+  --ldd "$LDD_BIN" \
+  --executable "euf-viper=$VIPER_BINARY" \
+  --executable "feature-report=$VIPER_FEATURE_REPORT" \
+  --executable "python=$PYTHON_BIN" \
+  --executable "z3=$SOLVER_ROOT/bin/z3" \
+  --executable "cvc5=$SOLVER_ROOT/bin/cvc5" \
+  --executable "yices2=$SOLVER_ROOT/bin/yices-smt2" \
+  --executable "opensmt=$SOLVER_ROOT/bin/opensmt" \
+  --artifact "checker=$CHECKOUT/scripts/cert/check_production_evidence.py" \
+  --artifact "independent-parser=$CHECKOUT/scripts/cert/independent_qfuf.py" \
+  --artifact "libz3=$Z3_LIBZ3" \
+  --artifact "sealed-build=$SEALED_BUILD_MANIFEST" \
+  --out "$EXECUTION_CLOSURE_MANIFEST" \
+  >"$RUN_ROOT/execution-closure-summary.json"
+
 CORPUS_INSTANCES="$CORPUS_ROOT/QF_UF"
 python_clean scripts/bench/freeze_campaign.py \
   campaigns/best-overall-qf-uf-2026-07.json \
@@ -220,7 +277,8 @@ fi
 python_clean - "$RUN_ROOT/prepare.json" "$VERIFIED_PROVENANCE" \
   "$RUN_ROOT" "$CORPUS_ROOT" "$FULL_MANIFEST" "$OFFICIAL_MANIFEST" \
   "$VIPER_BINARY" "$VIPER_BUILD_FEATURES" "$VIPER_FEATURE_REPORT" "$SLURM_JOB_ID" \
-  "${SLURM_SUBMIT_DIR:-}" "$SHARDS" <<'PY'
+  "${SLURM_SUBMIT_DIR:-}" "$SHARDS" "$SEALED_BUILD_MANIFEST" \
+  "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
 import hashlib
 import json
 import os
@@ -232,7 +290,7 @@ from pathlib import Path
 (
     raw_out, raw_provenance, raw_root, raw_corpus, raw_full_manifest,
     raw_official_manifest, raw_viper, build_features, raw_feature_report, job_id,
-    submit_directory, shards,
+    submit_directory, shards, raw_sealed_build, raw_execution_closure,
 ) = sys.argv[1:]
 out = Path(raw_out)
 root = Path(raw_root).resolve(strict=True)
@@ -268,8 +326,11 @@ for name in (
     artifacts[name] = {"path": str(path.resolve(strict=True)), "sha256": digest(path)}
 
 solver_config = json.loads((root / "solver-config.json").read_text(encoding="utf-8"))
+sealed_build_path = Path(raw_sealed_build).resolve(strict=True)
+sealed_build = json.loads(sealed_build_path.read_text(encoding="utf-8"))
+execution_closure_path = Path(raw_execution_closure).resolve(strict=True)
 payload = {
-    "schema": "euf-viper.locked-p0-preparation.v2",
+    "schema": "euf-viper.locked-p0-preparation.v3",
     "status": "prepared",
     "attempt": provenance["attempt"],
     "artifacts": artifacts,
@@ -300,6 +361,16 @@ payload = {
     },
     "revision": provenance["revision"],
     "runtime_tools": provenance["runtime_tools"],
+    "sealed_build": {
+        "path": str(sealed_build_path),
+        "sha256": digest(sealed_build_path),
+        "source_snapshot_manifest_sha256": sealed_build["source_snapshot_manifest_sha256"],
+        "build_execution_closure_sha256": sealed_build["build_execution_closure_sha256"],
+    },
+    "execution_closure": {
+        "path": str(execution_closure_path),
+        "sha256": digest(execution_closure_path),
+    },
     "shards": int(shards),
     "solver_executables": {
         record["id"]: executable(record["binary"])
@@ -309,6 +380,8 @@ payload = {
         "blob_count": provenance["source_blob_count"],
         "blobs_sha256": provenance["source_blobs_sha256"],
         "tree": provenance["source_tree"],
+        "snapshot_manifest_sha256": sealed_build["source_snapshot_manifest_sha256"],
+        "build_execution_closure_sha256": sealed_build["build_execution_closure_sha256"],
     },
     "submission_manifest_sha256": provenance["manifest_sha256"],
     "viper": executable(raw_viper),

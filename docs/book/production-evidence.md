@@ -2,12 +2,14 @@
 
 ## Scope
 
-Production evidence v3 is a **restricted SAT-only certifying mode**. It is
+Production evidence v4 is a **restricted SAT-only certifying mode**. It is
 available only through the explicit `production-evidence` Cargo feature and is
 not enabled by the default Cargo features or by the existing `certificates`
 feature. With `--evidence-out` absent, the ordinary parser, solver configuration,
-routes, result, and output contract remain unchanged. This includes byte-exact
-`f8d9205` stdout, stderr, and exit status for no arguments, help, unknown and
+routes, result, and output contract remain unchanged. This is checked by
+independently checking out and building `f8d9205` with the pinned toolchain,
+then comparing byte-exact stdout, stderr, and exit status for no arguments,
+help, unknown and
 extra legacy arguments, file and stdin parsing, successful solves, parse errors,
 and missing files. Strict evidence argument parsing is activated only when the
 exact `--evidence-out` flag occurs; ordinary help remains baseline-compatible.
@@ -29,7 +31,7 @@ reconstruction.
 
 `solve --evidence-out PATH FILE` makes the result and its same-run evidence one
 fail-closed operation. The solver writes a canonical
-UTF-8 `euf-viper.production-evidence.v3` JSON document at `PATH`, flushes it,
+UTF-8 `euf-viper.production-evidence.v4` JSON document at `PATH`, flushes it,
 publishes it with a no-replace hard link, syncs the directory, and only then
 prints a decisive result. An existing target is never replaced.
 
@@ -44,7 +46,8 @@ For SAT, the sidecar binds:
 - source bytes and SHA-256;
 - compile-time Git revision and dirty state;
 - the trusted executable SHA-256 and a build hash over the feature set, target,
-  profile, Rust and Cargo toolchains, and source manifest;
+  profile, Rust and Cargo toolchains, selected source manifest, sealed full
+  source snapshot manifest, and build execution closure;
 - a caller-generated 256-bit run nonce;
 - selected backend and every result-affecting `EUF_VIPER_*` runtime setting;
 - resolved root-CNF and evidence-mode options plus a canonical configuration
@@ -70,28 +73,56 @@ It also verifies typed classes, Boolean values, ground function consistency,
 every source assertion, and the exact status/backend-status pairs `sat/sat`,
 `unsupported/sat`, `unsupported/unsupported`, and `unsupported/unsat`.
 
-Decisive evidence is rejected by default when the build is dirty. A decisive
+Decisive evidence is rejected unless it came from the sealed Linux builder. An
+ordinary Cargo build, including a Linux build with the feature enabled, can run
+off-mode and fail-closed tests but cannot emit evidence. A decisive
 check also requires an independently trusted executable SHA-256; the value
 recorded by the sidecar is not self-authenticating. The emitter requires both
 control variables below and verifies the running executable before publishing
 evidence or a result:
 
 ```bash
-cargo build --release --features production-evidence
+TOOLCHAIN=1.96.0
+ATTEMPT="/tmp/euf-viper-sealed-$UID"
+install -d -m 0700 "$ATTEMPT" "$ATTEMPT/home"
+python3 -B scripts/wmi/sealed_linux_build.py build \
+  --repository . --revision "$(git rev-parse HEAD)" \
+  --artifact-dir target/sealed-release \
+  --staging-root "$ATTEMPT/sealed-staging" \
+  --cargo-home "$HOME/.cargo" --rustup-home "$HOME/.rustup" \
+  --home "$ATTEMPT/home" \
+  --git "$(command -v git)" \
+  --cargo "$(rustup which --toolchain "$TOOLCHAIN" cargo)" \
+  --rustc "$(rustup which --toolchain "$TOOLCHAIN" rustc)" \
+  --unshare "$(command -v unshare)" --ldd "$(command -v ldd)" \
+  --cc "$(command -v cc)" --cxx "$(command -v c++)" \
+  --ar "$(command -v ar)" --ranlib "$(command -v ranlib)"
 export EUF_VIPER_RUN_NONCE="$(openssl rand -hex 32)"
-export EUF_VIPER_TRUSTED_EXECUTABLE_SHA256="$(shasum -a 256 \
-  target/release/euf-viper | awk '{print $1}')"
-target/release/euf-viper solve input.smt2 \
+export EUF_VIPER_TRUSTED_EXECUTABLE_SHA256="$(sha256sum \
+  target/sealed-release/euf-viper | awk '{print $1}')"
+target/sealed-release/euf-viper solve input.smt2 \
   --evidence-out results/input.production-evidence.json
 python3 scripts/cert/check_production_evidence.py \
   results/input.production-evidence.json --source input.smt2 --status sat \
   --executable-sha256 "$EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
 ```
 
+The builder requires Linux `/proc/self/fd`, sealed `memfd_create`, a working
+unprivileged user and mount namespace, private mount propagation, tmpfs, and a
+read-only recursive bind remount. It disables same-UID process inspection,
+extracts the exact Git archive plus the `cargo vendor --locked` registry into
+an attempt-private tmpfs, copies and inventories the pinned Rust sysroot,
+verifies every source byte and mode, and remounts all inputs read-only before
+Cargo or a native compiler runs. Rust/Cargo, compiler/linker/archive tools,
+dynamic loaders, shared libraries, and the full vendored registry are hashed.
+External native tool paths whose file or parent directory is writable by the
+build UID are rejected. Failure of any namespace, seal, mount, read-only, or
+path-stability primitive aborts the build; there is no pathname-only fallback.
+
 ## Locked campaigns
 
-The locked WMI preparation builds one campaign binary with
-`--features certificates,production-evidence`. The same Cargo build emits the
+The locked WMI preparation builds one campaign binary from the sealed snapshot
+with `--features certificates,production-evidence`. The same sealed build emits the
 opt-in `euf-viper-build-features` companion executable. Preparation queries that
 report immediately and fails before solver installation or campaign freezing if
 either feature is absent; the real solver must then pass an evidence-emitting
@@ -100,7 +131,31 @@ solver-configuration recorder repeats the production-evidence check against the
 compiled companion report, then exercises the real solver with `--evidence-out`,
 before it can publish a lock.
 
-Every submission creates a private, attempt-specific mode-0700 remote root and
+Submission is split into two invocations. The first creates the attempt and
+submits **only** preparation:
+
+```bash
+scripts/wmi/submit_locked_p0.sh
+```
+
+It writes a local canonical `locked-p0-prepare-*.json` receipt containing the
+prepare job and exact remote `prepare.json` path. An external orchestrator must
+wait for successful preparation, read that final remote file, capture its
+SHA-256 outside the dependency graph, and explicitly supply both values:
+
+```bash
+scripts/wmi/submit_locked_p0_dependents.sh \
+  results/locked-p0-prepare-ATTEMPT.json \
+  EXTERNALLY_CAPTURED_PREPARE_JSON_SHA256
+```
+
+The second invocation rehashes the remote receipt under that supplied digest
+and runs the full provenance verifier before submitting either array. Both
+arrays and the audit receive the exact digest and independently reject any
+different receipt. The audit depends only on the two accepted arrays. No array
+or audit submission exists in the preparation submitter.
+
+Every preparation creates a private, attempt-specific mode-0700 remote root and
 a fresh no-hardlink detached checkout. The revision is never used as a reusable
 checkout or results directory. Preparation binds the attempt identity and
 canonical paths, every tracked source blob and mode, Git tree, exact execution
@@ -152,6 +207,17 @@ separate, explicitly non-promotional copy; it cannot create a promotable complet
 summary. A malformed frame, broken hash link, or missing completed sidecar is
 fatal.
 
+On Linux, the timed solver, SMT source, certificate solver, Python interpreter,
+checker source, independent parser, generated certificate manifest, and
+generated DIMACS/proof pair, and optional `drat-trim` executable are opened and
+hash-checked once, then executed or read through inherited `/proc/self/fd`
+descriptors. The checker preserves the bound DIMACS, proof, and `drat-trim`
+descriptors when spawning `drat-trim`. Production execution fails closed on
+platforms without this primitive. Preparation separately inventories and
+rehashes every runtime executable, its loader and shared-library closure, the
+checker sources, the sealed build manifest, and Z3's exact `libz3`; sealed
+artifact hashes must match the prepared solver and feature-report bindings.
+
 `scripts/cert/recover_hash_journal.py SOURCE OUTPUT` performs that separate
 forensic recovery. It verifies every complete canonical hash frame and appends a
 `non_promotional_recovery` marker binding the discarded tail. Runner and shadow
@@ -177,7 +243,7 @@ model metadata.
 The existing `certify` command builds a fresh canonical CNF and proof. It is
 valuable independent source-level evidence, but it does not certify the
 literal timed backend call, its transformed CNF, or its inprocessing history.
-Schema v3 binds and replays the exact pre-inprocessing clause stream presented
+Schema v4 binds and replays the exact pre-inprocessing clause stream presented
 through the backend API; it still cannot attest to undocumented clauses or
 transformations created internally by a third-party backend after loading.
 

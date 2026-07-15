@@ -8,7 +8,7 @@ UNAME_M="$(uname -m)"
 BUILD_Z3_API_RUNNER=0
 YICES_REQUIRED=0
 
-mkdir -p "$DEST/downloads" "$DEST/bin"
+mkdir -p "$DEST/downloads" "$DEST/bin" "$DEST/lib"
 
 download_checked() {
   local url="$1"
@@ -48,6 +48,14 @@ install_zip_binary() {
   fi
   cp "$bin" "$DEST/bin/$name"
   chmod +x "$DEST/bin/$name"
+  if [ "$name" = z3 ]; then
+    local z3_library
+    z3_library="$(find "$tmp" -type f \( -name 'libz3.so' -o -name 'libz3.so.*' \) | head -1)"
+    if [ -n "$z3_library" ]; then
+      cp "$z3_library" "$DEST/lib/$(basename "$z3_library")"
+      chmod 0555 "$DEST/lib/$(basename "$z3_library")"
+    fi
+  fi
 }
 
 install_tar_binary() {
@@ -167,11 +175,13 @@ elif [ "$BUILD_Z3_API_RUNNER" = 1 ]; then
   Z3_PACKAGE_DIR="$Z3_WHEEL_ROOT/z3"
   test -f "$Z3_PACKAGE_DIR/include/z3.h"
   test -f "$Z3_PACKAGE_DIR/lib/libz3.so"
+  cp "$Z3_PACKAGE_DIR/lib/libz3.so" "$DEST/lib/libz3.so"
+  chmod 0555 "$DEST/lib/libz3.so"
   "${CC:-cc}" -O2 -DNDEBUG \
     -I "$Z3_PACKAGE_DIR/include" \
     "$ROOT/scripts/bench/z3_native_runner.c" \
     -L "$Z3_PACKAGE_DIR/lib" \
-    -Wl,-rpath,"$Z3_PACKAGE_DIR/lib" \
+    -Wl,-rpath,"$DEST/lib" \
     -lz3 \
     -o "$DEST/bin/z3"
 elif command -v z3 >/dev/null 2>&1; then

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import signal
@@ -16,6 +17,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "bench" / "run_locked_campaign.py"
+RUNNER_SPEC = importlib.util.spec_from_file_location("run_locked_campaign_under_test", RUNNER)
+assert RUNNER_SPEC is not None and RUNNER_SPEC.loader is not None
+RUNNER_MODULE = importlib.util.module_from_spec(RUNNER_SPEC)
+sys.modules[RUNNER_SPEC.name] = RUNNER_MODULE
+RUNNER_SPEC.loader.exec_module(RUNNER_MODULE)
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -290,6 +296,56 @@ def platform_python_version() -> str:
 
 
 class LockedCampaignRunnerTests(unittest.TestCase):
+    @unittest.skipIf(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "non-Linux fail-closed test",
+    )
+    def test_production_execution_fails_closed_without_procfd(self) -> None:
+        with self.assertRaisesRegex(
+            RUNNER_MODULE.CampaignError, "requires Linux /proc/self/fd"
+        ):
+            RUNNER_MODULE._descriptor_execution_available(required=True)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "Linux descriptor execution test",
+    )
+    def test_executable_and_source_path_substitution_cannot_change_bound_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "solver"
+            replacement = root / "replacement"
+            source = root / "source.smt2"
+            write_executable(executable, "#!/bin/sh\nprintf 'original\\n'\n")
+            write_executable(replacement, "#!/bin/sh\nprintf 'attacker\\n'\n")
+            source.write_bytes(b"original source\n")
+            executable_fd = RUNNER_MODULE._open_verified_descriptor(
+                executable, sha256_file(executable), "test executable"
+            )
+            source_fd = RUNNER_MODULE._open_verified_descriptor(
+                source, sha256_file(source), "test source"
+            )
+            try:
+                replacement.replace(executable)
+                source.write_bytes(b"attacker source\n")
+                executed = subprocess.run(
+                    [f"/proc/self/fd/{executable_fd}"],
+                    capture_output=True,
+                    check=False,
+                    pass_fds=(executable_fd,),
+                )
+                captured = subprocess.run(
+                    ["/bin/cat", f"/proc/self/fd/{source_fd}"],
+                    capture_output=True,
+                    check=False,
+                    pass_fds=(source_fd,),
+                )
+            finally:
+                os.close(executable_fd)
+                os.close(source_fd)
+            self.assertEqual((executed.returncode, executed.stdout), (0, b"original\n"))
+            self.assertEqual((captured.returncode, captured.stdout), (0, b"original source\n"))
+
     def test_optional_shard_metadata_is_validated_and_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = CampaignFixture(Path(temporary))

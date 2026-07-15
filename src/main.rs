@@ -7725,15 +7725,21 @@ fn solve_file(path: &str, with_stats: bool, evidence_out: Option<&str>) -> Resul
 fn read_source_nofollow(path: &Path) -> Result<Vec<u8>, String> {
     #[cfg(feature = "production-evidence")]
     {
-        let source = nofollow_io::read_regular(path)?;
-        evidence_work!(EvidenceWorkKind::SourceCapture);
-        Ok(source)
+        production_evidence::require_sealed_build()?;
+        capture_source_nofollow(path)
     }
     #[cfg(not(feature = "production-evidence"))]
     {
         let _ = path;
         Err("--evidence-out requires the production-evidence feature".to_owned())
     }
+}
+
+#[cfg(feature = "production-evidence")]
+fn capture_source_nofollow(path: &Path) -> Result<Vec<u8>, String> {
+    let source = nofollow_io::read_regular(path)?;
+    evidence_work!(EvidenceWorkKind::SourceCapture);
+    Ok(source)
 }
 
 fn solve_file_with_root_cnf_options(
@@ -9286,7 +9292,10 @@ mod tests {
         assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
 
         reset_evidence_work_telemetry();
-        let captured = read_source_nofollow(&path).unwrap();
+        assert!(read_source_nofollow(&path).is_err());
+        assert_eq!(evidence_work_telemetry(), EvidenceWorkTelemetry::default());
+
+        let captured = capture_source_nofollow(&path).unwrap();
         assert_eq!(captured, ordinary);
         let work = evidence_work_telemetry();
         assert_eq!(work.source_captures, 1, "{work:?}");

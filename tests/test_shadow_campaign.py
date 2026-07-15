@@ -345,6 +345,11 @@ class CampaignFixture:
                     "repetition": repetition,
                     "cpu_id": 0,
                     "argv": [solver["binary"], instance["path"], "1"],
+                    "descriptor_binding": {
+                        "mechanism": "platform_pathname",
+                        "solver_sha256": solver["sha256"],
+                        "source_sha256": instance["sha256"],
+                    },
                     "environment_sha256": sha256_bytes(canonical_bytes(environment)),
                     "pid": 1000 + sequence,
                     "started_at": "2026-07-12T00:00:00+00:00",
@@ -580,6 +585,52 @@ class SelectionAndPartitionTests(unittest.TestCase):
             self.assertEqual(summary["verified"], [])
 
 
+class DescriptorExecutionContractTests(unittest.TestCase):
+    def test_unsat_checker_command_binds_generated_proof_artifacts(self) -> None:
+        prefix = Path("/attempt/certificate")
+        command = SHADOW._checker_command(
+            {
+                "python": {"path": "/tools/python"},
+                "checker": {"path": "/tools/checker.py"},
+                "independent_parser": {"path": "/tools/independent.py"},
+                "drat_trim": {"path": "/tools/drat-trim"},
+            },
+            {"expected_result": "unsat", "source_path": "/corpus/input.smt2"},
+            Path("/attempt/certificate.euf.json"),
+            prefix,
+        )
+        self.assertEqual(command[command.index("--dimacs") + 1], f"{prefix}.cnf")
+        self.assertEqual(command[command.index("--proof") + 1], f"{prefix}.drat")
+        self.assertIn("SourceFileLoader", SHADOW.CHECKER_BOOTSTRAP)
+
+    @unittest.skipIf(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "non-Linux fail-closed test",
+    )
+    def test_checker_execution_fails_closed_without_procfd(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError, "requires Linux /proc/self/fd"
+            ):
+                SHADOW.run_cold_process(
+                    [str(root / "checker")],
+                    environment={},
+                    timeout_s=1.0,
+                    grace_s=0.1,
+                    stdout_path=root / "stdout",
+                    stderr_path=root / "stderr",
+                    output_directory=root,
+                    descriptor_hashes={str(root / "checker"): "1" * 64},
+                )
+            self.assertFalse((root / "stdout").exists())
+            self.assertFalse((root / "stderr").exists())
+
+
+@unittest.skipUnless(
+    sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+    "certificate solver and checker execution requires Linux /proc/self/fd",
+)
 class ExecutionTests(unittest.TestCase):
     def test_parent_raw_tampering_is_rejected_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

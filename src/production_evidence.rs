@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::path::Path;
 
-pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v3";
+pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v4";
 
 const RUN_NONCE_ENV: &str = "EUF_VIPER_RUN_NONCE";
 const TRUSTED_EXECUTABLE_SHA256_ENV: &str = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256";
@@ -48,6 +48,8 @@ struct EvidenceBuild {
     rustc: &'static str,
     cargo: &'static str,
     source_manifest_sha256: &'static str,
+    sealed_source_manifest_sha256: &'static str,
+    execution_closure_sha256: &'static str,
 }
 
 #[derive(Serialize)]
@@ -212,6 +214,40 @@ fn trusted_executable_sha256() -> Result<String, String> {
     Ok(actual)
 }
 
+fn embedded_hash(name: &str, value: &'static str) -> Result<&'static str, String> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!(
+            "production evidence requires a sealed Linux build with embedded {name}"
+        ));
+    }
+    Ok(value)
+}
+
+pub(crate) fn require_sealed_build() -> Result<(), String> {
+    if !env!("EUF_VIPER_BUILD_TARGET").contains("linux") {
+        return Err("production evidence requires a sealed Linux build".to_owned());
+    }
+    embedded_hash(
+        "source snapshot manifest SHA-256",
+        env!("EUF_VIPER_BUILD_SEALED_SOURCE_MANIFEST_SHA256"),
+    )?;
+    embedded_hash(
+        "build execution closure SHA-256",
+        env!("EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256"),
+    )?;
+    if env!("EUF_VIPER_BUILD_SEALED_SOURCE_TREE") == "unsealed"
+        || env!("EUF_VIPER_GIT_REVISION") == "unknown"
+        || env!("EUF_VIPER_GIT_DIRTY") != "0"
+    {
+        return Err("production evidence build lacks an exact sealed Git snapshot".to_owned());
+    }
+    Ok(())
+}
+
 fn build_manifest() -> Result<(EvidenceBuild, String), String> {
     let features = env!("EUF_VIPER_BUILD_FEATURES")
         .split(',')
@@ -225,6 +261,8 @@ fn build_manifest() -> Result<(EvidenceBuild, String), String> {
         rustc: env!("EUF_VIPER_BUILD_RUSTC"),
         cargo: env!("EUF_VIPER_BUILD_CARGO"),
         source_manifest_sha256: env!("EUF_VIPER_BUILD_SOURCE_MANIFEST_SHA256"),
+        sealed_source_manifest_sha256: env!("EUF_VIPER_BUILD_SEALED_SOURCE_MANIFEST_SHA256"),
+        execution_closure_sha256: env!("EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256"),
     };
     let digest = sha256_hex(&canonical_bytes(&build)?);
     Ok((build, digest))

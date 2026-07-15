@@ -107,8 +107,9 @@ mkdir -m 0700 "$PRIVATE_HOME" "$EMPTY_TEMPLATE" "$ATTEMPT_ROOT/logs" "$ATTEMPT_R
 
 GIT_BIN="$(PATH="$BOOTSTRAP_PATH" command -v git)"
 PYTHON_BIN="$(PATH="$BOOTSTRAP_PATH" command -v python3)"
-CARGO_BIN="$(PATH="$BOOTSTRAP_PATH" command -v cargo)"
-RUSTC_BIN="$(PATH="$BOOTSTRAP_PATH" command -v rustc)"
+RUSTUP_BIN="$(PATH="$BOOTSTRAP_PATH" command -v rustup)"
+CARGO_BIN="$("$RUSTUP_BIN" which cargo)"
+RUSTC_BIN="$("$RUSTUP_BIN" which rustc)"
 SBATCH_BIN="$(PATH="$BOOTSTRAP_PATH" command -v sbatch)"
 BASH_BIN="/bin/bash"
 
@@ -128,11 +129,12 @@ tool() {
 }
 RUNTIME_PATH="$ORIGINAL_HOME/.cargo/bin:$ORIGINAL_HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 RUSTUP_HOME="$ORIGINAL_HOME/.rustup"
+CARGO_HOME="$ATTEMPT_ROOT/cargo"
 CARGO_TARGET_DIR="$ATTEMPT_ROOT/build/target"
 PRIVATE_TMP="$ATTEMPT_ROOT/tmp"
 XDG_CACHE_HOME="$ATTEMPT_ROOT/cache"
 XDG_CONFIG_HOME="$ATTEMPT_ROOT/config"
-mkdir -m 0700 "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+mkdir -m 0700 "$CARGO_HOME" "$PRIVATE_TMP" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
 MANIFEST="$ATTEMPT_ROOT/submission-provenance.json"
 
 env -i HOME="$ORIGINAL_HOME" LANG=C LC_ALL=C PATH="$BOOTSTRAP_PATH" \
@@ -152,14 +154,17 @@ env -i HOME="$ORIGINAL_HOME" LANG=C LC_ALL=C PATH="$BOOTSTRAP_PATH" \
   --tool "env=$(tool env)" \
   --tool "find=$(tool find)" \
   --tool "git=$GIT_BIN" \
+  --tool "ldd=$(tool ldd)" \
   --tool "mkdir=$(tool mkdir)" \
   --tool "python=$PYTHON_BIN" \
   --tool "ranlib=$(tool ranlib)" \
   --tool "rustc=$RUSTC_BIN" \
+  --tool "unshare=$(tool unshare)" \
   --tool "sbatch=$SBATCH_BIN" \
   --tool "sha256sum=$(tool sha256sum)" \
   --tool "tar=$(tool tar)" \
   --tool "unzip=$(tool unzip)" \
+  --execution-env "CARGO_HOME=$CARGO_HOME" \
   --execution-env "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
   --execution-env "HOME=$PRIVATE_HOME" \
   --execution-env "LANG=C" \
@@ -224,36 +229,10 @@ PREPARE_SUBMISSION="$(ssh "$REMOTE_HOST" "cd $Q_REMOTE_CHECKOUT && $Q_REMOTE_SBA
 PREPARE_JOB="${PREPARE_SUBMISSION%%;*}"
 case "$PREPARE_JOB" in *[!0-9]*|'') echo "invalid prepare job id: $PREPARE_SUBMISSION" >&2; exit 2 ;; esac
 
-FULL_EXPORTS="$COMMON_EXPORTS,EUF_VIPER_PREPARE_JOB_ID=$PREPARE_JOB,EUF_VIPER_CORPUS_KIND=full"
-OFFICIAL_EXPORTS="$COMMON_EXPORTS,EUF_VIPER_PREPARE_JOB_ID=$PREPARE_JOB,EUF_VIPER_CORPUS_KIND=official"
-printf -v Q_FULL_EXPORTS '%q' "$FULL_EXPORTS"
-printf -v Q_OFFICIAL_EXPORTS '%q' "$OFFICIAL_EXPORTS"
-printf -v Q_FULL_STDOUT '%q' "$REMOTE_ATTEMPT_ROOT/logs/full-%A_%a.out"
-printf -v Q_FULL_STDERR '%q' "$REMOTE_ATTEMPT_ROOT/logs/full-%A_%a.err"
-printf -v Q_OFFICIAL_STDOUT '%q' "$REMOTE_ATTEMPT_ROOT/logs/official-%A_%a.out"
-printf -v Q_OFFICIAL_STDERR '%q' "$REMOTE_ATTEMPT_ROOT/logs/official-%A_%a.err"
-
-FULL_SUBMISSION="$(ssh "$REMOTE_HOST" "cd $Q_REMOTE_CHECKOUT && $Q_REMOTE_SBATCH --parsable --kill-on-invalid-dep=yes --dependency=afterok:$PREPARE_JOB --array=0-$((SHARDS - 1))%$MAX_ACTIVE --chdir=$Q_REMOTE_CHECKOUT --output=$Q_FULL_STDOUT --error=$Q_FULL_STDERR --export=$Q_FULL_EXPORTS scripts/wmi/euf_viper_locked_shard.sbatch")"
-FULL_JOB="${FULL_SUBMISSION%%;*}"
-case "$FULL_JOB" in *[!0-9]*|'') echo "invalid full job id: $FULL_SUBMISSION" >&2; exit 2 ;; esac
-
-OFFICIAL_SUBMISSION="$(ssh "$REMOTE_HOST" "cd $Q_REMOTE_CHECKOUT && $Q_REMOTE_SBATCH --parsable --kill-on-invalid-dep=yes --dependency=afterok:$PREPARE_JOB --array=0-$((SHARDS - 1))%$MAX_ACTIVE --chdir=$Q_REMOTE_CHECKOUT --output=$Q_OFFICIAL_STDOUT --error=$Q_OFFICIAL_STDERR --export=$Q_OFFICIAL_EXPORTS scripts/wmi/euf_viper_locked_shard.sbatch")"
-OFFICIAL_JOB="${OFFICIAL_SUBMISSION%%;*}"
-case "$OFFICIAL_JOB" in *[!0-9]*|'') echo "invalid official job id: $OFFICIAL_SUBMISSION" >&2; exit 2 ;; esac
-
-AUDIT_EXPORTS="$COMMON_EXPORTS,EUF_VIPER_PREPARE_JOB_ID=$PREPARE_JOB,EUF_VIPER_LOCKED_SHARDS=$SHARDS"
-printf -v Q_AUDIT_EXPORTS '%q' "$AUDIT_EXPORTS"
-printf -v Q_AUDIT_STDOUT '%q' "$REMOTE_ATTEMPT_ROOT/logs/audit-%j.out"
-printf -v Q_AUDIT_STDERR '%q' "$REMOTE_ATTEMPT_ROOT/logs/audit-%j.err"
-AUDIT_SUBMISSION="$(ssh "$REMOTE_HOST" "cd $Q_REMOTE_CHECKOUT && $Q_REMOTE_SBATCH --parsable --kill-on-invalid-dep=yes --dependency=afterok:$FULL_JOB:$OFFICIAL_JOB --chdir=$Q_REMOTE_CHECKOUT --output=$Q_AUDIT_STDOUT --error=$Q_AUDIT_STDERR --export=$Q_AUDIT_EXPORTS scripts/wmi/euf_viper_locked_audit.sbatch")"
-AUDIT_JOB="${AUDIT_SUBMISSION%%;*}"
-case "$AUDIT_JOB" in *[!0-9]*|'') echo "invalid audit job id: $AUDIT_SUBMISSION" >&2; exit 2 ;; esac
-
-RECEIPT="$ROOT/results/locked-p0-attempt-$ATTEMPT_ID.json"
+RECEIPT="$ROOT/results/locked-p0-prepare-$ATTEMPT_ID.json"
 python3 -B -I -S - "$RECEIPT" "$REMOTE_SETUP" "$REMOTE_HOST" "$REMOTE_PARENT" \
   "$REMOTE_SHARED_CORPUS" "$REVISION" "$SHARDS" "$MAX_ACTIVE" \
-  "$PREPARE_EXPORTS" "$FULL_EXPORTS" "$OFFICIAL_EXPORTS" "$AUDIT_EXPORTS" \
-  "$PREPARE_JOB" "$FULL_JOB" "$OFFICIAL_JOB" "$AUDIT_JOB" <<'PY'
+  "$PREPARE_EXPORTS" "$PREPARE_JOB" <<'PY'
 import json
 import os
 import sys
@@ -261,9 +240,7 @@ from pathlib import Path
 
 (
     raw_path, raw_provenance, remote_host, remote_parent, shared_corpus,
-    revision, shards, max_active, prepare_exports, full_exports,
-    official_exports, audit_exports, prepare_job, full_job, official_job,
-    audit_job,
+    revision, shards, max_active, prepare_exports, prepare_job,
 ) = sys.argv[1:]
 path = Path(raw_path)
 provenance = json.loads(raw_provenance)
@@ -279,19 +256,12 @@ def export_map(value):
 
 attempt = provenance["attempt"]
 payload = {
-    "schema": "euf-viper.locked-p0-submission.v2",
-    "status": "submitted",
+    "schema": "euf-viper.locked-p0-prepare-submission.v3",
+    "status": "prepare_submitted",
     "attempt": attempt,
-    "jobs": {
-        "audit": audit_job,
-        "full": full_job,
-        "official": official_job,
-        "prepare": prepare_job,
-    },
+    "prepare_job": prepare_job,
+    "prepare_receipt": f"{attempt['root']}/results/p0-{prepare_job}/prepare.json",
     "log_paths": {
-        "audit": f"{attempt['root']}/logs/audit-%j.out",
-        "full": f"{attempt['root']}/logs/full-%A_%a.out",
-        "official": f"{attempt['root']}/logs/official-%A_%a.out",
         "prepare": f"{attempt['root']}/logs/prepare-%j.out",
     },
     "max_active": int(max_active),
@@ -301,12 +271,7 @@ payload = {
     "revision": revision,
     "shards": int(shards),
     "shared_corpus": shared_corpus,
-    "submission_environment": {
-        "audit": export_map(audit_exports),
-        "full": export_map(full_exports),
-        "official": export_map(official_exports),
-        "prepare": export_map(prepare_exports),
-    },
+    "prepare_environment": export_map(prepare_exports),
 }
 path.parent.mkdir(parents=True, exist_ok=True)
 encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -325,3 +290,7 @@ finally:
     os.close(directory)
 print(json.dumps(payload, indent=2, sort_keys=True))
 PY
+
+printf 'prepare_submission_receipt=%s\n' "$RECEIPT"
+printf 'next=scripts/wmi/submit_locked_p0_dependents.sh %q %s\n' \
+  "$RECEIPT" '<externally-captured-prepare-receipt-sha256>'

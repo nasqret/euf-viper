@@ -59,7 +59,7 @@ scripts/cert/install_drat_trim.sh
 Emit and check an UNSAT certificate:
 
 ```bash
-cargo build --release --features certificates
+cargo build --locked --release --features certificates
 target/release/euf-viper certify tests/fixtures/basic_unsat.smt2 \
   --out-prefix results/cert-basic
 scripts/cert/check_certificate.py results/cert-basic.euf.json \

@@ -38,9 +38,11 @@ class WmiCertificateScriptTests(unittest.TestCase):
 
     def test_p0_times_the_same_binary_that_emits_certificates(self) -> None:
         text = self.text(P0_PREPARE)
-        build = "build --release --features certificates,production-evidence"
+        build = 'python_clean "$SEALED_BUILD_HELPER" build'
         self.assertIn(build, text)
-        self.assertIn('VIPER_BINARY="$CARGO_TARGET_DIR/release/euf-viper"', text)
+        self.assertIn('VIPER_BINARY="$SEALED_ARTIFACT_DIR/euf-viper"', text)
+        self.assertIn("--revision \"$EXPECTED_REVISION\"", text)
+        self.assertIn("--cargo \"$CARGO_BIN\"", text)
         self.assertLess(text.index(build), text.index("record_solver_config.py"))
         self.assertIn("euf-viper-build-features", text)
         self.assertIn(
@@ -56,6 +58,7 @@ class WmiCertificateScriptTests(unittest.TestCase):
             self.assertIn("verify-preparation-receipt", text)
             self.assertIn('--provenance "$VERIFIED_PROVENANCE"', text)
             self.assertIn('--prepare-job "$PREPARE_JOB_ID"', text)
+            self.assertIn('--expected-sha256 "$PREPARE_RECEIPT_SHA256"', text)
             self.assertNotIn("Path(path).read_text", text)
 
     def test_embedded_python_blocks_compile(self) -> None:

@@ -229,6 +229,51 @@ def assert_descriptor_path_nofollow(path: Path, descriptor: int, context: str) -
         os.close(parent_fd)
 
 
+def _same_regular_identity(
+    parent_fd: int, name: str, metadata: os.stat_result
+) -> bool:
+    try:
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return False
+    return (
+        stat.S_ISREG(current.st_mode)
+        and current.st_dev == metadata.st_dev
+        and current.st_ino == metadata.st_ino
+        and current.st_mode == metadata.st_mode
+        and current.st_uid == metadata.st_uid
+        and current.st_gid == metadata.st_gid
+        and current.st_nlink == metadata.st_nlink
+        and current.st_size == metadata.st_size
+        and current.st_mtime_ns == metadata.st_mtime_ns
+        and current.st_ctime_ns == metadata.st_ctime_ns
+    )
+
+
+def _require_same_regular_identity(
+    parent_fd: int,
+    name: str,
+    metadata: os.stat_result,
+    context: str,
+) -> None:
+    if not _same_regular_identity(parent_fd, name, metadata):
+        raise StrictArtifactError(
+            f"{context}: published path does not name the checked staging inode"
+        )
+
+
+def _unlink_same_identity(
+    parent_fd: int, name: str, metadata: os.stat_result
+) -> bool:
+    if not _same_regular_identity(parent_fd, name, metadata):
+        return False
+    try:
+        os.unlink(name, dir_fd=parent_fd)
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def atomic_write_nofollow(
     path: Path,
     content: bytes,
@@ -247,6 +292,8 @@ def atomic_write_nofollow(
         flags |= os.O_CLOEXEC
     descriptor = -1
     published = False
+    complete = False
+    staging_metadata: os.stat_result | None = None
     try:
         if immutable:
             try:
@@ -273,8 +320,7 @@ def atomic_write_nofollow(
                 raise StrictArtifactError(f"{context}: short temporary write")
             offset += written
         os.fsync(descriptor)
-        os.close(descriptor)
-        descriptor = -1
+        staging_metadata = os.fstat(descriptor)
 
         post_fd, post_fingerprints = _open_directory_chain(
             absolute.parent, f"{context} parent recheck", create=False
@@ -300,24 +346,62 @@ def atomic_write_nofollow(
                 dst_dir_fd=parent_fd,
             )
         published = True
+        staging_metadata = os.fstat(descriptor)
+        if immutable:
+            _require_same_regular_identity(
+                parent_fd, temporary_name, staging_metadata, context
+            )
+            os.unlink(temporary_name, dir_fd=parent_fd)
+            staging_metadata = os.fstat(descriptor)
+        _require_same_regular_identity(
+            parent_fd, absolute.name, staging_metadata, context
+        )
         os.fsync(parent_fd)
         post_fd, post_fingerprints = _open_directory_chain(
             absolute.parent, f"{context} published parent recheck", create=False
         )
-        os.close(post_fd)
-        if post_fingerprints != fingerprints:
-            raise StrictArtifactError(f"{context}: parent path changed during publish")
+        try:
+            if post_fingerprints != fingerprints:
+                raise StrictArtifactError(
+                    f"{context}: parent path changed during publish"
+                )
+            _require_same_regular_identity(
+                post_fd, absolute.name, staging_metadata, context
+            )
+        finally:
+            os.close(post_fd)
+        _require_same_regular_identity(
+            parent_fd, absolute.name, staging_metadata, context
+        )
+        complete = True
         return absolute
     except OSError as error:
         raise StrictArtifactError(f"{context}: atomic publish failed: {error}") from error
     finally:
+        cleanup_metadata = staging_metadata
+        if descriptor >= 0:
+            try:
+                cleanup_metadata = os.fstat(descriptor)
+            except OSError:
+                pass
+        if published and not complete and cleanup_metadata is not None:
+            if _unlink_same_identity(parent_fd, absolute.name, cleanup_metadata):
+                if descriptor >= 0:
+                    try:
+                        cleanup_metadata = os.fstat(descriptor)
+                    except OSError:
+                        pass
+                try:
+                    os.fsync(parent_fd)
+                except OSError:
+                    pass
+        if cleanup_metadata is not None:
+            try:
+                _unlink_same_identity(parent_fd, temporary_name, cleanup_metadata)
+            except OSError:
+                pass
         if descriptor >= 0:
             os.close(descriptor)
-        if not published or immutable:
-            try:
-                os.unlink(temporary_name, dir_fd=parent_fd)
-            except FileNotFoundError:
-                pass
         os.close(parent_fd)
 
 

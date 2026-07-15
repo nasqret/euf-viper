@@ -227,6 +227,11 @@ def write_locked_fixture(
             "repetition": item["repetition"],
             "cpu_id": item["cpu_id"],
             "argv": item["argv"],
+            "descriptor_binding": {
+                "mechanism": "platform_pathname",
+                "solver_sha256": item["solver"]["sha256"],
+                "source_sha256": item["instance"]["sha256"],
+            },
             "environment_sha256": item["environment_sha256"],
             "pid": 1000 + item["sequence"],
             "started_at": "2026-07-12T00:00:00+00:00",
@@ -286,6 +291,11 @@ def write_raw_for_lock(lock: dict[str, object], raw_path: Path) -> list[dict[str
             "repetition": item["repetition"],
             "cpu_id": item["cpu_id"],
             "argv": item["argv"],
+            "descriptor_binding": {
+                "mechanism": "platform_pathname",
+                "solver_sha256": item["solver"]["sha256"],
+                "source_sha256": item["instance"]["sha256"],
+            },
             "environment_sha256": item["environment_sha256"],
             "pid": 2000 + item["sequence"],
             "started_at": "2026-07-12T00:00:00+00:00",

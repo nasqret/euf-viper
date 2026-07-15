@@ -12,7 +12,7 @@ fi
 
 cd "$ROOT"
 mkdir -p "$OUT"
-cargo build --release --features certificates
+cargo build --locked --release --features certificates
 
 for fixture in \
   tests/fixtures/basic_unsat.smt2 \

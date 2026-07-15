@@ -261,7 +261,7 @@ def make_records(
             "binary": paths["euf-viper"],
             "argv_template": ["{binary}", "solve", "{instance}"],
             "evidence": {
-                "schema": "euf-viper.production-evidence.v3",
+                "schema": "euf-viper.production-evidence.v4",
                 "argv_flag": "--evidence-out",
                 "accepted_decisive_statuses": ["sat"],
             },

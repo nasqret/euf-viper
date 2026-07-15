@@ -15,13 +15,14 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         text = WORKFLOW.read_text(encoding="ascii")
         commands = [
             "cargo fmt --all -- --check",
-            "cargo test\n",
-            "cargo test --no-default-features\n",
-            "cargo test --no-default-features --features certificates\n",
-            "cargo test --no-default-features --features production-evidence\n",
-            "cargo test --no-default-features --features certificates,production-evidence\n",
-            "cargo test --all-features\n",
-            "cargo build --release --features certificates,production-evidence",
+            "cargo test --locked\n",
+            "cargo test --locked --no-default-features\n",
+            "cargo test --locked --no-default-features --features certificates\n",
+            "cargo test --locked --no-default-features --features production-evidence\n",
+            "cargo test --locked --no-default-features --features certificates,production-evidence\n",
+            "cargo test --locked --all-features\n",
+            "sealed_linux_build.py build",
+            "python3 -B scripts/ci/build_cli_baseline.py",
         ]
         positions = []
         for command in commands:
@@ -51,13 +52,16 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("allowed={1}", text)
         self.assertIn("evidence status mismatch: expected 'sat', got 'unsupported'", text)
 
-    def test_cli_contract_locks_baseline_bytes_not_weak_statuses(self) -> None:
+    def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")
         self.assertIn("f8d9205", text)
-        self.assertIn("BASE_USAGE", text)
-        self.assertIn("CERTIFICATE_USAGE", text)
+        self.assertIn("--baseline-binary", text)
+        self.assertIn("--baseline-receipt", text)
+        self.assertIn("cli-baseline-build.v1", text)
         self.assertIn("completed.stdout", text)
         self.assertIn("completed.stderr", text)
+        self.assertNotIn("BASE_USAGE", text)
+        self.assertNotIn("CERTIFICATE_USAGE", text)
         for case in (
             "no arguments",
             "unknown top-level command",

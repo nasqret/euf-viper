@@ -132,6 +132,10 @@ def audit_shadow_shard(
         if shadow.sha256_file(solver_path) != solver["sha256"]:
             raise ShadowAuditError("euf-viper binary SHA-256 mismatch")
         checker_path = shadow.resolve_executable(checker, "certificate checker")
+        python_path = shadow.resolve_executable(sys.executable, "Python interpreter")
+        independent_parser_path = shadow.canonical_nofollow_path(
+            shadow.INDEPENDENT_PARSER_PATH
+        )
         drat_path = (
             shadow.resolve_executable(drat_trim, "drat-trim")
             if drat_trim is not None
@@ -150,7 +154,9 @@ def audit_shadow_shard(
             works,
             works,
             solver_path=solver_path,
+            python_path=python_path,
             checker_path=checker_path,
+            independent_parser_path=independent_parser_path,
             drat_trim_path=drat_path,
             corpus_root=corpus_root,
             timeout_s=timeout_s,
@@ -171,7 +177,9 @@ def audit_shadow_shard(
             lock_path: campaign["lock_file_sha256"],
             raw_path: campaign["raw_sha256"],
             solver_path: solver["sha256"],
+            python_path: plan["python"]["sha256"],
             checker_path: plan["checker"]["sha256"],
+            independent_parser_path: plan["independent_parser"]["sha256"],
         }
         if drat_path is not None:
             snapshots[drat_path] = plan["drat_trim"]["sha256"]

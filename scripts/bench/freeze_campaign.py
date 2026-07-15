@@ -449,7 +449,7 @@ def load_solvers(
                 "accepted_decisive_statuses",
             }:
                 raise FreezeError(f"solver {identifier!r} has invalid evidence contract")
-            if evidence["schema"] != "euf-viper.production-evidence.v3":
+            if evidence["schema"] != "euf-viper.production-evidence.v4":
                 raise FreezeError(f"solver {identifier!r} has unsupported evidence schema")
             if evidence["argv_flag"] != "--evidence-out":
                 raise FreezeError(f"solver {identifier!r} has invalid evidence argv flag")

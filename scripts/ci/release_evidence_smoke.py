@@ -114,6 +114,9 @@ def main() -> int:
     parser.add_argument("--repository", type=Path, required=True)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--feature-report", type=Path, required=True)
+    parser.add_argument("--sealed-build-manifest", type=Path, required=True)
+    parser.add_argument("--baseline-binary", type=Path, required=True)
+    parser.add_argument("--baseline-receipt", type=Path, required=True)
     parser.add_argument("--z3", type=Path, required=True)
     parser.add_argument("--cvc5", type=Path, required=True)
     parser.add_argument("--yices2", type=Path, required=True)
@@ -132,6 +135,12 @@ def main() -> int:
     python = Path(sys.executable).resolve(strict=True)
     checker = repository / "scripts/cert/check_production_evidence.py"
     binary_hash = sha256(binary)
+    sealed_build = json.loads(args.sealed_build_manifest.read_bytes())
+    if (
+        sealed_build.get("schema") != "euf-viper.sealed-linux-build.v1"
+        or sealed_build.get("status") != "built"
+    ):
+        raise SystemExit("release smoke received an invalid sealed build manifest")
 
     report = run([feature_report], cwd=repository).stdout.decode("ascii").strip()
     features = report.split(",") if report else []
@@ -149,7 +158,10 @@ def main() -> int:
             binary,
             "--repository",
             repository,
-            "--certificates",
+            "--baseline-binary",
+            args.baseline_binary.resolve(strict=True),
+            "--baseline-receipt",
+            args.baseline_receipt.resolve(strict=True),
         ],
         cwd=repository,
     )
@@ -184,6 +196,15 @@ def main() -> int:
             "sat",
             repository,
         )
+        sat_payload = json.loads(sat_evidence.read_bytes())
+        build = sat_payload.get("solver", {}).get("build", {})
+        if (
+            build.get("sealed_source_manifest_sha256")
+            != sealed_build.get("source_snapshot_manifest_sha256")
+            or build.get("execution_closure_sha256")
+            != sealed_build.get("build_execution_closure_sha256")
+        ):
+            raise SystemExit("release sidecar does not bind the exact sealed build manifests")
 
         unsat_source = root / "unsat.smt2"
         unsat_source.write_text(

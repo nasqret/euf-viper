@@ -16,6 +16,8 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_PATH = ROOT / "scripts" / "wmi" / "hermetic_provenance.py"
+SEALED_BUILD_HELPER_PATH = ROOT / "scripts" / "wmi" / "sealed_linux_build.py"
+EXECUTION_CLOSURE_HELPER_PATH = ROOT / "scripts" / "wmi" / "execution_closure.py"
 SPEC = importlib.util.spec_from_file_location("hermetic_provenance_test", HELPER_PATH)
 assert SPEC is not None and SPEC.loader is not None
 PROVENANCE = importlib.util.module_from_spec(SPEC)
@@ -48,9 +50,14 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         self.git(checkout, "init", "--quiet")
         self.git(checkout, "config", "user.name", "Provenance Test")
         self.git(checkout, "config", "user.email", "provenance@example.invalid")
-        helper = checkout / "scripts" / "wmi" / "hermetic_provenance.py"
-        helper.parent.mkdir(parents=True)
-        shutil.copyfile(HELPER_PATH, helper)
+        for source in (
+            HELPER_PATH,
+            SEALED_BUILD_HELPER_PATH,
+            EXECUTION_CLOSURE_HELPER_PATH,
+        ):
+            helper = checkout / "scripts" / "wmi" / source.name
+            helper.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, helper)
         tracked = checkout / "tracked.txt"
         tracked.write_text("bound source\n", encoding="ascii")
         self.git(checkout, "add", ".")
@@ -71,6 +78,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             for name in sorted(PROVENANCE.REQUIRED_RUNTIME_TOOLS)
         ]
         execution = {
+            "CARGO_HOME": str(attempt / "cargo"),
             "CARGO_TARGET_DIR": str(attempt / "build"),
             "HOME": str(attempt / "home"),
             "LANG": "C",
@@ -127,10 +135,12 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                 "shard": {
                     "EUF_VIPER_CORPUS_KIND": "full",
                     "EUF_VIPER_PREPARE_JOB_ID": "123",
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
                 },
                 "audit": {
                     "EUF_VIPER_LOCKED_SHARDS": "4",
                     "EUF_VIPER_PREPARE_JOB_ID": "123",
+                    "EUF_VIPER_PREPARE_RECEIPT_SHA256": "f" * 64,
                 },
             }[stage]
         )
@@ -149,7 +159,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         with mock.patch.dict(os.environ, environment, clear=True):
             verified = PROVENANCE.verify_manifest(verify_args)
         self.assertEqual(verified["attempt"]["id"], args.attempt_id)
-        self.assertEqual(verified["source_blob_count"], 2)
+        self.assertEqual(verified["source_blob_count"], 4)
         self.assertEqual(
             set(verified["runtime_tools"]), PROVENANCE.REQUIRED_RUNTIME_TOOLS
         )
@@ -285,20 +295,33 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             )
 
     def test_submitter_is_attempt_scoped_and_exports_only_receipt_bindings(self) -> None:
-        text = (ROOT / "scripts" / "wmi" / "submit_locked_p0.sh").read_text(
+        prepare_text = (ROOT / "scripts" / "wmi" / "submit_locked_p0.sh").read_text(
             encoding="ascii"
         )
-        self.assertIn('mktemp -d "$REMOTE_PARENT/attempt-$ATTEMPT_ID-XXXXXXXX"', text)
-        self.assertIn("clone --quiet --no-hardlinks", text)
-        self.assertIn("--ignored=matching", text)
-        self.assertIn("git ls-files -v", text)
-        self.assertIn("env -i", text)
-        self.assertIn("-B -I -S", text)
-        self.assertNotIn("--export=ALL", text)
-        self.assertNotIn('REMOTE_PARENT/$SHORT_REVISION', text)
-        self.assertIn("submission-provenance.json", text)
-        self.assertIn("provenance_helper_sha256", text)
-        self.assertIn("source_blobs_sha256", text)
+        dependent_text = (
+            ROOT / "scripts" / "wmi" / "submit_locked_p0_dependents.sh"
+        ).read_text(encoding="ascii")
+        self.assertIn(
+            'mktemp -d "$REMOTE_PARENT/attempt-$ATTEMPT_ID-XXXXXXXX"',
+            prepare_text,
+        )
+        self.assertIn("clone --quiet --no-hardlinks", prepare_text)
+        self.assertIn("--ignored=matching", prepare_text)
+        self.assertIn("git ls-files -v", prepare_text)
+        self.assertIn("env -i", prepare_text)
+        self.assertIn("-B -I -S", prepare_text)
+        self.assertNotIn("--export=ALL", prepare_text + dependent_text)
+        self.assertNotIn('REMOTE_PARENT/$SHORT_REVISION', prepare_text)
+        self.assertIn("submission-provenance.json", prepare_text)
+        self.assertIn("provenance_helper_sha256", prepare_text)
+        self.assertIn("source_blobs_sha256", prepare_text)
+        self.assertNotIn("--array=", prepare_text)
+        self.assertIn("PREPARE_RECEIPT_SHA256", dependent_text)
+        self.assertIn("--expected-sha256 \"$PREPARE_SHA256\"", dependent_text)
+        self.assertIn("--array=", dependent_text)
+        self.assertIn(
+            "--dependency=afterok:$FULL_JOB:$OFFICIAL_JOB", dependent_text
+        )
 
     def test_preparation_receipt_rehashes_artifacts_and_rejects_ambiguity(self) -> None:
         attempt, checkout, revision, fake_tool = self.make_repository("preparation")
@@ -361,8 +384,117 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             "yices2",
             "opensmt",
         )
+        source_snapshot = {
+            "schema": "euf-viper.sealed-source-snapshot.v1",
+            "revision": provenance["revision"],
+            "tree": provenance["source_tree"],
+            "files": [],
+        }
+        source_snapshot_sha256 = hashlib.sha256(
+            PROVENANCE.canonical_bytes(source_snapshot)
+        ).hexdigest()
+        build_closure = {
+            "schema": "euf-viper.build-execution-closure.v1",
+            "native": [],
+            "rust_toolchain": [],
+        }
+        build_closure_sha256 = hashlib.sha256(
+            PROVENANCE.canonical_bytes(build_closure)
+        ).hexdigest()
+        closure_member = executable(fake_tool)
+        sealed_artifact = {
+            "bytes": closure_member["bytes"],
+            "name": "euf-viper",
+            "sha256": closure_member["sha256"],
+        }
+        sealed_manifest = run_root / "sealed-build-manifest.json"
+        sealed_manifest.write_bytes(
+            PROVENANCE.canonical_bytes(
+                {
+                    "schema": "euf-viper.sealed-linux-build.v1",
+                    "status": "built",
+                    "artifacts": {
+                        "euf-viper": sealed_artifact,
+                        "euf-viper-build-features": {
+                            **sealed_artifact,
+                            "name": "euf-viper-build-features",
+                        },
+                    },
+                    "build_execution_closure": build_closure,
+                    "revision": provenance["revision"],
+                    "source_tree": provenance["source_tree"],
+                    "source_snapshot": source_snapshot,
+                    "source_snapshot_manifest_sha256": source_snapshot_sha256,
+                    "build_execution_closure_sha256": build_closure_sha256,
+                    "toolchain": {"cargo": "cargo fixture", "rustc": "rustc fixture"},
+                }
+            )
+        )
+
+        def closure_artifact(name: str, path: Path) -> dict[str, object]:
+            content = path.read_bytes()
+            return {
+                "bytes": len(content),
+                "category": "bound_artifact",
+                "name": name,
+                "path": str(path.resolve(strict=True)),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+
+        def closure_executable(name: str) -> dict[str, object]:
+            return {
+                "bytes": closure_member["bytes"],
+                "category": "executable",
+                "name": name,
+                "path": closure_member["realpath"],
+                "sha256": closure_member["sha256"],
+                "dynamic_dependencies": [closure_member["realpath"]],
+                "ldd_sha256": "a" * 64,
+            }
+
+        execution_closure = run_root / "execution-closure.json"
+        execution_closure.write_bytes(
+            PROVENANCE.canonical_bytes(
+                {
+                    "schema": "euf-viper.linux-execution-closure.v1",
+                    "artifacts": {
+                        name: closure_artifact(
+                            name,
+                            sealed_manifest if name == "sealed-build" else fake_tool,
+                        )
+                        for name in (
+                            "checker",
+                            "independent-parser",
+                            "libz3",
+                            "sealed-build",
+                        )
+                    },
+                    "executables": {
+                        name: closure_executable(name)
+                        for name in (
+                            "euf-viper",
+                            "feature-report",
+                            "python",
+                            "z3",
+                            "cvc5",
+                            "yices2",
+                            "opensmt",
+                        )
+                    },
+                    "libraries": [
+                        {
+                            "bytes": closure_member["bytes"],
+                            "category": "dynamic_library",
+                            "path": closure_member["realpath"],
+                            "sha256": closure_member["sha256"],
+                        }
+                    ],
+                    "virtual_libraries": [],
+                }
+            )
+        )
         payload = {
-            "schema": "euf-viper.locked-p0-preparation.v2",
+            "schema": "euf-viper.locked-p0-preparation.v3",
             "status": "prepared",
             "attempt": provenance["attempt"],
             "artifacts": artifacts,
@@ -385,6 +517,16 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             },
             "revision": provenance["revision"],
             "runtime_tools": provenance["runtime_tools"],
+            "sealed_build": {
+                "path": str(sealed_manifest),
+                "sha256": hashlib.sha256(sealed_manifest.read_bytes()).hexdigest(),
+                "source_snapshot_manifest_sha256": source_snapshot_sha256,
+                "build_execution_closure_sha256": build_closure_sha256,
+            },
+            "execution_closure": {
+                "path": str(execution_closure),
+                "sha256": hashlib.sha256(execution_closure.read_bytes()).hexdigest(),
+            },
             "shards": 4,
             "solver_executables": {
                 identifier: executable(fake_tool) for identifier in solver_ids
@@ -393,18 +535,28 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                 "blob_count": provenance["source_blob_count"],
                 "blobs_sha256": provenance["source_blobs_sha256"],
                 "tree": provenance["source_tree"],
+                "snapshot_manifest_sha256": source_snapshot_sha256,
+                "build_execution_closure_sha256": build_closure_sha256,
             },
             "submission_manifest_sha256": provenance["manifest_sha256"],
             "viper": executable(fake_tool),
         }
         receipt = run_root / "prepare.json"
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
+        receipt_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
         receipt_args = argparse.Namespace(
             receipt=receipt,
+            expected_sha256=receipt_sha256,
             provenance=json.dumps(provenance, sort_keys=True, separators=(",", ":")),
             run_root=run_root,
             prepare_job=123,
         )
+        receipt_args.expected_sha256 = "0" * 64
+        with self.assertRaisesRegex(
+            PROVENANCE.ProvenanceError, "differs from external binding"
+        ):
+            PROVENANCE.verify_preparation_receipt(receipt_args)
+        receipt_args.expected_sha256 = receipt_sha256
         accepted = PROVENANCE.verify_preparation_receipt(receipt_args)
         self.assertEqual(accepted["status"], "accepted")
 
@@ -416,21 +568,26 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         original_artifact.write_text("taxonomy/full.jsonl\n", encoding="ascii")
         original_receipt = receipt.read_bytes()
         receipt.write_bytes(b'{"schema":1,"schema":2}\n')
+        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "duplicate JSON key"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         receipt.write_bytes(original_receipt)
+        receipt_args.expected_sha256 = receipt_sha256
 
         payload["build_features"].append("production-evidence")
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
+        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "exact locked evidence features"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         payload["build_features"].pop()
 
         payload["attempt"] = {**payload["attempt"], "id": "f" * 32}
         receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
+        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
         with self.assertRaisesRegex(PROVENANCE.ProvenanceError, "attempt mismatch"):
             PROVENANCE.verify_preparation_receipt(receipt_args)
         receipt.write_bytes(original_receipt)
+        receipt_args.expected_sha256 = receipt_sha256
 
         link = run_root / "prepare-link.json"
         link.symlink_to(receipt)
