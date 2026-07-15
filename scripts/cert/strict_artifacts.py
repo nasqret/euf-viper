@@ -438,18 +438,6 @@ def _require_same_regular_identity(
         )
 
 
-def _unlink_same_identity(
-    parent_fd: int, name: str, metadata: os.stat_result
-) -> bool:
-    if not _same_regular_identity(parent_fd, name, metadata):
-        return False
-    try:
-        os.unlink(name, dir_fd=parent_fd)
-    except FileNotFoundError:
-        return False
-    return True
-
-
 def atomic_write_nofollow(
     path: Path,
     content: bytes,
@@ -472,8 +460,6 @@ def atomic_write_nofollow(
         flags |= os.O_CLOEXEC
     descriptor = -1
     existing_descriptor = -1
-    published = False
-    complete = False
     staging_metadata: os.stat_result | None = None
     try:
         if immutable:
@@ -526,7 +512,6 @@ def atomic_write_nofollow(
                     )
                 finally:
                     os.close(post_fd)
-                complete = True
                 return absolute
 
         descriptor = os.open(temporary_name, flags, mode, dir_fd=parent_fd)
@@ -563,7 +548,6 @@ def atomic_write_nofollow(
                 src_dir_fd=parent_fd,
                 dst_dir_fd=parent_fd,
             )
-        published = True
         staging_metadata = os.fstat(descriptor)
         if immutable:
             _require_same_regular_identity(
@@ -609,33 +593,13 @@ def atomic_write_nofollow(
             )
         finally:
             os.close(final_fd)
-        complete = True
         return absolute
     except OSError as error:
         raise StrictArtifactError(f"{context}: atomic publish failed: {error}") from error
     finally:
-        cleanup_metadata = staging_metadata
-        if descriptor >= 0:
-            try:
-                cleanup_metadata = os.fstat(descriptor)
-            except OSError:
-                pass
-        if published and not complete and cleanup_metadata is not None:
-            if _unlink_same_identity(parent_fd, absolute.name, cleanup_metadata):
-                if descriptor >= 0:
-                    try:
-                        cleanup_metadata = os.fstat(descriptor)
-                    except OSError:
-                        pass
-                try:
-                    os.fsync(parent_fd)
-                except OSError:
-                    pass
-        if cleanup_metadata is not None:
-            try:
-                _unlink_same_identity(parent_fd, temporary_name, cleanup_metadata)
-            except OSError:
-                pass
+        # POSIX pathname unlink cannot target the inode held by descriptor.  On
+        # failure, preserve every live name rather than risk deleting a racing
+        # replacement; a later immutable retry reopens and revalidates output.
         if descriptor >= 0:
             os.close(descriptor)
         if existing_descriptor >= 0:

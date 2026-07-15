@@ -50,7 +50,7 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                 )
         self.assertEqual(output.read_bytes(), b"attacker\n")
 
-    def test_parent_rename_cleans_only_the_publishers_inode(self) -> None:
+    def test_parent_rename_preserves_failed_publisher_inode(self) -> None:
         parent = self.root / "parent"
         parent.mkdir()
         moved = self.root / "moved"
@@ -72,9 +72,9 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                     output, b"publisher\n", "parent rename", immutable=True
                 )
         self.assertFalse(output.exists())
-        self.assertFalse((moved / "evidence.json").exists())
+        self.assertEqual((moved / "evidence.json").read_bytes(), b"publisher\n")
 
-    def test_directory_fsync_failure_leaves_no_final_path(self) -> None:
+    def test_directory_fsync_failure_preserves_publisher_output(self) -> None:
         output = self.root / "evidence.json"
         real_fsync = os.fsync
         calls = 0
@@ -91,14 +91,26 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                 STRICT.atomic_write_nofollow(
                     output, b"publisher\n", "fsync failure", immutable=True
                 )
-        self.assertFalse(output.exists())
+        self.assertEqual(output.read_bytes(), b"publisher\n")
 
-    def test_post_link_verification_failure_cleans_all_publisher_links(self) -> None:
+    def test_post_link_verification_failure_preserves_publisher_output(self) -> None:
         output = self.root / "evidence.json"
+        original = STRICT._require_same_regular_identity
+
+        def reject_output(
+            parent_fd: int,
+            name: str,
+            metadata: os.stat_result,
+            context: str,
+        ) -> None:
+            if name == output.name:
+                raise STRICT.StrictArtifactError("injected post-link failure")
+            original(parent_fd, name, metadata, context)
+
         with mock.patch.object(
             STRICT,
             "_require_same_regular_identity",
-            side_effect=STRICT.StrictArtifactError("injected post-link failure"),
+            side_effect=reject_output,
         ):
             with self.assertRaisesRegex(
                 STRICT.StrictArtifactError, "injected post-link failure"
@@ -106,12 +118,13 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                 STRICT.atomic_write_nofollow(
                     output, b"publisher\n", "post-link failure", immutable=True
                 )
-        self.assertFalse(output.exists())
+        self.assertEqual(output.read_bytes(), b"publisher\n")
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
 
-    def test_post_publish_callback_failure_rolls_back_new_inode(self) -> None:
+    def test_callback_failure_preserves_output_and_retry_revalidates(self) -> None:
         output = self.root / "evidence.json"
         callbacks: list[str] = []
+        downstream: list[Path] = []
 
         def before() -> None:
             callbacks.append("before")
@@ -120,10 +133,8 @@ class StrictArtifactPublicationTests(unittest.TestCase):
             callbacks.append("after")
             raise STRICT.StrictArtifactError("injected post-publication failure")
 
-        with self.assertRaisesRegex(
-            STRICT.StrictArtifactError, "injected post-publication failure"
-        ):
-            STRICT.atomic_write_nofollow(
+        def publish_and_continue() -> None:
+            result = STRICT.atomic_write_nofollow(
                 output,
                 b"publisher\n",
                 "post-publication callback",
@@ -131,9 +142,104 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                 pre_publish=before,
                 post_publish=after,
             )
+            downstream.append(result)
+
+        with self.assertRaisesRegex(
+            STRICT.StrictArtifactError, "injected post-publication failure"
+        ):
+            publish_and_continue()
         self.assertEqual(callbacks, ["before", "after"])
-        self.assertFalse(output.exists())
+        self.assertEqual(downstream, [])
+        self.assertEqual(output.read_bytes(), b"publisher\n")
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
+        with self.assertRaisesRegex(STRICT.StrictArtifactError, "immutable artifact drift"):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"different\n",
+                "different retry",
+                immutable=True,
+                post_publish=lambda: callbacks.append("wrong retry callback"),
+            )
+
+        result = STRICT.atomic_write_nofollow(
+            output,
+            b"publisher\n",
+            "matching retry",
+            immutable=True,
+            pre_publish=lambda: callbacks.append("retry before"),
+            post_publish=lambda: callbacks.append("retry after"),
+        )
+        self.assertEqual(result, output.resolve())
+        self.assertEqual(
+            callbacks, ["before", "after", "retry before", "retry after"]
+        )
+        self.assertEqual(output.read_bytes(), b"publisher\n")
+        self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
+    def test_callback_failure_has_no_stale_check_unlink_window(self) -> None:
+        output = self.root / "evidence.json"
+        original = STRICT._same_regular_identity
+        armed = False
+        interposed = False
+
+        def fail_after_publish() -> None:
+            nonlocal armed
+            armed = True
+            raise STRICT.StrictArtifactError("injected callback failure")
+
+        def replace_after_check(
+            parent_fd: int, name: str, metadata: os.stat_result
+        ) -> bool:
+            nonlocal interposed
+            same = original(parent_fd, name, metadata)
+            if armed and name == output.name and same:
+                # The old rollback unlinked by name immediately after this
+                # stale True result, deleting the replacement created here.
+                interposed = True
+                output.unlink()
+                output.write_bytes(b"replacement\n")
+                output.chmod(0o600)
+            return same
+
+        with mock.patch.object(
+            STRICT, "_same_regular_identity", side_effect=replace_after_check
+        ):
+            with self.assertRaisesRegex(
+                STRICT.StrictArtifactError, "injected callback failure"
+            ):
+                STRICT.atomic_write_nofollow(
+                    output,
+                    b"publisher\n",
+                    "stale cleanup check",
+                    immutable=True,
+                    post_publish=fail_after_publish,
+                )
+
+        self.assertFalse(hasattr(STRICT, "_unlink_same_identity"))
+        self.assertFalse(interposed)
+        self.assertEqual(output.read_bytes(), b"publisher\n")
+
+    def test_callback_failure_preserves_replacement_bytes(self) -> None:
+        output = self.root / "evidence.json"
+
+        def replace_and_fail() -> None:
+            output.unlink()
+            output.write_bytes(b"replacement\n")
+            output.chmod(0o600)
+            raise STRICT.StrictArtifactError("replacement callback failure")
+
+        with self.assertRaisesRegex(
+            STRICT.StrictArtifactError, "replacement callback failure"
+        ):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "callback replacement",
+                immutable=True,
+                post_publish=replace_and_fail,
+            )
+        self.assertEqual(output.read_bytes(), b"replacement\n")
 
     def test_fresh_post_publish_parent_replacement_preserves_replacement(self) -> None:
         parent = self.root / "parent"
@@ -156,7 +262,7 @@ class StrictArtifactPublicationTests(unittest.TestCase):
                 post_publish=replace_parent,
             )
         self.assertEqual(output.read_bytes(), b"replacement\n")
-        self.assertFalse((moved / "evidence.json").exists())
+        self.assertEqual((moved / "evidence.json").read_bytes(), b"publisher\n")
         self.assertFalse(list(parent.glob(".*.tmp-*")))
         self.assertFalse(list(moved.glob(".*.tmp-*")))
 
@@ -198,14 +304,14 @@ else:
             self.fail(f"existing FIFO acquisition blocked: {error}")
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_idempotent_post_publish_replacement_is_rejected_without_cleanup(self) -> None:
+    def test_idempotent_same_byte_replacement_is_rejected_without_cleanup(self) -> None:
         output = self.root / "evidence.json"
         output.write_bytes(b"publisher\n")
         output.chmod(0o600)
 
         def replace() -> None:
             output.unlink()
-            output.write_bytes(b"replacement\n")
+            output.write_bytes(b"publisher\n")
             output.chmod(0o600)
 
         with self.assertRaisesRegex(
@@ -218,7 +324,7 @@ else:
                 immutable=True,
                 post_publish=replace,
             )
-        self.assertEqual(output.read_bytes(), b"replacement\n")
+        self.assertEqual(output.read_bytes(), b"publisher\n")
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
 
     def test_idempotent_callbacks_preserve_checked_inode(self) -> None:
@@ -274,7 +380,9 @@ else:
         self.assertTrue(all(not thread.is_alive() for thread in threads))
         self.assertEqual(sorted(outcomes), ["published", "rejected"])
         self.assertIn(output.read_bytes(), {b"left\n", b"right\n"})
-        self.assertFalse(list(self.root.glob(".*.tmp-*")))
+        preserved = list(self.root.glob(".*.tmp-*"))
+        self.assertEqual(len(preserved), 1)
+        self.assertNotEqual(preserved[0].read_bytes(), output.read_bytes())
 
 
 if __name__ == "__main__":
