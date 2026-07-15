@@ -17,14 +17,14 @@ Authoritative exact-revision campaign: prepare/full/official/global-audit
 `144990`/`144991`/`144992`/`144993`, solver revision `30828a4`, with all six
 configurations and both corpus selections hash-bound by the campaign locks.
 
-| Solver configuration | Full 2s / 7,503 | Official 2s / 3,521 | Full 60s / 7,503 | Official 60s / 3,521 |
-| --- | ---: | ---: | ---: | ---: |
-| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 |
-| cvc5 | 7,222 | 3,384 | 7,479 | 3,510 |
-| OpenSMT | 6,916 | 3,215 | 7,448 | 3,497 |
-| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 |
-| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 |
-| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,484 | 3,511 |
+| Solver configuration | Full 2s | Official 2s | Full 60s | Official 60s | Full 1,200s | Official 1,200s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 | 7,502 | 3,520 |
+| cvc5 | 7,222 | 3,384 | 7,478 | 3,510 | 7,495 | 3,517 |
+| OpenSMT | 6,916 | 3,215 | 7,444 | 3,496 | 7,498 | 3,519 |
+| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 | 7,503 | 3,521 |
+| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 | 7,500 | 3,520 |
+| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,483 | 3,511 | 7,492 | 3,516 |
 
 All four global audits reject promotion. At 60 seconds euf-viper's common-wall
 geometric factor is `1.5685x` over Z3 default on the full corpus and `1.5214x`
@@ -35,7 +35,7 @@ is 22 shared Z3/Yices solves missed by euf-viper: nine Goel (six SAT, three
 UNSAT), one UNSAT PEQ, and twelve UNSAT QG `qg7` cases. With no regressions,
 euf-viper needs ten added solves to lead
 Z3 and 21 to lead Yices; matching Yices common timing additionally needs about
-`2.04x` geometric and `4.89x` aggregate improvement. The original 1,200-second
+`2.04x` geometric and `4.89x` aggregate improvement at 60 seconds. The original 1,200-second
 graph `145785`-`145789` is invalid as aggregate evidence: late full and official
 shards failed after `/home` returned `EDQUOT`, and the audits/finalizer were
 cancelled. Certificate arrays `146077`/`146080` failed for the same storage
@@ -46,11 +46,17 @@ remain immutable provenance. Recovery barrier `147305` completed, dispatcher
 `147306` validated the copied P0 base, and fresh 60-second arrays/audits are
 full `147307`/`147308` and official `147309`/`147310`; successor dispatcher
 `147311` releases 1,200-second work only after both audits. All 64 official
-array tasks, batch steps, and extern steps completed `0:0`. Full audit `147308`
-was scheduler-preempted after `02:09:26` and automatically requeued with
-`Restarts=1`; the first attempt left neither final nor temporary analysis.
-Require a complete restarted audit plus duplicate-aware accounting and continue
-to seal all rows until both audits finish. Rollback control
+array tasks, batch steps, and extern steps completed `0:0`. Official audit
+`147310` is terminal `0:0` and rejected promotion. Full audit `147308` survived
+scheduler preemption and later completed `0:0`; successor `147311` submitted
+the fresh 1,200-second arrays/audits `147684`-`147687` and finalizer `147688`.
+All are terminal `COMPLETED 0:0`. The final index SHA-256 is
+`2d1c7a3b...58b64d15`; both full and official analyses reject promotion. At
+1,200 seconds euf-viper is one solve behind Yices2 on each corpus, two solves
+ahead of Z3 default on full, and tied with Z3 default on official. It is
+`1.5522x`/`1.5025x` faster than Z3 geometrically but only
+`0.4838x`/`0.4635x` as fast as Yices2. The only candidate timeout is Goel
+`QF_UF_sokoban.2.prop1_ab_br_max.smt2`. Rollback control
 audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
@@ -611,6 +617,11 @@ independent evidence checks, and a frozen family holdout.
   hard-table cases, which is 10/12 for the current population, and more benefit
   than rejected unconditional quotienting. Derive both `N` and the threshold
   mechanically before reading any T6 projection output.
+- [ ] Use the current four-arm projection contract: unchanged encoder,
+  syntactic polarity-aware interning, guarded-EUF interning, and generic
+  post-CNF factoring. Extend the 25% gate to 8/9 frozen Goel and 1/1 PEQ in
+  addition to 10/12 qg7. The guarded arm must beat both ordinary controls; if
+  it cannot, reject the theory-conditioned mechanism and make no novelty claim.
 
 P1 exit: every survivor passes semantic differential and its preregistered
 opportunity threshold. Failed tracks stop before expensive timing.
@@ -785,26 +796,43 @@ fallback can be an operational portfolio but never a standalone victory.
 1. Preserve corrected zero-error range census `146071` as a final T4 rejection:
    7,503 rows, zero parse errors, zero eligible sources, and exactly zero
    value-cell savings against the 30% threshold. Do not implement Hall/PB.
-2. Quarantine failed certificate chains `146076`-`146078` and
-   `146079`-`146081`. Recreate them from exact revision `8f78543` under a fresh
-   `/work` root and require complete arrays plus terminal audits; do not reuse
-   or interpret partial `/home` output. Replacement full chain is
-   `147315`-`147317`; official is `147318`-`147320`.
+2. Keep failed certificate chains `146076`-`146078`, `146079`-`146081`, and
+   replacement arrays `147316`/`147319` quarantined. The replacement failures
+   split into generation and checker timeouts; held tasks and dependency-held
+   audits `147317`/`147320` are not coverage evidence. Complete independent
+   review of checker repair `940c556`, bound eager-seed allocation, pass
+   exact-head hosted CI, and run only the frozen controls before a multi-case
+   canary. Checker base `e3c1309` passed hosted run `29403602171`; post-CI WMI
+   controls `147522`/`147523` verified both artifacts. Strict count/category
+   metadata and bounded-seed repairs reached Rust `d570062` and checker
+   `11fe184`, but paired review remains NO-GO. Rust must abort on every
+   materialization-pass divergence; the checker must reject duplicate and
+   non-finite JSON plus non-integer SAT variable metadata. Repeat malformed
+   artifact review before push or hosted CI. Never release or interpret the
+   partial arrays.
 3. Preserve rollback audit `145929` as a rejection: do not promote
    whole-instance rollback. Reuse its frozen target/anti-target telemetry only
    in T3 M0 after the remaining fixed-arm gates finish.
 4. Keep modern Kissat 4 rejected: valid sample `145905` lost both geometric and
    aggregate paired gates, so broad `145906` and merge `145907` stay cancelled.
 5. Preserve failed 1,200-second graph `145785`-`145789` as immutable provenance.
-   Copy and verify the exact P0 base under `/work`, submit a fresh continuation
-   chain, and accept only complete full/official audits plus finalization.
-   Barrier/dispatcher `147305`/`147306` passed; monitor arrays
-   `147307`/`147309`, audits `147308`/`147310`, and successor `147311`.
-6. Complete adversarial review and repair of production model/proof sidecars;
-   canonical certificate reruns do not certify the timed production path.
-7. Finish and audit the T1 full parser shadow; independently review T5 before
-   submission; run T6 `146075`; implement only mechanisms that pass their
-   frozen construction thresholds.
+   The replacement `/work` chain is complete: 60-second audits `147308`/`147310`,
+   1,200-second arrays/audits `147684`-`147687`, and finalizer `147688` are all
+   terminal `0:0`. Preserve index SHA-256 `2d1c7a3b...58b64d15` as rejected
+   evidence. Diagnose the sole 1,200-second candidate timeout without rerunning
+   or mutating the sealed graph.
+6. Keep production-evidence repair `f27e254` NO-GO after adversarial review.
+   Its real release smoke uses one official instance with two shards, its
+   prepare/audit provenance comparison requires impossible stage-environment
+   equality, publication has a post-verification path-replacement race, and
+   scheduler-receipt decoding is ASCII despite UTF-8 emission. A bounded repair
+   of those four defects is active. Require a new exact-commit review and real
+   exact-head Ubuntu smoke before any WMI action.
+7. Finish and audit the T1 full parser shadow and independently review T5 before
+   submission. T6 syntactic projection commit `c8c336d` compresses qg7 literals
+   by 93.582% but passes only 4/9 Goel and 0/1 PEQ cases, so it is rejected
+   before timing. Retain it only as independently reviewed diagnostic
+   infrastructure; no solve-path routing is authorized.
 8. If at least two fixed representations survive with 10% oracle headroom, run
    T3 M0 component-pressure telemetry under the frozen S0/S1 contract. The
    current family-confounded 24-source panel has only 3.74% coverage-aware
@@ -814,6 +842,32 @@ fallback can be an operational portfolio but never a standalone victory.
    assertion lineage, and corrected T4 evidence complete.
 9. Select and compose a novel architecture only from independently checked,
    broad paired wins; then rerun P4/P5 on two CPU classes.
+10. Preserve certificate diagnostics `147498`, `147503`, `147514`, `147515`,
+    `147517`, and `147518`. They localize repeated checker reconstruction and
+    dynamic proof saturation. The 28,972-clause replayable eager-seed CNF is
+    SAT, not UNSAT; byte-identical local reconstruction
+    `387fd1e5...1a3ae00e` returned SAT in `0.123ms`. Fast UNSAT requires the
+    finite-domain encoding plus verified symmetry. Strict guarded finite-orbit
+    kernel `51d0d4d` reduces the exact `NEQ048_size9` artifact from 452,786 to
+    262,908 clauses. Prior combined head `ee2de94`
+    reproduces CNF SHA-256 `fed18707...6f14df9` and DRAT SHA-256
+    `38913e75...26a61e`; generation took `0.65s`, the independent v3 checker
+    returned `verified` in `0.84s`, and direct `drat-trim` verified in `0.23s`.
+    Python focused/full discovery and all Rust feature matrices pass. Its
+    integration review returned NO-GO because checked bytes were reopened after
+    hashing, source/output aliases could delete input, and certify CLI parsing
+    was permissive. Repair commit `4851361` snapshots hash-bound bytes through
+    one open, rejects path/inode aliases before cleanup, and strictly validates
+    the CLI. It passes 378 Python tests and 268 Rust tests with four ignored;
+    exact-head adversarial review is running. Hosted CI and a bounded WMI
+    control remain mandatory before publication or campaign use. This is
+    certificate-path evidence only, not production timing, coverage, merge, or
+    superiority evidence.
+11. Treat T6 as projection-only. The syntactic arm failed the frozen Goel/PEQ
+    population gates and is killed before timing. A guarded-EUF arm is eligible
+    only if its independently replayable guard can beat the syntactic control
+    and pass all original qg7/Goel/PEQ thresholds. No novelty claim is allowed
+    before pinned prior-art review.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

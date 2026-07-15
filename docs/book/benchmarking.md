@@ -331,20 +331,28 @@ revision `30828a4`. It adds the exact 3,521-source official selection, OpenSMT,
 Z3 `sat.euf=true`, hash-bound family taxonomy, immutable continuation records,
 and strict global audits.
 
-| Solver configuration | Full 2s | Official 2s | Full 60s | Official 60s |
-| --- | ---: | ---: | ---: | ---: |
-| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 |
-| cvc5 | 7,222 | 3,384 | 7,479 | 3,510 |
-| OpenSMT | 6,916 | 3,215 | 7,448 | 3,497 |
-| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 |
-| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 |
-| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,484 | 3,511 |
+| Solver configuration | Full 2s | Official 2s | Full 60s | Official 60s | Full 1,200s | Official 1,200s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| euf-viper | 7,269 | 3,400 | 7,480 | 3,508 | 7,502 | 3,520 |
+| cvc5 | 7,222 | 3,384 | 7,478 | 3,510 | 7,495 | 3,517 |
+| OpenSMT | 6,916 | 3,215 | 7,444 | 3,496 | 7,498 | 3,519 |
+| Yices2 | 7,445 | 3,490 | 7,500 | 3,518 | 7,503 | 3,521 |
+| Z3 default | 7,412 | 3,474 | 7,489 | 3,514 | 7,500 | 3,520 |
+| Z3 `sat.euf=true` | 7,395 | 3,469 | 7,483 | 3,511 | 7,492 | 3,516 |
 
 Every full/official two/60-second audit rejects. On the 60-second full corpus,
 euf-viper is `1.5685x` faster geometrically than Z3 default on common solves but
 only `0.5873x` by summed common wall time. Its geometric factor against Yices2
 is `0.4910x`. The official factors have the same direction. This is the
 fast-head/weak-tail profile in one paired result, not a solver victory.
+
+The sealed `/work` continuation finalized as jobs `147684`-`147688`; index
+SHA-256 is `2d1c7a3b...58b64d15`. At 1,200 seconds euf-viper is one solve
+behind Yices2 on each corpus, two ahead of Z3 default on full, and tied with Z3
+default on official. Its full/official common-wall geometric factors are
+`1.5522x`/`1.5025x` over Z3 but `0.4838x`/`0.4635x` over Yices2. The single
+candidate timeout is Goel `QF_UF_sokoban.2.prop1_ab_br_max.smt2`. Both terminal
+analyses reject promotion.
 
 ## Bounded Ackermann Rejection
 

@@ -1554,6 +1554,178 @@
   races remain. Hosted run `29398694222` passed only the bounded generic/Rust
   workflow. No lineage census, frontier implementation, or WMI job ran.
 
+## 2026-07-15 - Certificate timeout localization and bounded eager proof seed
+
+- Replacement certificate arrays are stopped and held: official `147319`
+  failed its first 45 tasks with 15 generation and 30 checker timeouts; full
+  `147316` failed its first six with three of each. Audits `147317`/`147320`
+  remain dependency-held. No partial row was interpreted.
+- Checker phase job `147498` measured `47.511s` reconstruction for
+  `gensys_icl019` and `176.956s` for `iso_icl068`, versus only `0.128s` and
+  `0.135s` in DRAT. Hoisting whole-problem validation reduced reconstruction
+  to `4.931s` and `11.046s` in job `147503`; integrated verification jobs
+  `147514`/`147515` completed in six/twelve seconds.
+- Exact isolated checker commit `e3c1309bd4bb1dc19ad0fc5b73e02c585121f6cd`
+  validates a detached canonical problem once and exits early on direct
+  equality contradictions. Review measured a `36.56x` local diagnostic
+  speedup and no parsed-file soundness differential, but found hostile-format
+  integer subclasses and noncanonical zero/one-arity `iff` snapshots. Hosted
+  run `29403602171` passed.
+- Fresh post-hosted WMI controls `147522`/`147523` verified the complete copied
+  `gensys_icl019` and `iso_icl068` UNSAT artifacts in `3.88s` and `5.98s`, with
+  about 65 MB peak RSS and exact source/CNF/DRAT/checker/tool hashes in output.
+  Their diagnostic root was made read-only after both terminal zero exits.
+- Repair `940c556226d766e74cbbad376afec23cdae19851` closes both API findings
+  and validates exact manifest variable/count/finite-domain fields plus
+  semantic seed categories. It passes 351 broad tests, optimized focused tests,
+  and the real 28,972-clause local stream in `3.190s`; independent review and
+  hosted CI are pending.
+- Generation job `147517` showed production solving `NEQ048_size9` in
+  `0.791s`, default eager CNF solving in `0.558s`, and dynamic certification
+  producing no artifact after 300 seconds. Pure replayable EUF seed job
+  `147518` built a 28,972-clause CNF in about `1.036s`. Subsequent exact local
+  reconstruction produced the same SHA-256
+  `387fd1e5cd8a5fb8b75c4d6dff38143e9a1163d5bcaeaeb981931ec24a3ae00e`;
+  direct solving returned SAT in `0.123458ms`. The earlier WMI line was
+  therefore misinterpreted and is not UNSAT evidence.
+- Eager-seed commit `3f6421cfef52cec86f7bb76cb3a16f4ac3c49a9f`
+  passed exact-head hosted run `29402707176`. Broad WMI remains blocked by
+  unbounded cubic allocation and missing strict checker validation of clause
+  counts/categories and `finite_domain_axioms`.
+- Official continuation audit `147310` completed `0:0` after `01:54:27` and
+  published terminal analysis SHA-256
+  `5a02f9bac273e3928231d216c5d3df490ee25b3fe0fd3362415521d1f418e133`.
+  It rejected promotion against every named comparator. At 60 seconds the
+  official solved counts are euf-viper 3,508, cvc5 3,510, OpenSMT 3,496,
+  Yices2 3,518, Z3 default 3,514, and Z3 `sat.euf` 3,511. Full audit `147308`
+  remains running from the immutable requeue and successor `147311` remains
+  dependency-held. No partial full analysis was inspected.
+- T8 commit `6bf7a352` remains census/frontier NO-GO after independent review:
+  active stack semantics, final path identity, source-to-binary/scheduler
+  provenance, independent receipt replay, and feature-off parser isolation are
+  incomplete. Repair is isolated; no WMI was submitted.
+
+## 2026-07-15 - Finite-orbit certificate premise and renewed review gates
+
+- Corrected the central generation diagnosis. The static replayable seed CNF
+  contains 7,966 base, 19,260 transitivity, and 1,746 congruence clauses and is
+  SAT. The Rust dump and preserved WMI probe file are byte-identical at SHA-256
+  `387fd1e5...1a3ae00e`; a fresh direct solve returned SAT in `0.123458ms`.
+- A deterministic domain-9 finite encoding without symmetry generated 194,093
+  finite clauses but did not solve `NEQ048_size9` within 26 seconds and was
+  stopped. The default verified-symmetry route generated 233,158 finite
+  clauses and solved the production CNF UNSAT in `0.164s` locally. This isolates
+  the useful mechanism to canonical orbit restriction, not one-hot encoding
+  alone.
+- Experimental branch `research-certificate-finite-domain`, head
+  `8af25b610848fd173b7c9523506eaef9509602cb`, adds explicit
+  `certify --finite-orbit` mode while preserving default v2 output. It rejects
+  ambient finite and axiom-order controls, fails closed on finite-path SAT,
+  separates finite clauses in an untrusted v3 manifest, and has reproducibility
+  tests. On `NEQ048_size9` it emits 24,264 variables and 452,786 clauses:
+  7,966 base, 233,158 finite, 209,916 transitivity, 1,746 congruence, and zero
+  dynamic conflicts. Generation plus proof took `0.78s`; direct `drat-trim -I`
+  verified in `0.364s`; repeated CNF, DRAT, and manifest hashes were identical.
+  The all-feature release suite passed 256 tests with four ignored; default and
+  no-default suites passed 234/228 with three ignored. This branch is not
+  publishable until an independent checker proves the finite-domain and orbit
+  transformations.
+- Paired review of Rust `d570062` and checker `11fe184` found exact static-seed
+  agreement, including the 3,054,656-visit NEQ plan and byte-identical CNF, but
+  remains NO-GO. Rust can map a second-pass budget divergence to ordinary
+  fallback instead of aborting; the checker accepts duplicate JSON keys,
+  non-finite JSON constants, and float SAT variable counts. Separate bounded
+  repairs are active; no push, hosted gate, WMI probe, merge, or campaign is
+  authorized.
+- Independent production-evidence review of `203fb980` confirmed its two
+  intended repairs but found three promotion-integrity failures: the finalizer
+  trusts analysis-provided lock eligibility, accepts promotion summaries that
+  contradict failed checks, and still aliases some analyzer crashes with exit
+  1 statistical rejection. Realistic sharded Linux coverage is also missing.
+  Diagnostic CI is the only allowed next gate after repair; WMI and merge stay
+  blocked.
+
+## 2026-07-15 - Strict v3 certificate integration and exact replay
+
+- Strict guarded finite-orbit commit `51d0d4d` reduces the exact
+  `NEQ048_size9` certificate from 452,786 to 262,908 clauses while preserving
+  24,264 variables. The categories are 7,966 base, 63,153 guarded rows, 1,754
+  finite coverage, 20,223 equality channels, 1,674 predicate channels, 39,024
+  orbit-lex, and 129,114 guarded channels. This is a 41.9% clause reduction.
+- Independent v3 checker `39acd09` reconstructs the source domain clique,
+  closure, adjacent-swap automorphisms, atom numbering, all seven clause
+  categories, lex auxiliaries, and exact DIMACS before invoking `drat-trim`.
+  Its separate adversarial review returned GO for sealed WMI use.
+- Rust seed allocation repair aborts on every impossible second-pass
+  divergence and commits to exact family/order/normalized seed content. Output
+  transaction repair removes stale or partial CNF, DRAT, and manifest files on
+  all tested parser, allocator, solver, hash, and write failures. CLI parsing
+  now starts the transaction before validating later options while preserving
+  `--finite-orbit`. The isolated exact allocation/transaction head passed
+  independent review.
+- Combined clean head `ee2de94de86f34d00dcc83cf9b79767b42d9911d`
+  passes 57 focused and 376 broad Python tests. Rust passes 264 tests with four
+  ignored under all features, 234/3 by default, 228/3 without defaults, and
+  256/4 with certificates only.
+- Exact release replay regenerated CNF SHA-256
+  `fed1870786e338b2fb4af09ccf49d23a5df9e1158905aeb28fd5b9a386f14df9`
+  and DRAT SHA-256
+  `38913e75653ab9239226085ae41578248d2796b0ac9da1536029acccf426a61e`
+  in `0.65s`. The independent checker returned `verified` in `0.84s`, and
+  direct `drat-trim -I` returned `VERIFIED` in `0.23s`.
+- Fresh integration review is active. No push, hosted claim, or WMI control is
+  accepted before it returns. WMI SSH still times out. The last confirmed full
+  audit `147308` state was running from `2026-07-15T13:03:36` with
+  `Restarts=2`; no current or terminal state is inferred from the outage.
+- The next performance candidate is T6: polarity-aware Boolean-DAG extension
+  interning with separate syntactic and guarded-EUF arms. It is projection-only
+  until actual emitted literals fall by at least 25% on the preregistered
+  qg7/Goel/PEQ majority and it beats ordinary syntactic sharing. No timing or
+  novelty claim exists.
+- Production-evidence repair `f27e2545926d8bd3c3bc873b1ad96b4126ebd60e`
+  recomputes all nine promotion checks, preserves validated analysis hashes and
+  exits in an immutable scheduler receipt, and reopens every preparation,
+  scheduler, lock, manifest, taxonomy, solver, and revision identity during
+  finalization. Its Ubuntu smoke uses distinct full/official inputs and a real
+  two-shard receipt flow. Local results are 466 passed/48 skipped plus 58
+  focused tests. An independent exact-commit review is active; no hosted or WMI
+  action is authorized yet.
+
+## 2026-07-15 - Terminal 1,200-second comparison and gated follow-ups
+
+- WMI recovered. Full 60-second audit `147308` completed `0:0`; successor
+  dispatcher `147311` submitted full/official 1,200-second arrays and audits
+  `147684`-`147687`, followed by finalizer `147688`. Every node completed
+  `0:0`. Final index SHA-256 is `2d1c7a3b...58b64d15`; full and official
+  analysis hashes are `82374f6b...7d5ec02` and `cbd9e0b5...027b8d40`.
+- At 1,200 seconds euf-viper solves 7,502/7,503 full and 3,520/3,521 official.
+  Yices2 solves 7,503/3,521; Z3 default solves 7,500/3,520. Euf-viper is
+  `1.5522x`/`1.5025x` faster than Z3 geometrically but only
+  `0.4838x`/`0.4635x` as fast as Yices2. Both analyses reject promotion.
+- The only euf-viper timeout is Goel
+  `QF_UF_sokoban.2.prop1_ab_br_max.smt2`, SHA-256
+  `cfe0e5e...97f3112`. Its exact source has 35,744 Boolean assertions, 8,682
+  terms, 138 applications, a verified domain of 60, 8,542 constants, and no
+  top-level equality/disequality facts. Bounded structural diagnosis is active;
+  no long local solve or new WMI run was launched.
+- T6 syntactic projection commit `c8c336d` is default-off and diagnostic-only.
+  It passes the 25% literal-reduction gate on 12/12 qg7, 4/9 Goel, and 0/1 PEQ,
+  with aggregate changes of -93.582%, -27.967%, and +11.780%. It therefore
+  fails the frozen Goel/PEQ gates and is killed before timing. Independent code
+  review is pending.
+- Strict certificate integration review rejected `ee2de94`: the checker did
+  not bind hashes to the bytes it later parsed, source/output aliases could
+  delete the source, and malformed certify options were accepted. Repair
+  `4851361b9ac81dec33dab150428e97d967e19854` uses private one-open snapshots,
+  rejects lexical/symlink/hardlink aliases before cleanup, and implements a
+  strict certify grammar. All 378 Python tests and 268 Rust all-feature tests
+  pass with four ignored. A replacement exact-commit review is required.
+- Production-evidence review keeps `f27e254` NO-GO: the real smoke has an
+  invalid one-instance/two-shard official corpus, stage-specific environments
+  are compared for impossible equality, publication has a post-check link race,
+  and UTF-8 receipts are reopened as ASCII. A four-defect repair is active; no
+  hosted or WMI campaign is authorized.
+
 ## Next Entry Template
 
 - Benchmark corpus:

@@ -29,7 +29,7 @@ hashes, six solver configurations, CPU/resource controls, and every child row.
 | --- | ---: | ---: | ---: | ---: |
 | euf-viper | 7,269 | 3,400 | 7,480 | 3,508 |
 | cvc5 | 7,222 | 3,384 | 7,479 | 3,510 |
-| OpenSMT | 6,916 | 3,215 | 7,448 | 3,497 |
+| OpenSMT | 6,916 | 3,215 | 7,448 | 3,496 |
 | Yices2 | 7,445 | 3,490 | 7,500 | 3,518 |
 | Z3 default | 7,412 | 3,474 | 7,489 | 3,514 |
 | Z3 `sat.euf=true` | 7,395 | 3,469 | 7,484 | 3,511 |
@@ -83,6 +83,84 @@ infrastructure failure and establishes no certificate result. Recovery requires
 fresh exact-revision roots under `/work`, complete arrays, and new terminal
 audits. Replacement chains are full `147315`/`147316`/`147317` and official
 `147318`/`147319`/`147320`. No partial certificate output is interpreted.
+
+The replacement arrays exposed two implementation bottlenecks before they
+could complete. Official array `147319` failed its first 45 tasks with exactly
+15 generation timeouts and 30 independent-checker timeouts; full array
+`147316` failed its first six with three of each. Remaining tasks are held and
+audits `147317`/`147320` are dependency-held. They establish no corpus
+coverage.
+
+Bounded diagnostics localize both bottlenecks. In job `147498`, source
+reconstruction without DRAT took `47.511s` for `gensys_icl019` and `176.956s`
+for `iso_icl068`, while DRAT took only `0.128s` and `0.135s`. Hoisting
+whole-problem validation reduced those reconstruction times to `4.931s` and
+`11.046s` in job `147503`; integrated jobs `147514`/`147515` verified the same
+sources in six and twelve seconds of wall time. Isolated checker commit
+`e3c1309` validates a detached canonical snapshot once and checks the exact
+21,006-lemma `NEQ048_size9` suffix in `2.1508s`. Review found no parsed-file
+soundness differential and measured a `36.56x` local diagnostic speedup, but
+found two public-API edge defects involving hostile integer formatting and
+noncanonical zero/one-arity `iff` snapshots. Exact-head hosted run
+`29403602171` passed. Fresh post-CI WMI controls `147522`/`147523` verified two
+complete copied UNSAT artifacts in `3.88s` and `5.98s`, at about 65 MB peak
+RSS, with exact checker/tool/artifact hashes.
+
+Repair chain `940c556`/`75347bd`/`11fe184` closes those API defects, requires
+exact manifest counts, regenerates the deterministic seed prefix, and matches
+Rust's bounded candidate policy. The 355-test Python suite and exact
+28,972-clause reconstruction pass. Paired review is still NO-GO: Rust does not
+abort on every impossible materialization-pass divergence, while the CLI
+checker accepts duplicate/non-finite JSON and float SAT variable counts. Both
+bounded repairs must pass another malformed-artifact review before push, hosted
+CI, or any combined canary.
+
+Generation probe `147517` showed production solving `NEQ048_size9` in
+`0.791s`, while dynamic certification produced no artifact after 300 seconds.
+Probe `147518` instead materialized only replayable transitivity and congruence
+lemmas: 7,966 base plus 19,260 transitivity plus 1,746 congruence clauses.
+Construction took about `1.036s`. Exact local reconstruction later proved that
+the preserved file and Rust dump are byte-identical at SHA-256
+`387fd1e5...1a3ae00e`, and direct solving returned SAT in `0.123458ms`. The
+earlier WMI line was misinterpreted: replayable eager seeds alone do not close
+this instance. Exact eager-seed commit `3f6421cf` passed hosted run
+`29402707176`, but no broad WMI follows from it.
+
+The successful route is finite-domain encoding with independently verified
+source symmetry. Deterministic domain-9 one-hot encoding without symmetry did
+not solve within 26 seconds; the verified-symmetry production route solved in
+`0.164s`. Experimental certificate head `8af25b6` emits a deterministic v3
+artifact with 24,264 variables and 452,786 clauses in `0.78s`; direct
+`drat-trim` verifies the propositional proof in `0.364s`. This establishes only
+the performance premise. An independent checker must still validate the
+finite-domain premise, adjacent-swap source automorphisms, and exact lex-leader
+encoding before v3 is a certificate or any fresh campaign is allowed.
+
+That missing checker now exists on an isolated reviewed branch, and a stricter
+guarded kernel removes the redundant full finite/transitivity suffix. Combined
+head `ee2de94` emits 24,264 variables and 262,908 clauses: 7,966 base, 63,153
+guarded rows, 1,754 finite coverage, 20,223 equality channels, 1,674 predicate
+channels, 39,024 adjacent-orbit lex clauses, and 129,114 guarded channels. The
+independent checker reconstructs the finite premise, closed functions,
+adjacent-swap automorphisms, atom IDs, all seven categories, lex auxiliaries,
+and exact DIMACS bytes from the source rather than trusting Rust metadata.
+
+An exact local replay generated CNF SHA-256 `fed18707...6f14df9` and DRAT
+SHA-256 `38913e75...26a61e` in `0.65s`; the checker returned `verified` in
+`0.84s`, and direct `drat-trim -I` verified in `0.23s`. Focused/full Python
+tests and all Rust feature matrices pass. A fresh adversarial review of the
+combined tree, exact-head hosted CI, and a bounded WMI control are still
+required. This remains certificate-path evidence, not timed production or
+coverage evidence.
+
+That combined review returned NO-GO. The checker hashed and then reopened
+source/CNF/proof paths, an input aliased to an output could be deleted by
+cleanup, and malformed certify options could silently select the wrong mode or
+path. Repair commit `4851361` copies and hashes each checked artifact through a
+single open into a private snapshot, rejects lexical and inode aliases before
+cleanup, and implements a strict certify grammar. It passes 378 Python tests
+and 268 all-feature Rust tests with four ignored. Replacement review, hosted
+CI, and WMI control remain mandatory.
 
 These replacement campaigns can establish that each reported source result has
 an independently checked canonical witness or refutation. They do **not** yet
@@ -162,6 +240,20 @@ missing parser metadata, newly runner-owned receipt fixtures, and receipt checks
 that mask intended negative cases stopped the workflow before Rust, release,
 `strace`, namespaces, sealed memfd, procfs, or locked smoke. No WMI preflight or
 corpus run followed; another isolated repair is active.
+
+The latest isolated production-evidence repair is exact commit `f27e254`. It
+recomputes all nine promotion predicates from aggregate/bootstrap data,
+preserves validated analysis hashes and exits through an immutable scheduler
+receipt, and reopens every preparation/scheduler receipt and lock identity at
+finalization. Its Ubuntu smoke uses distinct full and official manifests and
+taxonomies and executes a two-shard analyzer-to-finalizer receipt flow. Local
+verification reports 466 passed with 48 skipped plus 58 focused tests. A fresh
+independent review returned NO-GO: the real official smoke has one instance but
+requests two shards, preparation and audit environments are required to compare
+equal despite stage-specific variables, publication can replace a checked path
+at the link boundary, and UTF-8 scheduler receipts are reopened as ASCII. A
+bounded four-defect repair is active. No hosted Ubuntu or WMI result exists, so
+this does not yet repair the production evidence claim.
 
 ## Causal Controls
 
@@ -301,10 +393,24 @@ audits `147308`/`147310`, and successor dispatcher `147311`, which releases the
 1,200-second stage only after both audits. The first full shard completed from
 the `/work` command and output paths. Official array `147309` later completed
 all 64 tasks with zero task, batch, or extern exits. Full audit `147308` was
-scheduler-preempted after `02:09:26`; Slurm requeued the immutable job with one
-restart, and the first attempt left no final or temporary analysis artifact.
-The restarted full audit must run from scratch and pass duplicate-aware terminal
-accounting. No continuation row is interpreted before both audits finish.
+scheduler-preempted after `02:09:26`; Slurm requeued the immutable job, and the
+first attempt left no final or temporary analysis artifact. After a temporary
+gateway outage, a live refresh proved that the complete restart finished
+`0:0`. Official audit `147310` completed `0:0` after `01:54:27`; its terminal
+artifact SHA-256 is `5a02f9ba...1f418e133` and its promotion status is rejected
+against all five comparators. At 60 seconds the official solved counts are
+euf-viper 3,508, cvc5 3,510, OpenSMT 3,496, Yices2 3,518, Z3 default 3,514,
+and Z3 `sat.euf` 3,511.
+
+Successor `147311` then submitted the fresh 1,200-second full/official
+arrays/audits `147684`-`147687` and finalizer `147688`. Every node completed
+`0:0`. Final index SHA-256 is `2d1c7a3b...58b64d15`; full/official analysis
+hashes are `82374f6b...7d5ec02` and `cbd9e0b5...027b8d40`. Euf-viper solves
+7,502/7,503 full and 3,520/3,521 official, versus Yices2 7,503/3,521 and Z3
+default 7,500/3,520. Its common-wall geometric factor is
+`1.5522x`/`1.5025x` over Z3 but only `0.4838x`/`0.4635x` over Yices2. Both
+analyses reject promotion. The single remaining candidate timeout is Goel
+`QF_UF_sokoban.2.prop1_ab_br_max.smt2`.
 
 ## Opportunity Gates
 
@@ -323,10 +429,17 @@ No representation enters the solver merely because it is unusual.
    clause, literal, two-watch, and decoder costs. Both QG and Goel must show at
    least 25% broad reduction without weighted or p95 variable growth above
    `1.25`.
-4. T6 must separate tree encoding, generic Boolean DAG sharing, root-equality
-   union plus DAG, and full typed EUF quotient plus DAG. The full route must
-   reduce projected CNF by at least 25% on 8/10 frozen hard cases and beat both
-   generic controls by at least five percentage points.
+4. T6 must separate the unchanged encoder, syntactic polarity-aware interning,
+   guarded-EUF interning, and generic post-CNF factoring. The guarded route
+   must reduce actual emitted literals by at least 25% on 10/12 qg7, 8/9 Goel,
+   and 1/1 PEQ targets and beat both ordinary controls. Otherwise reject it
+   before timing or novelty analysis.
+
+The implemented default-off syntactic control at `c8c336d` passes that 25%
+literal gate on 12/12 qg7 but only 4/9 Goel and 0/1 PEQ. Its aggregate literal
+changes are -93.582%, -27.967%, and +11.780%, respectively, and encoding is
+slower on every aggregate. It is therefore rejected before timing and remains
+diagnostic-only pending independent code review.
 
 T1 typed-parser parity is complete. Final revision `e77846d` executes the
 no-follow-opened parser binary through its inherited descriptor, pins canonical
@@ -514,6 +627,13 @@ WMI currently has Rust 1.93 and its attempted 1.96 rustup fetch fails quota;
 toolchain/environment identity, runtime no-follow source opening, and complete
 independent report recomputation also remain open. No projection has run and no
 WMI or promotion decision is authorized.
+
+A later local projection-only implementation, `c8c336d`, emits the actual
+syntactic candidate DIMACS while leaving ordinary solve CNF bytes unchanged.
+It compresses all 12 qg7 cases but misses the frozen Goel and PEQ population
+gates, so no timing or solve-path integration is authorized. The guarded-EUF
+arm remains only a hypothesis and must beat this failed control under the
+original thresholds.
 
 The next broad route after these gates is T3 M0 component-pressure telemetry,
 not migration code. It stops if fewer than two fixed representations survive or
