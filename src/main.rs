@@ -6171,29 +6171,37 @@ fn plan_certificate_theory_seeds(
     Ok(counter.plan)
 }
 
+#[cfg(all(feature = "certificates", test))]
+std::thread_local! {
+    static CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR:
+        std::cell::Cell<Option<CertificateSeedFallbackReason>> = const {
+            std::cell::Cell::new(None)
+        };
+}
+
 #[cfg(feature = "certificates")]
 fn certificate_theory_seeds_with_budget(
     cnf: &CnfProblem,
     arena: &TermArena,
     budget: CertificateSeedBudget,
-) -> CertificateTheorySeeds {
+) -> Result<CertificateTheorySeeds, CertificateSeedFallbackReason> {
     if budget.clauses == 0 {
-        return CertificateTheorySeeds::fallback(
+        return Ok(CertificateTheorySeeds::fallback(
             budget,
             CertificateSeedFallbackReason::ClauseBudget,
-        );
+        ));
     }
     if budget.literals == 0 {
-        return CertificateTheorySeeds::fallback(
+        return Ok(CertificateTheorySeeds::fallback(
             budget,
             CertificateSeedFallbackReason::LiteralBudget,
-        );
+        ));
     }
     // The planning pass retains no clauses. Materialization starts only after the complete
     // transitivity-plus-congruence suffix fits both shared budgets.
     let plan = match plan_certificate_theory_seeds(cnf, arena, budget) {
         Ok(plan) => plan,
-        Err(reason) => return CertificateTheorySeeds::fallback(budget, reason),
+        Err(reason) => return Ok(CertificateTheorySeeds::fallback(budget, reason)),
     };
     let mut transitivity = Vec::new();
     let mut congruence = Vec::new();
@@ -6204,13 +6212,16 @@ fn certificate_theory_seeds_with_budget(
             .try_reserve_exact(plan.congruence_clauses)
             .is_err()
     {
-        return CertificateTheorySeeds::fallback(
-            budget,
-            CertificateSeedFallbackReason::AllocationRejected,
-        );
+        return Err(CertificateSeedFallbackReason::AllocationRejected);
     }
     let mut counter = CertificateSeedCounter::new(budget);
     let result = visit_certificate_theory_seed_clauses(cnf, arena, |family, clause| {
+        #[cfg(test)]
+        if let Some(reason) =
+            CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| injected.take())
+        {
+            return Err(reason);
+        }
         counter.account(family, clause.len())?;
         match family {
             CertificateSeedFamily::Transitivity => transitivity.push(clause.to_vec()),
@@ -6219,22 +6230,19 @@ fn certificate_theory_seeds_with_budget(
         Ok(())
     });
     if let Err(reason) = result {
-        return CertificateTheorySeeds::fallback(budget, reason);
+        return Err(reason);
     }
     if counter.plan != plan {
-        return CertificateTheorySeeds::fallback(
-            budget,
-            CertificateSeedFallbackReason::InconsistentEnumeration,
-        );
+        return Err(CertificateSeedFallbackReason::InconsistentEnumeration);
     }
     transitivity.sort();
     congruence.sort();
-    CertificateTheorySeeds {
+    Ok(CertificateTheorySeeds {
         transitivity,
         congruence,
         budget,
         fallback: None,
-    }
+    })
 }
 
 #[cfg(feature = "certificates")]
@@ -6764,7 +6772,14 @@ fn certify_file_with_seed_budget_and_finite(
     }
     let base_count = cnf.clauses.len();
     let theory_seed_start = cnf.clauses.len();
-    let seeds = certificate_theory_seeds_with_budget(&cnf, &problem.arena, seed_budget);
+    let seeds = certificate_theory_seeds_with_budget(&cnf, &problem.arena, seed_budget).map_err(
+        |reason| {
+            format!(
+                "certificate seed planning/materialization divergence failed closed: {}",
+                reason.label()
+            )
+        },
+    )?;
     if let Some(reason) = seeds.fallback
         && matches!(
             reason,
@@ -8705,6 +8720,41 @@ mod tests {
     }
 
     #[cfg(feature = "certificates")]
+    struct CertificateMaterializationErrorReset;
+
+    #[cfg(feature = "certificates")]
+    impl Drop for CertificateMaterializationErrorReset {
+        fn drop(&mut self) {
+            CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| injected.set(None));
+        }
+    }
+
+    #[cfg(feature = "certificates")]
+    fn with_certificate_materialization_error<T>(
+        reason: CertificateSeedFallbackReason,
+        run: impl FnOnce() -> T,
+    ) -> T {
+        CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| {
+            assert_eq!(
+                injected.replace(Some(reason)),
+                None,
+                "nested certificate materialization error injection"
+            );
+        });
+        let reset = CertificateMaterializationErrorReset;
+        let result = run();
+        CERTIFICATE_TEST_MATERIALIZATION_TRAVERSAL_ERROR.with(|injected| {
+            assert_eq!(
+                injected.take(),
+                None,
+                "certificate materialization error injection was not consumed"
+            );
+        });
+        drop(reset);
+        result
+    }
+
+    #[cfg(feature = "certificates")]
     fn certificate_base_and_seeds(
         source: &str,
     ) -> (Problem, CnfProblem, usize, CertificateTheorySeeds) {
@@ -8723,7 +8773,8 @@ mod tests {
             &cnf,
             &problem.arena,
             CertificateSeedBudget::default(),
-        );
+        )
+        .expect("materialize certificate test seeds");
         (problem, cnf, base_count, seeds)
     }
 
@@ -8991,7 +9042,8 @@ mod tests {
                 &cnf,
                 &parse_problem(MIXED_CERTIFICATE_SOURCE).unwrap().arena,
                 CertificateSeedBudget::default(),
-            ),
+            )
+            .expect("materialization matches the successful plan"),
             seeds
         );
 
@@ -9086,7 +9138,8 @@ mod tests {
             Err(CertificateSeedFallbackReason::ClauseBudget)
         );
 
-        let seeds = certificate_theory_seeds_with_budget(&cnf, &arena, budget);
+        let seeds = certificate_theory_seeds_with_budget(&cnf, &arena, budget)
+            .expect("first-pass clause exhaustion falls back");
         assert_eq!(
             seeds.fallback,
             Some(CertificateSeedFallbackReason::ClauseBudget)
@@ -9107,7 +9160,8 @@ mod tests {
             clauses: plan.transitivity_clauses + plan.congruence_clauses,
             literals: plan.literals,
         };
-        let exact = certificate_theory_seeds_with_budget(&cnf, &problem.arena, exact_budget);
+        let exact = certificate_theory_seeds_with_budget(&cnf, &problem.arena, exact_budget)
+            .expect("exact seed budget materializes");
         assert_eq!(exact.fallback, None);
         assert_eq!(exact.transitivity, default_seeds.transitivity);
         assert_eq!(exact.congruence, default_seeds.congruence);
@@ -9119,7 +9173,8 @@ mod tests {
                 clauses: exact_budget.clauses - 1,
                 literals: exact_budget.literals,
             },
-        );
+        )
+        .expect("first-pass clause exhaustion falls back");
         assert_eq!(
             clause_short.fallback,
             Some(CertificateSeedFallbackReason::ClauseBudget)
@@ -9134,7 +9189,8 @@ mod tests {
                 clauses: exact_budget.clauses,
                 literals: exact_budget.literals - 1,
             },
-        );
+        )
+        .expect("first-pass literal exhaustion falls back");
         assert_eq!(
             literal_short.fallback,
             Some(CertificateSeedFallbackReason::LiteralBudget)
@@ -9166,7 +9222,8 @@ mod tests {
         assert_eq!(plan.transitivity_clauses, 0);
         assert_eq!(plan.congruence_clauses, expected_clauses);
         assert_eq!(plan.literals, 2 * expected_clauses);
-        let exact = certificate_theory_seeds_with_budget(&cnf, &arena, exact_budget);
+        let exact = certificate_theory_seeds_with_budget(&cnf, &arena, exact_budget)
+            .expect("exact congruence seed budget materializes");
         assert_eq!(exact.fallback, None);
         assert_eq!(exact.congruence.len(), expected_clauses);
 
@@ -9177,7 +9234,8 @@ mod tests {
                 clauses: expected_clauses - 1,
                 literals: 2 * expected_clauses,
             },
-        );
+        )
+        .expect("first-pass congruence clause exhaustion falls back");
         assert_eq!(
             clause_short.fallback,
             Some(CertificateSeedFallbackReason::ClauseBudget)
@@ -9191,7 +9249,8 @@ mod tests {
                 clauses: expected_clauses,
                 literals: 2 * expected_clauses - 1,
             },
-        );
+        )
+        .expect("first-pass congruence literal exhaustion falls back");
         assert_eq!(
             literal_short.fallback,
             Some(CertificateSeedFallbackReason::LiteralBudget)
@@ -9259,13 +9318,58 @@ mod tests {
             plan_certificate_theory_seeds(&cnf, &arena, budget),
             Err(CertificateSeedFallbackReason::CandidateVisitBudget)
         );
-        let seeds = certificate_theory_seeds_with_budget(&cnf, &arena, budget);
+        let seeds = certificate_theory_seeds_with_budget(&cnf, &arena, budget)
+            .expect("first-pass candidate exhaustion falls back");
         assert_eq!(
             seeds.fallback,
             Some(CertificateSeedFallbackReason::CandidateVisitBudget)
         );
         assert!(seeds.transitivity.is_empty());
         assert!(seeds.congruence.is_empty());
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_second_pass_errors_abort_after_successful_planning() {
+        let (problem, cnf, _, _) = certificate_base_and_seeds(MIXED_CERTIFICATE_SOURCE);
+        let plan =
+            plan_certificate_theory_seeds(&cnf, &problem.arena, CertificateSeedBudget::default())
+                .expect("certificate planning succeeds before fault injection");
+        assert!(plan.transitivity_clauses + plan.congruence_clauses > 0);
+
+        let directory = CertificateTestDirectory::new("materialization-errors");
+        let source_path = directory.path("input.smt2");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE)
+            .expect("write materialization error test input");
+        for reason in [
+            CertificateSeedFallbackReason::ClauseBudget,
+            CertificateSeedFallbackReason::LiteralBudget,
+            CertificateSeedFallbackReason::CandidateVisitBudget,
+            CertificateSeedFallbackReason::ArithmeticOverflow,
+            CertificateSeedFallbackReason::AllocationRejected,
+            CertificateSeedFallbackReason::InconsistentEnumeration,
+        ] {
+            let prefix = directory.path(reason.label());
+            let error = with_certificate_materialization_error(reason, || {
+                certify_file_with_seed_budget(
+                    source_path.to_str().unwrap(),
+                    prefix.to_str().unwrap(),
+                    8,
+                    CertificateSeedBudget::default(),
+                )
+                .expect_err("second-pass traversal error must abort certification")
+            });
+            assert_eq!(
+                error,
+                format!(
+                    "certificate seed planning/materialization divergence failed closed: {}",
+                    reason.label()
+                )
+            );
+            for suffix in [".cnf", ".drat", ".euf.json"] {
+                assert!(!path_with_suffix(&prefix, suffix).exists());
+            }
+        }
     }
 
     #[cfg(feature = "certificates")]
@@ -9593,7 +9697,8 @@ mod tests {
             sat_cnf.add_assertion(assertion);
         }
         let sat_seeds =
-            certificate_theory_seeds_with_budget(&sat_cnf, &sat_problem.arena, zero_budget);
+            certificate_theory_seeds_with_budget(&sat_cnf, &sat_problem.arena, zero_budget)
+                .expect("zero first-pass budget falls back");
         assert_eq!(
             sat_seeds.fallback,
             Some(CertificateSeedFallbackReason::ClauseBudget)
