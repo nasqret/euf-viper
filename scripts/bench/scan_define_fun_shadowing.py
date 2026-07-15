@@ -21,8 +21,8 @@ from typing import TypeAlias
 from scripts.bench import component_quotient_contract as contract
 
 
-REPORT_SCHEMA = "euf-viper.define-fun-shadowing-corpus-scan.v1"
-SOURCE_SCHEMA = "euf-viper.define-fun-shadowing-source-scan.v1"
+REPORT_SCHEMA = "euf-viper.define-fun-shadowing-corpus-scan.v2"
+SOURCE_SCHEMA = "euf-viper.define-fun-shadowing-source-scan.v2"
 
 
 class ShadowScanError(ValueError):
@@ -43,6 +43,8 @@ class Definition:
     name: str
     command_index: int
     parameters: tuple[str, ...]
+    called_definitions: tuple[str, ...]
+    direct_global_references: tuple[str, ...]
     global_references: tuple[str, ...]
 
 
@@ -205,6 +207,65 @@ def _free_global_atoms(
     return references
 
 
+def _called_definitions(
+    expression: Sexp,
+    bound: frozenset[str],
+    available_macros: dict[str, Definition],
+) -> set[str]:
+    """Return every lexically visible define-fun referenced by an expression."""
+
+    if isinstance(expression, Atom):
+        if (
+            expression.kind in {"symbol", "quoted"}
+            and expression.text not in bound
+            and expression.text in available_macros
+        ):
+            return {expression.text}
+        return set()
+    if not expression:
+        return set()
+    syntax = _syntax(expression[0])
+    if syntax == "let":
+        if len(expression) != 3:
+            raise ShadowScanError("let must contain bindings and one body")
+        bindings = _list(expression[1], "let binding block")
+        called: set[str] = set()
+        names: set[str] = set()
+        for row_value in bindings:
+            row = _list(row_value, "let binding")
+            if len(row) != 2:
+                raise ShadowScanError("let binding must be a pair")
+            name = _name(row[0], "let binding name")
+            if name in names:
+                raise ShadowScanError(f"duplicate let binding {name!r}")
+            names.add(name)
+            called.update(_called_definitions(row[1], bound, available_macros))
+        called.update(
+            _called_definitions(
+                expression[2], bound | frozenset(names), available_macros
+            )
+        )
+        return called
+    if syntax == "!":
+        return (
+            _called_definitions(expression[1], bound, available_macros)
+            if len(expression) >= 2
+            else set()
+        )
+    called = set()
+    head = expression[0]
+    if (
+        isinstance(head, Atom)
+        and head.kind in {"symbol", "quoted"}
+        and head.text not in bound
+        and head.text in available_macros
+    ):
+        called.add(head.text)
+    for child in expression[1:]:
+        called.update(_called_definitions(child, bound, available_macros))
+    return called
+
+
 def scan_source(source: str) -> dict[str, object]:
     """Return a deterministic lexical-scope report for one SMT-LIB source."""
 
@@ -212,6 +273,8 @@ def scan_source(source: str) -> dict[str, object]:
         raise ShadowScanError("SMT-LIB source must be text")
     forms = _forms(source)
     global_nullaries: set[str] = set()
+    declared_term_names: set[str] = set()
+    declared_sort_names: set[str] = set()
     definitions: list[Definition] = []
     available_macros: dict[str, Definition] = {}
     calls: dict[tuple[str, int], list[dict[str, object]]] = {}
@@ -301,15 +364,28 @@ def scan_source(source: str) -> dict[str, object]:
             raise ShadowScanError("empty top-level command")
         head = _syntax(command[0])
         if head == "declare-const":
-            if len(command) == 3:
-                global_nullaries.add(_name(command[1], "constant name"))
+            if len(command) != 3:
+                raise ShadowScanError("declare-const has invalid arity")
+            name = _name(command[1], "constant name")
+            if name in declared_term_names:
+                raise ShadowScanError(f"duplicate global declaration {name!r}")
+            declared_term_names.add(name)
+            global_nullaries.add(name)
         elif head == "declare-fun":
-            if len(command) == 4 and not _list(command[2], "function arguments"):
-                global_nullaries.add(_name(command[1], "function name"))
+            if len(command) != 4:
+                raise ShadowScanError("declare-fun has invalid arity")
+            name = _name(command[1], "function name")
+            if name in declared_term_names:
+                raise ShadowScanError(f"duplicate global declaration {name!r}")
+            declared_term_names.add(name)
+            if not _list(command[2], "function arguments"):
+                global_nullaries.add(name)
         elif head == "define-fun":
             if len(command) != 5:
                 raise ShadowScanError("define-fun has invalid arity")
             name = _name(command[1], "define-fun name")
+            if name in declared_term_names:
+                raise ShadowScanError(f"duplicate global declaration {name!r}")
             parameter_rows = _list(command[2], "define-fun parameters")
             parameters: list[str] = []
             for row_value in parameter_rows:
@@ -320,7 +396,7 @@ def scan_source(source: str) -> dict[str, object]:
                 if parameter in parameters:
                     raise ShadowScanError(f"duplicate define-fun parameter {parameter!r}")
                 parameters.append(parameter)
-            references = tuple(
+            direct_references = tuple(
                 sorted(
                     _free_global_atoms(
                         command[4],
@@ -329,8 +405,30 @@ def scan_source(source: str) -> dict[str, object]:
                     )
                 )
             )
+            called_definitions = tuple(
+                sorted(
+                    _called_definitions(
+                        command[4], frozenset(parameters), available_macros
+                    )
+                )
+            )
+            references = tuple(
+                sorted(
+                    set(direct_references).union(
+                        *(
+                            set(available_macros[callee].global_references)
+                            for callee in called_definitions
+                        )
+                    )
+                )
+            )
             definition = Definition(
-                name, command_index, tuple(parameters), references
+                name,
+                command_index,
+                tuple(parameters),
+                called_definitions,
+                direct_references,
+                references,
             )
             walk_calls(
                 command[4],
@@ -341,12 +439,41 @@ def scan_source(source: str) -> dict[str, object]:
             )
             definitions.append(definition)
             available_macros[name] = definition
+            declared_term_names.add(name)
             if not parameters:
                 global_nullaries.add(name)
-        elif head == "assert" and len(command) == 2:
+        elif head == "assert":
+            if len(command) != 2:
+                raise ShadowScanError("assert has invalid arity")
             walk_calls(
                 command[1], frozenset(), command_index, "assert", (1,)
             )
+        elif head == "set-logic":
+            if len(command) != 2 or _syntax(command[1]) != "QF_UF":
+                raise ShadowScanError("only set-logic QF_UF is supported")
+        elif head in {"set-info", "set-option"}:
+            permitted = {2, 3} if head == "set-info" else {3}
+            if len(command) not in permitted:
+                raise ShadowScanError(f"{head} has invalid arity")
+            if not isinstance(command[1], Atom) or command[1].kind != "keyword":
+                raise ShadowScanError(f"{head} requires a keyword")
+        elif head == "declare-sort":
+            if (
+                len(command) != 3
+                or not isinstance(command[2], Atom)
+                or command[2].kind != "numeral"
+            ):
+                raise ShadowScanError("declare-sort has invalid arity")
+            name = _name(command[1], "sort name")
+            if name in declared_sort_names:
+                raise ShadowScanError(f"duplicate sort declaration {name!r}")
+            declared_sort_names.add(name)
+        elif head in {"check-sat", "exit"}:
+            if len(command) != 1:
+                raise ShadowScanError(f"{head} has invalid arity")
+        else:
+            rendered = head if head is not None else "<non-simple-symbol>"
+            raise ShadowScanError(f"unsupported top-level command {rendered!r}")
 
     candidates: list[dict[str, object]] = []
     affected: list[dict[str, object]] = []
@@ -354,7 +481,11 @@ def scan_source(source: str) -> dict[str, object]:
         if not definition.global_references:
             continue
         row: dict[str, object] = {
+            "called_definitions": list(definition.called_definitions),
             "command_index": definition.command_index,
+            "direct_global_references": list(
+                definition.direct_global_references
+            ),
             "global_references": list(definition.global_references),
             "name": definition.name,
             "parameters": list(definition.parameters),
@@ -397,6 +528,203 @@ def _source_path(root: Path, row: dict[str, object], line_number: int) -> Path:
     return root.joinpath(*path.parts)
 
 
+def _capture_source(
+    root: Path, row: dict[str, object], line_number: int
+) -> tuple[dict[str, object], bytes]:
+    lexical_path = _source_path(root, row, line_number)
+    relative_path = row.get("relative_path")
+    manifest_path = row.get("path")
+    source_sha256 = row.get("sha256")
+    expected_bytes = row.get("bytes")
+    if (
+        type(relative_path) is not str
+        or type(manifest_path) is not str
+        or type(source_sha256) is not str
+        or type(expected_bytes) is not int
+        or expected_bytes < 0
+    ):
+        raise ShadowScanError(f"manifest line {line_number} has malformed identity")
+    try:
+        canonical_path = lexical_path.resolve(strict=True)
+        named = os.stat(canonical_path, follow_symlinks=False)
+    except OSError as error:
+        raise ShadowScanError(
+            f"cannot resolve manifest source {relative_path!r}: {error}"
+        ) from error
+    if not stat.S_ISREG(named.st_mode):
+        raise ShadowScanError(f"manifest source {relative_path!r} is not regular")
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(canonical_path, flags)
+    except OSError as error:
+        raise ShadowScanError(
+            f"cannot open canonical manifest source {relative_path!r}: {error}"
+        ) from error
+    try:
+        opened = os.fstat(descriptor)
+        payload = bytearray()
+        while len(payload) <= expected_bytes:
+            chunk = os.read(descriptor, min(1024 * 1024, expected_bytes + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        closed_over = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        named_after = os.stat(canonical_path, follow_symlinks=False)
+    except OSError as error:
+        raise ShadowScanError(
+            f"manifest source {relative_path!r} disappeared during capture: {error}"
+        ) from error
+    identities = {
+        (named.st_dev, named.st_ino, named.st_mode, named.st_size),
+        (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_size),
+        (
+            closed_over.st_dev,
+            closed_over.st_ino,
+            closed_over.st_mode,
+            closed_over.st_size,
+        ),
+        (
+            named_after.st_dev,
+            named_after.st_ino,
+            named_after.st_mode,
+            named_after.st_size,
+        ),
+    }
+    captured = bytes(payload)
+    digest = hashlib.sha256(captured).hexdigest()
+    if (
+        len(identities) != 1
+        or len(captured) != expected_bytes
+        or opened.st_size != expected_bytes
+        or digest != source_sha256
+    ):
+        raise ShadowScanError(f"manifest source identity drift at {relative_path!r}")
+    ledger = {
+        "manifest_id": line_number - 1,
+        "manifest_path": manifest_path,
+        "relative_path": relative_path,
+        "lexical_path": str(lexical_path),
+        "canonical_path": str(canonical_path),
+        "device": opened.st_dev,
+        "inode": opened.st_ino,
+        "bytes": len(captured),
+        "sha256": digest,
+    }
+    return ledger, captured
+
+
+def _portable_source_set_bytes(source_ledger: list[dict[str, object]]) -> bytes:
+    return b"".join(
+        contract.canonical_json_bytes(
+            {
+                "relative_path": row["relative_path"],
+                "bytes": row["bytes"],
+                "sha256": row["sha256"],
+            }
+        )
+        for row in sorted(source_ledger, key=lambda item: str(item["relative_path"]))
+    )
+
+
+def _validate_source_ledger(
+    value: object, *, expected_sources: int, expected_portable_sha256: str
+) -> tuple[set[tuple[int, str, str]], str]:
+    if type(value) is not list or len(value) != expected_sources:
+        raise ShadowScanError("shadow-scan source ledger cardinality drift")
+    identities: set[tuple[int, str, str]] = set()
+    relative_paths: set[str] = set()
+    manifest_paths: set[str] = set()
+    lexical_paths: set[str] = set()
+    canonical_paths: set[str] = set()
+    physical_identities: set[tuple[int, int]] = set()
+    rows: list[dict[str, object]] = []
+    fields = {
+        "manifest_id",
+        "manifest_path",
+        "relative_path",
+        "lexical_path",
+        "canonical_path",
+        "device",
+        "inode",
+        "bytes",
+        "sha256",
+    }
+    for expected_id, item in enumerate(value):
+        if type(item) is not dict or set(item) != fields:
+            raise ShadowScanError("shadow-scan source ledger field set drift")
+        manifest_id = item["manifest_id"]
+        manifest_path = item["manifest_path"]
+        relative_path = item["relative_path"]
+        lexical_path = item["lexical_path"]
+        canonical_path = item["canonical_path"]
+        device = item["device"]
+        inode = item["inode"]
+        size = item["bytes"]
+        digest = item["sha256"]
+        if (
+            manifest_id != expected_id
+            or type(manifest_id) is not int
+            or type(manifest_path) is not str
+            or type(relative_path) is not str
+            or type(lexical_path) is not str
+            or type(canonical_path) is not str
+            or type(device) is not int
+            or device < 1
+            or type(inode) is not int
+            or inode < 1
+            or type(size) is not int
+            or size < 0
+            or type(digest) is not str
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ShadowScanError("shadow-scan source ledger identity is malformed")
+        manifest = PurePosixPath(manifest_path)
+        relative = PurePosixPath(relative_path)
+        lexical = PurePosixPath(lexical_path)
+        canonical = PurePosixPath(canonical_path)
+        if (
+            manifest.is_absolute()
+            or relative.is_absolute()
+            or not lexical.is_absolute()
+            or not canonical.is_absolute()
+            or not manifest.parts
+            or not relative.parts
+            or any(
+                part in {"", ".", ".."}
+                for part in (*manifest.parts, *relative.parts, *lexical.parts, *canonical.parts)
+            )
+            or tuple(manifest.parts[-len(relative.parts) :]) != relative.parts
+            or tuple(lexical.parts[-len(manifest.parts) :]) != manifest.parts
+        ):
+            raise ShadowScanError("shadow-scan source ledger path is malformed")
+        identity = (manifest_id, relative_path, digest)
+        physical = (device, inode)
+        if (
+            identity in identities
+            or relative_path in relative_paths
+            or manifest_path in manifest_paths
+            or lexical_path in lexical_paths
+            or canonical_path in canonical_paths
+            or physical in physical_identities
+        ):
+            raise ShadowScanError("shadow-scan source ledger contains a path or inode alias")
+        identities.add(identity)
+        relative_paths.add(relative_path)
+        manifest_paths.add(manifest_path)
+        lexical_paths.add(lexical_path)
+        canonical_paths.add(canonical_path)
+        physical_identities.add(physical)
+        rows.append(item)
+    portable_sha256 = hashlib.sha256(_portable_source_set_bytes(rows)).hexdigest()
+    if portable_sha256 != expected_portable_sha256:
+        raise ShadowScanError("shadow-scan portable source-set digest mismatch")
+    return identities, portable_sha256
+
+
 def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]:
     root = Path(os.path.abspath(repository_root))
     selected = contract.require_campaign_manifest_path(root, manifest_path)
@@ -405,6 +733,7 @@ def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]
     candidates: list[dict[str, object]] = []
     affected: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
+    source_ledger: list[dict[str, object]] = []
     totals = {
         "affected_definitions": 0,
         "colliding_call_sites": 0,
@@ -413,32 +742,14 @@ def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]
         "scan_failures": 0,
         "sources": len(rows),
     }
-    seen_paths: set[str] = set()
     for index, raw_row in enumerate(rows):
         row = dict(raw_row)
-        path = _source_path(root, row, index + 1)
-        relative_path = row.get("relative_path")
-        source_sha256 = row.get("sha256")
-        expected_bytes = row.get("bytes")
-        if (
-            type(relative_path) is not str
-            or relative_path in seen_paths
-            or type(source_sha256) is not str
-            or type(expected_bytes) is not int
-            or expected_bytes < 0
-        ):
-            raise ShadowScanError(f"manifest line {index + 1} has malformed identity")
-        seen_paths.add(relative_path)
-        payload = path.read_bytes()
-        digest = hashlib.sha256(payload).hexdigest()
-        if digest != source_sha256 or len(payload) != expected_bytes:
-            raise ShadowScanError(
-                f"manifest source identity drift at {relative_path!r}"
-            )
+        ledger_row, payload = _capture_source(root, row, index + 1)
+        source_ledger.append(ledger_row)
         source_identity = {
             "manifest_id": index,
-            "relative_path": relative_path,
-            "sha256": digest,
+            "relative_path": ledger_row["relative_path"],
+            "sha256": ledger_row["sha256"],
         }
         try:
             source_report = scan_source(payload.decode("utf-8"))
@@ -459,6 +770,16 @@ def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]
             candidates.append({"source": source_identity, **candidate})
         for affected_row in source_report["affected_definitions"]:
             affected.append({"source": source_identity, **affected_row})
+    ledger_identities, portable_source_set_sha256 = _validate_source_ledger(
+        source_ledger,
+        expected_sources=contract.EXPECTED_SOURCES,
+        expected_portable_sha256=contract.PORTABLE_SOURCE_SET_SHA256,
+    )
+    if len(ledger_identities) != len(rows):
+        raise ShadowScanError("shadow-scan source ledger completeness drift")
+    source_ledger_sha256 = hashlib.sha256(
+        contract.canonical_json_bytes(source_ledger)
+    ).hexdigest()
     report = {
         "schema": REPORT_SCHEMA,
         "status": "complete" if not failures else "incomplete",
@@ -472,9 +793,11 @@ def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]
             "expected_sources": contract.EXPECTED_SOURCES,
             "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
             "manifest_sha256": contract.MANIFEST_SHA256,
-            "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
+            "portable_source_set_sha256": portable_source_set_sha256,
+            "source_ledger_sha256": source_ledger_sha256,
         },
         "counts": totals,
+        "source_ledger": source_ledger,
         "candidate_definitions": candidates,
         "affected_definitions": affected,
         "failures": failures,
@@ -483,7 +806,14 @@ def scan_corpus(repository_root: Path, manifest_path: Path) -> dict[str, object]
     return report
 
 
-def validate_report(value: object) -> dict[str, object]:
+def _validate_report(
+    value: object,
+    *,
+    expected_sources: int,
+    expected_manifest_relative_path: str,
+    expected_manifest_sha256: str,
+    expected_portable_sha256: str,
+) -> dict[str, object]:
     required = {
         "schema",
         "status",
@@ -492,6 +822,7 @@ def validate_report(value: object) -> dict[str, object]:
         "analysis",
         "corpus",
         "counts",
+        "source_ledger",
         "candidate_definitions",
         "affected_definitions",
         "failures",
@@ -513,13 +844,33 @@ def validate_report(value: object) -> dict[str, object]:
         "solving_performed": False,
     }:
         raise ShadowScanError("shadow-scan analysis identity drift")
-    if value["corpus"] != {
-        "expected_sources": contract.EXPECTED_SOURCES,
-        "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
-        "manifest_sha256": contract.MANIFEST_SHA256,
-        "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
+    corpus = value["corpus"]
+    if type(corpus) is not dict or set(corpus) != {
+        "expected_sources",
+        "manifest_relative_path",
+        "manifest_sha256",
+        "portable_source_set_sha256",
+        "source_ledger_sha256",
     }:
         raise ShadowScanError("shadow-scan corpus binding drift")
+    ledger_sha256 = hashlib.sha256(
+        contract.canonical_json_bytes(value["source_ledger"])
+    ).hexdigest()
+    if corpus != {
+        "expected_sources": expected_sources,
+        "manifest_relative_path": expected_manifest_relative_path,
+        "manifest_sha256": expected_manifest_sha256,
+        "portable_source_set_sha256": expected_portable_sha256,
+        "source_ledger_sha256": ledger_sha256,
+    }:
+        raise ShadowScanError("shadow-scan corpus binding drift")
+    ledger_identities, recomputed_portable = _validate_source_ledger(
+        value["source_ledger"],
+        expected_sources=expected_sources,
+        expected_portable_sha256=expected_portable_sha256,
+    )
+    if recomputed_portable != corpus["portable_source_set_sha256"]:
+        raise ShadowScanError("shadow-scan ledger digest reconstruction drift")
     counts = value["counts"]
     count_fields = {
         "affected_definitions",
@@ -533,7 +884,7 @@ def validate_report(value: object) -> dict[str, object]:
         type(counts) is not dict
         or set(counts) != count_fields
         or any(type(item) is not int or item < 0 for item in counts.values())
-        or counts["sources"] != contract.EXPECTED_SOURCES
+        or counts["sources"] != expected_sources
         or counts["scan_failures"] != len(failures)
         or type(value["candidate_definitions"]) is not list
         or type(value["affected_definitions"]) is not list
@@ -555,7 +906,7 @@ def validate_report(value: object) -> dict[str, object]:
         digest = item["sha256"]
         if (
             type(manifest_id) is not int
-            or not 0 <= manifest_id < contract.EXPECTED_SOURCES
+            or not 0 <= manifest_id < expected_sources
             or type(relative_path) is not str
             or not relative_path
             or PurePosixPath(relative_path).is_absolute()
@@ -568,16 +919,19 @@ def validate_report(value: object) -> dict[str, object]:
             or any(character not in "0123456789abcdef" for character in digest)
         ):
             raise ShadowScanError(f"{context} source identity is malformed")
-        return manifest_id, relative_path, digest
+        identity = (manifest_id, relative_path, digest)
+        if identity not in ledger_identities:
+            raise ShadowScanError(f"{context} source is absent from the source ledger")
+        return identity
 
     def definition_row(
         item: object, context: str, *, affected: bool
-    ) -> tuple[
-        tuple[int, str, str], int, str, tuple[str, ...], tuple[str, ...]
-    ]:
+    ) -> tuple[object, ...]:
         fields = {
             "source",
+            "called_definitions",
             "command_index",
+            "direct_global_references",
             "global_references",
             "name",
             "parameters",
@@ -590,6 +944,8 @@ def validate_report(value: object) -> dict[str, object]:
         command_index = item["command_index"]
         name = item["name"]
         parameters = item["parameters"]
+        called = item["called_definitions"]
+        direct_globals = item["direct_global_references"]
         globals_ = item["global_references"]
         if (
             type(command_index) is not int
@@ -599,10 +955,20 @@ def validate_report(value: object) -> dict[str, object]:
             or type(parameters) is not list
             or any(type(parameter) is not str or not parameter for parameter in parameters)
             or len(parameters) != len(set(parameters))
+            or type(called) is not list
+            or called != sorted(set(called))
+            or any(type(callee) is not str or not callee for callee in called)
+            or type(direct_globals) is not list
+            or direct_globals != sorted(set(direct_globals))
+            or any(
+                type(reference) is not str or not reference
+                for reference in direct_globals
+            )
             or type(globals_) is not list
             or not globals_
             or any(type(reference) is not str or not reference for reference in globals_)
             or globals_ != sorted(set(globals_))
+            or any(reference not in globals_ for reference in direct_globals)
         ):
             raise ShadowScanError(f"{context} definition identity is malformed")
         if affected:
@@ -632,7 +998,15 @@ def validate_report(value: object) -> dict[str, object]:
                     or any(type(index) is not int or index < 0 for index in expression_path)
                 ):
                     raise ShadowScanError(f"{context} call identity is malformed")
-        return source, command_index, name, tuple(parameters), tuple(globals_)
+        return (
+            source,
+            command_index,
+            name,
+            tuple(parameters),
+            tuple(called),
+            tuple(direct_globals),
+            tuple(globals_),
+        )
 
     candidates = value["candidate_definitions"]
     affected_rows = value["affected_definitions"]
@@ -677,6 +1051,16 @@ def validate_report(value: object) -> dict[str, object]:
     if len(failure_sources) != len(set(failure_sources)):
         raise ShadowScanError("shadow-scan failure source duplication")
     return value
+
+
+def validate_report(value: object) -> dict[str, object]:
+    return _validate_report(
+        value,
+        expected_sources=contract.EXPECTED_SOURCES,
+        expected_manifest_relative_path=contract.MANIFEST_RELATIVE_PATH,
+        expected_manifest_sha256=contract.MANIFEST_SHA256,
+        expected_portable_sha256=contract.PORTABLE_SOURCE_SET_SHA256,
+    )
 
 
 def _write_no_replace(path: Path, payload: bytes) -> None:

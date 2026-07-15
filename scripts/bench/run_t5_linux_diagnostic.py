@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
             scope="ordinary_linux_publication_procfs_diagnostic",
             scheduler_evidence="not_queried",
             require_hosted_image=arguments.require_hosted_image,
+            require_github_sha=arguments.require_hosted_image,
         )
         identity.write_identity_no_replace(arguments.identity_output, value)
     except (OSError, identity.CiIdentityError) as error:

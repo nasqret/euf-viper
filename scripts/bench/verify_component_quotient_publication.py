@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 from scripts.bench import component_quotient_contract as contract  # noqa: E402
 from scripts.bench import independent_component_quotient_verifier as independent  # noqa: E402
 from scripts.bench import t5_linux_publication as publication  # noqa: E402
+from scripts.bench import t5_held_scheduler as held_scheduler  # noqa: E402
 from scripts.bench import t5_runtime_environment as runtime_environment  # noqa: E402
 
 
@@ -229,6 +230,7 @@ def validate_pending_submission_bytes(payload: bytes) -> dict[str, object]:
         "dependency",
         "job_id",
         "scheduler_submission",
+        "scheduler_held",
         "expected_marker_name",
         "contract",
         "python",
@@ -281,8 +283,41 @@ def validate_pending_submission_bytes(payload: bytes) -> dict[str, object]:
     }:
         raise ConsumerVerificationError("submission manifest is not the fixed external campaign")
     namespace_binding = receipt["remote_namespace"]
-    if type(namespace_binding) is not dict:
+    namespace_fields = {
+        "id",
+        "path",
+        "device",
+        "inode",
+        "results_path",
+        "results_device",
+        "results_inode",
+    }
+    if type(namespace_binding) is not dict or set(namespace_binding) != namespace_fields:
         raise ConsumerVerificationError("submission namespace binding is malformed")
+    namespace_path = namespace_binding["path"]
+    namespace_id = namespace_binding["id"]
+    if (
+        type(namespace_path) is not str
+        or not os.path.isabs(namespace_path)
+        or os.path.normpath(namespace_path) != namespace_path
+        or type(namespace_id) is not str
+        or namespace_binding["results_path"] != f"{namespace_path}/results"
+    ):
+        raise ConsumerVerificationError("submission namespace path relationship drift")
+    try:
+        contract.require_lower_sha256(namespace_id, "submission namespace id")
+        expected_namespace_id = contract.namespace_identity_sha256(
+            namespace_path=namespace_path,
+            namespace_device=namespace_binding["device"],
+            namespace_inode=namespace_binding["inode"],
+            results_device=namespace_binding["results_device"],
+            results_inode=namespace_binding["results_inode"],
+            submission_nonce=nonce,
+        )
+    except contract.ContractError as error:
+        raise ConsumerVerificationError(str(error)) from error
+    if namespace_id != expected_namespace_id:
+        raise ConsumerVerificationError("submission namespace identity digest mismatch")
     scheduler_submission = receipt["scheduler_submission"]
     if type(scheduler_submission) is not dict or set(scheduler_submission) != {
         "sbatch_parsable",
@@ -309,6 +344,18 @@ def validate_pending_submission_bytes(payload: bytes) -> dict[str, object]:
         or scheduler_submission["workdir"] != namespace_binding.get("path")
     ):
         raise ConsumerVerificationError("submission scheduler identity binding drift")
+    try:
+        held_identity = held_scheduler.validate_held_receipt(receipt["scheduler_held"])
+    except held_scheduler.HeldSchedulerError as error:
+        raise ConsumerVerificationError(str(error)) from error
+    if (
+        held_identity.job_id != job_id
+        or held_identity.cluster != cluster
+        or held_identity.job_name != job_name
+        or held_identity.user != user
+        or held_identity.workdir != namespace_path
+    ):
+        raise ConsumerVerificationError("submission held scheduler binding drift")
     dependency = receipt["dependency"]
     if dependency is not None and (type(dependency) is not int or dependency < 1):
         raise ConsumerVerificationError("submission dependency is malformed")
@@ -648,6 +695,7 @@ def verify_publication(
     evidence = _require_scheduler_evidence(
         scheduler_query(job_id, cluster), job_id=job_id, cluster=cluster
     )
+    held_identity = held_scheduler.validate_held_receipt(receipt["scheduler_held"])
     if (
         evidence.job_id != job_id
         or evidence.cluster != cluster
@@ -656,8 +704,8 @@ def verify_publication(
         or evidence.workdir != scheduler_submission["workdir"]
         or evidence.state != "COMPLETED"
         or evidence.exit_code != "0:0"
-        or not evidence.sluid
-        or not evidence.submit_time
+        or evidence.sluid != held_identity.sluid
+        or evidence.submit_time != held_identity.submit_time
     ):
         raise ConsumerVerificationError("scheduler callback did not prove successful root job")
     namespace = receipt["remote_namespace"]

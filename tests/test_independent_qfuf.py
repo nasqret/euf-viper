@@ -183,6 +183,13 @@ class LexerAndParserTests(unittest.TestCase):
         problem = QFUF.parse_and_encode(source)
         self.assertIsNone(find_base_assignment(problem, require_model=True))
 
+    def test_transitive_quoted_define_fun_cannot_capture_caller_let(self) -> None:
+        source = (
+            ROOT / "tests/fixtures/define_fun_transitive_quoted_shadow_unsat.smt2"
+        ).read_text(encoding="ascii")
+        problem = QFUF.parse_and_encode(source)
+        self.assertIsNone(find_base_assignment(problem, require_model=True))
+
     def test_invalid_unused_macro_body_is_rejected(self) -> None:
         with self.assertRaisesRegex(QFUF.IndependentQfufError, "body of `bad`"):
             QFUF.parse_and_encode(

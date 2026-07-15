@@ -98,6 +98,7 @@ PROJECT_RUNTIME_FILES=(
   scripts/bench/finalize_component_quotient_ram_metadata.py
   scripts/bench/independent_component_quotient_verifier.py
   scripts/bench/t5_independent_smtlib.py
+  scripts/bench/t5_held_scheduler.py
   scripts/bench/t5_linux_publication.py
   scripts/bench/t5_runtime_environment.py
   scripts/bench/t5_submission_receipt.py

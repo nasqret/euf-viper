@@ -15,6 +15,7 @@ WORKFLOW = ROOT / ".github/workflows/campaign-contract.yml"
 
 class T5CiContractTests(unittest.TestCase):
     def test_identity_is_explicitly_non_evidence_and_records_image_python(self) -> None:
+        head = identity._checked_out_head(ROOT)
         value = identity.capture_identity(
             scope="ordinary_linux_publication_procfs_diagnostic",
             scheduler_evidence="not_queried",
@@ -25,8 +26,10 @@ class T5CiContractTests(unittest.TestCase):
                 "ImageOS": "ubuntu24",
                 "ImageVersion": "20260701.1",
                 "GITHUB_ACTIONS": "true",
+                "GITHUB_SHA": head,
             },
             require_hosted_image=True,
+            require_github_sha=True,
         )
         self.assertEqual(value["status"], "execution_identity_non_evidence")
         self.assertFalse(value["decisive"])
@@ -34,6 +37,23 @@ class T5CiContractTests(unittest.TestCase):
         self.assertFalse(value["scheduler_query_performed"])
         self.assertEqual(value["runner"]["image_os"], "ubuntu24")
         self.assertEqual(len(value["python"]["sha256"]), 64)
+        self.assertEqual(value["github"]["sha"], value["github"]["checked_out_head"])
+
+    def test_hosted_identity_rejects_github_sha_checkout_drift(self) -> None:
+        with self.assertRaisesRegex(identity.CiIdentityError, "GITHUB_SHA differs"):
+            identity.capture_identity(
+                scope="ordinary_linux_publication_procfs_diagnostic",
+                scheduler_evidence="not_queried",
+                environment={
+                    "RUNNER_OS": "Linux",
+                    "RUNNER_ARCH": "X64",
+                    "ImageOS": "ubuntu24",
+                    "ImageVersion": "20260701.1",
+                    "GITHUB_SHA": "0" * 40,
+                },
+                require_hosted_image=True,
+                require_github_sha=True,
+            )
 
     def test_identity_write_is_no_replace_and_canonical(self) -> None:
         value = identity.capture_identity(
@@ -67,8 +87,10 @@ class T5CiContractTests(unittest.TestCase):
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("ubuntu-latest", text)
         self.assertNotRegex(text, r"uses:\s+[^\s]+@v[0-9]")
-        action_references = re.findall(r"^\s*- uses:\s+[^@\s]+@([^\s]+)", text, re.M)
+        uses_entries = re.findall(r"^\s*(?:-\s*)?uses:\s+([^\s]+)", text, re.M)
+        action_references = [entry.rsplit("@", 1)[1] for entry in uses_entries if "@" in entry]
         self.assertTrue(action_references)
+        self.assertEqual(len(action_references), len(uses_entries))
         self.assertTrue(
             all(re.fullmatch(r"[0-9a-f]{40}", item) for item in action_references)
         )
@@ -77,6 +99,12 @@ class T5CiContractTests(unittest.TestCase):
         self.assertIn("synthetic_injected_root_row", text)
         self.assertIn("inputs.t5_corpus_path != ''", text)
         self.assertIn("--require-hosted-image", text)
+        self.assertIn("--require-github-sha", text)
+        self.assertIn("scan_define_fun_shadowing.py scan", text)
+        self.assertIn("semantic-consumer-receipt.json", (
+            ROOT / "tests/t5_linux_e2e_driver.py"
+        ).read_text(encoding="utf-8"))
+        self.assertIn("t5-semantic-pipeline-results-and-receipts", text)
 
 
 if __name__ == "__main__":

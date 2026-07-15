@@ -48,7 +48,7 @@ VARIABLE_MAXIMUM_RATIO: Final = (5, 4)
 VARIABLE_PERCENTILE: Final = 95
 
 MARKER_SCHEMA: Final = "euf-viper.component-quotient-publication-marker.v2"
-SUBMISSION_SCHEMA: Final = "euf-viper.component-quotient-ram-wmi-submission.v6"
+SUBMISSION_SCHEMA: Final = "euf-viper.component-quotient-ram-wmi-submission.v7"
 FINAL_RECEIPT_SCHEMA: Final = (
     "euf-viper.component-quotient-ram-final-consumer-receipt.v2"
 )
@@ -69,6 +69,7 @@ RUNTIME_PROJECT_FILES: Final = (
     "scripts/bench/finalize_component_quotient_ram_metadata.py",
     "scripts/bench/independent_component_quotient_verifier.py",
     "scripts/bench/t5_independent_smtlib.py",
+    "scripts/bench/t5_held_scheduler.py",
     "scripts/bench/t5_linux_publication.py",
     "scripts/bench/t5_runtime_environment.py",
     "scripts/bench/t5_submission_receipt.py",

@@ -32,8 +32,19 @@ class EnvironmentCanaryStaticTests(unittest.TestCase):
         self.assertIn("#SBATCH --ntasks=1", sbatch)
         self.assertIn("#SBATCH --cpus-per-task=1", sbatch)
         self.assertNotIn("#SBATCH --array", sbatch)
+        self.assertIn(
+            "#SBATCH --output=/tmp/euf-viper-t5-environment-canary-%j.out", sbatch
+        )
+        self.assertIn(
+            "#SBATCH --error=/tmp/euf-viper-t5-environment-canary-%j.err", sbatch
+        )
+        self.assertNotIn("#SBATCH --output=results/", sbatch)
+        self.assertNotIn("#SBATCH --error=results/", sbatch)
         self.assertIn("mode=dry-run", submit)
         self.assertIn("sbatch --parsable", submit)
+        self.assertIn("check-checkout", submit)
+        self.assertIn("/proc/self/fd/9 emit", sbatch)
+        self.assertIn("--bound-script-fd 9", sbatch)
         self.assertIn("sacct-root-allocation", emitter)
         self.assertIn("SACCT_FORMAT", emitter)
         self.assertIn("sbatch_parsable", emitter)
@@ -92,26 +103,20 @@ class LinuxEnvironmentCanaryTests(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary)
+            checkout = Path(temporary) / "checkout"
+            subprocess.run(
+                ["git", "clone", "--quiet", "--no-hardlinks", str(ROOT), str(checkout)],
+                check=True,
+            )
+            output = checkout / "results"
+            output.mkdir()
             environment = {
                 "SLURM_JOB_ID": "987650001",
                 "SLURM_CLUSTER_NAME": "linux-canary-test",
                 "SLURM_JOB_NAME": "euf-t5-env-canary",
                 "SLURM_JOB_USER": "runner",
-                "SLURM_SUBMIT_DIR": str(ROOT),
+                "SLURM_SUBMIT_DIR": str(checkout),
             }
-            with (
-                mock.patch.dict(os.environ, environment, clear=False),
-                mock.patch.object(
-                    canary, "_command_identity", side_effect=command_identity
-                ),
-            ):
-                value, emission = canary.emit_canary(
-                    repository_root=ROOT,
-                    output_directory=output,
-                    expected_revision=revision,
-                )
-            canary_path = output / emission["canary"]["name"]
             scheduler = canary.RootSchedulerRow(
                 987650001,
                 "linux-canary-test:987650001",
@@ -119,20 +124,49 @@ class LinuxEnvironmentCanaryTests(unittest.TestCase):
                 "2026-07-15T12:00:00",
                 "euf-t5-env-canary",
                 "runner",
-                str(ROOT),
+                str(checkout),
                 "COMPLETED",
                 "0:0",
             )
-            receipt = canary.validate_canary_file(
-                canary_path=canary_path,
-                sbatch_parsable="987650001;linux-canary-test",
-                scheduler_query=lambda job_id, cluster: scheduler,
+            runtime_scheduler = canary.RootSchedulerRow(
+                987650001,
+                "linux-canary-test:987650001",
+                "linux-canary-test",
+                "2026-07-15T12:00:00",
+                "euf-t5-env-canary",
+                "runner",
+                str(checkout),
+                "RUNNING",
+                "0:0",
             )
+            with (
+                mock.patch.dict(os.environ, environment, clear=False),
+                mock.patch.object(
+                    canary, "_command_identity", side_effect=command_identity
+                ),
+            ):
+                value, emission = canary.emit_canary(
+                    repository_root=checkout,
+                    output_directory=output,
+                    expected_revision=revision,
+                    scheduler_query=lambda job_id, cluster: runtime_scheduler,
+                )
+                canary_path = output / emission["canary"]["name"]
+                receipt = canary.validate_canary_file(
+                    canary_path=canary_path,
+                    sbatch_parsable="987650001;linux-canary-test",
+                    scheduler_query=lambda job_id, cluster: scheduler,
+                )
             self.assertEqual(value["procfs_fd"]["procfs"]["type"], 0x9FA0)
             self.assertEqual(value["o_tmpfile_probe"]["links"], 1)
             self.assertEqual(value["o_tmpfile_probe"]["mode"], "0444")
             self.assertEqual(stat.S_IMODE(canary_path.stat().st_mode), 0o444)
             self.assertEqual(receipt["scheduler"]["source"], "sacct-root-allocation")
+            self.assertTrue(value["checkout"]["clean"])
+            self.assertEqual(
+                value["checkout"]["bound_emitter"]["sha256"],
+                value["checkout"]["runtime_files"][0]["sha256"],
+            )
             self.assertEqual(
                 receipt["submission"]["sbatch_parsable"],
                 "987650001;linux-canary-test",

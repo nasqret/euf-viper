@@ -259,28 +259,33 @@ independent evidence checks, and a frozen family holdout.
   Linux publisher, immutable content marker, and scheduler-gated consumer.
 - [x] Repair both independent `define-fun` implementations so stored bodies
   receive only their own parameter bindings and global declarations. Add the
-  bounded unsatisfiable caller-shadow fixture and a no-solve lexical scan
-  schema bound to the future exact 7,503-source input.
+  direct and transitive quoted caller-shadow fixtures. The no-solve scanner
+  closes the complete visible macro call graph and its v2 report reconstructs
+  the fixed portable digest from 7,503 unique physical-source ledger rows.
 - [x] Keep the full census held through returned-receipt parsing and immutable
   local `O_EXCL` persistence, then release over a separate SSH operation. Local
-  cancellation is armed before remote `sbatch`; fault tests cover parse,
-  collision, and fsync failure with no release.
+  cancellation is armed before remote `sbatch`; release and cancellation each
+  require a fresh exact held `scontrol`/root-`sacct` identity comparison. Fault
+  tests cover parse, collision, fsync, zero-row, ambiguous-row, and ownership
+  drift with no unverified operation.
 - [x] Split CI into a mandatory ordinary Linux procfs/publication diagnostic
   with zero permitted skips and a separately provisioned 7,503-source semantic
   integration using explicitly synthetic scheduler evidence. Pin all actions
   by commit and record runner-image/Python identities as non-evidence.
 - [x] Add the shard-free two-minute/256 MiB WMI environment-canary
   emitter/validator and dry-run helper. It has no source-set decision path and
-  preserves full `job;cluster` plus the post-job root `sacct` row. It has not
-  been submitted.
-- [ ] Obtain real Linux CI GO for capability-free `O_TMPFILE` publication via
+  preserves a clean exact-blob/bound-emitter inventory, Slurm tool hashes,
+  in-job scheduler identity, full `job;cluster`, and the post-job root `sacct`
+  row. It has not been submitted.
+- [x] Obtain real Linux mechanism smoke for capability-free `O_TMPFILE` publication via
   verified procfs `/proc/self/fd/<fd>` plus `linkat(AT_SYMLINK_FOLLOW)`, all
   race/fsync regressions, the exact capability inventory, and the clean
-  post-test checkout guard. Diagnostic hosted run `29385400195` reached all 88
-  Linux tests and passed the real publication primitive, but one stale
-  earliest-failure assertion and one test-setup JSON decode failed; it is not
-  GO. Presence or absence of `CAP_DAC_READ_SEARCH` must be recorded, never
-  inferred from publication success.
+  post-test checkout guard. User-reported exact run `29392694401` on `48f3cec`
+  passed the mandatory diagnostic and root portable/Rust job with no permitted
+  skip; its explicitly provisioned semantic job truthfully skipped because no
+  corpus was supplied. This is mechanism smoke only, not corpus, scheduler, or
+  promotion evidence. Presence or absence of `CAP_DAC_READ_SEARCH` must be
+  recorded, never inferred from publication success.
 - [ ] Project class-code, sorting-network, clause, watch, and decoder cost over
   all 7,503 files only after review and Linux GO; no WMI run is currently
   authorized or submitted.

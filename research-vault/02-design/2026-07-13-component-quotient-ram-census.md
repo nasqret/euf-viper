@@ -260,6 +260,24 @@ synthetic. A two-minute, 256 MiB, non-corpus WMI canary can independently record
 procfs/fd, capability, mount/statfs, O_TMPFILE, runtime, and Slurm command
 semantics while preserving its submitted `job;cluster` and root `sacct` row.
 
+The final pre-submission repair strengthens these controls without running the
+corpus or WMI. The lexical scanner closes free-global references through the
+full visible `define-fun` call graph, retains a 7,503-row physical-source
+ledger, rejects canonical-path and inode aliases, and reconstructs the portable
+source-set digest during report validation. Recursive or otherwise unsupported
+top-level forms fail the scan. The held submission receipt contains an
+immutable scheduler snapshot assembled from agreeing `scontrol` and root
+`sacct` rows. Release and cancellation each re-query and compare hold, SLUID,
+submit time, cluster, name, user, and workdir; missing or ambiguous rows do not
+authorize an operation. The namespace object and identity digest are exact.
+
+The environment canary is also an exact-blob execution check: a clean canary-
+only checkout inventory is retained, the emitter executes through its bound
+descriptor, and post-job validation rehashes `scontrol` and `sacct` while
+matching the completed root row to the in-job SLUID/name/user/workdir record.
+CI binds `GITHUB_SHA` to checked-out `HEAD`; only the explicitly provisioned
+semantic role runs and uploads the no-solve scan plus exact consumer artifacts.
+
 ## Preregistered Decision
 
 The prospective target selector uses only:

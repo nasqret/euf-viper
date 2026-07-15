@@ -161,11 +161,20 @@ wrong platform, failed procfs semantic, failed `O_TMPFILE`, mount drift, or
 runtime identity drift is a failure, not a skip. Real scheduler evidence is
 reserved for post-job WMI validation.
 
+Both CI roles require the recorded checked-out `HEAD` to equal `GITHUB_SHA`.
+The provisioned role runs the standalone no-solve scanner before the semantic
+pipeline and uploads its exact scan receipt, execution identity, final consumer
+receipt, and synthetic-scheduler result record as one retained artifact set.
+
 The define-fun regression is independently fixed in both SMT-LIB readers.
 Macro bodies receive only their own parameters as lexical bindings; all other
 atoms resolve through global declarations, never a caller `let` or outer macro
 parameter. A bounded fixture at
 `tests/fixtures/define_fun_caller_shadow_unsat.smt2` is genuinely unsatisfiable.
+The quoted-symbol `inner -> outer -> let` fixture at
+`tests/fixtures/define_fun_transitive_quoted_shadow_unsat.smt2` is also
+unsatisfiable and exercises transitive free-global propagation through the
+complete visible `define-fun` call graph.
 To scan the exact external source set lexically, without encoding or solving:
 
 ```bash
@@ -178,9 +187,13 @@ python3 -B scripts/bench/scan_define_fun_shadowing.py validate \
 ```
 
 The report schema is
-`euf-viper.define-fun-shadowing-corpus-scan.v1`, binds the exact 7,503-row
-manifest and portable source-set hashes, records candidate and affected
-definitions plus colliding call sites, and fixes `solving_performed=false`.
+`euf-viper.define-fun-shadowing-corpus-scan.v2`. It retains all 7,503 source
+rows with manifest, lexical, canonical path, device, inode, byte count, and
+SHA-256 identities. Validation independently rejects path/resolution/inode
+aliases, reconstructs the portable source-set digest from that ledger, and
+checks complete source/definition/failure accounting. Unsupported top-level
+forms, including recursive definitions, are scan failures rather than ignored
+commands. The report fixes `solving_performed=false`.
 
 Before any full submission, inspect the two-minute/256 MiB environment-only
 canary without submitting:
@@ -193,10 +206,12 @@ Its `--submit` mode is shard-free and cannot enter any source-set or decision
 pipeline. It records procfs fd semantics, all capability sets, repository and
 output mount/statfs identities, actual one-link mode-0444 `O_TMPFILE`
 publication with digest/fsync, Python/runtime identity, and `scontrol`/`sacct`
-availability. After that canary job completes, the dedicated validator accepts
-the preserved `job;cluster`, requires one successful root `sacct` row, and
-emits an immutable environment-only validation receipt. The canary remains
-nondecisive and non-authoritative.
+availability and executable hashes. The submitter requires a clean exact-blob
+canary checkout; the job opens the emitter once and executes those bound bytes
+through `/proc/self/fd`. It records an in-job root scheduler identity, including
+SLUID/name/user/workdir, and the validator requires the same complete identity
+in the successful root `sacct` row while rehashing both Slurm tools. The canary
+remains nondecisive and non-authoritative.
 
 ```bash
 scripts/wmi/submit_component_quotient_census.sh
@@ -226,13 +241,19 @@ time, job name, user, workdir, state, and exit code. Stale attempt files and
 immutable orphans are expected after failures and must not be deleted by
 campaign wrappers.
 
-The full census is submitted held. The remote submit operation creates and
-returns its immutable pending receipt without releasing the job. A local EXIT
-and signal trap is armed before the remote `sbatch`, can recover the held
-`job;cluster` from the remote attempt or its unique prebound Slurm job name,
-and owns cancellation until release.
+The full census is submitted held. Immediately after `sbatch`, the remote
+operation obtains mutually consistent `scontrol` and root `sacct` identities
+and persists the complete held state, including hold reason, SLUID, submit time,
+cluster, name, user, and workdir. The pending v7 receipt embeds that record and
+an exact namespace object whose keys and nonce/path/inode digest relationships
+admit no extras. A local EXIT and signal trap is armed before the remote
+`sbatch` and owns cancellation until successful release.
 Local code first parses the returned canonical bytes, verifies every expected
 submission binding, creates the local receipt with `O_EXCL`, fsyncs and seals
 it mode `0444`, fsyncs its directory, and reopens it for full validation. Only
-then does a separate SSH operation release the job. Parse, `O_EXCL`, write,
-fsync, revalidation, SSH, or release failure cancels without a release attempt.
+then does a separate SSH operation release the job. Immediately before release
+or cancellation, remote code re-queries the complete identity and compares it
+exactly with the persisted held record. Zero or multiple scheduler rows are
+fail-closed errors and never authorize touching a job. Parse, `O_EXCL`, write,
+fsync, revalidation, SSH, or release failure enters that guarded cancellation
+path without a release attempt.

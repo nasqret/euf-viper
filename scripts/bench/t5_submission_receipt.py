@@ -44,6 +44,7 @@ class ExpectedSubmission:
     cluster: str
     job_name: str
     job_user: str
+    held_receipt_sha256: str
     python_realpath: str
     python_version: str
     python_sha256: str
@@ -55,10 +56,12 @@ def _require_expected(
     scheduler = receipt.get("scheduler_submission")
     namespace = receipt.get("remote_namespace")
     python = receipt.get("python")
+    held = receipt.get("scheduler_held")
     if (
         type(scheduler) is not dict
         or type(namespace) is not dict
         or type(python) is not dict
+        or type(held) is not dict
     ):
         raise SubmissionHandoffError(
             "pending receipt lacks scheduler, namespace, or Python binding"
@@ -83,6 +86,7 @@ def _require_expected(
         scheduler.get("job_name"),
         scheduler.get("user"),
         scheduler.get("workdir"),
+        held.get("receipt_sha256"),
         python.get("realpath"),
         python.get("version"),
         python.get("sha256"),
@@ -107,6 +111,7 @@ def _require_expected(
         expected.job_name,
         expected.job_user,
         expected.namespace_path,
+        expected.held_receipt_sha256,
         expected.python_realpath,
         expected.python_version,
         expected.python_sha256,
@@ -223,26 +228,44 @@ def guarded_handoff(
 
 _REMOTE_CONTROL = b"""set -euo pipefail
 action="$1"
-job_id="$2"
-cluster="$3"
-if [[ ! "$job_id" =~ ^[1-9][0-9]*$ ]] || [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+work="$2"
+attempt_id="$3"
+expected_receipt_sha256="$4"
+python_realpath="$5"
+python_sha256="$6"
+if [[ "$work" != /* ]] || [[ "$work" == *[[:space:]]* ]] || \\
+   [[ ! "$attempt_id" =~ ^[A-Za-z0-9_.-]+$ ]] || \\
+   [[ ! "$expected_receipt_sha256" =~ ^[0-9a-f]{64}$ ]] || \\
+   [[ "$python_realpath" != /* ]] || [[ "$python_realpath" == *[[:space:]]* ]] || \\
+   [[ ! "$python_sha256" =~ ^[0-9a-f]{64}$ ]]; then
   echo "held-job identity is malformed" >&2
   exit 2
 fi
-case "$action" in
-  release)
-    env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \\
-      scontrol --clusters="$cluster" --quiet release "$job_id"
-    ;;
-  cancel)
-    env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \\
-      scancel --clusters="$cluster" "$job_id"
-    ;;
-  *)
-    echo "unsupported held-job operation" >&2
-    exit 2
-    ;;
-esac
+if [ "$action" != release ] && [ "$action" != cancel ]; then
+  echo "unsupported held-job operation" >&2
+  exit 2
+fi
+if [ "$(cd -- "$work" && pwd -P)" != "$work" ]; then
+  echo "held-job workdir is not canonical" >&2
+  exit 2
+fi
+observed_python_sha256="$(sha256sum -- "$python_realpath")"
+observed_python_sha256="${observed_python_sha256%% *}"
+if [ "$observed_python_sha256" != "$python_sha256" ]; then
+  echo "held-job Python identity drift" >&2
+  exit 2
+fi
+receipt="$work/results/component-quotient-census-held-${attempt_id}.json"
+exec env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \\
+  "$python_realpath" -I -B -S "$work/scripts/bench/t5_held_scheduler.py" operate \\
+    --receipt "$receipt" \\
+    --expected-receipt-sha256 "$expected_receipt_sha256" \\
+    --expected-job-id "$7" \\
+    --expected-cluster "$8" \\
+    --expected-job-name "$9" \\
+    --expected-user "${10}" \\
+    --expected-workdir "$work" \\
+    --action "$action"
 """
 
 
@@ -265,8 +288,15 @@ def _remote_operation(
                 "-s",
                 "--",
                 action,
+                expected.namespace_path,
+                expected.attempt_id,
+                expected.held_receipt_sha256,
+                expected.python_realpath,
+                expected.python_sha256,
                 str(expected.job_id),
                 expected.cluster,
+                expected.job_name,
+                expected.job_user,
             ],
             input=_REMOTE_CONTROL,
             env={
@@ -303,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cluster", required=True)
     parser.add_argument("--job-name", required=True)
     parser.add_argument("--job-user", required=True)
+    parser.add_argument("--held-receipt-sha256", required=True)
     parser.add_argument("--python-realpath", required=True)
     parser.add_argument("--python-version", required=True)
     parser.add_argument("--python-sha256", required=True)
@@ -330,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         cluster=arguments.cluster,
         job_name=arguments.job_name,
         job_user=arguments.job_user,
+        held_receipt_sha256=arguments.held_receipt_sha256,
         python_realpath=arguments.python_realpath,
         python_version=arguments.python_version,
         python_sha256=arguments.python_sha256,

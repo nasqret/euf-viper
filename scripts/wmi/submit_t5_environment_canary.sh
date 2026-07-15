@@ -29,7 +29,7 @@ if [ "$MODE" = "--dry-run" ]; then
     'mode=dry-run' \
     'resources=00:02:00,256MiB,1cpu,1task,no-array' \
     'scope=non-corpus-environment-only' \
-    "command=sbatch --parsable --export=<revision,python,user> $SCRIPT" \
+    "command=sbatch --parsable --export=<revision,python,python-hash,emitter-hash,emitter-bytes,user> $SCRIPT" \
     'post_job=validate_t5_environment_canary.sh JOB_ID;CLUSTER CANARY RECEIPT'
   exit 0
 fi
@@ -47,6 +47,15 @@ REVISION="$(
     GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     git -C "$ROOT" rev-parse HEAD
 )"
+env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+  "$PYTHON" -I -B -S scripts/bench/t5_environment_canary.py check-checkout \
+    --repository-root "$ROOT" --expected-revision "$REVISION" >/dev/null
+PYTHON_SHA256="$(sha256sum -- "$PYTHON")"
+PYTHON_SHA256="${PYTHON_SHA256%% *}"
+EMITTER="scripts/bench/t5_environment_canary.py"
+EMITTER_SHA256="$(sha256sum -- "$EMITTER")"
+EMITTER_SHA256="${EMITTER_SHA256%% *}"
+EMITTER_BYTES="$(stat -c %s -- "$EMITTER")"
 USER_NAME="$(id -un)"
 CLUSTER="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
@@ -54,6 +63,9 @@ CLUSTER="$(
 )"
 if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]] || \
    [[ "$PYTHON" != /* ]] || [ ! -x "$PYTHON" ] || \
+   [[ ! "$PYTHON_SHA256" =~ ^[0-9a-f]{64}$ ]] || \
+   [[ ! "$EMITTER_SHA256" =~ ^[0-9a-f]{64}$ ]] || \
+   [[ ! "$EMITTER_BYTES" =~ ^[1-9][0-9]*$ ]] || \
    [[ ! "$USER_NAME" =~ ^[A-Za-z0-9_.-]+$ ]] || \
    [[ ! "$CLUSTER" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   echo "canary submission binding is malformed" >&2
@@ -61,6 +73,9 @@ if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]] || \
 fi
 EXPORTS="EUF_VIPER_T5_CANARY_REVISION=$REVISION"
 EXPORTS+=",EUF_VIPER_T5_CANARY_PYTHON=$PYTHON"
+EXPORTS+=",EUF_VIPER_T5_CANARY_PYTHON_SHA256=$PYTHON_SHA256"
+EXPORTS+=",EUF_VIPER_T5_CANARY_EMITTER_SHA256=$EMITTER_SHA256"
+EXPORTS+=",EUF_VIPER_T5_CANARY_EMITTER_BYTES=$EMITTER_BYTES"
 EXPORTS+=",EUF_VIPER_T5_CANARY_USER=$USER_NAME"
 SUBMISSION="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \

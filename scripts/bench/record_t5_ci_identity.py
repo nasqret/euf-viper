@@ -8,12 +8,15 @@ import hashlib
 import json
 import os
 import platform
+import re
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
 
 IDENTITY_SCHEMA = "euf-viper.t5-ci-execution-identity.v1"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class CiIdentityError(ValueError):
@@ -28,12 +31,39 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _checked_out_head(repository_root: Path) -> str:
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(repository_root), "rev-parse", "HEAD"],
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "TZ": "UTC",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_SYSTEM": "/dev/null",
+            },
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise CiIdentityError(f"cannot identify checked-out HEAD: {error}") from error
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise CiIdentityError("checked-out HEAD is malformed")
+    return head
+
+
 def capture_identity(
     *,
     scope: str,
     scheduler_evidence: str,
     environment: dict[str, str] | None = None,
     require_hosted_image: bool = False,
+    require_github_sha: bool = False,
+    repository_root: Path = ROOT,
 ) -> dict[str, object]:
     environment = dict(os.environ if environment is None else environment)
     if scope not in {
@@ -44,6 +74,7 @@ def capture_identity(
     if scheduler_evidence not in {"not_queried", "synthetic_injected_root_row"}:
         raise CiIdentityError("unsupported scheduler-evidence label")
     executable = Path(sys.executable).resolve(strict=True)
+    checked_out_head = _checked_out_head(repository_root)
     executable_stat = executable.stat()
     uname = platform.uname()
     runner = {
@@ -58,6 +89,9 @@ def capture_identity(
         for field in ("runner_os", "runner_arch", "image_os", "image_version")
     ):
         raise CiIdentityError("hosted runner image identity is incomplete")
+    github_sha = environment.get("GITHUB_SHA")
+    if require_github_sha and github_sha != checked_out_head:
+        raise CiIdentityError("GITHUB_SHA differs from checked-out HEAD")
     value = {
         "schema": IDENTITY_SCHEMA,
         "status": "execution_identity_non_evidence",
@@ -72,7 +106,8 @@ def capture_identity(
             "repository": environment.get("GITHUB_REPOSITORY"),
             "run_id": environment.get("GITHUB_RUN_ID"),
             "run_attempt": environment.get("GITHUB_RUN_ATTEMPT"),
-            "sha": environment.get("GITHUB_SHA"),
+            "sha": github_sha,
+            "checked_out_head": checked_out_head,
         },
         "python": {
             "realpath": str(executable),
@@ -148,12 +183,25 @@ def validate_identity(value: object) -> dict[str, object]:
         "run_id",
         "run_attempt",
         "sha",
+        "checked_out_head",
     }:
         raise CiIdentityError("T5 CI runner field set drift")
     if any(item is not None and type(item) is not str for item in runner.values()):
         raise CiIdentityError("T5 CI runner identity type drift")
     if any(item is not None and type(item) is not str for item in github.values()):
         raise CiIdentityError("T5 CI GitHub identity type drift")
+    checked_out_head = github["checked_out_head"]
+    github_sha = github["sha"]
+    if (
+        type(checked_out_head) is not str
+        or not re.fullmatch(r"[0-9a-f]{40}", checked_out_head)
+        or github_sha is not None
+        and (
+            not re.fullmatch(r"[0-9a-f]{40}", github_sha)
+            or github_sha != checked_out_head
+        )
+    ):
+        raise CiIdentityError("T5 CI checked-out revision binding drift")
     python = value["python"]
     if type(python) is not dict or set(python) != {
         "realpath",
@@ -240,12 +288,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scope", required=True)
     parser.add_argument("--scheduler-evidence", required=True)
     parser.add_argument("--require-hosted-image", action="store_true")
+    parser.add_argument("--require-github-sha", action="store_true")
     arguments = parser.parse_args(argv)
     try:
         value = capture_identity(
             scope=arguments.scope,
             scheduler_evidence=arguments.scheduler_evidence,
             require_hosted_image=arguments.require_hosted_image,
+            require_github_sha=arguments.require_github_sha,
         )
         write_identity_no_replace(arguments.output, value)
     except (OSError, CiIdentityError) as error:

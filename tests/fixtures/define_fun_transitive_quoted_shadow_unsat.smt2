@@ -1,0 +1,11 @@
+(set-logic QF_UF)
+(declare-sort U 0)
+(declare-const |global value| U)
+(declare-const other U)
+(define-fun |inner macro| ((x U)) U |global value|)
+(define-fun |outer macro| ((x U)) U (|inner macro| x))
+(assert (distinct |global value| other))
+(assert
+  (let ((|global value| other))
+    (= (|outer macro| |global value|) |global value|)))
+(check-sat)

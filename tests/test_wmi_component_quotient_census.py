@@ -25,6 +25,7 @@ from scripts.bench import component_quotient_contract as contract
 from scripts.bench import independent_component_quotient_verifier as independent
 from scripts.bench import t5_linux_publication as publication
 from scripts.bench import t5_runtime_environment as runtime_environment
+from scripts.bench import t5_held_scheduler as held_scheduler
 from scripts.bench import t5_submission_receipt as submission_receipt
 from scripts.bench import verify_component_quotient_publication as consumer
 
@@ -55,6 +56,22 @@ def clean_environment(home: Path | str = "/nonexistent") -> dict[str, str]:
 
 def smt_query(body: str) -> str:
     return f"(set-logic QF_UF)\n{body}\n(check-sat)\n"
+
+
+def held_scheduler_record(
+    job_id: int, cluster: str, job_name: str, user: str, workdir: str
+) -> dict[str, object]:
+    return held_scheduler.HeldSchedulerIdentity(
+        job_id=job_id,
+        sluid=f"{cluster}:{job_id}",
+        cluster=cluster,
+        submit_time="2026-07-15T12:00:00",
+        job_name=job_name,
+        user=user,
+        workdir=workdir,
+        state="PENDING",
+        hold_reason="JobHeldUser",
+    ).to_json()
 
 
 class ComponentQuotientStaticContractTests(unittest.TestCase):
@@ -158,14 +175,15 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         self.assertIn("namespace_id", text)
         self.assertIn("--hold", text)
         self.assertIn("cancel_held_job", text)
-        self.assertIn('scancel --clusters="$cluster" "$job_id"', text)
+        self.assertIn("t5_held_scheduler.py\" operate", text)
+        self.assertNotRegex(text, r"(?m)^\s*scancel(?:\s|$)")
         self.assertIn("trap cancel_held_job EXIT", text)
         self.assertIn("trap cancel_local_held_job EXIT", text)
         self.assertIn("LOCAL_SUBMISSION_ACTIVE=1", text)
         self.assertIn("squeue --clusters=", text)
         self.assertIn("--job-name=", text)
         self.assertIn("scripts/bench/t5_submission_receipt.py", text)
-        self.assertIn('scontrol --clusters="$cluster" --quiet release', handoff_text)
+        self.assertIn("t5_held_scheduler.py\" operate", handoff_text)
         self.assertIn("guarded_handoff", handoff_text)
         self.assertIn("trap 'exit 129' HUP", text)
         self.assertLess(text.index("trap cancel_held_job EXIT"), text.index("pending_path="))
@@ -181,7 +199,10 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
             text.index("scripts/bench/t5_submission_receipt.py"),
             text.index("LOCAL_RELEASED=1"),
         )
-        self.assertIn('printf \'%s\\n%s\\n\' "$submission" "$payload"', text)
+        self.assertIn(
+            'printf \'%s\\n%s\\n%s\\n\' "$submission" "$held_receipt_sha256" "$payload"',
+            text,
+        )
         self.assertNotIn("git clean", text)
         self.assertNotIn("git reset", text)
         self.assertNotRegex(text, r"(?m)^\s*rm(?:\s|$)")
@@ -354,23 +375,41 @@ class FixedLockTests(unittest.TestCase):
 
 class LocalSubmissionHandoffTests(unittest.TestCase):
     def setUp(self) -> None:
+        namespace_path = "/remote/t5-attempt"
+        nonce = "2" * 64
+        namespace_id = contract.namespace_identity_sha256(
+            namespace_path=namespace_path,
+            namespace_device=1,
+            namespace_inode=2,
+            results_device=1,
+            results_inode=3,
+            submission_nonce=nonce,
+        )
+        held = held_scheduler_record(
+            987654,
+            "wmi-test",
+            "euf-cqram-" + namespace_id[:20],
+            "reviewer",
+            namespace_path,
+        )
         self.expected = submission_receipt.ExpectedSubmission(
             revision="1" * 40,
             published_ref="origin/reviewed",
             remote_host="wmicluster",
-            namespace_path="/remote/t5-attempt",
-            namespace_id="3" * 64,
+            namespace_path=namespace_path,
+            namespace_id=namespace_id,
             namespace_device=1,
             namespace_inode=2,
             results_device=1,
             results_inode=3,
             attempt_id="component-quotient-111111111111-attempt.ABCDEFGH",
-            submission_nonce="2" * 64,
+            submission_nonce=nonce,
             dependency=None,
             job_id=987654,
             cluster="wmi-test",
-            job_name="euf-cqram-" + "3" * 20,
+            job_name="euf-cqram-" + namespace_id[:20],
             job_user="reviewer",
+            held_receipt_sha256=str(held["receipt_sha256"]),
             python_realpath="/usr/bin/python3",
             python_version="3.12.0",
             python_sha256="4" * 64,
@@ -407,6 +446,13 @@ class LocalSubmissionHandoffTests(unittest.TestCase):
                 "user": expected.job_user,
                 "workdir": expected.namespace_path,
             },
+            "scheduler_held": held_scheduler_record(
+                expected.job_id,
+                expected.cluster,
+                expected.job_name,
+                expected.job_user,
+                expected.namespace_path,
+            ),
             "expected_marker_name": (
                 f"component-quotient-census-{expected.job_id}.current"
             ),
@@ -469,6 +515,33 @@ class LocalSubmissionHandoffTests(unittest.TestCase):
             )
         self.assertEqual(events, ["cancel"])
 
+    def test_pending_namespace_is_exact_and_digest_bound(self) -> None:
+        for label, mutate in (
+            (
+                "extra",
+                lambda value: value["remote_namespace"].__setitem__("extra", 1),
+            ),
+            (
+                "results path",
+                lambda value: value["remote_namespace"].__setitem__(
+                    "results_path", "/remote/other-results"
+                ),
+            ),
+            (
+                "inode digest",
+                lambda value: value["remote_namespace"].__setitem__("inode", 99),
+            ),
+        ):
+            with self.subTest(label=label):
+                value = json.loads(self.payload())
+                mutate(value)
+                value.pop("receipt_sha256")
+                value["receipt_sha256"] = digest(contract.canonical_json_bytes(value))
+                with self.assertRaises(consumer.ConsumerVerificationError):
+                    consumer.validate_pending_submission_bytes(
+                        contract.canonical_json_bytes(value)
+                    )
+
     def test_local_persist_failure_cancels_without_release(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             events = self.run_failure(
@@ -501,6 +574,98 @@ class LocalSubmissionHandoffTests(unittest.TestCase):
                 cancel=lambda: events.append("cancel"),
             )
         self.assertEqual(events, ["release"])
+
+
+class HeldSchedulerOwnershipTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.identity = held_scheduler.HeldSchedulerIdentity(
+            job_id=81234,
+            sluid="wmicluster:81234",
+            cluster="wmicluster",
+            submit_time="2026-07-15T12:00:00",
+            job_name="euf-cqram-owned",
+            user="t5-user",
+            workdir="/remote/owned-attempt",
+            state="PENDING",
+            hold_reason="JobHeldUser",
+        )
+
+    def test_zero_or_ambiguous_scheduler_lookup_never_cancels(self) -> None:
+        for output in ("", "JobId=81234\nJobId=81234\n"):
+            with self.subTest(output=output), mock.patch.object(
+                held_scheduler, "_run", return_value=output
+            ) as run:
+                with self.assertRaises(held_scheduler.HeldSchedulerError):
+                    held_scheduler.query_held_job(81234, "wmicluster")
+                self.assertEqual(run.call_count, 1)
+                self.assertFalse(
+                    any(call.args[0][0] == "scancel" for call in run.call_args_list)
+                )
+
+    def test_identity_drift_blocks_cancel_before_action(self) -> None:
+        drifted = replace(self.identity, workdir="/remote/unrelated")
+        with (
+            mock.patch.object(
+                held_scheduler, "query_held_job", return_value=drifted
+            ),
+            mock.patch.object(held_scheduler, "_run") as run,
+        ):
+            with self.assertRaisesRegex(
+                held_scheduler.HeldSchedulerError, "changed before operation"
+            ):
+                held_scheduler.operate_on_held_job(self.identity, "cancel")
+            run.assert_not_called()
+
+    def test_complete_held_identity_is_requeried_before_cancel(self) -> None:
+        with (
+            mock.patch.object(
+                held_scheduler, "query_held_job", return_value=self.identity
+            ) as query,
+            mock.patch.object(held_scheduler, "_run", return_value="") as run,
+        ):
+            self.assertEqual(
+                held_scheduler.operate_on_held_job(self.identity, "cancel"),
+                self.identity,
+            )
+        query.assert_called_once_with(81234, "wmicluster")
+        self.assertEqual(
+            run.call_args.args[0],
+            ["scancel", "--clusters=wmicluster", "81234"],
+        )
+
+    def test_scontrol_and_sacct_must_agree_on_complete_held_identity(self) -> None:
+        control = (
+            "JobId=81234 JobName=euf-cqram-owned UserId=t5-user(1001) "
+            "JobState=PENDING Reason=JobHeldUser WorkDir=/remote/owned-attempt "
+            "SubmitTime=2026-07-15T12:00:00\n"
+        )
+        accounting = (
+            "81234|wmicluster:81234|wmicluster|2026-07-15T12:00:00|"
+            "euf-cqram-owned|t5-user|/remote/owned-attempt|PENDING|\n"
+        )
+        with mock.patch.object(
+            held_scheduler, "_run", side_effect=(control, accounting)
+        ):
+            self.assertEqual(
+                held_scheduler.query_held_job(81234, "wmicluster"), self.identity
+            )
+        with mock.patch.object(
+            held_scheduler,
+            "_run",
+            side_effect=(control, accounting.replace("owned-attempt", "other")),
+        ):
+            with self.assertRaisesRegex(
+                held_scheduler.HeldSchedulerError, "identities disagree"
+            ):
+                held_scheduler.query_held_job(81234, "wmicluster")
+
+    def test_held_receipt_rejects_extra_keys(self) -> None:
+        value = self.identity.to_json()
+        value["extra"] = "not-allowed"
+        with self.assertRaisesRegex(
+            held_scheduler.HeldSchedulerError, "field set drift"
+        ):
+            held_scheduler.validate_held_receipt(value)
 
 
 class IndependentSemanticDifferentialTests(unittest.TestCase):
@@ -581,6 +746,23 @@ class IndependentSemanticDifferentialTests(unittest.TestCase):
             problem.equality_pairs,
             ((min(global_term, other_term), max(global_term, other_term)),),
         )
+        self.assertNotIn((other_term, other_term), problem.equality_pairs)
+
+    def test_t5_parser_transitive_quoted_macro_shadowing_is_unsat(self) -> None:
+        source = (
+            ROOT / "tests/fixtures/define_fun_transitive_quoted_shadow_unsat.smt2"
+        ).read_text(encoding="ascii")
+        problem = independent.audit_smtlib.parse_qfuf_for_audit(source)
+        names = {
+            term: problem.signatures[function].name
+            for term, function in enumerate(problem.term_functions)
+        }
+        global_term = next(
+            term for term, name in names.items() if name == "global value"
+        )
+        other_term = next(term for term, name in names.items() if name == "other")
+        pair = (min(global_term, other_term), max(global_term, other_term))
+        self.assertIn(pair, problem.equality_pairs)
         self.assertNotIn((other_term, other_term), problem.equality_pairs)
 
     def test_exhaustive_small_equality_graphs_match_analyzer(self) -> None:
@@ -1366,6 +1548,15 @@ class PublicationPlatformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "pending.json"
+            nonce = "c" * 64
+            namespace_id = contract.namespace_identity_sha256(
+                namespace_path="/remote/attempt",
+                namespace_device=1,
+                namespace_inode=2,
+                results_device=1,
+                results_inode=3,
+                submission_nonce=nonce,
+            )
             value = {
                 "schema": contract.SUBMISSION_SCHEMA,
                 "status": "submitted_pending_nondecisive",
@@ -1375,7 +1566,7 @@ class PublicationPlatformTests(unittest.TestCase):
                 "published_ref": "origin/main",
                 "remote_host": "wmicluster",
                 "remote_namespace": {
-                    "id": "b" * 64,
+                    "id": namespace_id,
                     "path": "/remote/attempt",
                     "device": 1,
                     "inode": 2,
@@ -1384,7 +1575,7 @@ class PublicationPlatformTests(unittest.TestCase):
                     "results_inode": 3,
                 },
                 "attempt_id": "attempt-123456",
-                "submission_nonce": "c" * 64,
+                "submission_nonce": nonce,
                 "dependency": None,
                 "job_id": 123,
                 "scheduler_submission": {
@@ -1395,6 +1586,13 @@ class PublicationPlatformTests(unittest.TestCase):
                     "user": "tester",
                     "workdir": "/remote/attempt",
                 },
+                "scheduler_held": held_scheduler_record(
+                    123,
+                    "wmicluster",
+                    "euf-cqram-census",
+                    "tester",
+                    "/remote/attempt",
+                ),
                 "expected_marker_name": "component-quotient-census-123.current",
                 "contract": {
                     "expected_sources": contract.EXPECTED_SOURCES,
@@ -1805,6 +2003,13 @@ class ConsumerFixture:
             "dependency": None,
             "job_id": self.job_id,
             "scheduler_submission": self._scheduler_submission(),
+            "scheduler_held": held_scheduler_record(
+                self.job_id,
+                self.cluster,
+                self.job_name,
+                self.job_user,
+                str(self.namespace),
+            ),
             "expected_marker_name": self.marker_name,
             "contract": {
                 "expected_sources": contract.EXPECTED_SOURCES,

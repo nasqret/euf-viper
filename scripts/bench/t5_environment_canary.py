@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import sysconfig
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,9 +27,17 @@ if str(ROOT) not in sys.path:
 from scripts.bench import t5_linux_publication as publication  # noqa: E402
 
 
-CANARY_SCHEMA = "euf-viper.t5-wmi-environment-canary.v1"
+CANARY_SCHEMA = "euf-viper.t5-wmi-environment-canary.v2"
 EMISSION_SCHEMA = "euf-viper.t5-wmi-environment-canary-emission.v1"
-VALIDATION_SCHEMA = "euf-viper.t5-wmi-environment-canary-validation.v1"
+VALIDATION_SCHEMA = "euf-viper.t5-wmi-environment-canary-validation.v2"
+CHECKOUT_SCHEMA = "euf-viper.t5-wmi-environment-canary-checkout.v1"
+CANARY_RUNTIME_FILES = (
+    "scripts/bench/t5_environment_canary.py",
+    "scripts/bench/t5_linux_publication.py",
+    "scripts/wmi/euf_viper_t5_environment_canary.sbatch",
+    "scripts/wmi/submit_t5_environment_canary.sh",
+    "scripts/wmi/validate_t5_environment_canary.sh",
+)
 SACCT_FORMAT = (
     "JobIDRaw%64,SLUID%256,Cluster%128,Submit%32,JobName%128,User%128,"
     "WorkDir%4096,State%64,ExitCode%32"
@@ -72,30 +81,6 @@ def canonical_json_bytes(value: object) -> bytes:
         json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
         + "\n"
     ).encode("ascii")
-
-
-def _sha256_file(path: Path) -> tuple[str, int]:
-    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
-    try:
-        descriptor_stat = os.fstat(descriptor)
-        if not stat.S_ISREG(descriptor_stat.st_mode):
-            raise CanaryError(f"runtime path is not a regular file: {path}")
-        digest = hashlib.sha256()
-        size = 0
-        while chunk := os.read(descriptor, 1024 * 1024):
-            digest.update(chunk)
-            size += len(chunk)
-        terminal = os.fstat(descriptor)
-        if (
-            (terminal.st_dev, terminal.st_ino)
-            != (descriptor_stat.st_dev, descriptor_stat.st_ino)
-            or terminal.st_size != size
-        ):
-            raise CanaryError(f"runtime path changed while hashed: {path}")
-        return digest.hexdigest(), size
-    finally:
-        os.close(descriptor)
 
 
 def _decode_mount_path(value: str) -> str:
@@ -173,18 +158,60 @@ def _filesystem_binding(path: Path) -> dict[str, object]:
     }
 
 
-def _regular_file_identity(path: Path) -> dict[str, object]:
+def _capture_regular_file(path: Path) -> tuple[dict[str, object], bytes]:
     canonical = path.resolve(strict=True)
-    digest, size = _sha256_file(canonical)
-    file_stat = canonical.stat()
-    return {
-        "realpath": str(canonical),
-        "device": file_stat.st_dev,
-        "inode": file_stat.st_ino,
-        "mode": f"{stat.S_IMODE(file_stat.st_mode):04o}",
-        "bytes": size,
-        "sha256": digest,
-    }
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(canonical, flags)
+    try:
+        opened = os.fstat(descriptor)
+        named = os.stat(canonical, follow_symlinks=False)
+        if not stat.S_ISREG(opened.st_mode):
+            raise CanaryError(f"runtime path is not regular: {canonical}")
+        payload = bytearray()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            payload.extend(chunk)
+        terminal = os.fstat(descriptor)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_mode,
+            opened.st_size,
+        ) != (
+            named.st_dev,
+            named.st_ino,
+            named.st_mode,
+            named.st_size,
+        ) or (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_mode,
+            opened.st_size,
+        ) != (
+            terminal.st_dev,
+            terminal.st_ino,
+            terminal.st_mode,
+            terminal.st_size,
+        ) or len(payload) != opened.st_size:
+            raise CanaryError(f"runtime path changed while captured: {canonical}")
+    finally:
+        os.close(descriptor)
+    captured = bytes(payload)
+    return (
+        {
+            "realpath": str(canonical),
+            "device": opened.st_dev,
+            "inode": opened.st_ino,
+            "mode": f"{stat.S_IMODE(opened.st_mode):04o}",
+            "bytes": len(captured),
+            "sha256": hashlib.sha256(captured).hexdigest(),
+        },
+        captured,
+    )
+
+
+def _regular_file_identity(path: Path) -> dict[str, object]:
+    identity, _ = _capture_regular_file(path)
+    return identity
 
 
 def _command_identity(command: str) -> dict[str, object]:
@@ -278,6 +305,144 @@ def _git_revision(repository_root: Path) -> str:
     return revision
 
 
+def _safe_git(repository_root: Path, *arguments: str, text: bool = True) -> str | bytes:
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repository_root), *arguments],
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": "/nonexistent",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "TZ": "UTC",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_SYSTEM": "/dev/null",
+                "GIT_PAGER": "cat",
+            },
+            check=True,
+            capture_output=True,
+            text=text,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise CanaryError(f"cannot inspect canary checkout: {error}") from error
+    return completed.stdout
+
+
+def _descriptor_identity(descriptor: int) -> dict[str, object]:
+    descriptor_stat = os.fstat(descriptor)
+    if not stat.S_ISREG(descriptor_stat.st_mode):
+        raise CanaryError("bound canary emitter descriptor is not regular")
+    digest = hashlib.sha256()
+    offset = 0
+    while offset < descriptor_stat.st_size:
+        chunk = os.pread(descriptor, min(1024 * 1024, descriptor_stat.st_size - offset), offset)
+        if not chunk:
+            raise CanaryError("bound canary emitter descriptor ended early")
+        digest.update(chunk)
+        offset += len(chunk)
+    terminal = os.fstat(descriptor)
+    if (
+        descriptor_stat.st_dev,
+        descriptor_stat.st_ino,
+        descriptor_stat.st_mode,
+        descriptor_stat.st_size,
+    ) != (
+        terminal.st_dev,
+        terminal.st_ino,
+        terminal.st_mode,
+        terminal.st_size,
+    ):
+        raise CanaryError("bound canary emitter descriptor changed during hashing")
+    return {
+        "device": descriptor_stat.st_dev,
+        "inode": descriptor_stat.st_ino,
+        "mode": f"{stat.S_IMODE(descriptor_stat.st_mode):04o}",
+        "bytes": descriptor_stat.st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def capture_checkout_identity(
+    repository_root: Path,
+    expected_revision: str,
+    *,
+    bound_script_descriptor: int | None = None,
+) -> dict[str, object]:
+    repository_root = repository_root.resolve(strict=True)
+    revision = _git_revision(repository_root)
+    if revision != expected_revision:
+        raise CanaryError("canary checkout revision differs from submission")
+    status = _safe_git(
+        repository_root, "status", "--porcelain=v1", "--untracked-files=all"
+    )
+    if type(status) is not str or status:
+        raise CanaryError("canary checkout is not clean, including untracked files")
+    flags = _safe_git(repository_root, "ls-files", "-v", "-z")
+    if type(flags) is not str or any(
+        entry and (entry[0] == "S" or entry[0].islower())
+        for entry in flags.split("\x00")
+    ):
+        raise CanaryError("canary checkout has hidden index flags")
+    runtime_files: list[dict[str, object]] = []
+    for relative_path in CANARY_RUNTIME_FILES:
+        tree = _safe_git(repository_root, "ls-tree", revision, "--", relative_path)
+        if type(tree) is not str or not tree.endswith(f"\t{relative_path}\n"):
+            raise CanaryError(f"canary runtime blob is absent: {relative_path}")
+        metadata = tree.split("\t", 1)[0].split()
+        if len(metadata) != 3 or metadata[1] != "blob":
+            raise CanaryError(f"canary runtime tree identity drift: {relative_path}")
+        expected_mode, _, expected_blob = metadata
+        payload = _safe_git(
+            repository_root, "cat-file", "blob", f"{revision}:{relative_path}", text=False
+        )
+        if type(payload) is not bytes:
+            raise CanaryError("canary Git blob capture type drift")
+        path = repository_root / relative_path
+        identity, actual_payload = _capture_regular_file(path)
+        actual_mode = "100755" if os.access(path, os.X_OK) else "100644"
+        if (
+            payload != actual_payload
+            or actual_mode != expected_mode
+            or hashlib.sha1(
+                f"blob {len(payload)}\0".encode("ascii") + payload
+            ).hexdigest()
+            != expected_blob
+        ):
+            raise CanaryError(f"canary runtime bytes differ from Git blob: {relative_path}")
+        runtime_files.append(
+            {
+                "path": relative_path,
+                "git_blob_sha1": expected_blob,
+                **identity,
+            }
+        )
+    bound = (
+        _descriptor_identity(bound_script_descriptor)
+        if bound_script_descriptor is not None
+        else {
+            key: runtime_files[0][key]
+            for key in ("device", "inode", "mode", "bytes", "sha256")
+        }
+    )
+    emitter = runtime_files[0]
+    if any(bound[key] != emitter[key] for key in bound):
+        raise CanaryError("executed canary emitter differs from the exact Git blob")
+    terminal_status = _safe_git(
+        repository_root, "status", "--porcelain=v1", "--untracked-files=all"
+    )
+    if terminal_status or _git_revision(repository_root) != revision:
+        raise CanaryError("canary checkout changed during exact-blob capture")
+    value = {
+        "schema": CHECKOUT_SCHEMA,
+        "revision": revision,
+        "clean": True,
+        "runtime_files": runtime_files,
+        "bound_emitter": {"path": CANARY_RUNTIME_FILES[0], **bound},
+    }
+    return _validate_checkout_identity(value)
+
+
 def _artifact(name: str, published: publication.PublishedFile) -> dict[str, object]:
     return {
         "name": name,
@@ -291,16 +456,24 @@ def _artifact(name: str, published: publication.PublishedFile) -> dict[str, obje
 
 
 def emit_canary(
-    *, repository_root: Path, output_directory: Path, expected_revision: str
+    *,
+    repository_root: Path,
+    output_directory: Path,
+    expected_revision: str,
+    bound_script_descriptor: int | None = None,
+    scheduler_query: Callable[[int, str], RootSchedulerRow] | None = None,
 ) -> tuple[dict[str, object], dict[str, object]]:
     if not sys.platform.startswith("linux"):
         raise CanaryError("WMI environment canary requires Linux")
     repository_root = repository_root.resolve(strict=True)
     output_directory = output_directory.resolve(strict=True)
     job = _job_identity()
-    revision = _git_revision(repository_root)
-    if revision != expected_revision:
-        raise CanaryError("canary checkout revision differs from submission")
+    checkout = capture_checkout_identity(
+        repository_root,
+        expected_revision,
+        bound_script_descriptor=bound_script_descriptor,
+    )
+    revision = str(checkout["revision"])
     directory_flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
     directory_flags |= getattr(os, "O_NOFOLLOW", 0)
     output_descriptor = os.open(output_directory, directory_flags)
@@ -322,6 +495,43 @@ def emit_canary(
         probe = _artifact(probe_name, probe_published)
         uname = platform.uname()
         libc_name, libc_version = platform.libc_ver()
+        commands = {
+            "scontrol": _command_identity("scontrol"),
+            "sacct": _command_identity("sacct"),
+        }
+        if scheduler_query is not None:
+            runtime_scheduler = scheduler_query(job["job_id"], job["cluster"])
+        else:
+            last_scheduler_error: CanaryError | None = None
+            for scheduler_attempt in range(15):
+                try:
+                    runtime_scheduler = query_root_scheduler_row(
+                        job["job_id"],
+                        job["cluster"],
+                        sacct_realpath=str(commands["sacct"]["realpath"]),
+                        require_success=False,
+                    )
+                    break
+                except CanaryError as error:
+                    last_scheduler_error = error
+                    if scheduler_attempt < 14:
+                        time.sleep(1)
+            else:
+                raise CanaryError(
+                    f"cannot capture in-job root scheduler row: {last_scheduler_error}"
+                )
+        _validate_scheduler_row(
+            runtime_scheduler,
+            job_id=job["job_id"],
+            cluster=job["cluster"],
+            require_success=False,
+        )
+        if (
+            runtime_scheduler.job_name != job["job_name"]
+            or runtime_scheduler.user != job["user"]
+            or runtime_scheduler.workdir != job["workdir"]
+        ):
+            raise CanaryError("runtime scheduler row differs from canary job identity")
         value = {
             "schema": CANARY_SCHEMA,
             "status": "environment_canary_non_evidence",
@@ -329,7 +539,9 @@ def emit_canary(
             "authoritative": False,
             "scope": "non_corpus_wmi_environment",
             "repository_revision": revision,
+            "checkout": checkout,
             "job": job,
+            "scheduler_runtime": runtime_scheduler.to_json(),
             "python": _python_identity(),
             "runtime": {
                 "system": uname.system,
@@ -339,10 +551,7 @@ def emit_canary(
                 "machine": uname.machine,
                 "libc": {"name": libc_name, "version": libc_version},
             },
-            "commands": {
-                "scontrol": _command_identity("scontrol"),
-                "sacct": _command_identity("sacct"),
-            },
+            "commands": commands,
             "filesystems": {
                 "repository": _filesystem_binding(repository_root),
                 "output": _filesystem_binding(output_directory),
@@ -481,6 +690,66 @@ def _validate_file_identity(value: object, context: str) -> dict[str, object]:
     return value
 
 
+def _validate_checkout_identity(value: object) -> dict[str, object]:
+    if type(value) is not dict or set(value) != {
+        "schema",
+        "revision",
+        "clean",
+        "runtime_files",
+        "bound_emitter",
+    }:
+        raise CanaryError("canary checkout field set drift")
+    if (
+        value["schema"] != CHECKOUT_SCHEMA
+        or value["clean"] is not True
+        or type(value["revision"]) is not str
+        or not re.fullmatch(r"[0-9a-f]{40}", value["revision"])
+        or type(value["runtime_files"]) is not list
+        or len(value["runtime_files"]) != len(CANARY_RUNTIME_FILES)
+    ):
+        raise CanaryError("canary checkout identity drift")
+    runtime_fields = {
+        "path",
+        "git_blob_sha1",
+        "realpath",
+        "device",
+        "inode",
+        "mode",
+        "bytes",
+        "sha256",
+    }
+    for expected_path, item in zip(CANARY_RUNTIME_FILES, value["runtime_files"], strict=True):
+        if (
+            type(item) is not dict
+            or set(item) != runtime_fields
+            or item["path"] != expected_path
+            or type(item["git_blob_sha1"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{40}", item["git_blob_sha1"])
+        ):
+            raise CanaryError("canary runtime blob ledger drift")
+        _validate_file_identity(item, f"canary runtime blob {expected_path}")
+    bound = value["bound_emitter"]
+    if type(bound) is not dict or set(bound) != {
+        "path",
+        "device",
+        "inode",
+        "mode",
+        "bytes",
+        "sha256",
+    } or bound["path"] != CANARY_RUNTIME_FILES[0]:
+        raise CanaryError("bound canary emitter field set drift")
+    _validate_file_identity(
+        {"realpath": "/proc/self/fd/bound", **bound}, "bound canary emitter"
+    )
+    emitter = value["runtime_files"][0]
+    if any(
+        bound[field] != emitter[field]
+        for field in ("device", "inode", "mode", "bytes", "sha256")
+    ):
+        raise CanaryError("bound canary emitter does not match the Git blob ledger")
+    return value
+
+
 def _validate_statfs(value: object, context: str) -> dict[str, object]:
     if type(value) is not dict or set(value) != {
         "type",
@@ -584,7 +853,9 @@ def validate_canary(value: object) -> dict[str, object]:
         "authoritative",
         "scope",
         "repository_revision",
+        "checkout",
         "job",
+        "scheduler_runtime",
         "python",
         "runtime",
         "commands",
@@ -604,6 +875,42 @@ def validate_canary(value: object) -> dict[str, object]:
     ):
         raise CanaryError("environment canary status drift")
     _validate_job_identity(value["job"], "environment canary")
+    checkout = _validate_checkout_identity(value["checkout"])
+    if checkout["revision"] != value["repository_revision"]:
+        raise CanaryError("canary checkout revision binding drift")
+    runtime_scheduler = value["scheduler_runtime"]
+    if type(runtime_scheduler) is not dict:
+        raise CanaryError("canary runtime scheduler row is malformed")
+    try:
+        runtime_row = RootSchedulerRow(
+            runtime_scheduler["job_id"],
+            runtime_scheduler["sluid"],
+            runtime_scheduler["cluster"],
+            runtime_scheduler["submit_time"],
+            runtime_scheduler["job_name"],
+            runtime_scheduler["user"],
+            runtime_scheduler["workdir"],
+            runtime_scheduler["state"],
+            runtime_scheduler["exit_code"],
+        )
+    except (KeyError, TypeError) as error:
+        raise CanaryError("canary runtime scheduler row is malformed") from error
+    expected_runtime_json = runtime_row.to_json()
+    if runtime_scheduler != expected_runtime_json:
+        raise CanaryError("canary runtime scheduler field set drift")
+    job = value["job"]
+    _validate_scheduler_row(
+        runtime_row,
+        job_id=job["job_id"],
+        cluster=job["cluster"],
+        require_success=False,
+    )
+    if (
+        runtime_row.job_name != job["job_name"]
+        or runtime_row.user != job["user"]
+        or runtime_row.workdir != job["workdir"]
+    ):
+        raise CanaryError("canary runtime scheduler ownership drift")
     python = value["python"]
     if type(python) is not dict or set(python) != {
         "realpath",
@@ -670,6 +977,18 @@ def validate_canary(value: object) -> dict[str, object]:
         raise CanaryError("environment canary filesystem set drift")
     for name, binding in filesystems.items():
         _validate_filesystem_binding(binding, f"environment canary {name}")
+    repository_filesystem = filesystems["repository"]
+    output_filesystem = filesystems["output"]
+    if (
+        output_filesystem["path"] != f"{repository_filesystem['path']}/results"
+        or value["job"]["workdir"] != repository_filesystem["path"]
+        or output_filesystem["device"] != repository_filesystem["device"]
+        or output_filesystem["mount"]["mount_id"]
+        != repository_filesystem["mount"]["mount_id"]
+        or output_filesystem["statfs"]["type"]
+        != repository_filesystem["statfs"]["type"]
+    ):
+        raise CanaryError("environment canary intended filesystem relationship drift")
     procfs = value["procfs_fd"]
     if type(procfs) is not dict or set(procfs) != {
         "method",
@@ -723,11 +1042,17 @@ def _verify_artifact(directory: Path, expected: dict[str, object]) -> bytes:
         os.close(descriptor)
 
 
-def query_root_scheduler_row(job_id: int, cluster: str) -> RootSchedulerRow:
+def query_root_scheduler_row(
+    job_id: int,
+    cluster: str,
+    *,
+    sacct_realpath: str = "sacct",
+    require_success: bool = True,
+) -> RootSchedulerRow:
     try:
         completed = subprocess.run(
             [
-                "sacct",
+                sacct_realpath,
                 "-n",
                 "-P",
                 "-X",
@@ -755,16 +1080,24 @@ def query_root_scheduler_row(job_id: int, cluster: str) -> RootSchedulerRow:
         fields = line.strip().split("|")
         if len(fields) == 10 and fields[-1] == "":
             fields.pop()
-        if len(fields) == 9 and fields[0] == str(job_id):
+        if fields and any(fields):
+            if len(fields) != 9 or fields[0] != str(job_id):
+                raise CanaryError("scheduler returned a non-root or malformed canary row")
             rows.append(fields[1:])
     if len(rows) != 1:
         raise CanaryError("scheduler returned no unique canary root-allocation row")
     row = RootSchedulerRow(job_id, *rows[0])
-    return _validate_scheduler_row(row, job_id=job_id, cluster=cluster)
+    return _validate_scheduler_row(
+        row, job_id=job_id, cluster=cluster, require_success=require_success
+    )
 
 
 def _validate_scheduler_row(
-    row: RootSchedulerRow, *, job_id: int, cluster: str
+    row: RootSchedulerRow,
+    *,
+    job_id: int,
+    cluster: str,
+    require_success: bool = True,
 ) -> RootSchedulerRow:
     if type(row) is not RootSchedulerRow or any(
         type(value) is not str
@@ -786,10 +1119,16 @@ def _validate_scheduler_row(
     if (
         row.job_id != job_id
         or row.cluster != cluster
-        or row.state != "COMPLETED"
-        or row.exit_code != "0:0"
+        or (require_success and row.state != "COMPLETED")
+        or (require_success and row.exit_code != "0:0")
+        or (not require_success and row.state != "RUNNING")
         or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}", row.submit_time)
         or not row.workdir.startswith("/")
+        or row.sluid == str(job_id)
+        or any(
+            not re.fullmatch(r"[A-Za-z0-9_.-]+", value)
+            for value in (row.cluster, row.job_name, row.user)
+        )
     ):
         raise CanaryError("canary root scheduler row is unsuccessful or malformed")
     return row
@@ -852,9 +1191,43 @@ def validate_canary_file(
     _verify_artifact(directory, canary_artifact)
     probe = value["o_tmpfile_probe"]
     _verify_artifact(directory, probe)
+    observed_commands = {
+        name: _command_identity(name) for name in ("scontrol", "sacct")
+    }
+    if observed_commands != value["commands"]:
+        raise CanaryError("recorded scontrol/sacct executable identity changed")
+    if scheduler_query is query_root_scheduler_row:
+        scheduler_value = scheduler_query(
+            job_id,
+            cluster,
+            sacct_realpath=str(observed_commands["sacct"]["realpath"]),
+        )
+    else:
+        scheduler_value = scheduler_query(job_id, cluster)
     scheduler = _validate_scheduler_row(
-        scheduler_query(job_id, cluster), job_id=job_id, cluster=cluster
+        scheduler_value, job_id=job_id, cluster=cluster
     )
+    runtime_scheduler = value["scheduler_runtime"]
+    assert type(runtime_scheduler) is dict
+    if any(
+        getattr(scheduler, field) != runtime_scheduler[field]
+        for field in (
+            "sluid",
+            "cluster",
+            "submit_time",
+            "job_name",
+            "user",
+            "workdir",
+        )
+    ):
+        raise CanaryError("completed scheduler row differs from in-job identity")
+    job = value["job"]
+    if (
+        scheduler.job_name != job["job_name"]
+        or scheduler.user != job["user"]
+        or scheduler.workdir != job["workdir"]
+    ):
+        raise CanaryError("completed scheduler row differs from canary ownership")
     receipt = {
         "schema": VALIDATION_SCHEMA,
         "status": "environment_canary_validated_non_evidence",
@@ -863,6 +1236,7 @@ def validate_canary_file(
         "scheduler_query_performed": True,
         "submission": {"sbatch_parsable": sbatch_parsable, "job_id": job_id, "cluster": cluster},
         "scheduler": scheduler.to_json(),
+        "commands": observed_commands,
         "canary": canary_artifact,
         "o_tmpfile_probe": probe,
     }
@@ -878,6 +1252,7 @@ def validate_validation_receipt(value: object) -> dict[str, object]:
         "scheduler_query_performed",
         "submission",
         "scheduler",
+        "commands",
         "canary",
         "o_tmpfile_probe",
     }:
@@ -892,6 +1267,7 @@ def validate_validation_receipt(value: object) -> dict[str, object]:
         raise CanaryError("canary validation receipt status drift")
     submission = value["submission"]
     scheduler = value["scheduler"]
+    commands = value["commands"]
     if type(submission) is not dict or set(submission) != {
         "sbatch_parsable",
         "job_id",
@@ -910,6 +1286,23 @@ def validate_validation_receipt(value: object) -> dict[str, object]:
         "successful",
     }:
         raise CanaryError("canary validation scheduler field set drift")
+    if type(commands) is not dict or set(commands) != {"scontrol", "sacct"}:
+        raise CanaryError("canary validation command identity set drift")
+    for name, command in commands.items():
+        if type(command) is not dict or set(command) != {
+            "realpath",
+            "device",
+            "inode",
+            "mode",
+            "bytes",
+            "sha256",
+            "available",
+            "version",
+        }:
+            raise CanaryError(f"canary validation {name} identity field set drift")
+        _validate_file_identity(command, f"canary validation {name}")
+        if command["available"] is not True or not command["version"]:
+            raise CanaryError(f"canary validation {name} availability drift")
     if (
         type(submission["job_id"]) is not int
         or submission["job_id"] < 1
@@ -985,21 +1378,30 @@ def _write_no_replace(path: Path, payload: bytes) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    checkout = subparsers.add_parser("check-checkout")
+    checkout.add_argument("--repository-root", type=Path, required=True)
+    checkout.add_argument("--expected-revision", required=True)
     emit = subparsers.add_parser("emit")
     emit.add_argument("--repository-root", type=Path, required=True)
     emit.add_argument("--output-directory", type=Path, required=True)
     emit.add_argument("--expected-revision", required=True)
+    emit.add_argument("--bound-script-fd", type=int, required=True)
     validate = subparsers.add_parser("validate")
     validate.add_argument("--canary", type=Path, required=True)
     validate.add_argument("--sbatch-parsable", required=True)
     validate.add_argument("--receipt-out", type=Path, required=True)
     arguments = parser.parse_args(argv)
     try:
-        if arguments.command == "emit":
+        if arguments.command == "check-checkout":
+            result = capture_checkout_identity(
+                arguments.repository_root, arguments.expected_revision
+            )
+        elif arguments.command == "emit":
             _, result = emit_canary(
                 repository_root=arguments.repository_root,
                 output_directory=arguments.output_directory,
                 expected_revision=arguments.expected_revision,
+                bound_script_descriptor=arguments.bound_script_fd,
             )
         else:
             result = validate_canary_file(

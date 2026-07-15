@@ -318,6 +318,7 @@ fi
 
 LOCAL_JOB_ID=""
 LOCAL_SLURM_CLUSTER="$REMOTE_SLURM_CLUSTER"
+LOCAL_HELD_RECEIPT_SHA256=""
 LOCAL_SUBMISSION_ACTIVE=0
 LOCAL_RELEASED=0
 
@@ -328,7 +329,9 @@ cancel_local_held_job() {
     if ! ssh "$REMOTE_HOST" bash -s -- \
       "$REMOTE_WORK" "$REMOTE_ATTEMPT_ID" \
       "$LOCAL_JOB_ID" "$LOCAL_SLURM_CLUSTER" \
-      "$LOCAL_JOB_NAME" "$REMOTE_JOB_USER" <<'REMOTE_CANCEL_LOCAL_HANDOFF'
+      "$LOCAL_JOB_NAME" "$REMOTE_JOB_USER" \
+      "$REMOTE_PYTHON_REALPATH" "$REMOTE_PYTHON_SHA256" \
+      "$LOCAL_HELD_RECEIPT_SHA256" <<'REMOTE_CANCEL_LOCAL_HANDOFF'
 set -euo pipefail
 export PATH=/usr/bin:/bin
 work="$1"
@@ -337,62 +340,70 @@ job_id="$3"
 cluster="$4"
 job_name="$5"
 job_user="$6"
-bound_cluster="$cluster"
+python_realpath="$7"
+python_sha256="$8"
+held_receipt_sha256="$9"
 if [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]] || \
    [[ ! "$job_name" =~ ^[A-Za-z0-9_.-]+$ ]] || \
-   [[ ! "$job_user" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+   [[ ! "$job_user" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ "$work" != /* ]] || [[ "$python_realpath" != /* ]] || \
+   [[ ! "$python_sha256" =~ ^[0-9a-f]{64}$ ]]; then
   echo "held census fallback identity is malformed" >&2
   exit 2
 fi
-if [ -z "$job_id" ] || [ -z "$cluster" ]; then
-  held_path="$work/results/component-quotient-census-held-${attempt_id}.txt"
-  if [ -s "$held_path" ]; then
-    submission="$(cat -- "$held_path")"
-    if [[ ! "$submission" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
-      echo "held census identity file is malformed" >&2
+if [[ ! "$job_id" =~ ^[1-9][0-9]*$ ]]; then
+  queue="$(
+    env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+      squeue --clusters="$cluster" --noheader --user="$job_user" \
+        --name="$job_name" --format='%A'
+  )"
+  candidates=()
+  while IFS= read -r candidate; do
+    candidate="${candidate//[[:space:]]/}"
+    [ -z "$candidate" ] && continue
+    [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || {
+      echo "held census fallback query returned a malformed job id" >&2
       exit 2
-    fi
-    job_id="${BASH_REMATCH[1]}"
-    cluster="${BASH_REMATCH[2]}"
-    if [ "$cluster" != "$bound_cluster" ]; then
-      echo "held census identity cluster differs from the prebound cluster" >&2
+    }
+    candidates+=("$candidate")
+  done <<< "$queue"
+  if [ "${#candidates[@]}" -ne 1 ]; then
+    echo "held census fallback query returned zero or ambiguous jobs" >&2
+    exit 2
+  fi
+  job_id="${candidates[0]}"
+fi
+held_path="$work/results/component-quotient-census-held-${attempt_id}.json"
+if [ ! -s "$held_path" ]; then
+  if ! env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+    "$python_realpath" -I -B -S "$work/scripts/bench/t5_held_scheduler.py" capture \
+      --job-id "$job_id" --cluster "$cluster" --job-name "$job_name" \
+      --user "$job_user" --workdir "$work" --output "$held_path" >/dev/null; then
+    [ -s "$held_path" ] || {
+      echo "cannot persist held scheduler ownership for cancellation" >&2
       exit 2
-    fi
-  else
-    queue="$(
-      env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-        squeue --clusters="$cluster" --noheader --user="$job_user" \
-          --name="$job_name" --format='%A'
-    )"
-    candidates=()
-    while IFS= read -r candidate; do
-      candidate="${candidate//[[:space:]]/}"
-      if [ -z "$candidate" ]; then
-        continue
-      fi
-      if [[ ! "$candidate" =~ ^[1-9][0-9]*$ ]]; then
-        echo "held census fallback query returned a malformed job id" >&2
-        exit 2
-      fi
-      candidates+=("$candidate")
-    done <<< "$queue"
-    if [ "${#candidates[@]}" -eq 0 ]; then
-      exit 0
-    fi
-    if [ "${#candidates[@]}" -ne 1 ]; then
-      echo "held census fallback query is not unique" >&2
-      exit 2
-    fi
-    job_id="${candidates[0]}"
+    }
   fi
 fi
-if [[ ! "$job_id" =~ ^[1-9][0-9]*$ ]] || \
-   [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-  echo "held census cancellation identity is malformed" >&2
+digest_args=()
+if [ -n "$held_receipt_sha256" ]; then
+  [[ "$held_receipt_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "held census receipt digest is malformed" >&2
+    exit 2
+  }
+  digest_args=(--expected-receipt-sha256 "$held_receipt_sha256")
+fi
+observed_python_sha256="$(sha256sum -- "$python_realpath")"
+observed_python_sha256="${observed_python_sha256%% *}"
+if [ "$observed_python_sha256" != "$python_sha256" ]; then
+  echo "held census Python identity drift" >&2
   exit 2
 fi
 env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-  scancel --clusters="$cluster" "$job_id"
+  "$python_realpath" -I -B -S "$work/scripts/bench/t5_held_scheduler.py" operate \
+    --receipt "$held_path" "${digest_args[@]}" --expected-job-id "$job_id" \
+    --expected-cluster "$cluster" --expected-job-name "$job_name" \
+    --expected-user "$job_user" --expected-workdir "$work" --action cancel
 REMOTE_CANCEL_LOCAL_HANDOFF
     then
       echo "failed to cancel census during local receipt handoff" >&2
@@ -485,11 +496,10 @@ export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_JOB_USER=$job_user"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_WORKDIR=$work"
 submission=""
 job_id=""
-held_path="$work/results/component-quotient-census-held-${attempt_id}.txt"
+held_path="$work/results/component-quotient-census-held-${attempt_id}.json"
 remote_handoff_complete=0
 cancel_held_job() {
   local status="$?"
-  local candidate=""
   local cancel_job="$job_id"
   local cancel_cluster="$cluster"
   trap - EXIT
@@ -498,18 +508,21 @@ cancel_held_job() {
     cancel_job="${BASH_REMATCH[1]}"
     cancel_cluster="${BASH_REMATCH[2]}"
   fi
-  if [[ ! "$cancel_job" =~ ^[1-9][0-9]*$ ]] && [ -s "$held_path" ]; then
-    candidate="$(cat -- "$held_path")"
-    if [[ "$candidate" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
-      cancel_job="${BASH_REMATCH[1]}"
-      cancel_cluster="${BASH_REMATCH[2]}"
-    fi
-  fi
   if [ "$remote_handoff_complete" -eq 0 ] && \
      [[ "$cancel_job" =~ ^[1-9][0-9]*$ ]] && \
      [[ "$cancel_cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    if [ ! -s "$held_path" ]; then
+      env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+        "$python_realpath" -I -B -S scripts/bench/t5_held_scheduler.py capture \
+          --job-id "$cancel_job" --cluster "$cancel_cluster" \
+          --job-name "$job_name" --user "$job_user" --workdir "$work" \
+          --output "$held_path" >/dev/null || true
+    fi
     if ! env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-      scancel --clusters="$cancel_cluster" "$cancel_job"; then
+      "$python_realpath" -I -B -S scripts/bench/t5_held_scheduler.py operate \
+        --receipt "$held_path" --expected-job-id "$cancel_job" \
+        --expected-cluster "$cancel_cluster" --expected-job-name "$job_name" \
+        --expected-user "$job_user" --expected-workdir "$work" --action cancel; then
       echo "failed to cancel held job $cancel_job on cluster $cancel_cluster" >&2
     fi
   fi
@@ -534,31 +547,16 @@ if [ "$submitted_cluster" != "$cluster" ]; then
   echo "sbatch --parsable cluster differs from Slurm ClusterName" >&2
   exit 2
 fi
-env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-  "$python_realpath" -I -B -S -c '
-import os, sys
-path, submission = sys.argv[1:]
-data = (submission + "\n").encode("ascii")
-flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
-fd = os.open(path, flags, 0o600)
-try:
-    offset = 0
-    while offset < len(data):
-        written = os.write(fd, data[offset:])
-        if written <= 0:
-            raise OSError("held-job identity write made no progress")
-        offset += written
-    os.fsync(fd)
-    os.fchmod(fd, 0o444)
-    os.fsync(fd)
-finally:
-    os.close(fd)
-directory = os.open(os.path.dirname(path), os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0))
-try:
-    os.fsync(directory)
-finally:
-    os.close(directory)
-' "$held_path" "$submission"
+held_payload="$(
+  env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+    "$python_realpath" -I -B -S scripts/bench/t5_held_scheduler.py capture \
+      --job-id "$job_id" --cluster "$cluster" --job-name "$job_name" \
+      --user "$job_user" --workdir "$work" --output "$held_path"
+)"
+if [ -z "$held_payload" ] || [[ "$held_payload" == *$'\n'* ]]; then
+  echo "held scheduler receipt response is malformed" >&2
+  exit 2
+fi
 pending_path="$work/results/component-quotient-census-submission-${attempt_id}-${job_id}.json"
 payload="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
@@ -567,7 +565,7 @@ payload="$(
     "$attempt_id" "$submission_nonce" "$namespace_id" \
     "$namespace_device" "$namespace_inode" "$results_device" "$results_inode" \
     "$manifest_sha256" "$dependency" "$job_id" "$submission" "$cluster" \
-    "$job_name" "$job_user" \
+    "$job_name" "$job_user" "$held_payload" \
     "$python_realpath" "$python_version" "$python_sha256" <<'PY'
 import hashlib
 import json
@@ -594,13 +592,18 @@ import sys
     cluster,
     job_name,
     job_user,
+    held_payload,
     python_realpath,
     python_version,
     python_sha256,
 ) = sys.argv[1:]
 job = int(job_id)
+held = json.loads(held_payload)
+held_canonical = canonical = lambda item: (json.dumps(item, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
+if held_canonical(held) != (held_payload + "\n").encode("ascii"):
+    raise ValueError("held scheduler receipt is not canonical JSON")
 value = {
-    "schema": "euf-viper.component-quotient-ram-wmi-submission.v6",
+    "schema": "euf-viper.component-quotient-ram-wmi-submission.v7",
     "status": "submitted_pending_nondecisive",
     "decisive": False,
     "authoritative": False,
@@ -628,6 +631,7 @@ value = {
         "user": job_user,
         "workdir": namespace_path,
     },
+    "scheduler_held": held,
     "expected_marker_name": f"component-quotient-census-{job}.current",
     "contract": {
         "expected_sources": 7503,
@@ -642,7 +646,6 @@ value = {
         "sha256": python_sha256,
     },
 }
-canonical = lambda item: (json.dumps(item, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n").encode("ascii")
 value["receipt_sha256"] = hashlib.sha256(canonical(value)).hexdigest()
 data = canonical(value)
 flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
@@ -667,15 +670,27 @@ finally:
 sys.stdout.buffer.write(data)
 PY
 )"
-printf '%s\n%s\n' "$submission" "$payload"
+held_receipt_sha256="$(
+  printf '%s\n' "$held_payload" | \
+    "$python_realpath" -I -B -S -c \
+      'import json,sys; value=json.load(sys.stdin); print(value["receipt_sha256"])'
+)"
+if [[ ! "$held_receipt_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "held scheduler receipt digest response is malformed" >&2
+  exit 2
+fi
+printf '%s\n%s\n%s\n' "$submission" "$held_receipt_sha256" "$payload"
 remote_handoff_complete=1
 trap - EXIT HUP INT TERM
 REMOTE_SUBMIT_ATTEMPT
 )"
 
 SBATCH_PARSABLE="${SUBMISSION_RAW%%$'\n'*}"
-PENDING_JSON="${SUBMISSION_RAW#*$'\n'}"
+SUBMISSION_REMAINDER="${SUBMISSION_RAW#*$'\n'}"
+HELD_RECEIPT_SHA256="${SUBMISSION_REMAINDER%%$'\n'*}"
+PENDING_JSON="${SUBMISSION_REMAINDER#*$'\n'}"
 if [[ ! "$SBATCH_PARSABLE" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]] || \
+   [[ ! "$HELD_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] || \
    [ -z "$PENDING_JSON" ] || \
    [[ "$PENDING_JSON" == *$'\n'* ]]; then
   echo "remote submission/receipt response is malformed" >&2
@@ -689,6 +704,7 @@ if [ "$SLURM_CLUSTER" != "$REMOTE_SLURM_CLUSTER" ]; then
 fi
 LOCAL_JOB_ID="$JOB_ID"
 LOCAL_SLURM_CLUSTER="$SLURM_CLUSTER"
+LOCAL_HELD_RECEIPT_SHA256="$HELD_RECEIPT_SHA256"
 
 mkdir -p "$ROOT/results"
 RECEIPT_PATH="$ROOT/results/component-quotient-census-submission-${REMOTE_ATTEMPT_ID}-${JOB_ID}.json"
@@ -730,6 +746,7 @@ HANDOFF_JSON="$(
         --cluster "$SLURM_CLUSTER" \
         --job-name "$LOCAL_JOB_NAME" \
         --job-user "$REMOTE_JOB_USER" \
+        --held-receipt-sha256 "$HELD_RECEIPT_SHA256" \
         --python-realpath "$REMOTE_PYTHON_REALPATH" \
         --python-version "$REMOTE_PYTHON_VERSION" \
         --python-sha256 "$REMOTE_PYTHON_SHA256" \

@@ -23,6 +23,7 @@ from scripts.bench import component_quotient_contract as contract  # noqa: E402
 from scripts.bench import finalize_component_quotient_ram_metadata as finalizer  # noqa: E402
 from scripts.bench import independent_component_quotient_verifier as independent  # noqa: E402
 from scripts.bench import t5_linux_publication as publication  # noqa: E402
+from scripts.bench import t5_held_scheduler as held_scheduler  # noqa: E402
 from scripts.bench import verify_component_quotient_publication as consumer  # noqa: E402
 
 
@@ -164,6 +165,17 @@ def main() -> int:
         "dependency": None,
         "job_id": job_id,
         "scheduler_submission": scheduler_submission,
+        "scheduler_held": held_scheduler.HeldSchedulerIdentity(
+            job_id=job_id,
+            sluid=f"{cluster}:{job_id}",
+            cluster=cluster,
+            submit_time="2026-07-15T12:00:00",
+            job_name=job_name,
+            user=job_user,
+            workdir=str(ROOT),
+            state="PENDING",
+            hold_reason="JobHeldUser",
+        ).to_json(),
         "expected_marker_name": f"component-quotient-census-{job_id}.current",
         "contract": {
             "expected_sources": contract.EXPECTED_SOURCES,
@@ -295,19 +307,29 @@ def main() -> int:
     mode = stat.S_IMODE((results / published.name).stat().st_mode)
     if mode != 0o444 or (results / published.name).stat().st_nlink != 1:
         raise SystemExit("end-to-end consumer receipt is not one immutable inode")
-    print(
-        json.dumps(
-            {
-                "manifest_rows": len(rows),
-                "manifest_sha256": contract.MANIFEST_SHA256,
-                "receipt": published.name,
-                "receipt_sha256": published.sha256,
-                "scheduler_evidence": "synthetic_injected_root_row",
-                "sacct_queried": False,
-            },
-            sort_keys=True,
+    summary = {
+        "manifest_rows": len(rows),
+        "manifest_sha256": contract.MANIFEST_SHA256,
+        "receipt": published.name,
+        "receipt_sha256": published.sha256,
+        "revision": revision,
+        "scheduler_evidence": "synthetic_injected_root_row",
+        "sacct_queried": False,
+    }
+    artifact_text = os.environ.get("EUF_VIPER_T5_E2E_ARTIFACT_DIR")
+    if artifact_text:
+        artifact_directory = Path(artifact_text)
+        if not artifact_directory.is_absolute() or not artifact_directory.is_dir():
+            raise SystemExit("semantic artifact directory must already exist and be absolute")
+        _write_immutable(
+            artifact_directory / "semantic-consumer-receipt.json",
+            (results / published.name).read_bytes(),
         )
-    )
+        _write_immutable(
+            artifact_directory / "semantic-pipeline-result.json",
+            contract.canonical_json_bytes(summary),
+        )
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

@@ -128,6 +128,7 @@ jobs:
     runs-on: [self-hosted, linux, t5-corpus]
     env:
       EUF_VIPER_T5_E2E_CORPUS: ${{ inputs.t5_corpus_path }}
+      EUF_VIPER_T5_E2E_ARTIFACT_DIR: ${{ runner.temp }}/t5-semantic-artifacts
       EUF_VIPER_T5_E2E_SCHEDULER_EVIDENCE: synthetic_injected_root_row
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
@@ -140,18 +141,34 @@ jobs:
             *) echo "T5 corpus path must be explicitly supplied and absolute" >&2; exit 2 ;;
           esac
           test -f "$EUF_VIPER_T5_E2E_CORPUS/qf_uf_manifest.jsonl"
+          mkdir -p "$EUF_VIPER_T5_E2E_ARTIFACT_DIR"
           python3 -B scripts/bench/record_t5_ci_identity.py \
-            --output "$RUNNER_TEMP/t5-semantic-pipeline-identity.json" \
+            --output "$EUF_VIPER_T5_E2E_ARTIFACT_DIR/t5-semantic-pipeline-identity.json" \
             --scope provisioned_7503_semantic_pipeline_integration \
-            --scheduler-evidence synthetic_injected_root_row
+            --scheduler-evidence synthetic_injected_root_row \
+            --require-github-sha
+      - name: Run exact no-solve define-fun scanner
+        run: |
+          if [ -e benchmarks/smtlib-2025 ]; then
+            test "$(readlink -f benchmarks/smtlib-2025)" = \
+              "$(readlink -f "$EUF_VIPER_T5_E2E_CORPUS")"
+          else
+            ln -s "$EUF_VIPER_T5_E2E_CORPUS" benchmarks/smtlib-2025
+          fi
+          python3 -B scripts/bench/scan_define_fun_shadowing.py scan \
+            --repository-root "$GITHUB_WORKSPACE" \
+            --manifest "$GITHUB_WORKSPACE/benchmarks/smtlib-2025/qf_uf_manifest.jsonl" \
+            --output "$EUF_VIPER_T5_E2E_ARTIFACT_DIR/define-fun-shadow-scan-receipt.json"
+          python3 -B scripts/bench/scan_define_fun_shadowing.py validate \
+            --report "$EUF_VIPER_T5_E2E_ARTIFACT_DIR/define-fun-shadow-scan-receipt.json"
       - name: Run exact semantic pipeline with synthetic scheduler evidence
         run: >-
           python3 -B -m unittest -v
           tests.test_t5_linux_end_to_end
-      - name: Upload provisioned integration identity
+      - name: Upload exact provisioned integration results and receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: t5-semantic-pipeline-identity
-          path: ${{ runner.temp }}/t5-semantic-pipeline-identity.json
+          name: t5-semantic-pipeline-results-and-receipts
+          path: ${{ runner.temp }}/t5-semantic-artifacts
           if-no-files-found: error

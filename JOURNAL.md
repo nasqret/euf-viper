@@ -1093,6 +1093,47 @@
 - No branch was pushed, no artifact was published, no WMI job was submitted,
   and the external 7,503-source pipeline was not run.
 
+## 2026-07-15: T5 second independent-review repair
+
+- Continued from exact local commit
+  `48f3cec3b09b42fc6e5dc407f7207cf86434cc20`; no other worktree, remote, corpus,
+  publication path, or WMI state was inspected or changed.
+- The no-solve scanner now propagates free globals transitively through visible
+  `define-fun` calls, including quoted identifiers. A quoted
+  `inner -> outer -> let` formula is independently parsed as unsatisfiable by
+  both implementations. Unsupported top-level forms fail closed.
+- Scanner v2 retains 7,503 exact source-ledger rows and independently rebuilds
+  the fixed portable source digest. Canonical-path, lexical-path, manifest-path,
+  and `(device,inode)` aliases are rejected before a complete report can pass.
+- The pending submission schema is v7. A separately persisted held scheduler
+  record binds user hold, root SLUID, submit time, cluster, job name, user, and
+  workdir from agreeing `scontrol` and `sacct` rows. Release and cancellation
+  each re-query that complete identity; zero, ambiguous, or drifted lookup
+  results issue no scheduler operation. Namespace keys and digest relationships
+  are exact. Existing local parse/`O_EXCL`/fsync fault tests still cancel with no
+  release.
+- The two-minute/256 MiB canary remains non-corpus and unsubmitted. It now
+  requires a clean exact-blob checkout, executes a bound emitter descriptor,
+  retains runtime file/Python/Slurm tool inode/stat/hash records and in-job root
+  scheduler identity, and compares those to the completed root `sacct` row.
+  Slurm stdout/stderr use `/tmp`, so scheduler-created log files cannot dirty
+  the checkout before the in-job clean-tree gate.
+- CI identity requires `GITHUB_SHA` to equal checked-out `HEAD`. The optional
+  provisioned job runs and validates the no-solve scanner, then retains/uploads
+  scan, identity, semantic result, and final consumer receipt artifacts. Pin
+  tests enumerate every workflow `uses` entry.
+- User-reported hosted run `29392694401` for prior commit `48f3cec` passed the
+  mandatory ordinary-Linux mechanism diagnostic and root portable/Rust job;
+  the provisioned semantic job skipped because no corpus was supplied. This is
+  recorded only as mechanism smoke, never as corpus or scheduler evidence.
+- Local verification passed all 39 Python test modules (405 tests, 14 explicit
+  Linux/corpus skips), the focused 59-test repair suite (one real-Linux skip),
+  and `cargo +1.96.0 test --all-features` (228 passed, four explicit external
+  probes ignored). Repository-wide Python, shell/Sbatch, and YAML syntax,
+  strict Jupyter Book, `git diff --check`, and `git fsck --full` also passed.
+- No branch was pushed, no GitHub operation was performed, no external corpus
+  was scanned, and no WMI job was submitted, inspected, released, or cancelled.
+
 ## Next Entry Template
 
 - Benchmark corpus:
