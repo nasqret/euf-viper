@@ -2,10 +2,16 @@
   "gate": {
     "decision_rule": "pass iff at least 10 of 12 sources qualify; otherwise reject",
     "minimum_qualifying_sources": 10,
+    "parent_gate_ratio": {
+      "minimum_qualifying_sources": 8,
+      "population_sources": 10
+    },
+    "population_sources": 12,
     "qualifying_source_rule": "D reduction from A is at least 250000 ppm and exceeds both B and C reductions from A by at least 50000 ppm",
     "required_d_reduction_from_a_ppm": 250000,
     "required_increment_over_b_ppm": 50000,
-    "required_increment_over_c_ppm": 50000
+    "required_increment_over_c_ppm": 50000,
+    "threshold_derivation": "ceil(8 * 12 / 10)"
   },
   "implementation_or_promotion_eligible": false,
   "projection_contract": {
@@ -30,6 +36,7 @@
     "audit": {
       "file_sha256": "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a",
       "manifest_sha256": "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4",
+      "observation_provenance_sha256": "eecdc97e95cbbde241e4a968ed8a330e4eece4574e056ea7008e1b0aaa5159c6",
       "path": "p0-144990/continuations/chain-145036/audit/full-60.json",
       "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
       "solver_binary_sha256": "edcf8d1af94e9eb937fb5e073ffd08de1738bb369409484b5e067980597ba576"
@@ -41,11 +48,11 @@
       "file_sha256": "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db",
       "records": 7503
     },
-    "derivation": "exact intersection of P0 60-second euf-viper timeouts, qg7 sources of at least 6000000 bytes, and instances solved with the manifest status by both z3-default and yices2",
+    "derivation": "exact intersection of P0 60-second euf-viper timeouts, qg7 sources mechanically satisfying frozen DOMAIN7_HUGE structure and physical bytes, and instances solved with the manifest status by both z3-default and yices2",
     "evidence_scope": "current_p0_full60_qg7_shared_z3_yices_deficit",
     "projection_template_sha256": "198b0824c8847f249cc0c4405dcdea4e9b3101979c0b437cdeebd26165892476",
     "selection_version": "p0-30828a4-full60-qg7-shared-deficit-v1",
-    "source_records_sha256": "13da44b804fd90afb9df48ac119f0c8c568894db42042075f6f4e495d346c014"
+    "source_records_sha256": "f274424dcfdf3bd155fe12f7aedb99f8a80dfcb54c0625899dfba8377fff5b0b"
   },
   "sources": [
     {
@@ -65,6 +72,14 @@
       "source_id": 7309,
       "source_sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 147,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750124,
+        "source_bytes": 6013419
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -89,6 +104,14 @@
       "source_id": 7310,
       "source_sha256": "05295ac0b0b9d7757b3c2b68184ab0504fc90d56582fb97cc891b8a990bf23ac",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 147,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750075,
+        "source_bytes": 6013089
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -113,6 +136,14 @@
       "source_id": 7311,
       "source_sha256": "5143c7d94d43c5dc077fb8c92dcc7bce4c672c79c03dcbeef901dd8a8532f5a8",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 147,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750215,
+        "source_bytes": 6013964
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -137,6 +168,14 @@
       "source_id": 7312,
       "source_sha256": "5d487c7da1e60eb8b28ba24d8dc7bc79f40915318ec62d38b44771420d30fc8b",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 147,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750166,
+        "source_bytes": 6013634
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -161,6 +200,14 @@
       "source_id": 7313,
       "source_sha256": "42ec7341e7b5294e44042572702f6346a990b151fe47d48deb6595d679645ed5",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 196,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750003,
+        "source_bytes": 6012142
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -185,6 +232,14 @@
       "source_id": 7315,
       "source_sha256": "a6c8c7c8a2a8d1b67574674ea78570977245a728743eca52768b52f9ef165675",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 196,
+        "closed_table_functions": 1,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750320,
+        "source_bytes": 6014935
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen",
         "rule": "qg-size-variant",
@@ -209,6 +264,14 @@
       "source_id": 7316,
       "source_sha256": "175547f0f09d2238085f5621dfede32190411257315b215abcc2857d96d7e78f",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 156,
+        "closed_table_functions": 2,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 749744,
+        "source_bytes": 6010211
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
@@ -233,6 +296,14 @@
       "source_id": 7317,
       "source_sha256": "dbcbdc19201c2a39ce2839becb61f4f4191ff1e9738396d894da962b33611c2b",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 163,
+        "closed_table_functions": 3,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 749837,
+        "source_bytes": 6011031
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
@@ -257,6 +328,14 @@
       "source_id": 7318,
       "source_sha256": "a9f9ba690dc07f211035fc43da019da8baff81c6366d51467fd64fff016d9514",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 154,
+        "closed_table_functions": 2,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750086,
+        "source_bytes": 6013082
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
@@ -281,6 +360,14 @@
       "source_id": 7319,
       "source_sha256": "72b5e5242f0de636f031840d9e04e4d1cf55203ac1d0653c10e3576d7561e1b8",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 161,
+        "closed_table_functions": 3,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750179,
+        "source_bytes": 6013902
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
@@ -305,6 +392,14 @@
       "source_id": 7320,
       "source_sha256": "d0c7fd4c118d0f4eafec0851bdf82e52508c08ea6c12a962f1e48045aacdd5c8",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 212,
+        "closed_table_functions": 3,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750006,
+        "source_bytes": 6012398
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
@@ -329,6 +424,14 @@
       "source_id": 7322,
       "source_sha256": "fe3693b6f59618083ca4734c299a200c4cfd5b3edcd15457add15e04663781f7",
       "source_status": "unsat",
+      "source_structure": {
+        "binary_table_apps": 176,
+        "closed_table_functions": 2,
+        "domain_size": 7,
+        "guarded_disequality_clauses": 0,
+        "parentheses": 750037,
+        "source_bytes": 6012899
+      },
       "taxonomy": {
         "generator_lineage": "QF_UF/QG-classification/iso_icl_nogen_sk",
         "rule": "qg-size-variant",
