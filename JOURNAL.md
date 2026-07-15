@@ -1506,6 +1506,16 @@
   and the cited evidence is ephemeral. Branch publication, hosted qualification,
   canary, full timing, and WMI are NO-GO; the original worker is repairing all
   six findings.
+- Production-evidence repair `afa2a844` passed all local matrices and was
+  published only after independent review allowed a non-attesting hosted
+  diagnostic. Review still demonstrated an unverified second source read,
+  candidate-authored build receipts, unbound trace channels, incomplete
+  path-executed runtime closure, mutable final audit publication, shared
+  candidate/baseline compiler-oracle trust, and missing hosted revision
+  equality. Exact run `29395085728` failed before Rust: 424 Python tests had 12
+  failures, five errors, and four skips across checker arity, loader identity,
+  parser metadata, receipt ownership, and negative-fixture ordering. No Linux
+  evidence primitive or WMI preflight ran; repair resumed in isolation.
 
 ## Next Entry Template
 

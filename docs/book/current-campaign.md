@@ -149,6 +149,20 @@ an unenforced compiler baseline, incomplete execution closure, and
 nontransactional publication. The conditional one-input WMI preflight was not
 submitted; no production-evidence corpus run exists.
 
+Repair `afa2a844` passed all local feature matrices and received independent
+approval only for non-attesting branch publication and hosted Linux diagnosis.
+Review still found that source bytes can change during a second unverified
+descriptor read, the sealed-build receipt is candidate-authored, build tracing
+does not bind every input channel or publish trace bytes, runtime closure is
+incomplete and path-executed, final analysis publication is mutable, baseline
+compiler/oracle trust is shared, and hosted revision equality is not asserted.
+Exact-head run `29395085728` then failed its 424-test Python step with 12
+failures and five errors. Checker-command arity, Python loader resolution,
+missing parser metadata, newly runner-owned receipt fixtures, and receipt checks
+that mask intended negative cases stopped the workflow before Rust, release,
+`strace`, namespaces, sealed memfd, procfs, or locked smoke. No WMI preflight or
+corpus run followed; another isolated repair is active.
+
 ## Causal Controls
 
 ### Modern Kissat

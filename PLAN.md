@@ -186,7 +186,16 @@ result cache can satisfy V1-V4.
   not submitted. Review additionally rejects candidate-forgeable build metadata,
   an unenforced Rust compiler baseline, incomplete execution closure, and
   nontransactional publication. V4 repair remains isolated; no production-
-  evidence corpus run exists.
+  evidence corpus run exists. Repair `afa2a844` passed its local matrices and
+  received diagnostic-publication/hosted-only approval, but review still found
+  an unverified second descriptor read, candidate-authored build attestation,
+  unbound build input channels, incomplete and unenforced runtime closure,
+  mutable final analysis publication, shared candidate/baseline compiler-oracle
+  trust, and no `GITHUB_SHA == HEAD` assertion. Exact hosted run `29395085728`
+  then failed before Rust with 12 failures and five errors among 424 Python
+  tests: checker-command arity, Python loader identity, missing parser metadata,
+  runner-owned receipt fixtures, and early receipt failures. No Linux evidence
+  primitive or WMI preflight ran. The full shadow and merge remain NO-GO.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke

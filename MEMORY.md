@@ -1036,3 +1036,12 @@
   source-bound reconstruction of all history/certificates, stable repeat
   identity, per-arm fully inclusive overhead, all-three M3 success, durable
   evidence, and another review.
+- Production-evidence `afa2a844` is diagnostic-only and WMI NO-GO. Review found
+  a verified/read source race, candidate-authored build attestation, unbound
+  trace channels, incomplete path-executed runtime closure, mutable global
+  analysis publication, shared baseline compiler/oracle trust, and no hosted
+  revision equality assertion. Exact run `29395085728` failed before Rust with
+  12 failures and five errors among 424 Python tests; no `strace`, namespace,
+  sealed-memfd, procfs, release, or locked smoke ran. Repair every review and
+  hosted failure, then repeat review/hosted gates before any one-input WMI
+  preflight.
