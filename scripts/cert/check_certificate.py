@@ -52,6 +52,34 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def strict_json_loads(text: str) -> object:
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-finite JSON number {value!r}")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            result[key] = value
+        return result
+
+    return json.loads(
+        text,
+        parse_constant=reject_constant,
+        object_pairs_hook=unique_object,
+    )
+
+
+def required_manifest_string(manifest: dict, field: str) -> str:
+    value = manifest.get(field)
+    if type(value) is not str or not value:
+        raise SystemExit(
+            f"certificate manifest field {field!r} must be a nonempty string"
+        )
+    return value
+
+
 def artifact_path(value: str, manifest_path: Path, override: Path | None) -> Path:
     if override is not None:
         return override
@@ -235,22 +263,43 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        manifest = strict_json_loads(args.manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         raise SystemExit(f"cannot read certificate manifest: {error}") from error
-    if not isinstance(manifest, dict) or manifest.get("format") != V2_FORMAT:
+    if type(manifest) is not dict or manifest.get("format") != V2_FORMAT:
         raise SystemExit(
             "independent checking requires euf-viper-euf-cnf-v2; "
             "legacy v1 trusts the solver-emitted base CNF"
         )
     if manifest.get("encoding") != "canonical-tseitin-v1":
         raise SystemExit("unsupported or missing independent encoding identifier")
-    source = artifact_path(manifest["source"], args.manifest, args.source)
-    actual_source_hash = sha256(source)
-    if actual_source_hash != manifest.get("source_sha256"):
+
+    result = manifest.get("result")
+    if result != "sat" and result != "unsat":
+        raise SystemExit(f"certificate manifest has unsupported result {result!r}")
+
+    source_value = required_manifest_string(manifest, "source")
+    expected_source_hash = required_manifest_string(manifest, "source_sha256")
+    sat_variables = None
+    if result == "sat":
+        sat_variables = manifest.get("variables")
+        if type(sat_variables) is not int:
+            raise SystemExit("SAT manifest variables must be an exact integer")
+    else:
+        dimacs_value = required_manifest_string(manifest, "dimacs")
+        expected_dimacs_hash = required_manifest_string(manifest, "dimacs_sha256")
+        proof_value = required_manifest_string(manifest, "proof")
+        expected_proof_hash = required_manifest_string(manifest, "proof_sha256")
+
+    try:
+        source = artifact_path(source_value, args.manifest, args.source)
+        actual_source_hash = sha256(source)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise SystemExit(f"cannot read source artifact: {error}") from error
+    if actual_source_hash != expected_source_hash:
         raise SystemExit(
             "source SHA-256 mismatch: "
-            f"expected {manifest.get('source_sha256')}, got {actual_source_hash}"
+            f"expected {expected_source_hash}, got {actual_source_hash}"
         )
     try:
         source_text = source.read_text(encoding="utf-8")
@@ -258,16 +307,15 @@ def main() -> int:
     except (OSError, UnicodeError, IndependentQfufError) as error:
         raise SystemExit(f"independent SMT-LIB reconstruction failed: {error}") from error
 
-    result = manifest.get("result")
     if result == "sat":
+        if sat_variables != problem.variable_count:
+            raise SystemExit(
+                "SAT manifest variable count differs from independent reconstruction"
+            )
         try:
             validate_v2_sat_manifest(manifest, problem)
         except IndependentQfufError as error:
             raise SystemExit(f"independent SAT model check failed: {error}") from error
-        if manifest.get("variables") != problem.variable_count:
-            raise SystemExit(
-                "SAT manifest variable count differs from independent reconstruction"
-            )
         print(
             json.dumps(
                 {
@@ -281,16 +329,20 @@ def main() -> int:
             )
         )
         return 0
-    if result != "unsat":
-        raise SystemExit(f"certificate manifest has unsupported result {result!r}")
 
-    dimacs = artifact_path(manifest["dimacs"], args.manifest, args.dimacs)
-    proof = artifact_path(manifest["proof"], args.manifest, args.proof)
+    try:
+        dimacs = artifact_path(dimacs_value, args.manifest, args.dimacs)
+        proof = artifact_path(proof_value, args.manifest, args.proof)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise SystemExit(f"cannot resolve certificate artifact: {error}") from error
     for path, expected, label in [
-        (dimacs, manifest["dimacs_sha256"], "DIMACS"),
-        (proof, manifest["proof_sha256"], "proof"),
+        (dimacs, expected_dimacs_hash, "DIMACS"),
+        (proof, expected_proof_hash, "proof"),
     ]:
-        actual = sha256(path)
+        try:
+            actual = sha256(path)
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"cannot read {label} artifact: {error}") from error
         if actual != expected:
             raise SystemExit(f"{label} SHA-256 mismatch: expected {expected}, got {actual}")
     try:
@@ -304,13 +356,16 @@ def main() -> int:
         raise SystemExit(f"independent UNSAT reconstruction failed: {error}") from error
     if not args.drat_trim:
         raise SystemExit("drat-trim is required; pass --drat-trim PATH")
-    checked = subprocess.run(
-        [args.drat_trim, str(dimacs), str(proof), "-I"],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-    )
+    try:
+        checked = subprocess.run(
+            [args.drat_trim, str(dimacs), str(proof), "-I"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    except OSError as error:
+        raise SystemExit(f"cannot run drat-trim: {error}") from error
     if checked.returncode != 0 or "VERIFIED" not in checked.stdout:
         raise SystemExit(f"drat-trim rejected the proof:\n{checked.stdout}")
 
@@ -323,9 +378,9 @@ def main() -> int:
                 "clauses": len(clauses),
                 "base_clauses": problem.base_count,
                 "replayed_theory_clauses": replayed,
-                "source_sha256": manifest["source_sha256"],
-                "dimacs_sha256": manifest["dimacs_sha256"],
-                "proof_sha256": manifest["proof_sha256"],
+                "source_sha256": expected_source_hash,
+                "dimacs_sha256": expected_dimacs_hash,
+                "proof_sha256": expected_proof_hash,
             },
             sort_keys=True,
         )
