@@ -87,8 +87,14 @@ referenced SHA-256 values. Then submit with the original prepare/audit lineage:
 ```bash
 EUF_VIPER_WMI_CAMPAIGN_ROOT=/work/bnaskrecki/euf-viper-campaigns \
 EUF_VIPER_CONTINUATION_REVISION=30828a4f0c1e7e478a9c6f406ccb245eeefc4961 \
+EUF_VIPER_BASE_DEPENDENCY_JOB_ID=<fresh-barrier-job> \
 bash scripts/wmi/submit_locked_continuations.sh 144990 144993
 ```
+
+`144993` remains the immutable base-audit identity. The separate dependency job
+is only a live Slurm barrier when the old completed audit has aged out of the
+controller; the dispatcher still opens and validates the original audit and
+all referenced hashes before deriving any work.
 
 Do not treat a completed parent array state as sufficient. Inspect task-level
 accounting, require the full/official audit files and finalizer, and reject any

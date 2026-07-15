@@ -6,6 +6,7 @@ REMOTE_HOST="${EUF_VIPER_WMI_HOST:-wmicluster}"
 REMOTE_PARENT="${EUF_VIPER_WMI_CAMPAIGN_ROOT:-}"
 BASE_PREPARE_JOB_ID="${1:-${EUF_VIPER_BASE_PREPARE_JOB_ID:-}}"
 BASE_AUDIT_JOB_ID="${2:-${EUF_VIPER_BASE_AUDIT_JOB_ID:-}}"
+BASE_DEPENDENCY_JOB_ID="${EUF_VIPER_BASE_DEPENDENCY_JOB_ID:-$BASE_AUDIT_JOB_ID}"
 SHARDS="${EUF_VIPER_CONTINUATION_SHARDS:-64}"
 MAX_ACTIVE="${EUF_VIPER_CONTINUATION_MAX_ACTIVE:-16}"
 BOOTSTRAP_REPLICATES="${EUF_VIPER_CONTINUATION_BOOTSTRAP_REPLICATES:-10000}"
@@ -23,6 +24,7 @@ positive_integer() {
 
 positive_integer "base prepare job id" "$BASE_PREPARE_JOB_ID"
 positive_integer "base audit job id" "$BASE_AUDIT_JOB_ID"
+positive_integer "base dependency job id" "$BASE_DEPENDENCY_JOB_ID"
 positive_integer "configured shard count" "$SHARDS"
 positive_integer "maximum active shard count" "$MAX_ACTIVE"
 positive_integer "bootstrap replicate count" "$BOOTSTRAP_REPLICATES"
@@ -90,7 +92,7 @@ test -z \"\$(git -C $Q_REMOTE_WORK status --porcelain=v1 --untracked-files=no)\"
 mkdir -p $Q_REMOTE_WORK/results"
 
 DISPATCH_SUBMISSION="$(ssh "$REMOTE_HOST" "cd $Q_REMOTE_WORK && sbatch --parsable --kill-on-invalid-dep=yes \
-  --dependency=afterok:$BASE_AUDIT_JOB_ID \
+  --dependency=afterok:$BASE_DEPENDENCY_JOB_ID \
   --export=ALL,EUF_VIPER_EXPECTED_REVISION=$REVISION,EUF_VIPER_BASE_PREPARE_JOB_ID=$BASE_PREPARE_JOB_ID,EUF_VIPER_BASE_AUDIT_JOB_ID=$BASE_AUDIT_JOB_ID,EUF_VIPER_CONTINUATION_TARGET_BUDGET=60,EUF_VIPER_CONTINUATION_SHARDS=$SHARDS,EUF_VIPER_CONTINUATION_MAX_ACTIVE=$MAX_ACTIVE,EUF_VIPER_CONTINUATION_BOOTSTRAP_REPLICATES=$BOOTSTRAP_REPLICATES,EUF_VIPER_CONTINUATION_WALL_TIME_60=$WALL_TIME_60,EUF_VIPER_CONTINUATION_WALL_TIME_1200=$WALL_TIME_1200 \
   scripts/wmi/euf_viper_continuation_dispatch.sbatch")"
 DISPATCH_JOB_ID="${DISPATCH_SUBMISSION%%;*}"
@@ -101,7 +103,8 @@ RECEIPT="$ROOT/results/locked-continuation-submission-$DISPATCH_JOB_ID.json"
 python3 - \
   "$RECEIPT" "$REVISION" "$REMOTE_HOST" "$REMOTE_WORK" \
   "$SUBMITTER_REVISION" \
-  "$BASE_PREPARE_JOB_ID" "$BASE_AUDIT_JOB_ID" "$DISPATCH_JOB_ID" \
+  "$BASE_PREPARE_JOB_ID" "$BASE_AUDIT_JOB_ID" "$BASE_DEPENDENCY_JOB_ID" \
+  "$DISPATCH_JOB_ID" \
   "$SHARDS" "$MAX_ACTIVE" "$BOOTSTRAP_REPLICATES" \
   "$WALL_TIME_60" "$WALL_TIME_1200" <<'PY'
 import json
@@ -111,7 +114,7 @@ from pathlib import Path
 
 (
     output_raw, revision, remote_host, remote_worktree, submitter_revision, base_prepare,
-    base_audit, dispatcher, shards, max_active, bootstrap_replicates,
+    base_audit, base_dependency, dispatcher, shards, max_active, bootstrap_replicates,
     wall_time_60, wall_time_1200,
 ) = sys.argv[1:]
 payload = {
@@ -123,13 +126,14 @@ payload = {
     "remote_worktree": remote_worktree,
     "base_prepare_job_id": int(base_prepare),
     "base_audit_job_id": int(base_audit),
+    "base_dependency_job_id": int(base_dependency),
     "chain_id": int(dispatcher),
     "initial_dispatcher_job_id": int(dispatcher),
     "configured_shards": int(shards),
     "max_active": int(max_active),
     "bootstrap_replicates": int(bootstrap_replicates),
     "wall_time": {"60": wall_time_60, "1200": wall_time_1200},
-    "dependency": f"afterok:{base_audit}",
+    "dependency": f"afterok:{base_dependency}",
 }
 output = Path(output_raw)
 if output.exists() or output.is_symlink():
