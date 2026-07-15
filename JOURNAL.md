@@ -1381,6 +1381,19 @@
   The real one-link test passed on that runner, so the repair must inventory
   effective capabilities rather than infer an unprivileged environment. No WMI
   job was submitted; a manifest/procfs/Slurm/oracle repair is active locally.
+- Independent T1 review accepted exact commit `26156e3` only for diagnostic
+  publication. It verified lossless raw output, strict payload replay, sealed
+  128-shard closure, accepted 7,503-source binding, warmup-one/ABBA-five
+  dimensions, and offline locked compilation. It rejected WMI because ambient
+  values still select submit and execution roots, a forgeable stop file can end
+  mutation monitoring before Cargo, the output ELF lacks complete recursive
+  runtime/toolchain closure, and placement is observed rather than enforceable.
+- Pushed exact `26156e3691297c0765a583369d65b3fd62d2d560` to
+  `research-typed-parser-timing`; no WMI action followed. Hosted run
+  `29386186960` failed at workflow evaluation with zero jobs. The new workflow
+  placed `${{ runner.temp }}` in `jobs.validate.env`, but GitHub permits no
+  `runner` context at that key. A fresh isolated repair now owns the monitor,
+  ELF closure, immutable roots, bounded-canary placement, and valid Linux CI.
 
 ## Next Entry Template
 

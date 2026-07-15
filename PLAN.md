@@ -310,7 +310,17 @@ independent evidence checks, and a frozen family holdout.
   was underbound; and CI did not run the exact release path. Raw-output sealing,
   the accepted manifest digest, a shards/rounds schema split, mutation-monitored
   builds, homogeneous timing controls, and real-release CI are under repair. No
-  WMI timing row exists.
+  WMI timing row exists. Revision `26156e3` closed the raw-output, shard-set,
+  accepted-corpus, dimension, and offline-build requirements and passed its
+  local matrices, but independent review authorized only exact-SHA diagnostic
+  publication. WMI remains NO-GO: submitter and job roots are ambient-selectable;
+  either public stop sentinel can terminate mutation monitoring before Cargo;
+  the final ELF lacks a recursively checked loader/library/toolchain closure;
+  and the observed placement cannot support the preregistered sub-1% inference.
+  Exact hosted run `29386186960` then failed before GitHub created a job because
+  `runner.temp` was used in `jobs.validate.env`, where the `runner` context is
+  unavailable. Repair those boundaries, add a genuinely bounded canary mode,
+  and obtain a fresh independent review before any WMI submission.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.
 

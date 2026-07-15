@@ -269,6 +269,19 @@ accepted corpus digest, separate shard and ABBA-round constants, monitor the
 build snapshot, lock a homogeneous timing lane, and run the real release on
 Linux before WMI.
 
+Revision `26156e3` closed the raw-output and shard-set attacks, bound the
+accepted 7,503-source corpus, split 128 shards from five measured ABBA rounds,
+and used locked offline compilation. Independent review nevertheless approved
+only exact-SHA publication for Linux diagnostics. WMI remains forbidden because
+ambient values still choose submit and job roots, public stop sentinels can end
+mutation monitors before compilation, final ELF/loader/library/toolchain
+closure is incomplete, and the lane does not enforce the placement needed for
+a sub-1% conclusion. Hosted run `29386186960` then failed before creating any
+job: the workflow used `runner.temp` in job-level `env`, where the
+[GitHub context table](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability)
+does not provide `runner`. A fourth evidence repair is isolated; no timing row
+or WMI submission exists.
+
 T5's hardened source-only census at `b51c75e` failed its second review: the WMI
 receipt trusted aggregate booleans, contradictory oracle counters could pass,
 and semantically impossible rehashed count rows were accepted. A strict bundle

@@ -957,3 +957,10 @@
   failed two Linux consumer-test contracts; its one-link test passed without an
   effective-capability record. Repair all four boundaries and rerun independent
   review before any WMI action. No T5 WMI submission exists.
+- T1 timing commit `26156e3` is publication-only and WMI NO-GO. It correctly
+  seals raw output, 128 shards, ABBA dimensions, and the accepted 7,503-source
+  corpus, but ambient roots remain selectable, stop sentinels can end mutation
+  monitoring before Cargo, final ELF/runtime closure is incomplete, and the
+  lane cannot support sub-1% promotion. Hosted run `29386186960` created zero
+  jobs because `runner.temp` is unavailable in job-level `env`. Repair all
+  boundaries and obtain a new independent review; no T1 WMI job exists.
