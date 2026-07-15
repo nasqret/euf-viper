@@ -299,7 +299,12 @@ Recovery barrier `147305` completed and dispatcher `147306` validated the copied
 base. It submitted fresh 60-second full/official arrays `147307`/`147309`,
 audits `147308`/`147310`, and successor dispatcher `147311`, which releases the
 1,200-second stage only after both audits. The first full shard completed from
-the `/work` command and output paths.
+the `/work` command and output paths. Official array `147309` later completed
+all 64 tasks with zero task, batch, or extern exits. Full audit `147308` was
+scheduler-preempted after `02:09:26`; Slurm requeued the immutable job with one
+restart, and the first attempt left no final or temporary analysis artifact.
+The restarted full audit must run from scratch and pass duplicate-aware terminal
+accounting. No continuation row is interpreted before both audits finish.
 
 ## Opportunity Gates
 

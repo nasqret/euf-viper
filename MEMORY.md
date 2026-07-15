@@ -1045,3 +1045,9 @@
   sealed-memfd, procfs, release, or locked smoke ran. Repair every review and
   hosted failure, then repeat review/hosted gates before any one-input WMI
   preflight.
+- WMI official continuation array `147309` is task-complete with all 64 task,
+  batch, and extern steps at `COMPLETED 0:0`, but its rows remain sealed pending
+  audit `147310`. Full audit `147308` was scheduler-preempted after `02:09:26`
+  and automatically requeued (`Restarts=1`); the first attempt left no final or
+  temporary analysis artifact. Accept only a complete restarted audit with
+  duplicate-aware accounting. Do not count or reuse the preempted computation.

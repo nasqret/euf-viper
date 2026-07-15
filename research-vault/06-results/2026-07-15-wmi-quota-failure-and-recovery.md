@@ -64,6 +64,13 @@ fails.
 - Certificate full: prepare/array/audit `147315`/`147316`/`147317`.
 - Certificate official: prepare/array/audit `147318`/`147319`/`147320`.
 
+Official continuation array `147309` completed all 64 tasks with task, batch,
+and extern exit `0:0`. Full audit `147308` was preempted after `02:09:26` and
+automatically requeued with `Restarts=1`; its first attempt produced no final or
+temporary analysis artifact. The requeued job must rerun from scratch and pass
+duplicate-aware terminal accounting. Neither official rows nor the preempted
+full analysis are interpreted before audits `147308` and `147310` finish.
+
 The certificate submitter's empty optional-dependency expansion was fixed at
 `026f283`. The interrupted pre-fix attempt created no Slurm job and is not part
 of either replacement chain.

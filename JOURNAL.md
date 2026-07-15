@@ -1516,6 +1516,13 @@
   failures, five errors, and four skips across checker arity, loader identity,
   parser metadata, receipt ownership, and negative-fixture ordering. No Linux
   evidence primitive or WMI preflight ran; repair resumed in isolation.
+- Official continuation array `147309` completed all 64 tasks; every task,
+  batch step, and extern step is `COMPLETED 0:0`. Full audit `147308` was
+  scheduler-preempted after `02:09:26` on `c1n1` and automatically requeued with
+  `Restarts=1`. Its first attempt wrote no final JSON or temporary analysis;
+  stdout is empty and stderr contains only the 97-byte preemption message. The
+  preempted attempt is administrative provenance, and all rows remain sealed
+  pending complete restarted audit `147308` and official audit `147310`.
 
 ## Next Entry Template
 

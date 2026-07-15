@@ -45,7 +45,12 @@ and will not be interpreted. Recovery uses a fresh exact-revision root under
 remain immutable provenance. Recovery barrier `147305` completed, dispatcher
 `147306` validated the copied P0 base, and fresh 60-second arrays/audits are
 full `147307`/`147308` and official `147309`/`147310`; successor dispatcher
-`147311` releases 1,200-second work only after both audits. Rollback control
+`147311` releases 1,200-second work only after both audits. All 64 official
+array tasks, batch steps, and extern steps completed `0:0`. Full audit `147308`
+was scheduler-preempted after `02:09:26` and automatically requeued with
+`Restarts=1`; the first attempt left neither final nor temporary analysis.
+Require a complete restarted audit plus duplicate-aware accounting and continue
+to seal all rows until both audits finish. Rollback control
 audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
