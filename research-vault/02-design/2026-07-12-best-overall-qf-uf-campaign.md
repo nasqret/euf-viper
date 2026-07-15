@@ -274,10 +274,14 @@ is earlier and typed: share Boolean subgraphs modulo proved source-level EUF
 congruence, while retaining assumptions and source-to-CNF provenance. Also test
 semantic extension variables for repeated application rows or theory reasons.
 
-Run census before solver changes. Require at least 25% projected CNF reduction
-on 8/10 frozen hard table cases, exhaustive small-formula equivalence, and a
-generic Kissat/CaDiCaL factoring control. Kill if generic factoring matches it
-or reduced CNF does not reduce wall time.
+Run census before solver changes. The accepted current-P0 population contains
+12 mechanically derived qg7 sources; the frozen parent ratio scales as
+`ceil(8 * 12 / 10) = 10`. Require at least 25% projected CNF reduction on at
+least 10/12 sources, exhaustive small-formula equivalence, and a generic
+Kissat/CaDiCaL factoring control. Population acceptance is not a projection
+result: the projection is unexecuted and implementation/promotion eligibility
+remains false. Kill if generic factoring matches it or reduced CNF does not
+reduce wall time.
 
 ## T7. SAT-Impact-Aware Explanations And Theory Vivification
 

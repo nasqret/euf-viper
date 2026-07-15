@@ -24,7 +24,7 @@ P0_AUDIT_MANIFEST_SHA256 = (
     "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
 )
 LOCAL_MANIFEST_SHA256 = (
-    "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db"
+    "597f8ee5dad0d4e55d407a18cbd48d727a70b6b86590020863cd2145e73eac0a"
 )
 PROJECTION_TEMPLATE_SHA256 = (
     "198b0824c8847f249cc0c4405dcdea4e9b3101979c0b437cdeebd26165892476"
@@ -41,6 +41,12 @@ MINIMUM_SOURCE_BYTES = 6_000_000
 MINIMUM_PARENTHESES = 80_000
 PARENT_GATE_POPULATION = 10
 PARENT_GATE_MINIMUM = 8
+CORPUS_DESCRIPTOR_PREFIX = "QF_UF/"
+CORPUS_ARCHIVE_MD5 = "e185bc80a80116bcfea116df190f87d2"
+CORPUS_SOURCE_DOI = "10.5281/zenodo.16740866"
+CORPUS_SOURCE_URL = (
+    "https://zenodo.org/api/records/16740866/files/QF_UF.tar.zst/content"
+)
 SOLVED_RESULTS = frozenset({"sat", "unsat"})
 RESULTS = SOLVED_RESULTS | {"timeout", "unknown", "error", "invalid"}
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -76,6 +82,39 @@ OBSERVATION_FIELDS = frozenset(
         "source_record_sha256s",
     }
 )
+CORPUS_FIELDS = frozenset(
+    {
+        "archive_md5",
+        "bytes",
+        "id",
+        "logic",
+        "path",
+        "relative_path",
+        "sha256",
+        "source_doi",
+        "source_url",
+        "status",
+    }
+)
+
+ARM_A = "tree expansion with globally identified source atoms and no compound-gate sharing"
+ARM_B = "generic source-DAG hash-consing with signed edges and no theory rewriting"
+ARM_C = "B after typed union of positive equality atoms in unconditional assertion roots"
+ARM_D = "B after typed congruence closure seeded only by the C root unions"
+ENCODING = (
+    "signed-edge n-ary Tseitin v1: not is polarity; and/or use n binary "
+    "implications plus one length-(n+1) clause; all-equal iff uses 2(n-1) "
+    "ternary plus two length-(n+1) clauses; ite uses four ternary clauses; "
+    "each assertion adds one unit; constants share one fixed-true variable"
+)
+QUALIFYING_SOURCE_RULE = (
+    "D reduction from A is at least 250000 ppm and exceeds both B and C "
+    "reductions from A by at least 50000 ppm"
+)
+TWO_WATCH_RULE = (
+    "two entries for every clause of length at least two; units use no ordinary "
+    "watch entries"
+)
 
 
 class DerivationError(ValueError):
@@ -104,7 +143,6 @@ class P0Selection(NamedTuple):
     index: dict[tuple[float, str, str], dict[str, Any]]
     corpus_by_path: dict[str, dict[str, Any]]
     selected_paths: list[str]
-    provenance_sha256: str
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -194,6 +232,18 @@ def require_hash(blob: ImmutableFile, expected: str, context: str) -> str:
     return observed
 
 
+def require_frozen_audit_hash(blob: ImmutableFile) -> str:
+    return require_hash(blob, P0_AUDIT_SHA256, "P0 audit")
+
+
+def require_frozen_corpus_manifest_hash(blob: ImmutableFile) -> str:
+    return require_hash(blob, LOCAL_MANIFEST_SHA256, "corpus manifest")
+
+
+def require_frozen_projection_template_hash(blob: ImmutableFile) -> str:
+    return require_hash(blob, PROJECTION_TEMPLATE_SHA256, "projection template")
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     try:
         rendered = json.dumps(
@@ -240,15 +290,22 @@ def canonical_source_digest(sources: list[dict[str, Any]]) -> str:
     digest = hashlib.sha256()
     for source in sources:
         digest.update(
-            json.dumps(source, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            json.dumps(
+                source,
+                allow_nan=False,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii")
         )
         digest.update(b"\n")
     return digest.hexdigest()
 
 
-def load_corpus_manifest(data: bytes, expected_sources: int) -> list[dict[str, Any]]:
+def load_corpus_manifest(data: bytes) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
+    seen_descriptor_paths: set[str] = set()
     seen_ids: set[int] = set()
     try:
         text = data.decode("utf-8")
@@ -261,16 +318,31 @@ def load_corpus_manifest(data: bytes, expected_sources: int) -> list[dict[str, A
         if not line:
             raise DerivationError(f"blank corpus manifest row at line {line_number}")
         try:
-            row = json.loads(line, object_pairs_hook=reject_duplicate_keys)
+            row = json.loads(
+                line,
+                object_pairs_hook=reject_duplicate_keys,
+                parse_constant=reject_nonfinite_json,
+            )
         except (json.JSONDecodeError, DerivationError) as error:
             raise DerivationError(
                 f"invalid corpus manifest row at line {line_number}: {error}"
             ) from error
         if not isinstance(row, dict):
             raise DerivationError(f"corpus manifest line {line_number} is not an object")
+        if frozenset(row) != CORPUS_FIELDS:
+            raise DerivationError(f"corpus manifest field drift at line {line_number}")
         relative_path = canonical_relative_path(
             row.get("relative_path"), f"corpus relative path at line {line_number}"
         )
+        descriptor_path = canonical_relative_path(
+            row.get("path"), f"corpus descriptor path at line {line_number}"
+        )
+        expected_descriptor_path = CORPUS_DESCRIPTOR_PREFIX + relative_path
+        if descriptor_path != expected_descriptor_path:
+            raise DerivationError(
+                f"corpus descriptor/source identity drift at line {line_number}: "
+                f"expected {expected_descriptor_path!r}, got {descriptor_path!r}"
+            )
         source_id = row.get("id")
         source_bytes = row.get("bytes")
         if type(source_id) is not int or source_id < 0:
@@ -282,18 +354,30 @@ def load_corpus_manifest(data: bytes, expected_sources: int) -> list[dict[str, A
         if type(source_bytes) is not int or source_bytes <= 0:
             raise DerivationError(f"invalid source byte count at line {line_number}")
         require_sha256(row.get("sha256"), f"source SHA-256 at line {line_number}")
-        if row.get("logic") != "QF_UF" or row.get("status") not in SOLVED_RESULTS:
+        if (
+            row.get("logic") != "QF_UF"
+            or row.get("status") not in SOLVED_RESULTS
+            or row.get("archive_md5") != CORPUS_ARCHIVE_MD5
+            or row.get("source_doi") != CORPUS_SOURCE_DOI
+            or row.get("source_url") != CORPUS_SOURCE_URL
+        ):
             raise DerivationError(f"invalid source logic/status at line {line_number}")
-        if relative_path in seen_paths or source_id in seen_ids:
+        if (
+            relative_path in seen_paths
+            or descriptor_path in seen_descriptor_paths
+            or source_id in seen_ids
+        ):
             raise DerivationError(f"duplicate source identity at line {line_number}")
         seen_paths.add(relative_path)
+        seen_descriptor_paths.add(descriptor_path)
         seen_ids.add(source_id)
         rows.append(row)
-    if len(rows) != expected_sources:
+    if len(rows) != EXPECTED_CORPUS_SOURCES:
         raise DerivationError(
-            f"corpus source count mismatch: expected {expected_sources}, got {len(rows)}"
+            "corpus source count mismatch: "
+            f"expected {EXPECTED_CORPUS_SOURCES}, got {len(rows)}"
         )
-    if seen_ids != set(range(expected_sources)):
+    if seen_ids != set(range(EXPECTED_CORPUS_SOURCES)):
         raise DerivationError("corpus source ids are not exactly 0..N-1")
     return rows
 
@@ -301,13 +385,17 @@ def load_corpus_manifest(data: bytes, expected_sources: int) -> list[dict[str, A
 def observation_index(
     audit: dict[str, Any],
     corpus_paths: set[str],
-    expected_provenance_sha256: str,
 ) -> dict[tuple[float, str, str], dict[str, Any]]:
     inputs = audit.get("inputs")
     hashes = audit.get("input_hashes")
     if not isinstance(inputs, dict) or not isinstance(hashes, dict):
         raise DerivationError("P0 audit lacks inputs or input_hashes")
     expected_sources = len(corpus_paths)
+    if expected_sources != EXPECTED_CORPUS_SOURCES:
+        raise DerivationError(
+            "P0 corpus population is incompatible with the frozen contract: "
+            f"expected {EXPECTED_CORPUS_SOURCES}, got {expected_sources}"
+        )
     if (
         audit.get("schema_version") != 1
         or audit.get("status") != "rejected"
@@ -339,15 +427,15 @@ def observation_index(
             f"expected {expected_observations}, got "
             f"{len(observations) if isinstance(observations, list) else 'non-list'}"
         )
-    require_sha256(expected_provenance_sha256, "expected observation provenance SHA-256")
     declared_provenance_sha256 = require_sha256(
         hashes.get("observation_provenance_sha256"),
         "declared observation provenance SHA-256",
     )
-    if declared_provenance_sha256 != expected_provenance_sha256:
+    if declared_provenance_sha256 != P0_OBSERVATION_PROVENANCE_SHA256:
         raise DerivationError(
             "P0 frozen observation provenance SHA-256 drift: "
-            f"expected {expected_provenance_sha256}, got {declared_provenance_sha256}"
+            f"expected {P0_OBSERVATION_PROVENANCE_SHA256}, "
+            f"got {declared_provenance_sha256}"
         )
     observed_provenance_sha256 = hashlib.sha256(
         canonical_json_bytes(observations)
@@ -1004,7 +1092,7 @@ def _read_relative_source(
 
 
 def verify_selected_sources(
-    source_root: Path,
+    descriptor_root: Path,
     selected_paths: list[str],
     corpus_by_path: dict[str, dict[str, Any]],
 ) -> dict[str, PhysicalSource]:
@@ -1015,15 +1103,19 @@ def verify_selected_sources(
         | getattr(os, "O_DIRECTORY", 0)
     )
     try:
-        root_descriptor = os.open(source_root, root_flags)
+        root_descriptor = os.open(descriptor_root, root_flags)
     except OSError as error:
-        raise DerivationError(f"cannot open physical source root {source_root}: {error}") from error
+        raise DerivationError(
+            f"cannot open corpus descriptor root {descriptor_root}: {error}"
+        ) from error
     verified: dict[str, PhysicalSource] = {}
     identities: dict[tuple[int, int], str] = {}
     try:
         for relative_path in selected_paths:
             row = corpus_by_path[relative_path]
-            blob = _read_relative_source(root_descriptor, relative_path, relative_path)
+            blob = _read_relative_source(
+                root_descriptor, row["path"], relative_path
+            )
             previous = identities.get(blob.identity)
             if previous is not None:
                 raise DerivationError(
@@ -1075,22 +1167,33 @@ def qg7_taxonomy(relative_path: str) -> dict[str, str]:
     }
 
 
-def require_frozen_counts(expected_sources: int, expected_selected: int) -> None:
-    if expected_sources != EXPECTED_CORPUS_SOURCES:
-        raise DerivationError(
-            "configured corpus count is incompatible with the frozen contract: "
-            f"expected {EXPECTED_CORPUS_SOURCES}, got {expected_sources}"
-        )
-    if expected_selected != EXPECTED_SELECTED_SOURCES:
-        raise DerivationError(
-            "configured selected count is incompatible with the frozen contract: "
-            f"expected {EXPECTED_SELECTED_SOURCES}, got {expected_selected}"
-        )
+def frozen_projection_contract() -> dict[str, Any]:
+    return {
+        "arms": {"A": ARM_A, "B": ARM_B, "C": ARM_C, "D": ARM_D},
+        "encoding": ENCODING,
+        "primary_measure": "literal_slots",
+        "secondary_measures": [
+            "variables",
+            "clauses",
+            "unit_clauses",
+            "two_watch_entries",
+        ],
+        "two_watch_rule": TWO_WATCH_RULE,
+    }
+
+
+def frozen_qualifying_rule() -> dict[str, Any]:
+    return {
+        "qualifying_source_rule": QUALIFYING_SOURCE_RULE,
+        "required_d_reduction_from_a_ppm": 250_000,
+        "required_increment_over_b_ppm": 50_000,
+        "required_increment_over_c_ppm": 50_000,
+    }
 
 
 def validate_projection_template(
     template: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> None:
     projection_contract = template.get("projection_contract")
     selection = template.get("selection")
     gate = template.get("gate")
@@ -1101,6 +1204,9 @@ def validate_projection_template(
         or not isinstance(gate, dict)
     ):
         raise DerivationError("projection template identity drift")
+    expected_projection_contract = frozen_projection_contract()
+    if projection_contract != expected_projection_contract:
+        raise DerivationError("projection template contract drift")
     if (
         type(selection.get("candidate_count")) is not int
         or selection["candidate_count"] != PARENT_GATE_POPULATION
@@ -1110,18 +1216,9 @@ def validate_projection_template(
         != "pass iff at least 8 of 10 sources qualify; otherwise reject"
     ):
         raise DerivationError("projection template parent 8/10 gate drift")
-    required_gate = {
-        "qualifying_source_rule": (
-            "D reduction from A is at least 250000 ppm and exceeds both B and C "
-            "reductions from A by at least 50000 ppm"
-        ),
-        "required_d_reduction_from_a_ppm": 250_000,
-        "required_increment_over_b_ppm": 50_000,
-        "required_increment_over_c_ppm": 50_000,
-    }
+    required_gate = frozen_qualifying_rule()
     if any(gate.get(key) != value for key, value in required_gate.items()):
         raise DerivationError("projection template qualifying rule drift")
-    return projection_contract, required_gate
 
 
 def qualifying_threshold(population: int) -> int:
@@ -1135,16 +1232,16 @@ def qualifying_threshold(population: int) -> int:
 def select_p0_sources(
     audit: dict[str, Any],
     corpus_rows: list[dict[str, Any]],
-    *,
-    expected_provenance_sha256: str,
-    expected_selected: int,
 ) -> P0Selection:
+    if len(corpus_rows) != EXPECTED_CORPUS_SOURCES:
+        raise DerivationError(
+            "corpus population is incompatible with the frozen contract: "
+            f"expected {EXPECTED_CORPUS_SOURCES}, got {len(corpus_rows)}"
+        )
     corpus_by_path = {row["relative_path"]: row for row in corpus_rows}
     if len(corpus_by_path) != len(corpus_rows):
         raise DerivationError("corpus relative paths are not unique")
-    index = observation_index(
-        audit, set(corpus_by_path), expected_provenance_sha256
-    )
+    index = observation_index(audit, set(corpus_by_path))
     selected_paths: list[str] = []
     for relative_path in sorted(corpus_by_path, key=lambda value: value.encode("utf-8")):
         if not relative_path.startswith(QG7_PREFIX):
@@ -1154,29 +1251,26 @@ def select_p0_sources(
         yices = index[(60.0, "yices2", relative_path)]["result"]
         if candidate == "timeout" and z3 in SOLVED_RESULTS and yices in SOLVED_RESULTS:
             selected_paths.append(relative_path)
-    if len(selected_paths) != expected_selected:
+    if len(selected_paths) != EXPECTED_SELECTED_SOURCES:
         raise DerivationError(
-            f"P0 qg7 shared-deficit count mismatch: expected {expected_selected}, "
-            f"got {len(selected_paths)}"
+            "P0 qg7 shared-deficit count mismatch: "
+            f"expected {EXPECTED_SELECTED_SOURCES}, got {len(selected_paths)}"
         )
-    return P0Selection(
-        index, corpus_by_path, selected_paths, expected_provenance_sha256
-    )
+    return P0Selection(index, corpus_by_path, selected_paths)
 
 
 def build_manifest(
     selection: P0Selection,
-    projection_contract: dict[str, Any],
-    qualifying_rule: dict[str, Any],
     physical_sources: dict[str, PhysicalSource],
-    *,
-    audit_sha256: str,
-    local_manifest_sha256: str,
-    projection_template_sha256: str,
 ) -> dict[str, Any]:
     index = selection.index
     corpus_by_path = selection.corpus_by_path
     selected_paths = selection.selected_paths
+    if (
+        len(corpus_by_path) != EXPECTED_CORPUS_SOURCES
+        or len(selected_paths) != EXPECTED_SELECTED_SOURCES
+    ):
+        raise DerivationError("selection population drift before manifest construction")
     if set(physical_sources) != set(selected_paths):
         raise DerivationError("physical source evidence does not exactly cover selection")
 
@@ -1225,9 +1319,9 @@ def build_manifest(
         "schema": SCHEMA,
         "selection": {
             "audit": {
-                "file_sha256": audit_sha256,
+                "file_sha256": P0_AUDIT_SHA256,
                 "manifest_sha256": P0_AUDIT_MANIFEST_SHA256,
-                "observation_provenance_sha256": selection.provenance_sha256,
+                "observation_provenance_sha256": P0_OBSERVATION_PROVENANCE_SHA256,
                 "path": "p0-144990/continuations/chain-145036/audit/full-60.json",
                 "revision": P0_REVISION,
                 "solver_binary_sha256": P0_BINARY_SHA256,
@@ -1236,7 +1330,7 @@ def build_manifest(
             "canonical_order": "relative_path_utf8_bytewise_ascending",
             "canonical_path_list_sha256": path_digest,
             "corpus_manifest": {
-                "file_sha256": local_manifest_sha256,
+                "file_sha256": LOCAL_MANIFEST_SHA256,
                 "records": len(corpus_by_path),
             },
             "derivation": (
@@ -1246,11 +1340,13 @@ def build_manifest(
                 "z3-default and yices2"
             ),
             "evidence_scope": "current_p0_full60_qg7_shared_z3_yices_deficit",
-            "projection_template_sha256": projection_template_sha256,
+            "projection_template_sha256": PROJECTION_TEMPLATE_SHA256,
             "selection_version": "p0-30828a4-full60-qg7-shared-deficit-v1",
             "source_records_sha256": canonical_source_digest(sources),
         },
-        "projection_contract": projection_contract,
+        "population_status": "accepted",
+        "projection_contract": frozen_projection_contract(),
+        "projection_status": "not_executed",
         "gate": {
             "decision_rule": (
                 f"pass iff at least {minimum_qualifying} of {population} sources "
@@ -1266,7 +1362,7 @@ def build_manifest(
                 f"ceil({PARENT_GATE_MINIMUM} * {population} / "
                 f"{PARENT_GATE_POPULATION})"
             ),
-            **qualifying_rule,
+            **frozen_qualifying_rule(),
         },
         "implementation_or_promotion_eligible": False,
         "sources": sources,
@@ -1275,7 +1371,10 @@ def build_manifest(
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("ascii")
+    data = (
+        json.dumps(payload, allow_nan=False, ensure_ascii=True, indent=2, sort_keys=True)
+        + "\n"
+    ).encode("ascii")
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -1303,60 +1402,32 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--audit", required=True, type=Path)
     parser.add_argument("--corpus-manifest", required=True, type=Path)
     parser.add_argument("--projection-template", required=True, type=Path)
-    parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--expected-audit-sha256", default=P0_AUDIT_SHA256)
-    parser.add_argument("--expected-corpus-manifest-sha256", default=LOCAL_MANIFEST_SHA256)
-    parser.add_argument(
-        "--expected-projection-template-sha256", default=PROJECTION_TEMPLATE_SHA256
-    )
-    parser.add_argument("--expected-sources", type=int, default=EXPECTED_CORPUS_SOURCES)
-    parser.add_argument("--expected-selected", type=int, default=EXPECTED_SELECTED_SOURCES)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    require_frozen_counts(args.expected_sources, args.expected_selected)
 
     audit_blob = read_immutable_file(args.audit, "P0 audit")
     manifest_blob = read_immutable_file(args.corpus_manifest, "corpus manifest")
     template_blob = read_immutable_file(args.projection_template, "projection template")
-    audit_sha = require_hash(audit_blob, args.expected_audit_sha256, "P0 audit")
-    manifest_sha = require_hash(
-        manifest_blob,
-        args.expected_corpus_manifest_sha256,
-        "corpus manifest",
-    )
-    template_sha = require_hash(
-        template_blob,
-        args.expected_projection_template_sha256,
-        "projection template",
-    )
+    require_frozen_audit_hash(audit_blob)
+    require_frozen_corpus_manifest_hash(manifest_blob)
+    require_frozen_projection_template_hash(template_blob)
     audit = parse_json_bytes(audit_blob.data, "P0 audit")
     template = parse_json_bytes(template_blob.data, "projection template")
     if not isinstance(audit, dict) or not isinstance(template, dict):
         raise DerivationError("audit and projection template must be objects")
-    projection_contract, qualifying_rule = validate_projection_template(template)
-    corpus_rows = load_corpus_manifest(manifest_blob.data, args.expected_sources)
-    selection = select_p0_sources(
-        audit,
-        corpus_rows,
-        expected_provenance_sha256=P0_OBSERVATION_PROVENANCE_SHA256,
-        expected_selected=args.expected_selected,
-    )
+    validate_projection_template(template)
+    corpus_rows = load_corpus_manifest(manifest_blob.data)
+    selection = select_p0_sources(audit, corpus_rows)
     physical_sources = verify_selected_sources(
-        args.source_root, selection.selected_paths, selection.corpus_by_path
+        args.corpus_manifest.parent,
+        selection.selected_paths,
+        selection.corpus_by_path,
     )
-    payload = build_manifest(
-        selection,
-        projection_contract,
-        qualifying_rule,
-        physical_sources,
-        audit_sha256=audit_sha,
-        local_manifest_sha256=manifest_sha,
-        projection_template_sha256=template_sha,
-    )
+    payload = build_manifest(selection, physical_sources)
     output_sha256 = atomic_write_json(args.output, payload)
     print(json.dumps({"output": str(args.output), "sha256": output_sha256}))
     return 0

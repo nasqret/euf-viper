@@ -4,37 +4,59 @@ use super::bool_dag_telemetry::{
     AblationProjection, AblationTelemetry, ProjectedCnf, analyze_four_way_ablation,
 };
 use super::{Problem, ScopedLetMode, parse_problem_with_scoped_let_mode};
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::env;
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const SCHEMA: &str = "euf-viper.t6-theory-dag-census.v1";
-const MANIFEST_SCHEMA: &str = "euf-viper.t6-theory-dag-manifest.v1";
+const SCHEMA: &str = "euf-viper.t6-theory-dag-census.v2";
+const MANIFEST_SCHEMA: &str = "euf-viper.t6-theory-dag-manifest.v2";
 const MANIFEST_ENV: &str = "EUF_VIPER_T6_MANIFEST";
 const CORPUS_ROOT_ENV: &str = "EUF_VIPER_T6_CORPUS_ROOT";
 const OUTPUT_ENV: &str = "EUF_VIPER_T6_OUTPUT";
 const REVISION_ENV: &str = "EUF_VIPER_EXPECTED_REVISION";
-const EXPECTED_SOURCES: usize = 10;
+const EXPECTED_MANIFEST_SHA256: &str =
+    "33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78";
+const EXPECTED_CORPUS_MANIFEST_SHA256: &str =
+    "597f8ee5dad0d4e55d407a18cbd48d727a70b6b86590020863cd2145e73eac0a";
+const EXPECTED_PROJECTION_TEMPLATE_SHA256: &str =
+    "198b0824c8847f249cc0c4405dcdea4e9b3101979c0b437cdeebd26165892476";
+const EXPECTED_SOURCE_RECORDS_SHA256: &str =
+    "f274424dcfdf3bd155fe12f7aedb99f8a80dfcb54c0625899dfba8377fff5b0b";
+const EXPECTED_SOURCES: usize = 12;
 const EXPECTED_PATH_LIST_SHA256: &str =
-    "43f367dfa7bc1684cb48828415249b59779416d17ad1fb2af50d4c8366bf2523";
+    "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa";
 const REQUIRED_D_REDUCTION_PPM: i64 = 250_000;
 const REQUIRED_INCREMENT_OVER_B_PPM: i64 = 50_000;
 const REQUIRED_INCREMENT_OVER_C_PPM: i64 = 50_000;
-const REQUIRED_QUALIFYING_SOURCES: usize = 8;
-const HISTORICAL_PERFORMANCE_REVISION: &str = "58efe9d43dab65675530ad4f52b93df2bf73d729";
-const HISTORICAL_PROVENANCE_REVISION: &str = "70d28bf3a5f410ec38047324d581667d298ecc93";
-const HISTORICAL_PROVENANCE_SHA256: &str =
-    "2a61b9f10d9e5999d1330fe4f00f36c4b0b4b6482d159768a4040f951d02cad1";
-const HISTORICAL_RESULT_SHA256: &str =
-    "f255208a70c7af4ef34039a577ba6642002397097ef3bb8ac73041293b980863";
+const PARENT_GATE_POPULATION: usize = 10;
+const PARENT_GATE_MINIMUM: usize = 8;
+const REQUIRED_QUALIFYING_SOURCES: usize = 10;
 const CURRENT_P0_REVISION: &str = "30828a4f0c1e7e478a9c6f406ccb245eeefc4961";
 const CURRENT_P0_AUDIT_SHA256: &str =
     "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a";
-const CURRENT_P0_EXPECTED_SOURCES: usize = 12;
+const CURRENT_P0_AUDIT_MANIFEST_SHA256: &str =
+    "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4";
+const CURRENT_P0_BINARY_SHA256: &str =
+    "edcf8d1af94e9eb937fb5e073ffd08de1738bb369409484b5e067980597ba576";
+const CURRENT_P0_OBSERVATION_PROVENANCE_SHA256: &str =
+    "eecdc97e95cbbde241e4a968ed8a330e4eece4574e056ea7008e1b0aaa5159c6";
+const ARM_A: &str =
+    "tree expansion with globally identified source atoms and no compound-gate sharing";
+const ARM_B: &str = "generic source-DAG hash-consing with signed edges and no theory rewriting";
+const ARM_C: &str =
+    "B after typed union of positive equality atoms in unconditional assertion roots";
+const ARM_D: &str = "B after typed congruence closure seeded only by the C root unions";
+const ENCODING: &str = "signed-edge n-ary Tseitin v1: not is polarity; and/or use n binary implications plus one length-(n+1) clause; all-equal iff uses 2(n-1) ternary plus two length-(n+1) clauses; ite uses four ternary clauses; each assertion adds one unit; constants share one fixed-true variable";
+const QUALIFYING_SOURCE_RULE: &str = "D reduction from A is at least 250000 ppm and exceeds both B and C reductions from A by at least 50000 ppm";
+const TWO_WATCH_RULE: &str =
+    "two entries for every clause of length at least two; units use no ordinary watch entries";
 const MAX_SOURCE_BYTES: usize = 16 * 1_048_576;
 const MAX_DIAGNOSTIC_CHARS: usize = 512;
 
@@ -43,44 +65,47 @@ static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FrozenManifest {
+    gate: GateContract,
+    implementation_or_promotion_eligible: bool,
+    population_status: String,
+    projection_contract: ProjectionContract,
+    projection_status: String,
     schema: String,
     selection: SelectionContract,
-    projection_contract: ProjectionContract,
-    gate: GateContract,
-    current_confirmation: CurrentConfirmationContract,
     sources: Vec<FrozenSource>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SelectionContract {
+    audit: AuditContract,
     candidate_count: usize,
     canonical_order: String,
     canonical_path_list_sha256: String,
+    corpus_manifest: CorpusManifestContract,
     derivation: String,
-    domain7_huge_population_path_list_sha256: String,
     evidence_scope: String,
-    historical_campaign_result: String,
-    historical_campaign_result_sha256: String,
-    performance_revision: String,
-    provenance_document: String,
-    provenance_document_revision: String,
-    provenance_document_sha256: String,
-    provenance_section: String,
+    projection_template_sha256: String,
     selection_version: String,
+    source_records_sha256: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CurrentConfirmationContract {
-    derivation_policy: String,
-    expected_source_count: usize,
-    implementation_or_promotion_eligible: bool,
-    p0_audit_path: String,
-    p0_audit_sha256: String,
-    p0_revision: String,
-    required_before_implementation_or_promotion: bool,
-    status: String,
+struct AuditContract {
+    file_sha256: String,
+    manifest_sha256: String,
+    observation_provenance_sha256: String,
+    path: String,
+    revision: String,
+    solver_binary_sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CorpusManifestContract {
+    file_sha256: String,
+    records: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,21 +133,56 @@ struct ArmContract {
 struct GateContract {
     decision_rule: String,
     minimum_qualifying_sources: usize,
+    parent_gate_ratio: ParentGateRatio,
+    population_sources: usize,
     qualifying_source_rule: String,
     required_d_reduction_from_a_ppm: i64,
     required_increment_over_b_ppm: i64,
     required_increment_over_c_ppm: i64,
+    threshold_derivation: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParentGateRatio {
+    minimum_qualifying_sources: usize,
+    population_sources: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FrozenSource {
+    p0_results: P0Results,
     relative_path: String,
     selection_tags: Vec<String>,
     sequence: usize,
     source_bytes: usize,
+    source_id: usize,
     source_sha256: String,
+    source_status: String,
+    source_structure: SourceStructure,
     taxonomy: Taxonomy,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct P0Results {
+    #[serde(rename = "euf-viper")]
+    euf_viper: String,
+    yices2: String,
+    #[serde(rename = "z3-default")]
+    z3_default: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceStructure {
+    binary_table_apps: usize,
+    closed_table_functions: usize,
+    domain_size: usize,
+    guarded_disequality_clauses: usize,
+    parentheses: usize,
+    source_bytes: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -141,7 +201,9 @@ struct CensusReport {
     contract: ReportContract,
     manifest: ManifestRecord,
     gate: GateRecord,
-    current_confirmation: CurrentConfirmationContract,
+    implementation_or_promotion_eligible: bool,
+    population_status: &'static str,
+    projection_status: &'static str,
     sources: Vec<SourceRecord>,
 }
 
@@ -157,6 +219,7 @@ struct ReportContract {
 struct ManifestRecord {
     file_sha256: String,
     canonical_path_list_sha256: String,
+    source_records_sha256: String,
     sources: u64,
 }
 
@@ -253,6 +316,98 @@ struct ReductionRecord {
     qualifies: bool,
 }
 
+#[derive(Clone, Copy)]
+struct StrictJsonSeed;
+
+struct StrictJsonVisitor;
+
+impl<'de> DeserializeSeed<'de> for StrictJsonSeed {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(StrictJsonVisitor)
+    }
+}
+
+impl<'de> Visitor<'de> for StrictJsonVisitor {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("strict finite JSON without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        if value.is_finite() {
+            Ok(())
+        } else {
+            Err(E::custom("non-finite JSON number"))
+        }
+    }
+
+    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_string<E>(self, _value: String) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        StrictJsonSeed.deserialize(deserializer)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence.next_element_seed(StrictJsonSeed)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = HashSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(de::Error::custom(format!("duplicate JSON key {key:?}")));
+            }
+            map.next_value_seed(StrictJsonSeed)?;
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn run_from_env() -> Result<(), String> {
     let manifest = required_path(MANIFEST_ENV)?;
     let corpus_root = required_path(CORPUS_ROOT_ENV)?;
@@ -291,9 +446,7 @@ fn run_census(
     }
     let manifest_bytes = fs::read(manifest_path)
         .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
-    let manifest: FrozenManifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|error| format!("invalid frozen manifest: {error}"))?;
-    validate_manifest(&manifest)?;
+    let manifest = decode_manifest(&manifest_bytes)?;
 
     let mut sources = Vec::with_capacity(manifest.sources.len());
     for source in &manifest.sources {
@@ -303,16 +456,65 @@ fn run_census(
         revision,
         sha256_hex(&manifest_bytes),
         manifest.selection.canonical_path_list_sha256.clone(),
-        manifest.current_confirmation.clone(),
+        manifest.selection.source_records_sha256.clone(),
         sources,
     )?;
     let bytes = serialize_report(&report)?;
     atomic_write(output_path, &bytes)
 }
 
-fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
+fn decode_manifest(bytes: &[u8]) -> Result<FrozenManifest, String> {
+    let mut strict = serde_json::Deserializer::from_slice(bytes);
+    StrictJsonSeed
+        .deserialize(&mut strict)
+        .map_err(|error| format!("invalid strict frozen manifest JSON: {error}"))?;
+    strict
+        .end()
+        .map_err(|error| format!("invalid strict frozen manifest JSON: {error}"))?;
+
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|error| format!("invalid frozen manifest JSON: {error}"))?;
+    let source_records_sha256 = canonical_source_records_sha256(&value)?;
+    let manifest: FrozenManifest = serde_json::from_value(value)
+        .map_err(|error| format!("invalid frozen manifest contract: {error}"))?;
+    validate_manifest(&manifest, &source_records_sha256)?;
+
+    let observed = sha256_hex(bytes);
+    if observed != EXPECTED_MANIFEST_SHA256 {
+        return Err(format!(
+            "frozen manifest artifact hash mismatch: expected {EXPECTED_MANIFEST_SHA256}, observed {observed}"
+        ));
+    }
+    Ok(manifest)
+}
+
+fn canonical_source_records_sha256(value: &serde_json::Value) -> Result<String, String> {
+    let sources = value
+        .get("sources")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "frozen manifest sources must be an array".to_owned())?;
+    let mut digest = Sha256::new();
+    for source in sources {
+        let bytes = serde_json::to_vec(source)
+            .map_err(|error| format!("failed to canonicalize source record: {error}"))?;
+        digest.update(bytes);
+        digest.update(b"\n");
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn validate_manifest(
+    manifest: &FrozenManifest,
+    computed_source_records_sha256: &str,
+) -> Result<(), String> {
     if manifest.schema != MANIFEST_SCHEMA {
         return Err(format!("unexpected manifest schema {:?}", manifest.schema));
+    }
+    if manifest.implementation_or_promotion_eligible
+        || manifest.population_status != "accepted"
+        || manifest.projection_status != "not_executed"
+    {
+        return Err("manifest evidence-state contract drift".to_owned());
     }
     if manifest.selection.candidate_count != EXPECTED_SOURCES
         || manifest.sources.len() != EXPECTED_SOURCES
@@ -323,49 +525,36 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
             manifest.sources.len()
         ));
     }
-    if manifest.selection.canonical_order != "relative_path_bytewise_ascending" {
+    if manifest.selection.canonical_order != "relative_path_utf8_bytewise_ascending" {
         return Err("unexpected canonical ordering contract".to_owned());
     }
     if manifest.selection.canonical_path_list_sha256 != EXPECTED_PATH_LIST_SHA256 {
         return Err("unexpected frozen path-list digest".to_owned());
     }
     if manifest.selection.derivation
-        != "lexicographically sorted intersection of the frozen DOMAIN7_HUGE selector and the 10 QG entries in the historical pre-fix 58efe9d full-60 timeout table; retained only as the preregistered developmental 8/10 gate"
+        != "exact intersection of P0 60-second euf-viper timeouts, qg7 sources mechanically satisfying frozen DOMAIN7_HUGE structure and physical bytes, and instances solved with the manifest status by both z3-default and yices2"
     {
         return Err("selection derivation drift".to_owned());
     }
-    require_sha256(
-        &manifest.selection.domain7_huge_population_path_list_sha256,
-        "DOMAIN7_HUGE path-list digest",
-    )?;
-    if manifest.selection.evidence_scope != "historical_58efe9d_developmental_gate_not_current_p0"
-        || manifest.selection.historical_campaign_result
-            != "results/wmi/four-solver-60s-143248/qf-uf-corpus-143248.csv"
-        || manifest.selection.historical_campaign_result_sha256 != HISTORICAL_RESULT_SHA256
-        || manifest.selection.performance_revision != HISTORICAL_PERFORMANCE_REVISION
-        || manifest.selection.provenance_document
-            != "research-vault/06-results/2026-07-11-tail-opportunity-atlas.md"
-        || manifest.selection.provenance_document_revision != HISTORICAL_PROVENANCE_REVISION
-        || manifest.selection.provenance_document_sha256 != HISTORICAL_PROVENANCE_SHA256
-        || manifest.selection.provenance_section != "Exact 60-second timeout manifest"
-        || manifest.selection.selection_version
-            != "historical-58efe9d-full60-domain7-huge-intersection-v1"
+    if manifest.selection.evidence_scope != "current_p0_full60_qg7_shared_z3_yices_deficit"
+        || manifest.selection.selection_version != "p0-30828a4-full60-qg7-shared-deficit-v1"
+        || manifest.selection.projection_template_sha256 != EXPECTED_PROJECTION_TEMPLATE_SHA256
+        || manifest.selection.source_records_sha256 != EXPECTED_SOURCE_RECORDS_SHA256
+        || computed_source_records_sha256 != EXPECTED_SOURCE_RECORDS_SHA256
     {
         return Err("selection provenance drift".to_owned());
     }
-    require_sha256(
-        &manifest.selection.historical_campaign_result_sha256,
-        "historical campaign result SHA-256",
-    )?;
-    require_sha256(
-        &manifest.selection.provenance_document_sha256,
-        "provenance document SHA-256",
-    )?;
+    validate_audit_contract(&manifest.selection.audit)?;
+    if manifest.selection.corpus_manifest.records != 7_503
+        || manifest.selection.corpus_manifest.file_sha256 != EXPECTED_CORPUS_MANIFEST_SHA256
+    {
+        return Err("corpus manifest provenance drift".to_owned());
+    }
     validate_projection_contract(&manifest.projection_contract)?;
     validate_gate_contract(&manifest.gate)?;
-    validate_current_confirmation(&manifest.current_confirmation)?;
 
     let mut previous = None::<&str>;
+    let mut source_ids = HashSet::new();
     for (index, source) in manifest.sources.iter().enumerate() {
         if source.sequence != index {
             return Err(format!(
@@ -385,14 +574,29 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
             ));
         }
         require_sha256(&source.source_sha256, "source SHA-256")?;
+        if !source_ids.insert(source.source_id) {
+            return Err(format!("duplicate source id {}", source.source_id));
+        }
         if source.selection_tags
             != [
                 "DOMAIN7_HUGE".to_owned(),
-                "HISTORICAL_58EFE9D_FULL60_PERSISTENT".to_owned(),
+                "P0_30828A4_FULL60_EUF_TIMEOUT".to_owned(),
+                "P0_30828A4_FULL60_Z3_YICES_SOLVED".to_owned(),
             ]
         {
             return Err(format!("selection tags drift for {}", source.relative_path));
         }
+        if source.p0_results.euf_viper != "timeout"
+            || source.p0_results.yices2 != source.source_status
+            || source.p0_results.z3_default != source.source_status
+            || !matches!(source.source_status.as_str(), "sat" | "unsat")
+        {
+            return Err(format!(
+                "P0 result/status drift for {}",
+                source.relative_path
+            ));
+        }
+        validate_source_structure(source)?;
         validate_taxonomy(source)?;
     }
     let path_digest = canonical_path_list_sha256(&manifest.sources);
@@ -405,35 +609,44 @@ fn validate_manifest(manifest: &FrozenManifest) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_current_confirmation(contract: &CurrentConfirmationContract) -> Result<(), String> {
-    if contract.derivation_policy
-        != "a distinct confirmation manifest must be generated mechanically from the frozen current P0 full-60 audit; hand-selected paths are forbidden"
-        || contract.expected_source_count != CURRENT_P0_EXPECTED_SOURCES
-        || contract.implementation_or_promotion_eligible
-        || contract.p0_audit_path != "p0-144990/continuations/chain-145036/audit/full-60.json"
-        || contract.p0_audit_sha256 != CURRENT_P0_AUDIT_SHA256
-        || contract.p0_revision != CURRENT_P0_REVISION
-        || !contract.required_before_implementation_or_promotion
-        || contract.status != "not_materialized"
+fn validate_audit_contract(contract: &AuditContract) -> Result<(), String> {
+    if contract.file_sha256 != CURRENT_P0_AUDIT_SHA256
+        || contract.manifest_sha256 != CURRENT_P0_AUDIT_MANIFEST_SHA256
+        || contract.observation_provenance_sha256 != CURRENT_P0_OBSERVATION_PROVENANCE_SHA256
+        || contract.path != "p0-144990/continuations/chain-145036/audit/full-60.json"
+        || contract.revision != CURRENT_P0_REVISION
+        || contract.solver_binary_sha256 != CURRENT_P0_BINARY_SHA256
     {
-        return Err("current P0 confirmation contract drift".to_owned());
+        return Err("current P0 audit contract drift".to_owned());
     }
-    require_sha256(&contract.p0_audit_sha256, "current P0 audit SHA-256")?;
+    Ok(())
+}
+
+fn validate_source_structure(source: &FrozenSource) -> Result<(), String> {
+    let structure = &source.source_structure;
+    if structure.domain_size != 7
+        || structure.closed_table_functions < 1
+        || structure.binary_table_apps < 49
+        || structure.guarded_disequality_clauses != 0
+        || structure.parentheses < 80_000
+        || structure.source_bytes != source.source_bytes
+        || source.source_bytes < 6_000_000
+    {
+        return Err(format!(
+            "DOMAIN7_HUGE structure drift for {}",
+            source.relative_path
+        ));
+    }
     Ok(())
 }
 
 fn validate_projection_contract(contract: &ProjectionContract) -> Result<(), String> {
-    for (field, value) in [
-        ("arm A", contract.arms.A.as_str()),
-        ("arm B", contract.arms.B.as_str()),
-        ("arm C", contract.arms.C.as_str()),
-        ("arm D", contract.arms.D.as_str()),
-        ("encoding", contract.encoding.as_str()),
-        ("two-watch rule", contract.two_watch_rule.as_str()),
-    ] {
-        require_nonempty(value, field)?;
-    }
-    if contract.primary_measure != "literal_slots"
+    if contract.arms.A != ARM_A
+        || contract.arms.B != ARM_B
+        || contract.arms.C != ARM_C
+        || contract.arms.D != ARM_D
+        || contract.encoding != ENCODING
+        || contract.primary_measure != "literal_slots"
         || contract.secondary_measures
             != [
                 "variables".to_owned(),
@@ -441,16 +654,23 @@ fn validate_projection_contract(contract: &ProjectionContract) -> Result<(), Str
                 "unit_clauses".to_owned(),
                 "two_watch_entries".to_owned(),
             ]
+        || contract.two_watch_rule != TWO_WATCH_RULE
     {
-        return Err("projection measure contract drift".to_owned());
+        return Err("projection contract drift".to_owned());
     }
     Ok(())
 }
 
 fn validate_gate_contract(contract: &GateContract) -> Result<(), String> {
-    require_nonempty(&contract.decision_rule, "gate decision rule")?;
-    require_nonempty(&contract.qualifying_source_rule, "qualifying-source rule")?;
-    if contract.minimum_qualifying_sources != REQUIRED_QUALIFYING_SOURCES
+    let derived = qualifying_threshold(contract.population_sources)?;
+    if contract.population_sources != EXPECTED_SOURCES
+        || contract.minimum_qualifying_sources != derived
+        || derived != REQUIRED_QUALIFYING_SOURCES
+        || contract.parent_gate_ratio.minimum_qualifying_sources != PARENT_GATE_MINIMUM
+        || contract.parent_gate_ratio.population_sources != PARENT_GATE_POPULATION
+        || contract.decision_rule != "pass iff at least 10 of 12 sources qualify; otherwise reject"
+        || contract.threshold_derivation != "ceil(8 * 12 / 10)"
+        || contract.qualifying_source_rule != QUALIFYING_SOURCE_RULE
         || contract.required_d_reduction_from_a_ppm != REQUIRED_D_REDUCTION_PPM
         || contract.required_increment_over_b_ppm != REQUIRED_INCREMENT_OVER_B_PPM
         || contract.required_increment_over_c_ppm != REQUIRED_INCREMENT_OVER_C_PPM
@@ -458,6 +678,17 @@ fn validate_gate_contract(contract: &GateContract) -> Result<(), String> {
         return Err("gate threshold drift".to_owned());
     }
     Ok(())
+}
+
+fn qualifying_threshold(population: usize) -> Result<usize, String> {
+    if population == 0 {
+        return Err("qualifying population must be positive".to_owned());
+    }
+    PARENT_GATE_MINIMUM
+        .checked_mul(population)
+        .and_then(|value| value.checked_add(PARENT_GATE_POPULATION - 1))
+        .map(|value| value / PARENT_GATE_POPULATION)
+        .ok_or_else(|| "qualifying threshold overflow".to_owned())
 }
 
 fn validate_taxonomy(source: &FrozenSource) -> Result<(), String> {
@@ -472,7 +703,7 @@ fn validate_taxonomy(source: &FrozenSource) -> Result<(), String> {
         || parts[2] != "qg7"
     {
         return Err(format!(
-            "unexpected hard-10 taxonomy path {}",
+            "unexpected current-P0 taxonomy path {}",
             source.relative_path
         ));
     }
@@ -505,13 +736,6 @@ fn validate_relative_path(value: &str) -> Result<(), String> {
             .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(format!("unsafe relative path {value:?}"));
-    }
-    Ok(())
-}
-
-fn require_nonempty(value: &str, field: &str) -> Result<(), String> {
-    if value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err(format!("{field} must be nonempty printable text"));
     }
     Ok(())
 }
@@ -767,7 +991,7 @@ fn build_report(
     revision: &str,
     manifest_sha256: String,
     path_list_sha256: String,
-    current_confirmation: CurrentConfirmationContract,
+    source_records_sha256: String,
     sources: Vec<SourceRecord>,
 ) -> Result<CensusReport, String> {
     if sources.len() != EXPECTED_SOURCES {
@@ -792,23 +1016,26 @@ fn build_report(
         manifest: ManifestRecord {
             file_sha256: manifest_sha256,
             canonical_path_list_sha256: path_list_sha256,
+            source_records_sha256,
             sources: sources.len() as u64,
         },
         gate: GateRecord {
-            scope: "historical_58efe9d_developmental_8_of_10",
+            scope: "current_p0_qg7_derived_10_of_12",
             decision: if qualifying_sources >= REQUIRED_QUALIFYING_SOURCES {
                 GateDecision::Pass
             } else {
                 GateDecision::Reject
             },
-            pass_semantics: "developmental_only_current_12_confirmation_required_before_implementation_or_promotion",
+            pass_semantics: "source_only_projection_gate_no_implementation_or_promotion",
             qualifying_sources: qualifying_sources as u64,
             required_qualifying_sources: REQUIRED_QUALIFYING_SOURCES as u64,
             required_d_reduction_from_a_ppm: REQUIRED_D_REDUCTION_PPM,
             required_increment_over_b_ppm: REQUIRED_INCREMENT_OVER_B_PPM,
             required_increment_over_c_ppm: REQUIRED_INCREMENT_OVER_C_PPM,
         },
-        current_confirmation,
+        implementation_or_promotion_eligible: false,
+        population_status: "accepted",
+        projection_status: "completed",
         sources,
     })
 }
@@ -870,69 +1097,78 @@ fn bounded_diagnostic(value: &str) -> String {
 mod tests {
     use super::*;
 
+    const MANIFEST_BYTES: &[u8] = include_bytes!("../campaigns/t6-theory-dag-p0-qg12-v1.json");
+
     fn frozen_manifest() -> FrozenManifest {
-        serde_json::from_str(include_str!("../campaigns/t6-theory-dag-hard10-v1.json")).unwrap()
+        decode_manifest(MANIFEST_BYTES).unwrap()
     }
 
     #[test]
-    fn frozen_manifest_reproduces_audited_path_digest_and_taxonomy() {
+    fn v2_manifest_reproduces_every_pinned_digest_and_taxonomy() {
         let manifest = frozen_manifest();
-        validate_manifest(&manifest).unwrap();
+        validate_manifest(&manifest, EXPECTED_SOURCE_RECORDS_SHA256).unwrap();
+        assert_eq!(sha256_hex(MANIFEST_BYTES), EXPECTED_MANIFEST_SHA256);
         assert_eq!(
             canonical_path_list_sha256(&manifest.sources),
             EXPECTED_PATH_LIST_SHA256
         );
         assert_eq!(manifest.sources.len(), EXPECTED_SOURCES);
+        assert_eq!(
+            manifest.selection.corpus_manifest.file_sha256,
+            EXPECTED_CORPUS_MANIFEST_SHA256
+        );
+        assert_eq!(
+            manifest.gate.minimum_qualifying_sources,
+            qualifying_threshold(EXPECTED_SOURCES).unwrap()
+        );
     }
 
     #[test]
-    fn historical_provenance_tags_and_current_confirmation_reject_drift() {
+    fn projection_audit_status_and_template_digest_reject_drift() {
         let mut revision_drift = frozen_manifest();
-        revision_drift.selection.performance_revision = CURRENT_P0_REVISION.to_owned();
+        revision_drift.selection.audit.revision = "0".repeat(40);
         assert_eq!(
-            validate_manifest(&revision_drift).unwrap_err(),
+            validate_manifest(&revision_drift, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
+            "current P0 audit contract drift"
+        );
+
+        let mut arm_drift = frozen_manifest();
+        arm_drift.projection_contract.arms.A = "attacker-selected projection".to_owned();
+        assert_eq!(
+            validate_manifest(&arm_drift, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
+            "projection contract drift"
+        );
+
+        let mut arm_and_digest_drift = frozen_manifest();
+        arm_and_digest_drift.projection_contract.arms.A = "attacker-selected projection".to_owned();
+        arm_and_digest_drift.selection.projection_template_sha256 = "0".repeat(64);
+        assert_eq!(
+            validate_manifest(&arm_and_digest_drift, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
             "selection provenance drift"
-        );
-
-        let mut version_drift = frozen_manifest();
-        version_drift.selection.selection_version =
-            "p0-full60-domain7-huge-intersection-v1".to_owned();
-        assert_eq!(
-            validate_manifest(&version_drift).unwrap_err(),
-            "selection provenance drift"
-        );
-
-        let mut tag_drift = frozen_manifest();
-        tag_drift.sources[0].selection_tags[1] = "P0_FULL60_PERSISTENT".to_owned();
-        assert!(
-            validate_manifest(&tag_drift)
-                .unwrap_err()
-                .contains("selection tags drift")
-        );
-
-        let mut audit_drift = frozen_manifest();
-        audit_drift.current_confirmation.p0_audit_sha256 = "0".repeat(64);
-        assert_eq!(
-            validate_manifest(&audit_drift).unwrap_err(),
-            "current P0 confirmation contract drift"
         );
 
         let mut eligibility_drift = frozen_manifest();
-        eligibility_drift
-            .current_confirmation
-            .implementation_or_promotion_eligible = true;
+        eligibility_drift.implementation_or_promotion_eligible = true;
         assert_eq!(
-            validate_manifest(&eligibility_drift).unwrap_err(),
-            "current P0 confirmation contract drift"
+            validate_manifest(&eligibility_drift, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
+            "manifest evidence-state contract drift"
+        );
+
+        let mut projection_status_drift = frozen_manifest();
+        projection_status_drift.projection_status = "completed".to_owned();
+        assert_eq!(
+            validate_manifest(&projection_status_drift, EXPECTED_SOURCE_RECORDS_SHA256)
+                .unwrap_err(),
+            "manifest evidence-state contract drift"
         );
     }
 
     #[test]
-    fn manifest_reorder_delete_and_path_tampering_fail_closed() {
+    fn manifest_reorder_delete_source_and_gate_tampering_fail_closed() {
         let mut reordered = frozen_manifest();
         reordered.sources.swap(0, 1);
         assert!(
-            validate_manifest(&reordered)
+            validate_manifest(&reordered, EXPECTED_SOURCE_RECORDS_SHA256)
                 .unwrap_err()
                 .contains("sequence")
         );
@@ -940,7 +1176,7 @@ mod tests {
         let mut deleted = frozen_manifest();
         deleted.sources.pop();
         assert!(
-            validate_manifest(&deleted)
+            validate_manifest(&deleted, EXPECTED_SOURCE_RECORDS_SHA256)
                 .unwrap_err()
                 .contains("source count")
         );
@@ -948,7 +1184,81 @@ mod tests {
         let mut tampered = frozen_manifest();
         tampered.sources[0].relative_path =
             "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2".to_owned();
-        assert!(validate_manifest(&tampered).is_err());
+        assert!(validate_manifest(&tampered, EXPECTED_SOURCE_RECORDS_SHA256).is_err());
+
+        let mut wrong_population = frozen_manifest();
+        wrong_population.gate.population_sources = 11;
+        wrong_population.gate.minimum_qualifying_sources = 9;
+        wrong_population.gate.decision_rule =
+            "pass iff at least 9 of 11 sources qualify; otherwise reject".to_owned();
+        wrong_population.gate.threshold_derivation = "ceil(8 * 11 / 10)".to_owned();
+        assert_eq!(
+            validate_manifest(&wrong_population, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
+            "gate threshold drift"
+        );
+
+        let mut wrong_threshold = frozen_manifest();
+        wrong_threshold.gate.minimum_qualifying_sources = 9;
+        assert_eq!(
+            validate_manifest(&wrong_threshold, EXPECTED_SOURCE_RECORDS_SHA256).unwrap_err(),
+            "gate threshold drift"
+        );
+    }
+
+    #[test]
+    fn strict_manifest_json_rejects_duplicate_keys_and_nonfinite_numbers() {
+        let original = String::from_utf8(MANIFEST_BYTES.to_vec()).unwrap();
+        let duplicate = original.replacen(
+            "{\n  \"gate\"",
+            "{\n  \"schema\": \"euf-viper.t6-theory-dag-manifest.v2\",\n  \"gate\"",
+            1,
+        );
+        assert!(
+            decode_manifest(duplicate.as_bytes())
+                .unwrap_err()
+                .contains("duplicate JSON key")
+        );
+
+        for token in ["NaN", "Infinity", "-Infinity"] {
+            let nonfinite = original.replacen(
+                "{\n  \"gate\"",
+                &format!("{{\n  \"nonfinite\": {token},\n  \"gate\""),
+                1,
+            );
+            assert!(
+                decode_manifest(nonfinite.as_bytes())
+                    .unwrap_err()
+                    .contains("strict frozen manifest JSON")
+            );
+        }
+    }
+
+    #[test]
+    fn old_v1_manifest_and_semantically_equal_reencoding_are_rejected() {
+        let old = include_bytes!("../campaigns/t6-theory-dag-hard10-v1.json");
+        assert!(decode_manifest(old).is_err());
+
+        let mut reencoded = MANIFEST_BYTES.to_vec();
+        reencoded.push(b'\n');
+        assert!(
+            decode_manifest(&reencoded)
+                .unwrap_err()
+                .contains("artifact hash mismatch")
+        );
+    }
+
+    #[test]
+    fn changed_source_row_with_matching_internal_digest_is_rejected() {
+        let mut value: serde_json::Value = serde_json::from_slice(MANIFEST_BYTES).unwrap();
+        let source = &mut value["sources"][0];
+        let bytes = source["source_bytes"].as_u64().unwrap() + 1;
+        source["source_bytes"] = bytes.into();
+        source["source_structure"]["source_bytes"] = bytes.into();
+        let digest = canonical_source_records_sha256(&value).unwrap();
+        value["selection"]["source_records_sha256"] = digest.into();
+        let mut changed = serde_json::to_vec_pretty(&value).unwrap();
+        changed.push(b'\n');
+        assert!(decode_manifest(&changed).is_err());
     }
 
     #[test]
@@ -979,6 +1289,8 @@ mod tests {
         assert_eq!(reduction_ppm(100, 75).unwrap(), 250_000);
         assert_eq!(reduction_ppm(100, 80).unwrap(), 200_000);
         assert_eq!(reduction_ppm(100, 105).unwrap(), -50_000);
+        assert_eq!(qualifying_threshold(10).unwrap(), 8);
+        assert_eq!(qualifying_threshold(12).unwrap(), 10);
     }
 
     fn fake_source(sequence: u64, qualifies: bool) -> SourceRecord {
@@ -1046,14 +1358,14 @@ mod tests {
 
     #[test]
     fn report_bytes_are_deterministic_and_gate_is_fail_closed() {
-        let sources = (0..10)
-            .map(|sequence| fake_source(sequence, sequence < 7))
+        let sources = (0..EXPECTED_SOURCES as u64)
+            .map(|sequence| fake_source(sequence, sequence < 9))
             .collect::<Vec<_>>();
         let first = build_report(
             "0123456789abcdef",
-            "1".repeat(64),
+            EXPECTED_MANIFEST_SHA256.to_owned(),
             EXPECTED_PATH_LIST_SHA256.to_owned(),
-            frozen_manifest().current_confirmation,
+            EXPECTED_SOURCE_RECORDS_SHA256.to_owned(),
             sources,
         )
         .unwrap();
@@ -1063,25 +1375,19 @@ mod tests {
         assert_eq!(first_bytes, second_bytes);
         assert_eq!(first_bytes.last(), Some(&b'\n'));
         assert_eq!(first.gate.decision, GateDecision::Reject);
-        assert_eq!(first.gate.qualifying_sources, 7);
-        assert_eq!(first.gate.scope, "historical_58efe9d_developmental_8_of_10");
-        assert!(
-            first
-                .current_confirmation
-                .required_before_implementation_or_promotion
-        );
-        assert!(
-            !first
-                .current_confirmation
-                .implementation_or_promotion_eligible
-        );
+        assert_eq!(first.gate.qualifying_sources, 9);
+        assert_eq!(first.gate.required_qualifying_sources, 10);
+        assert_eq!(first.gate.scope, "current_p0_qg7_derived_10_of_12");
+        assert_eq!(first.population_status, "accepted");
+        assert_eq!(first.projection_status, "completed");
+        assert!(!first.implementation_or_promotion_eligible);
         let text = String::from_utf8(first_bytes).unwrap();
         assert!(!text.contains("timestamp"));
     }
 
     #[test]
-    #[ignore = "requires the frozen external hard-10 corpus"]
-    fn hard10_census_from_env() {
+    #[ignore = "requires the frozen external current-P0 qg12 corpus"]
+    fn p0_qg12_census_from_env() {
         run_from_env().unwrap();
     }
 }

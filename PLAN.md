@@ -274,9 +274,15 @@ independent evidence checks, and a frozen family holdout.
 
 ### T6: Theory-Conditioned Boolean DAG
 
+- [x] Freeze the mechanically derived current-P0 qg7 population at 12 sources.
+  The accepted manifest is a population contract only; its source-only
+  projection remains unexecuted and implementation/promotion eligibility is
+  false.
 - [ ] Run dual source-EUF/Boolean-gate congruence census.
-- [ ] Require at least 25% projected CNF reduction on 8/10 frozen hard-table
-  cases and more benefit than rejected unconditional quotienting.
+- [ ] Require at least 25% projected CNF reduction on at least
+  `ceil(8 * 12 / 10) = 10` of the 12 accepted current-P0 sources and more
+  benefit than rejected unconditional quotienting. The historical 8/10 gate
+  supplies only the frozen ratio; it is not current-P0 execution evidence.
 
 P1 exit: every survivor passes semantic differential and its preregistered
 opportunity threshold. Failed tracks stop before expensive timing.

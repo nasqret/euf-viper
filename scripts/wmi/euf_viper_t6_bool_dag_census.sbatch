@@ -20,6 +20,7 @@ export RAYON_NUM_THREADS=1
 export CARGO_BUILD_JOBS="${SLURM_CPUS_PER_TASK:-1}"
 
 CARGO="${EUF_VIPER_CARGO:-$HOME/.cargo/bin/cargo}"
+RUST_TOOLCHAIN="1.96.0"
 EXPECTED_CARGO_RESOLVED="${EUF_VIPER_CARGO_RESOLVED:?set EUF_VIPER_CARGO_RESOLVED}"
 EXPECTED_CARGO_SHA256="${EUF_VIPER_CARGO_SHA256:?set EUF_VIPER_CARGO_SHA256}"
 EXPECTED_CARGO_VERSION="${EUF_VIPER_CARGO_VERSION:?set EUF_VIPER_CARGO_VERSION}"
@@ -59,7 +60,7 @@ if [ "$ACTUAL_CARGO_SHA256" != "$EXPECTED_CARGO_SHA256" ]; then
   echo "cargo hash mismatch: expected $EXPECTED_CARGO_SHA256, got $ACTUAL_CARGO_SHA256" >&2
   exit 2
 fi
-ACTUAL_CARGO_VERSION="$("$CARGO" --version)"
+ACTUAL_CARGO_VERSION="$("$CARGO" +1.96.0 --version)"
 if [ "$ACTUAL_CARGO_VERSION" != "$EXPECTED_CARGO_VERSION" ]; then
   echo "cargo version mismatch: expected $EXPECTED_CARGO_VERSION, got $ACTUAL_CARGO_VERSION" >&2
   exit 2
@@ -69,11 +70,12 @@ export EUF_VIPER_CARGO_RESOLVED="$ACTUAL_CARGO_RESOLVED"
 export EUF_VIPER_CARGO_SHA256="$ACTUAL_CARGO_SHA256"
 export EUF_VIPER_CARGO_VERSION="$ACTUAL_CARGO_VERSION"
 export PATH="$(dirname "$CARGO"):$PATH"
-printf 'cargo_configured=%s\ncargo_resolved=%s\ncargo_sha256=%s\ncargo_version=%s\n' \
-  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" "$ACTUAL_CARGO_VERSION"
+printf 'cargo_configured=%s\ncargo_resolved=%s\ncargo_sha256=%s\ncargo_version=%s\ntoolchain=%s\n' \
+  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" \
+  "$ACTUAL_CARGO_VERSION" "$RUST_TOOLCHAIN"
 
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:?set EUF_VIPER_EXPECTED_REVISION}"
-EXPECTED_MANIFEST_SHA256="${EUF_VIPER_T6_EXPECTED_MANIFEST_SHA256:?set EUF_VIPER_T6_EXPECTED_MANIFEST_SHA256}"
+EXPECTED_MANIFEST_SHA256="33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78"
 ACTUAL_REVISION="$(git rev-parse HEAD)"
 if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
   echo "revision mismatch: expected $EXPECTED_REVISION, got $ACTUAL_REVISION" >&2
@@ -84,7 +86,7 @@ if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
   exit 2
 fi
 
-MANIFEST="${EUF_VIPER_T6_MANIFEST:-$PWD/campaigns/t6-theory-dag-hard10-v1.json}"
+MANIFEST="${EUF_VIPER_T6_MANIFEST:-$PWD/campaigns/t6-theory-dag-p0-qg12-v1.json}"
 CORPUS_ROOT="${EUF_VIPER_T6_CORPUS_ROOT:?set EUF_VIPER_T6_CORPUS_ROOT}"
 if [ ! -s "$MANIFEST" ]; then
   echo "missing frozen T6 manifest: $MANIFEST" >&2
@@ -109,12 +111,13 @@ export EUF_VIPER_T6_CORPUS_ROOT="$CORPUS_ROOT"
 export EUF_VIPER_T6_OUTPUT="$OUT/report.json"
 export EUF_VIPER_EXPECTED_REVISION="$EXPECTED_REVISION"
 mkdir -p "$OUT"
-printf 'configured=%s\nresolved=%s\nsha256=%s\nversion=%s\n' \
-  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" "$ACTUAL_CARGO_VERSION" \
+printf 'configured=%s\nresolved=%s\nsha256=%s\nversion=%s\ntoolchain=%s\n' \
+  "$CARGO" "$ACTUAL_CARGO_RESOLVED" "$ACTUAL_CARGO_SHA256" \
+  "$ACTUAL_CARGO_VERSION" "$RUST_TOOLCHAIN" \
   > "$OUT/cargo-toolchain.txt"
 
-"$CARGO" test --release --locked --all-features \
-  t6_bool_dag_census::tests::hard10_census_from_env \
+"$CARGO" +1.96.0 test --release --locked --all-features \
+  t6_bool_dag_census::tests::p0_qg12_census_from_env \
   -- --ignored --exact --nocapture \
   > "$OUT/run.txt"
 
@@ -136,23 +139,55 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise SystemExit(f"duplicate JSON key {key!r}")
+        result[key] = value
+    return result
+
+
+def reject_nonfinite(value):
+    raise SystemExit(f"non-finite JSON number {value!r}")
+
+
+def load_strict_json(path: Path):
+    try:
+        return json.loads(
+            path.read_text(encoding="ascii"),
+            object_pairs_hook=reject_duplicate_keys,
+            parse_constant=reject_nonfinite,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid strict JSON in {path}: {error}") from error
+
+
 metadata_path, report_path, run_path, manifest_path, cargo_path = map(Path, sys.argv[1:])
-report = json.loads(report_path.read_text(encoding="ascii"))
-if report.get("schema") != "euf-viper.t6-theory-dag-census.v1":
+report = load_strict_json(report_path)
+if report.get("schema") != "euf-viper.t6-theory-dag-census.v2":
     raise SystemExit("unexpected T6 report schema")
 if report.get("analysis_revision") != os.environ["EUF_VIPER_EXPECTED_REVISION"]:
     raise SystemExit("T6 report revision mismatch")
 manifest = report.get("manifest")
-if not isinstance(manifest, dict) or manifest.get("sources") != 10:
-    raise SystemExit("T6 report does not contain exactly 10 frozen sources")
+if not isinstance(manifest, dict) or manifest.get("sources") != 12:
+    raise SystemExit("T6 report does not contain exactly 12 frozen sources")
+if manifest.get("file_sha256") != (
+    "33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78"
+):
+    raise SystemExit("T6 report manifest artifact hash mismatch")
 if manifest.get("canonical_path_list_sha256") != (
-    "43f367dfa7bc1684cb48828415249b59779416d17ad1fb2af50d4c8366bf2523"
+    "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa"
 ):
     raise SystemExit("T6 report path-list digest mismatch")
+if manifest.get("source_records_sha256") != (
+    "f274424dcfdf3bd155fe12f7aedb99f8a80dfcb54c0625899dfba8377fff5b0b"
+):
+    raise SystemExit("T6 report source-record digest mismatch")
 sources = report.get("sources")
-if not isinstance(sources, list) or len(sources) != 10:
+if not isinstance(sources, list) or len(sources) != 12:
     raise SystemExit("T6 report source array mismatch")
-if [row.get("sequence") for row in sources] != list(range(10)):
+if [row.get("sequence") for row in sources] != list(range(12)):
     raise SystemExit("T6 report source sequence mismatch")
 for row in sources:
     projections = row.get("projections")
@@ -179,38 +214,26 @@ for row in sources:
 gate = report.get("gate")
 if not isinstance(gate, dict) or gate.get("decision") not in {"pass", "reject"}:
     raise SystemExit("T6 report gate decision is invalid")
-if gate.get("scope") != "historical_58efe9d_developmental_8_of_10":
+if gate.get("scope") != "current_p0_qg7_derived_10_of_12":
     raise SystemExit("T6 report gate scope drift")
 if gate.get("pass_semantics") != (
-    "developmental_only_current_12_confirmation_required_before_implementation_or_promotion"
+    "source_only_projection_gate_no_implementation_or_promotion"
 ):
     raise SystemExit("T6 report gate pass semantics drift")
-if gate.get("required_qualifying_sources") != 8:
+if gate.get("required_qualifying_sources") != 10:
     raise SystemExit("T6 report qualifying-source threshold drift")
 qualifying = gate.get("qualifying_sources")
-if type(qualifying) is not int or not 0 <= qualifying <= 10:
+if type(qualifying) is not int or not 0 <= qualifying <= 12:
     raise SystemExit("T6 report qualifying-source count is invalid")
-expected_decision = "pass" if qualifying >= 8 else "reject"
+expected_decision = "pass" if qualifying >= 10 else "reject"
 if gate["decision"] != expected_decision:
     raise SystemExit("T6 report gate decision is inconsistent")
-confirmation = report.get("current_confirmation")
-expected_confirmation = {
-    "derivation_policy": (
-        "a distinct confirmation manifest must be generated mechanically from the frozen "
-        "current P0 full-60 audit; hand-selected paths are forbidden"
-    ),
-    "expected_source_count": 12,
-    "implementation_or_promotion_eligible": False,
-    "p0_audit_path": "p0-144990/continuations/chain-145036/audit/full-60.json",
-    "p0_audit_sha256": (
-        "2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a"
-    ),
-    "p0_revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
-    "required_before_implementation_or_promotion": True,
-    "status": "not_materialized",
-}
-if confirmation != expected_confirmation:
-    raise SystemExit("T6 report current-P0 confirmation contract drift")
+if report.get("population_status") != "accepted":
+    raise SystemExit("T6 accepted-population status drift")
+if report.get("projection_status") != "completed":
+    raise SystemExit("T6 completed-projection status drift")
+if report.get("implementation_or_promotion_eligible") is not False:
+    raise SystemExit("T6 promotion eligibility drift")
 
 artifacts = {
     "cargo_toolchain": cargo_path,
@@ -219,7 +242,7 @@ artifacts = {
     "run": run_path,
 }
 payload = {
-    "schema": "euf-viper.t6-theory-dag-wmi-run.v1",
+    "schema": "euf-viper.t6-theory-dag-wmi-run.v2",
     "state": "completed",
     "analysis_kind": "source_only_structural_projection",
     "revision": os.environ["EUF_VIPER_EXPECTED_REVISION"],
@@ -230,17 +253,20 @@ payload = {
         "resolved_path": os.environ["EUF_VIPER_CARGO_RESOLVED"],
         "sha256": os.environ["EUF_VIPER_CARGO_SHA256"],
         "version": os.environ["EUF_VIPER_CARGO_VERSION"],
+        "toolchain": "1.96.0",
     },
     "gate": {
         "scope": gate["scope"],
         "decision": gate["decision"],
         "qualifying_sources": qualifying,
-        "required_qualifying_sources": 8,
+        "required_qualifying_sources": 10,
         "implementation_or_promotion_eligible": False,
     },
-    "current_confirmation": confirmation,
+    "population_status": "accepted",
+    "projection_status": "completed",
+    "implementation_or_promotion_eligible": False,
     "validation": {
-        "expected_sources": 10,
+        "expected_sources": 12,
         "observed_sources": len(sources),
         "parser_source_cap_failures": 0,
     },

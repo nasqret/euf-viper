@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REMOTE_HOST="${EUF_VIPER_WMI_HOST:-wmicluster}"
 REMOTE_PARENT="${EUF_VIPER_T6_REMOTE_PARENT:-}"
 REMOTE_BRANCH="${EUF_VIPER_T6_REMOTE_BRANCH:-research-t6-theory-dag}"
-MANIFEST="$ROOT/campaigns/t6-theory-dag-hard10-v1.json"
+MANIFEST="$ROOT/campaigns/t6-theory-dag-p0-qg12-v1.json"
+EXPECTED_MANIFEST_SHA256="33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78"
 
 cd "$ROOT"
 if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
@@ -28,6 +29,10 @@ if [ ! -s "$MANIFEST" ]; then
   exit 2
 fi
 MANIFEST_SHA256="$(shasum -a 256 "$MANIFEST" | awk '{print $1}')"
+if [ "$MANIFEST_SHA256" != "$EXPECTED_MANIFEST_SHA256" ]; then
+  echo "manifest hash mismatch: expected $EXPECTED_MANIFEST_SHA256, got $MANIFEST_SHA256" >&2
+  exit 2
+fi
 
 REMOTE_HOME="$(ssh "$REMOTE_HOST" 'printf %s "$HOME"')"
 if [ -z "$REMOTE_PARENT" ]; then
@@ -63,7 +68,7 @@ fi
 case "$REMOTE_CARGO_SHA256" in
   *[!0-9a-f]*) echo "remote cargo SHA-256 is malformed" >&2; exit 2 ;;
 esac
-if ! REMOTE_CARGO_VERSION="$(ssh "$REMOTE_HOST" "'$REMOTE_CARGO' --version")"; then
+if ! REMOTE_CARGO_VERSION="$(ssh "$REMOTE_HOST" "'$REMOTE_CARGO' +1.96.0 --version")"; then
   echo "failed to read remote cargo version through $REMOTE_CARGO" >&2
   exit 2
 fi
@@ -77,7 +82,7 @@ REMOTE_WORK="$REMOTE_PARENT/$SHORT_REVISION-t6-theory-dag"
 
 ssh "$REMOTE_HOST" "set -euo pipefail; mkdir -p '$REMOTE_PARENT'; if [ ! -d '$REMOTE_WORK/.git' ]; then git clone --quiet https://github.com/nasqret/euf-viper.git '$REMOTE_WORK'; fi; git -C '$REMOTE_WORK' fetch --quiet origin '$REVISION'; git -C '$REMOTE_WORK' checkout --quiet --detach '$REVISION'; test \"\$(git -C '$REMOTE_WORK' rev-parse HEAD)\" = '$REVISION'; test -d '$REMOTE_CORPUS_ROOT'"
 
-SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_CARGO='$REMOTE_CARGO',EUF_VIPER_CARGO_RESOLVED='$REMOTE_CARGO_RESOLVED',EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256',EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION',EUF_VIPER_T6_EXPECTED_MANIFEST_SHA256='$MANIFEST_SHA256',EUF_VIPER_T6_CORPUS_ROOT='$REMOTE_CORPUS_ROOT' scripts/wmi/euf_viper_t6_bool_dag_census.sbatch")"
+SUBMISSION="$(ssh "$REMOTE_HOST" "cd '$REMOTE_WORK' && mkdir -p results && sbatch --parsable --export=ALL,EUF_VIPER_EXPECTED_REVISION='$REVISION',EUF_VIPER_CARGO='$REMOTE_CARGO',EUF_VIPER_CARGO_RESOLVED='$REMOTE_CARGO_RESOLVED',EUF_VIPER_CARGO_SHA256='$REMOTE_CARGO_SHA256',EUF_VIPER_CARGO_VERSION='$REMOTE_CARGO_VERSION',EUF_VIPER_T6_CORPUS_ROOT='$REMOTE_CORPUS_ROOT' scripts/wmi/euf_viper_t6_bool_dag_census.sbatch")"
 JOB_ID="${SUBMISSION%%;*}"
 case "$JOB_ID" in
   *[!0-9]*|'') echo "invalid T6 census job id: $SUBMISSION" >&2; exit 2 ;;
@@ -111,7 +116,7 @@ from pathlib import Path
 ) = sys.argv[1:]
 path = Path(output)
 payload = {
-    "schema": "euf-viper.t6-theory-dag-wmi-submission.v1",
+    "schema": "euf-viper.t6-theory-dag-wmi-submission.v2",
     "state": "submitted",
     "analysis_kind": "source_only_structural_projection",
     "revision": revision,
@@ -126,11 +131,14 @@ payload = {
         "resolved_path": cargo_resolved,
         "sha256": cargo_sha256,
         "version": cargo_version,
+        "toolchain": "1.96.0",
     },
-    "gate_scope": "historical_58efe9d_developmental_8_of_10",
-    "current_confirmation_required": True,
+    "gate_scope": "current_p0_qg7_derived_10_of_12",
+    "required_qualifying_sources": 10,
+    "population_status": "accepted",
+    "projection_status": "not_executed",
     "implementation_or_promotion_eligible": False,
-    "expected_sources": 10,
+    "expected_sources": 12,
     "job_id": int(job_id),
 }
 temporary = path.with_name(f".{path.name}.tmp")

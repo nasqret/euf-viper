@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import unicodedata
 from pathlib import Path
 
 
@@ -36,6 +38,35 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def absolute_lexical(path: Path) -> Path:
+    """Return an absolute normalized path without resolving symlinks."""
+
+    return Path(os.path.abspath(path))
+
+
+def descriptor_path(path: Path, descriptor_parent: Path) -> str:
+    try:
+        relative = path.relative_to(descriptor_parent)
+    except ValueError as error:
+        raise ValueError(
+            f"source {path} is outside manifest directory {descriptor_parent}"
+        ) from error
+    value = relative.as_posix()
+    if (
+        not value
+        or value.startswith("/")
+        or "\\" in value
+        or "//" in value
+        or unicodedata.normalize("NFC", value) != value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(
+            unicodedata.category(character) in {"Cc", "Cf"} for character in value
+        )
+    ):
+        raise ValueError(f"non-canonical descriptor-relative source path {value!r}")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
@@ -46,14 +77,29 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
-    files = sorted(args.root.rglob("*.smt2"))
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", encoding="utf-8") as out:
+    root = absolute_lexical(args.root)
+    output = absolute_lexical(args.out)
+    descriptor_parent = output.parent
+    if not root.is_dir():
+        parser.error(f"corpus root is not a directory: {root}")
+    try:
+        root.relative_to(descriptor_parent)
+    except ValueError:
+        parser.error(
+            f"corpus root must be below manifest directory {descriptor_parent}: {root}"
+        )
+
+    files = sorted(
+        root.rglob("*.smt2"),
+        key=lambda path: path.relative_to(root).as_posix().encode("utf-8"),
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="\n") as out:
         for idx, path in enumerate(files):
-            rel = path.relative_to(args.root).as_posix()
+            rel = path.relative_to(root).as_posix()
             row = {
                 "id": idx,
-                "path": str(path),
+                "path": descriptor_path(path, descriptor_parent),
                 "relative_path": rel,
                 "logic": first_match(path, LOGIC_RE) or args.logic,
                 "status": first_match(path, STATUS_RE) or "unknown",
@@ -63,8 +109,8 @@ def main() -> int:
                 "source_url": args.source_url,
                 "archive_md5": args.archive_md5,
             }
-            out.write(json.dumps(row, sort_keys=True) + "\n")
-    print(f"manifest={args.out} files={len(files)}")
+            out.write(json.dumps(row, allow_nan=False, sort_keys=True) + "\n")
+    print(f"manifest={output} files={len(files)}")
     return 0
 
 

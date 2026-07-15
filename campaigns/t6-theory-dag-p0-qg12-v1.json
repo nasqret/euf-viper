@@ -14,6 +14,7 @@
     "threshold_derivation": "ceil(8 * 12 / 10)"
   },
   "implementation_or_promotion_eligible": false,
+  "population_status": "accepted",
   "projection_contract": {
     "arms": {
       "A": "tree expansion with globally identified source atoms and no compound-gate sharing",
@@ -31,6 +32,7 @@
     ],
     "two_watch_rule": "two entries for every clause of length at least two; units use no ordinary watch entries"
   },
+  "projection_status": "not_executed",
   "schema": "euf-viper.t6-theory-dag-manifest.v2",
   "selection": {
     "audit": {
@@ -45,7 +47,7 @@
     "canonical_order": "relative_path_utf8_bytewise_ascending",
     "canonical_path_list_sha256": "1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa",
     "corpus_manifest": {
-      "file_sha256": "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db",
+      "file_sha256": "597f8ee5dad0d4e55d407a18cbd48d727a70b6b86590020863cd2145e73eac0a",
       "records": 7503
     },
     "derivation": "exact intersection of P0 60-second euf-viper timeouts, qg7 sources mechanically satisfying frozen DOMAIN7_HUGE structure and physical bytes, and instances solved with the manifest status by both z3-default and yices2",

@@ -1015,6 +1015,39 @@
   control, complete provenance, and decoder caps must all pass before any solver
   implementation.
 
+## 2026-07-15 T6 Frozen-Population Consumer Repair
+
+- Starting from clean `b587847`, removed every caller-supplied T6 expected-hash
+  and population override. Audit, observation provenance, portable corpus
+  descriptor metadata, projection template, source bytes, and output contract
+  are repository constants. Strict JSON/JSONL decoding rejects duplicate keys
+  and `NaN`/`Infinity`/`-Infinity` at the Python, Rust, and Slurm report
+  boundaries.
+- Regenerated all 7,503 corpus rows with canonical manifest-directory-relative
+  source identities. The portable corpus descriptor SHA-256 is
+  `597f8ee5dad0d4e55d407a18cbd48d727a70b6b86590020863cd2145e73eac0a`;
+  descriptor-relative component opening remains no-follow and verifies file
+  size, SHA-256, unique physical identity, exact metadata, and source structure.
+- Regenerated `campaigns/t6-theory-dag-p0-qg12-v1.json` from audit
+  `2458b01872a290c89f715a277dfd41e2c28091fc649925c9acbfefeb6e72686a`.
+  Artifact SHA-256 is
+  `33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78`;
+  path-list/source-record digests are
+  `1fd24c2c5fa8eafd07a39f28c96d828e0e0aa1072fd032db413c60f34270b6fa`
+  and `f274424dcfdf3bd155fe12f7aedb99f8a80dfcb54c0625899dfba8377fff5b0b`.
+  The population status is accepted, the projection status is not executed,
+  and implementation/promotion eligibility remains false.
+- The Rust consumer, Slurm job, and submitter now require manifest v2, exactly
+  12 sources, and the mechanically derived `ceil(8 * 12 / 10) = 10` gate. They
+  pin the exact artifact bytes and invoke `cargo +1.96.0`; no global Rustup state
+  was changed.
+- Validation passed: 26 focused Python tests; 9 focused Rust tests with the
+  external projection test ignored; all 307 Python tests; 232 default Rust
+  tests with 3 external probes ignored; 247 all-feature Rust tests with 5
+  external corpus/probe runs ignored; shell syntax; and a warnings-as-errors
+  nine-page Jupyter Book build. No T6 projection, publication, push, or WMI
+  submission/cancellation occurred.
+
 ## Next Entry Template
 
 - Benchmark corpus:

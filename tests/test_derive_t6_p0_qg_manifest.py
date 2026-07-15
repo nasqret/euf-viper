@@ -5,14 +5,18 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bench" / "derive_t6_p0_qg_manifest.py"
 COMMITTED = ROOT / "campaigns" / "t6-theory-dag-p0-qg12-v1.json"
+MAKE_MANIFEST = ROOT / "scripts" / "bench" / "make_manifest.py"
 SPEC = importlib.util.spec_from_file_location("derive_t6_p0_qg_manifest", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 T6 = importlib.util.module_from_spec(SPEC)
@@ -25,11 +29,15 @@ def digest(label: str) -> str:
 
 def source(source_id: int, relative_path: str, status: str = "unsat") -> dict:
     return {
+        "archive_md5": T6.CORPUS_ARCHIVE_MD5,
         "bytes": T6.MINIMUM_SOURCE_BYTES + source_id,
         "id": source_id,
         "logic": "QF_UF",
+        "path": T6.CORPUS_DESCRIPTOR_PREFIX + relative_path,
         "relative_path": relative_path,
         "sha256": digest(f"source-{source_id}"),
+        "source_doi": T6.CORPUS_SOURCE_DOI,
+        "source_url": T6.CORPUS_SOURCE_URL,
         "status": status,
     }
 
@@ -146,8 +154,27 @@ def projection_template() -> dict:
             "required_increment_over_b_ppm": 50_000,
             "required_increment_over_c_ppm": 50_000,
         },
-        "projection_contract": {"arms": {"A": "a", "B": "b", "C": "c", "D": "d"}},
+        "projection_contract": T6.frozen_projection_contract(),
     }
+
+
+@contextmanager
+def synthetic_contract(
+    provenance_sha256: str,
+    *,
+    corpus_sources: int = 3,
+    selected_sources: int = 2,
+):
+    with mock.patch.multiple(
+        T6,
+        EXPECTED_CORPUS_SOURCES=corpus_sources,
+        EXPECTED_SELECTED_SOURCES=selected_sources,
+        P0_OBSERVATION_PROVENANCE_SHA256=provenance_sha256,
+        P0_AUDIT_SHA256="d" * 64,
+        LOCAL_MANIFEST_SHA256="e" * 64,
+        PROJECTION_TEMPLATE_SHA256="f" * 64,
+    ):
+        yield
 
 
 def valid_metrics(source_bytes: int) -> dict[str, int]:
@@ -207,22 +234,24 @@ def huge_domain_table_source() -> bytes:
 
 class T6P0ManifestTests(unittest.TestCase):
     def derive(self, audit: dict, rows: list[dict], provenance_sha256: str) -> dict:
-        selection = T6.select_p0_sources(
-            audit,
-            rows,
-            expected_provenance_sha256=provenance_sha256,
-            expected_selected=2,
-        )
-        contract, rule = T6.validate_projection_template(projection_template())
-        return T6.build_manifest(
-            selection,
-            contract,
-            rule,
-            physical_evidence(rows),
-            audit_sha256="d" * 64,
-            local_manifest_sha256="e" * 64,
-            projection_template_sha256="f" * 64,
-        )
+        with synthetic_contract(provenance_sha256):
+            selection = T6.select_p0_sources(audit, rows)
+            T6.validate_projection_template(projection_template())
+            return T6.build_manifest(selection, physical_evidence(rows))
+
+    def observation_index(
+        self, audit: dict, rows: list[dict], provenance_sha256: str
+    ) -> dict:
+        with synthetic_contract(provenance_sha256):
+            return T6.observation_index(
+                audit, {row["relative_path"] for row in rows}
+            )
+
+    def selection(
+        self, audit: dict, rows: list[dict], provenance_sha256: str
+    ) -> T6.P0Selection:
+        with synthetic_contract(provenance_sha256):
+            return T6.select_p0_sources(audit, rows)
 
     def test_derivation_is_structural_deterministic_and_ratio_bound(self) -> None:
         audit, rows, provenance = fixture()
@@ -247,7 +276,7 @@ class T6P0ManifestTests(unittest.TestCase):
         manifest = json.loads(raw)
         self.assertEqual(
             hashlib.sha256(raw).hexdigest(),
-            "1b3f4e52c8c856e09205baf88b4cff8604f6d864e93373a980ba8d974e205c21",
+            "33a9f0016570dc07dc4c9aed2f575633eb5a2ee10d21177c97a4e86b65507c78",
         )
         expected_paths_and_hashes = [
             ("QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2", "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0"),
@@ -270,6 +299,13 @@ class T6P0ManifestTests(unittest.TestCase):
         )
         self.assertEqual(manifest["gate"]["population_sources"], 12)
         self.assertEqual(manifest["gate"]["minimum_qualifying_sources"], 10)
+        self.assertEqual(manifest["population_status"], "accepted")
+        self.assertEqual(manifest["projection_status"], "not_executed")
+        self.assertFalse(manifest["implementation_or_promotion_eligible"])
+        self.assertEqual(
+            manifest["selection"]["corpus_manifest"]["file_sha256"],
+            T6.LOCAL_MANIFEST_SHA256,
+        )
         self.assertEqual(
             manifest["selection"]["audit"]["observation_provenance_sha256"],
             T6.P0_OBSERVATION_PROVENANCE_SHA256,
@@ -285,13 +321,13 @@ class T6P0ManifestTests(unittest.TestCase):
         audit["inputs"]["observation_provenance"].pop()
         tampered = rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "observation count"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, tampered)
+            self.observation_index(audit, rows, tampered)
 
         audit, rows, _ = fixture()
         audit["inputs"]["observation_provenance"][0]["relative_path"] = "QF_UF/replaced.smt2"
         tampered = rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "outside the frozen corpus"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, tampered)
+            self.observation_index(audit, rows, tampered)
 
         audit, rows, _ = fixture()
         audit["inputs"]["observation_provenance"].append(
@@ -299,9 +335,9 @@ class T6P0ManifestTests(unittest.TestCase):
         )
         tampered = rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "observation count"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, tampered)
+            self.observation_index(audit, rows, tampered)
 
-    def test_swapped_or_tampered_provenance_fails_after_outer_hash_override(self) -> None:
+    def test_swapped_or_tampered_provenance_cannot_redefine_frozen_digest(self) -> None:
         audit, rows, frozen = fixture()
         observations = audit["inputs"]["observation_provenance"]
         observations[0], observations[1] = observations[1], observations[0]
@@ -311,20 +347,17 @@ class T6P0ManifestTests(unittest.TestCase):
             path.write_text(json.dumps(audit), encoding="utf-8")
             blob = T6.read_immutable_file(path, "tampered audit")
             self.assertEqual(T6.require_hash(blob, blob.sha256, "P0 audit"), blob.sha256)
+            with self.assertRaisesRegex(T6.DerivationError, "hash mismatch"):
+                T6.require_frozen_audit_hash(blob)
             parsed = T6.parse_json_bytes(blob.data, "tampered audit")
         with self.assertRaisesRegex(T6.DerivationError, "frozen observation provenance"):
-            T6.select_p0_sources(
-                parsed,
-                rows,
-                expected_provenance_sha256=frozen,
-                expected_selected=2,
-            )
+            self.selection(parsed, rows, frozen)
 
         audit, rows, frozen = fixture()
         audit["inputs"]["observation_provenance"][0]["source_raw_sha256"] = "9" * 64
         rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "frozen observation provenance"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, frozen)
+            self.observation_index(audit, rows, frozen)
 
     def test_observation_row_schema_and_carry_semantics_are_independently_checked(self) -> None:
         audit, rows, _ = fixture()
@@ -337,13 +370,13 @@ class T6P0ManifestTests(unittest.TestCase):
         final["origin_budget_s"] = 60.0
         tampered = rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "was not carried forward exactly"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, tampered)
+            self.observation_index(audit, rows, tampered)
 
         audit, rows, _ = fixture()
         audit["inputs"]["observation_provenance"][0]["injected"] = True
         tampered = rehash_observations(audit)
         with self.assertRaisesRegex(T6.DerivationError, "field drift"):
-            T6.observation_index(audit, {row["relative_path"] for row in rows}, tampered)
+            self.observation_index(audit, rows, tampered)
 
     def test_comparator_loss_or_candidate_solve_changes_the_exact_selection(self) -> None:
         target = "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2"
@@ -369,12 +402,7 @@ class T6P0ManifestTests(unittest.TestCase):
                 final["origin_budget_s"] = 60.0
             tampered = rehash_observations(audit)
             with self.assertRaisesRegex(T6.DerivationError, "shared-deficit count"):
-                T6.select_p0_sources(
-                    audit,
-                    rows,
-                    expected_provenance_sha256=tampered,
-                    expected_selected=2,
-                )
+                self.selection(audit, rows, tampered)
 
     def test_paths_reject_every_alias_control_and_traversal_form(self) -> None:
         bad_paths = (
@@ -403,30 +431,99 @@ class T6P0ManifestTests(unittest.TestCase):
     def test_corpus_rows_require_canonical_paths_and_id_order(self) -> None:
         row = source(0, "QF_UF/a.smt2")
         data = (json.dumps(row) + "\n").encode("utf-8")
-        self.assertEqual(T6.load_corpus_manifest(data, 1), [row])
-        for bad in ("QF_UF//a.smt2", "QF_UF/./a.smt2", "QF_UF/../a.smt2"):
-            changed = dict(row, relative_path=bad)
-            with self.assertRaises(T6.DerivationError):
-                T6.load_corpus_manifest((json.dumps(changed) + "\n").encode(), 1)
-        changed = dict(row, id=1)
-        with self.assertRaisesRegex(T6.DerivationError, "id/order drift"):
-            T6.load_corpus_manifest((json.dumps(changed) + "\n").encode(), 1)
+        with synthetic_contract("0" * 64, corpus_sources=1, selected_sources=0):
+            self.assertEqual(T6.load_corpus_manifest(data), [row])
+            for bad in ("QF_UF//a.smt2", "QF_UF/./a.smt2", "QF_UF/../a.smt2"):
+                changed = dict(row, relative_path=bad)
+                with self.assertRaises(T6.DerivationError):
+                    T6.load_corpus_manifest((json.dumps(changed) + "\n").encode())
+            changed = dict(row, id=1)
+            with self.assertRaisesRegex(T6.DerivationError, "id/order drift"):
+                T6.load_corpus_manifest((json.dumps(changed) + "\n").encode())
+
+            changed = dict(row, path="QF_UF/alias.smt2")
+            with self.assertRaisesRegex(T6.DerivationError, "descriptor/source identity"):
+                T6.load_corpus_manifest((json.dumps(changed) + "\n").encode())
 
     def test_all_input_types_are_hashed_and_parsed_from_one_snapshot(self) -> None:
         corpus_row = source(0, "QF_UF/a.smt2")
         cases = (
             (b'{"value": 1}\n', lambda data: T6.parse_json_bytes(data, "audit")),
-            ((json.dumps(corpus_row) + "\n").encode(), lambda data: T6.load_corpus_manifest(data, 1)),
+            ((json.dumps(corpus_row) + "\n").encode(), T6.load_corpus_manifest),
             (json.dumps(projection_template()).encode(), lambda data: T6.parse_json_bytes(data, "template")),
         )
+        with synthetic_contract("0" * 64, corpus_sources=1, selected_sources=0):
+            with tempfile.TemporaryDirectory() as temporary:
+                for index, (original, parser) in enumerate(cases):
+                    path = Path(temporary) / f"input-{index}"
+                    path.write_bytes(original)
+                    blob = T6.read_immutable_file(path, f"input {index}")
+                    path.write_bytes(b"tampered after snapshot")
+                    self.assertEqual(blob.sha256, hashlib.sha256(original).hexdigest())
+                    parser(blob.data)
+
+    def test_all_json_inputs_reject_duplicates_and_nonfinite_numbers(self) -> None:
+        strict_json_inputs = (
+            b'{"value":1,"value":2}',
+            b'{"extra":NaN}',
+            b'{"extra":Infinity}',
+            b'{"extra":-Infinity}',
+        )
+        for raw in strict_json_inputs:
+            with self.subTest(raw=raw):
+                with self.assertRaises(T6.DerivationError):
+                    T6.parse_json_bytes(raw, "strict JSON input")
+
+        row = source(0, "QF_UF/a.smt2")
+        prefix = json.dumps(row)[:-1]
+        attacks = (
+            (prefix + ',"extra":NaN}\n').encode(),
+            (prefix + ',"extra":Infinity}\n').encode(),
+            (prefix + ',"extra":-Infinity}\n').encode(),
+            (prefix + ',"id":0}\n').encode(),
+        )
+        with synthetic_contract("0" * 64, corpus_sources=1, selected_sources=0):
+            for raw in attacks:
+                with self.subTest(raw=raw[-32:]):
+                    with self.assertRaises(T6.DerivationError):
+                        T6.load_corpus_manifest(raw)
+
+    def test_portable_manifest_is_identical_in_alternate_checkout_paths(self) -> None:
+        outputs = []
         with tempfile.TemporaryDirectory() as temporary:
-            for index, (original, parser) in enumerate(cases):
-                path = Path(temporary) / f"input-{index}"
-                path.write_bytes(original)
-                blob = T6.read_immutable_file(path, f"input {index}")
-                path.write_bytes(b"tampered after snapshot")
-                self.assertEqual(blob.sha256, hashlib.sha256(original).hexdigest())
-                parser(blob.data)
+            base = Path(temporary)
+            for checkout in (base / "checkout-a", base / "different" / "checkout-b"):
+                corpus_root = checkout / "corpus" / "QF_UF"
+                source_path = corpus_root / "QF_UF" / "family" / "case.smt2"
+                source_path.parent.mkdir(parents=True)
+                source_path.write_text(
+                    "(set-logic QF_UF)\n(set-info :status unsat)\n(check-sat)\n",
+                    encoding="ascii",
+                )
+                output = checkout / "corpus" / "manifest.jsonl"
+                subprocess.run(
+                    [
+                        "python3",
+                        str(MAKE_MANIFEST),
+                        str(corpus_root),
+                        "--source-doi",
+                        T6.CORPUS_SOURCE_DOI,
+                        "--source-url",
+                        T6.CORPUS_SOURCE_URL,
+                        "--archive-md5",
+                        T6.CORPUS_ARCHIVE_MD5,
+                        "--out",
+                        str(output),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                outputs.append(output.read_bytes())
+            self.assertEqual(outputs[0], outputs[1])
+            row = json.loads(outputs[0])
+            self.assertEqual(row["path"], "QF_UF/QF_UF/family/case.smt2")
+            self.assertFalse(Path(row["path"]).is_absolute())
 
     def test_structured_parser_proves_table_shape_and_ignores_fake_text(self) -> None:
         metrics = T6.analyze_smt2_source(domain_table_source(), "synthetic qg7")
@@ -466,12 +563,14 @@ class T6P0ManifestTests(unittest.TestCase):
         path_symlink = "QF_UF/QG-classification/qg7/link001.smt2"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            file_one = root / path_one
-            file_two = root / path_two
-            file_symlink = root / path_symlink
+            row_one = source(0, path_one)
+            row_two = source(1, path_two)
+            row_symlink = source(1, path_symlink)
+            file_one = root / row_one["path"]
+            file_two = root / row_two["path"]
+            file_symlink = root / row_symlink["path"]
             file_one.parent.mkdir(parents=True)
             file_one.write_bytes(data)
-            row_one = source(0, path_one)
             row_one.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
             verified = T6.verify_selected_sources(root, [path_one], {path_one: row_one})
             self.assertEqual(verified[path_one].metrics["binary_table_apps"], 49)
@@ -481,7 +580,6 @@ class T6P0ManifestTests(unittest.TestCase):
                 T6.verify_selected_sources(root, [path_one], {path_one: wrong_hash})
 
             file_symlink.symlink_to(file_one)
-            row_symlink = source(1, path_symlink)
             row_symlink.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
             with self.assertRaisesRegex(T6.DerivationError, "cannot open physical source"):
                 T6.verify_selected_sources(
@@ -489,7 +587,6 @@ class T6P0ManifestTests(unittest.TestCase):
                 )
 
             os.link(file_one, file_two)
-            row_two = source(1, path_two)
             row_two.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
             with self.assertRaisesRegex(T6.DerivationError, "duplicate physical source identity"):
                 T6.verify_selected_sources(
@@ -503,10 +600,10 @@ class T6P0ManifestTests(unittest.TestCase):
         data = b"(set-logic QF_UF)\n(assert true)\n"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            path = root / relative_path
+            row = source(0, relative_path)
+            path = root / row["path"]
             path.parent.mkdir(parents=True)
             path.write_bytes(data)
-            row = source(0, relative_path)
             row.update(bytes=len(data), sha256=hashlib.sha256(data).hexdigest())
             with self.assertRaisesRegex(T6.DerivationError, "outside DOMAIN7_HUGE"):
                 T6.verify_selected_sources(root, [relative_path], {relative_path: row})
@@ -532,16 +629,57 @@ class T6P0ManifestTests(unittest.TestCase):
         expected = {1: 1, 2: 2, 10: 8, 11: 9, 12: 10, 13: 11}
         for population, threshold in expected.items():
             self.assertEqual(T6.qualifying_threshold(population), threshold)
-        T6.require_frozen_counts(7_503, 12)
-        for corpus_count, selected_count in ((7_502, 12), (7_503, 11), (3, 2)):
-            with self.assertRaisesRegex(T6.DerivationError, "incompatible"):
-                T6.require_frozen_counts(corpus_count, selected_count)
+
+        one_row = source(0, "QF_UF/a.smt2")
+        with self.assertRaisesRegex(T6.DerivationError, "source count mismatch"):
+            T6.load_corpus_manifest((json.dumps(one_row) + "\n").encode())
+
+        help_result = subprocess.run(
+            ["python3", str(SCRIPT), "--help"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        for option in (
+            "--expected-audit-sha256",
+            "--expected-corpus-manifest-sha256",
+            "--expected-projection-template-sha256",
+            "--expected-sources",
+            "--expected-selected",
+            "--source-root",
+        ):
+            self.assertNotIn(option, help_result.stdout)
 
         changed = projection_template()
         changed["selection"]["candidate_count"] = 11
         changed["gate"]["minimum_qualifying_sources"] = 9
         with self.assertRaisesRegex(T6.DerivationError, "parent 8/10 gate drift"):
             T6.validate_projection_template(changed)
+
+    def test_changed_template_arm_and_changed_source_row_cannot_be_rebound_by_digest(self) -> None:
+        changed_template = projection_template()
+        changed_template["projection_contract"]["arms"]["A"] = (
+            "attacker-selected projection"
+        )
+        changed_template_digest = hashlib.sha256(
+            (json.dumps(changed_template, sort_keys=True) + "\n").encode()
+        ).hexdigest()
+        self.assertRegex(changed_template_digest, r"[0-9a-f]{64}")
+        with self.assertRaisesRegex(T6.DerivationError, "template contract drift"):
+            T6.validate_projection_template(changed_template)
+
+        changed_row = source(0, "QF_UF/a.smt2")
+        changed_row["bytes"] += 1
+        changed_row["sha256"] = "f" * 64
+        raw = (json.dumps(changed_row, sort_keys=True) + "\n").encode()
+        blob = T6.ImmutableFile(
+            data=raw,
+            sha256=hashlib.sha256(raw).hexdigest(),
+            identity=(1, 1),
+        )
+        self.assertEqual(blob.sha256, hashlib.sha256(raw).hexdigest())
+        with self.assertRaisesRegex(T6.DerivationError, "hash mismatch"):
+            T6.require_frozen_corpus_manifest_hash(blob)
 
     def test_source_status_and_physical_evidence_are_bound(self) -> None:
         audit, rows, provenance = fixture()
@@ -550,29 +688,19 @@ class T6P0ManifestTests(unittest.TestCase):
             self.derive(audit, rows, provenance)
 
         audit, rows, provenance = fixture()
-        selection = T6.select_p0_sources(
-            audit,
-            rows,
-            expected_provenance_sha256=provenance,
-            expected_selected=2,
-        )
-        contract, rule = T6.validate_projection_template(projection_template())
-        evidence = physical_evidence(rows)
-        first = selection.selected_paths[0]
-        bad_metrics = dict(evidence[first].metrics, binary_table_apps=48)
-        evidence[first] = T6.PhysicalSource(
-            evidence[first].source_bytes, evidence[first].source_sha256, bad_metrics
-        )
-        with self.assertRaisesRegex(T6.DerivationError, "binary_table_apps"):
-            T6.build_manifest(
-                selection,
-                contract,
-                rule,
-                evidence,
-                audit_sha256="d" * 64,
-                local_manifest_sha256="e" * 64,
-                projection_template_sha256="f" * 64,
+        with synthetic_contract(provenance):
+            selection = T6.select_p0_sources(audit, rows)
+            T6.validate_projection_template(projection_template())
+            evidence = physical_evidence(rows)
+            first = selection.selected_paths[0]
+            bad_metrics = dict(evidence[first].metrics, binary_table_apps=48)
+            evidence[first] = T6.PhysicalSource(
+                evidence[first].source_bytes,
+                evidence[first].source_sha256,
+                bad_metrics,
             )
+            with self.assertRaisesRegex(T6.DerivationError, "binary_table_apps"):
+                T6.build_manifest(selection, evidence)
 
     def test_atomic_output_is_canonical_deterministic_and_replaces_existing_file(self) -> None:
         audit, rows, provenance = fixture()
