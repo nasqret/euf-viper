@@ -2071,6 +2071,21 @@ impl FlatClauses {
         self.try_push_with_max_end_offset(clause, u32::MAX)
     }
 
+    #[cfg(feature = "certificates")]
+    fn try_reserve_additional(
+        &mut self,
+        additional_clauses: usize,
+        additional_literals: usize,
+    ) -> Result<(), FlatClauseStoreError> {
+        Self::checked_end_offset(self.literals.len(), additional_literals, u32::MAX)?;
+        self.literals
+            .try_reserve(additional_literals)
+            .map_err(|_| FlatClauseStoreError::AllocationFailed)?;
+        self.end_offsets
+            .try_reserve(additional_clauses)
+            .map_err(|_| FlatClauseStoreError::AllocationFailed)
+    }
+
     fn try_push_with_max_end_offset(
         &mut self,
         clause: Vec<i32>,
@@ -5156,11 +5171,9 @@ const CERTIFICATE_EAGER_DEFAULT_CLAUSE_BUDGET: usize = 262_144;
 #[cfg(feature = "certificates")]
 const CERTIFICATE_EAGER_DEFAULT_LITERAL_BUDGET: usize = 1_048_576;
 #[cfg(feature = "certificates")]
-const CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET: usize = 1_048_576;
-#[cfg(feature = "certificates")]
-const CERTIFICATE_EAGER_MAX_LITERAL_BUDGET: usize = 8_388_608;
-#[cfg(feature = "certificates")]
 const CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION: usize = 4_096;
+#[cfg(feature = "certificates")]
+const CERTIFICATE_EAGER_MAX_CANDIDATE_VISITS: usize = 4_194_304;
 
 #[cfg(feature = "certificates")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5191,6 +5204,7 @@ enum CertificateSeedFamily {
 enum CertificateSeedFallbackReason {
     ClauseBudget,
     LiteralBudget,
+    CandidateVisitBudget,
     ArithmeticOverflow,
     AllocationRejected,
     InconsistentEnumeration,
@@ -5202,6 +5216,7 @@ impl CertificateSeedFallbackReason {
         match self {
             Self::ClauseBudget => "fallback_clause_budget",
             Self::LiteralBudget => "fallback_literal_budget",
+            Self::CandidateVisitBudget => "fallback_candidate_visit_budget",
             Self::ArithmeticOverflow => "fallback_arithmetic_overflow",
             Self::AllocationRejected => "fallback_allocation_rejected",
             Self::InconsistentEnumeration => "fallback_inconsistent_enumeration",
@@ -5311,53 +5326,17 @@ impl CertificateTheorySeeds {
 }
 
 #[cfg(feature = "certificates")]
-fn parse_certificate_seed_budget_value(
-    name: &str,
-    raw: Option<&std::ffi::OsStr>,
-    default: usize,
-    maximum: usize,
-) -> Result<usize, String> {
-    let Some(raw) = raw else {
-        return Ok(default);
-    };
-    let value = raw
-        .to_str()
-        .ok_or_else(|| format!("{name} must be canonical ASCII decimal"))?;
-    let bytes = value.as_bytes();
-    let canonical = value == "0"
-        || matches!(bytes.first(), Some(b'1'..=b'9'))
-            && bytes.iter().skip(1).all(u8::is_ascii_digit);
-    if !canonical {
-        return Err(format!("{name} must be canonical ASCII decimal"));
-    }
-    let value = value
-        .parse::<usize>()
-        .map_err(|_| format!("{name} is outside the platform usize range"))?;
-    if value > maximum {
-        return Err(format!("{name} must not exceed {maximum}"));
-    }
-    Ok(value)
-}
-
-#[cfg(feature = "certificates")]
 fn certificate_seed_budget_from_values(
     clause_budget: Option<&std::ffi::OsStr>,
     literal_budget: Option<&std::ffi::OsStr>,
 ) -> Result<CertificateSeedBudget, String> {
-    Ok(CertificateSeedBudget {
-        clauses: parse_certificate_seed_budget_value(
-            CERTIFICATE_EAGER_CLAUSE_BUDGET_ENV,
-            clause_budget,
-            CERTIFICATE_EAGER_DEFAULT_CLAUSE_BUDGET,
-            CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET,
-        )?,
-        literals: parse_certificate_seed_budget_value(
-            CERTIFICATE_EAGER_LITERAL_BUDGET_ENV,
-            literal_budget,
-            CERTIFICATE_EAGER_DEFAULT_LITERAL_BUDGET,
-            CERTIFICATE_EAGER_MAX_LITERAL_BUDGET,
-        )?,
-    })
+    if clause_budget.is_some() || literal_budget.is_some() {
+        return Err(format!(
+            "{CERTIFICATE_EAGER_CLAUSE_BUDGET_ENV} and \
+             {CERTIFICATE_EAGER_LITERAL_BUDGET_ENV} are unsupported in certificate mode"
+        ));
+    }
+    Ok(CertificateSeedBudget::default())
 }
 
 #[cfg(feature = "certificates")]
@@ -5377,18 +5356,18 @@ enum CertificateCandidateCount {
 #[cfg(feature = "certificates")]
 fn certificate_candidate_count(
     choices: impl IntoIterator<Item = usize>,
-) -> Result<CertificateCandidateCount, CertificateSeedFallbackReason> {
+) -> CertificateCandidateCount {
     let mut count = 1usize;
     for choices in choices {
-        count = count
-            .checked_mul(choices)
-            .ok_or(CertificateSeedFallbackReason::ArithmeticOverflow)?;
+        if choices == 0 {
+            return CertificateCandidateCount::Eligible(0);
+        }
+        if count > CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION / choices {
+            return CertificateCandidateCount::Skipped;
+        }
+        count *= choices;
     }
-    if count <= CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION {
-        Ok(CertificateCandidateCount::Eligible(count))
-    } else {
-        Ok(CertificateCandidateCount::Skipped)
-    }
+    CertificateCandidateCount::Eligible(count)
 }
 
 #[cfg(feature = "certificates")]
@@ -5512,6 +5491,7 @@ fn visit_certificate_congruence_clauses(
     let canonical_only = canonical_values.len() >= 3
         && (arena.apps.len() > 1_000 || has_predicate_applications(cnf, arena));
     let mut candidate_counts = vec![None; arena.terms.len()];
+    let mut candidate_visits = 0usize;
     for &application in &arena.apps {
         let term = &arena.terms[application];
         let mut choices = Vec::with_capacity(term.args.len());
@@ -5523,7 +5503,13 @@ fn visit_certificate_congruence_clauses(
                     .ok_or(CertificateSeedFallbackReason::ArithmeticOverflow)?,
             );
         }
-        if let CertificateCandidateCount::Eligible(count) = certificate_candidate_count(choices)? {
+        if let CertificateCandidateCount::Eligible(count) = certificate_candidate_count(choices) {
+            candidate_visits = candidate_visits
+                .checked_add(count.saturating_sub(1))
+                .ok_or(CertificateSeedFallbackReason::ArithmeticOverflow)?;
+            if candidate_visits > CERTIFICATE_EAGER_MAX_CANDIDATE_VISITS {
+                return Err(CertificateSeedFallbackReason::CandidateVisitBudget);
+            }
             candidate_counts[application] = Some(count);
         }
     }
@@ -5632,6 +5618,18 @@ fn certificate_theory_seeds_with_budget(
     arena: &TermArena,
     budget: CertificateSeedBudget,
 ) -> CertificateTheorySeeds {
+    if budget.clauses == 0 {
+        return CertificateTheorySeeds::fallback(
+            budget,
+            CertificateSeedFallbackReason::ClauseBudget,
+        );
+    }
+    if budget.literals == 0 {
+        return CertificateTheorySeeds::fallback(
+            budget,
+            CertificateSeedFallbackReason::LiteralBudget,
+        );
+    }
     // The planning pass retains no clauses. Materialization starts only after the complete
     // transitivity-plus-congruence suffix fits both shared budgets.
     let plan = match plan_certificate_theory_seeds(cnf, arena, budget) {
@@ -6057,13 +6055,42 @@ fn certify_file_with_seed_budget(
     }
     let base_count = cnf.clauses.len();
     let seeds = certificate_theory_seeds_with_budget(&cnf, &problem.arena, seed_budget);
+    if let Some(reason) = seeds.fallback
+        && matches!(
+            reason,
+            CertificateSeedFallbackReason::ArithmeticOverflow
+                | CertificateSeedFallbackReason::AllocationRejected
+                | CertificateSeedFallbackReason::InconsistentEnumeration
+        )
+    {
+        return Err(format!(
+            "certificate seed generation failed closed: {}",
+            reason.label()
+        ));
+    }
+    let seed_status = seeds.status();
     let transitivity_count = seeds.transitivity.len();
     let congruence_count = seeds.congruence.len();
+    let seed_clause_count = transitivity_count
+        .checked_add(congruence_count)
+        .ok_or_else(|| "certificate seed clause count overflow".to_owned())?;
+    let seed_literal_count = seeds
+        .transitivity
+        .iter()
+        .chain(&seeds.congruence)
+        .try_fold(0usize, |total, clause| total.checked_add(clause.len()))
+        .ok_or_else(|| "certificate seed literal count overflow".to_owned())?;
     eprintln!("certificate_eager_clause_budget={}", seeds.budget.clauses);
     eprintln!("certificate_eager_literal_budget={}", seeds.budget.literals);
-    eprintln!("certificate_eager_seed_status={}", seeds.status());
+    cnf.clauses
+        .try_reserve_additional(seed_clause_count, seed_literal_count)
+        .map_err(|error| format!("certificate seed append failed closed: {error}"))?;
     cnf.clauses.extend(seeds.transitivity);
     cnf.clauses.extend(seeds.congruence);
+    eprintln!("certificate_eager_seed_status={seed_status}");
+    eprintln!("certificate_eager_transitivity_clauses={transitivity_count}");
+    eprintln!("certificate_eager_congruence_clauses={congruence_count}");
+    eprintln!("certificate_saturation_backend=varisat");
     let saturation = discover_certificate_theory_conflicts(
         &mut cnf,
         &problem.arena,
@@ -8361,10 +8388,7 @@ mod tests {
     #[test]
     fn certificate_seed_global_clause_and_literal_boundaries_are_exact() {
         let (problem, cnf, _, default_seeds) = certificate_base_and_seeds(MIXED_CERTIFICATE_SOURCE);
-        let generous = CertificateSeedBudget {
-            clauses: CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET,
-            literals: CERTIFICATE_EAGER_MAX_LITERAL_BUDGET,
-        };
+        let generous = CertificateSeedBudget::default();
         let plan = plan_certificate_theory_seeds(&cnf, &problem.arena, generous).unwrap();
         let exact_budget = CertificateSeedBudget {
             clauses: plan.transitivity_clauses + plan.congruence_clauses,
@@ -8488,12 +8512,47 @@ mod tests {
         );
         assert_eq!(
             certificate_candidate_count([usize::MAX, 2]),
-            Err(CertificateSeedFallbackReason::ArithmeticOverflow)
+            CertificateCandidateCount::Skipped
         );
         assert_eq!(
             certificate_candidate_count([CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION + 1]),
-            Ok(CertificateCandidateCount::Skipped)
+            CertificateCandidateCount::Skipped
         );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_candidate_work_is_globally_bounded_before_enumeration() {
+        let mut arena = TermArena::default();
+        let arguments = (0..12)
+            .map(|index| {
+                let left = arena.intern((2 * index) as SymId, Vec::new());
+                let right = arena.intern((2 * index + 1) as SymId, Vec::new());
+                (left, right)
+            })
+            .collect::<Vec<_>>();
+        let mut cnf = CnfProblem::new();
+        for &(left, right) in &arguments {
+            cnf.atom_lit(BoolAtomKey::Eq(left, right));
+        }
+        cnf.finite_equalities_complete = true;
+        let application_arguments = arguments.iter().map(|&(left, _)| left).collect::<Vec<_>>();
+        for function in 0..2_000 {
+            arena.intern(10_000 + function as SymId, application_arguments.clone());
+        }
+
+        let budget = CertificateSeedBudget::default();
+        assert_eq!(
+            plan_certificate_theory_seeds(&cnf, &arena, budget),
+            Err(CertificateSeedFallbackReason::CandidateVisitBudget)
+        );
+        let seeds = certificate_theory_seeds_with_budget(&cnf, &arena, budget);
+        assert_eq!(
+            seeds.fallback,
+            Some(CertificateSeedFallbackReason::CandidateVisitBudget)
+        );
+        assert!(seeds.transitivity.is_empty());
+        assert!(seeds.congruence.is_empty());
     }
 
     #[cfg(feature = "certificates")]
@@ -8541,39 +8600,16 @@ mod tests {
 
     #[cfg(feature = "certificates")]
     #[test]
-    fn certificate_seed_environment_values_are_canonical_and_deterministic() {
+    fn certificate_seed_environment_overrides_are_rejected() {
         use std::ffi::OsStr;
 
         assert_eq!(
             certificate_seed_budget_from_values(None, None).unwrap(),
             CertificateSeedBudget::default()
         );
-        let clauses = CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET.to_string();
-        let literals = CERTIFICATE_EAGER_MAX_LITERAL_BUDGET.to_string();
-        let expected = CertificateSeedBudget {
-            clauses: CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET,
-            literals: CERTIFICATE_EAGER_MAX_LITERAL_BUDGET,
-        };
-        for _ in 0..2 {
-            assert_eq!(
-                certificate_seed_budget_from_values(
-                    Some(OsStr::new(&clauses)),
-                    Some(OsStr::new(&literals)),
-                )
-                .unwrap(),
-                expected
-            );
-        }
-        assert_eq!(
-            certificate_seed_budget_from_values(Some(OsStr::new("0")), Some(OsStr::new("0")),)
-                .unwrap(),
-            CertificateSeedBudget {
-                clauses: 0,
-                literals: 0,
-            }
-        );
-        for invalid in ["", "00", "01", "+1", "-1", " 1", "1 ", "1_0", "x"] {
-            assert!(certificate_seed_budget_from_values(Some(OsStr::new(invalid)), None).is_err());
+        for value in ["", "0", "1", "262144", "1048576", "x"] {
+            assert!(certificate_seed_budget_from_values(Some(OsStr::new(value)), None).is_err());
+            assert!(certificate_seed_budget_from_values(None, Some(OsStr::new(value))).is_err());
         }
         #[cfg(unix)]
         {
@@ -8582,15 +8618,6 @@ mod tests {
             let non_utf8 = std::ffi::OsString::from_vec(vec![0xff]);
             assert!(certificate_seed_budget_from_values(Some(non_utf8.as_os_str()), None).is_err());
         }
-        let too_many_clauses = (CERTIFICATE_EAGER_MAX_CLAUSE_BUDGET + 1).to_string();
-        let too_many_literals = (CERTIFICATE_EAGER_MAX_LITERAL_BUDGET + 1).to_string();
-        assert!(
-            certificate_seed_budget_from_values(Some(OsStr::new(&too_many_clauses)), None).is_err()
-        );
-        assert!(
-            certificate_seed_budget_from_values(None, Some(OsStr::new(&too_many_literals)))
-                .is_err()
-        );
     }
 
     #[cfg(feature = "certificates")]
@@ -8708,6 +8735,43 @@ mod tests {
                 .unsupported
                 .is_empty()
         );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn static_transitivity_unsat_closes_in_first_saturation_round() {
+        let source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun c () U)
+            (assert (= a b))
+            (assert (= b c))
+            (assert (not (= a c)))
+            (check-sat)
+        "#;
+        let directory = CertificateTestDirectory::new("static-unsat-precheck");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, source).expect("write static UNSAT source");
+        certify_file_with_seed_budget(
+            source_path.to_str().unwrap(),
+            prefix.to_str().unwrap(),
+            1,
+            CertificateSeedBudget::default(),
+        )
+        .expect("static UNSAT certificate");
+
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(path_with_suffix(&prefix, ".euf.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["result"], "unsat");
+        assert_eq!(manifest["clauses"]["transitivity"], 3);
+        assert_eq!(manifest["clauses"]["theory_conflicts"], 0);
+        assert_eq!(manifest["theory_rounds"], 1);
+        assert!(path_with_suffix(&prefix, ".cnf").exists());
+        assert!(path_with_suffix(&prefix, ".drat").exists());
     }
 
     #[cfg(feature = "certificates")]
