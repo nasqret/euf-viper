@@ -933,3 +933,11 @@
   objects. Never push, repair in place, or cite it. Continue only from fresh
   valid clone `/private/tmp/euf-viper-t5-recovered`, populated from the intact
   physical files while excluding the corrupt object database.
+- WMI recovery is live under `/work`. Exact P0 copy validation found no byte
+  difference. Barrier `147305` completed and dispatcher `147306` submitted
+  replacement 60-second arrays/audits `147307`/`147308` and
+  `147309`/`147310`, with 1,200-second successor `147311` dependency-held.
+  Certificate replacements are full `147315`-`147317` and official
+  `147318`-`147320`. Preserve original audit identity `144993`, use the separate
+  live dependency barrier from `b99bff3`, and require every new terminal audit.
+  Certificate no-dependency submission is fixed and tested at `026f283`.

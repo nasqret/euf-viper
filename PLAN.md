@@ -42,7 +42,11 @@ cancelled. Certificate arrays `146077`/`146080` failed for the same storage
 reason and their audits were cancelled. Completed partial rows are quarantined
 and will not be interpreted. Recovery uses a fresh exact-revision root under
 `/work`, a complete rerun, and new terminal audits; the failed `/home` trees
-remain immutable provenance. Rollback control audit `145929`
+remain immutable provenance. Recovery barrier `147305` completed, dispatcher
+`147306` validated the copied P0 base, and fresh 60-second arrays/audits are
+full `147307`/`147308` and official `147309`/`147310`; successor dispatcher
+`147311` releases 1,200-second work only after both audits. Rollback control
+audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
 overheads were `11.17x`-`32.75x` against a `1.10x` cap.
@@ -179,7 +183,9 @@ result cache can satisfy V1-V4.
   quota-constrained `/home` tree; audits `146078`/`146081` were cancelled.
   This is infrastructure failure, not certificate evidence. A fresh `/work`
   campaign must rerun prepare, every shard, and the global audit before this
-  item closes; no partial artifact may be reused or counted.
+  item closes; no partial artifact may be reused or counted. Fresh `/work`
+  chains are full `147315`/`147316`/`147317` and official
+  `147318`/`147319`/`147320`.
 - [x] Run current sound main plus Z3/cvc5/Yices2/OpenSMT at two seconds.
   Revision `70f0a60` chain `144767`-`144770` was cancelled during the requested
   project pause before producing benchmark rows. The replacement immutable
@@ -211,6 +217,9 @@ result cache can satisfy V1-V4.
   the finalizer were cancelled. The graph is preserved as failed provenance,
   not benchmark evidence. Recreate the exact `30828a4` P0 input under `/work`
   and run a wholly new continuation chain through both audits and finalization.
+  That replacement is live as dispatcher `147306`, 60-second full/official
+  arrays `147307`/`147309`, audits `147308`/`147310`, and dependency-held
+  1,200-second dispatcher `147311`.
 - [x] Publish a new current-main opportunity atlas before tuning a route.
   Commit `d948993` binds the exact post-parser-fix full 60-second audit and the
   22-source shared Z3/Yices deficit. A bounded unresolved-track refresh is in
@@ -591,7 +600,8 @@ fallback can be an operational portfolio but never a standalone victory.
 2. Quarantine failed certificate chains `146076`-`146078` and
    `146079`-`146081`. Recreate them from exact revision `8f78543` under a fresh
    `/work` root and require complete arrays plus terminal audits; do not reuse
-   or interpret partial `/home` output.
+   or interpret partial `/home` output. Replacement full chain is
+   `147315`-`147317`; official is `147318`-`147320`.
 3. Preserve rollback audit `145929` as a rejection: do not promote
    whole-instance rollback. Reuse its frozen target/anti-target telemetry only
    in T3 M0 after the remaining fixed-arm gates finish.
@@ -600,6 +610,8 @@ fallback can be an operational portfolio but never a standalone victory.
 5. Preserve failed 1,200-second graph `145785`-`145789` as immutable provenance.
    Copy and verify the exact P0 base under `/work`, submit a fresh continuation
    chain, and accept only complete full/official audits plus finalization.
+   Barrier/dispatcher `147305`/`147306` passed; monitor arrays
+   `147307`/`147309`, audits `147308`/`147310`, and successor `147311`.
 6. Complete adversarial review and repair of production model/proof sidecars;
    canonical certificate reruns do not certify the timed production path.
 7. Finish and audit the T1 full parser shadow; independently review T5 before

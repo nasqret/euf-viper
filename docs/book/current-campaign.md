@@ -81,7 +81,8 @@ with all 7,503 rows and zero parser errors. Certificate prepares
 returned `EDQUOT`; audits `146078`/`146081` were cancelled. This is an
 infrastructure failure and establishes no certificate result. Recovery requires
 fresh exact-revision roots under `/work`, complete arrays, and new terminal
-audits. No partial certificate output is interpreted.
+audits. Replacement chains are full `147315`/`147316`/`147317` and official
+`147318`/`147319`/`147320`. No partial certificate output is interpreted.
 
 These replacement campaigns can establish that each reported source result has
 an independently checked canonical witness or refutation. They do **not** yet
@@ -194,6 +195,11 @@ At the 2026-07-15 refresh, `/home` used 174.49 GiB of 200 GiB and 1,838,881 of
 files. Recovery therefore stages a fresh exact `30828a4` checkout and verified
 P0 base under `/work`, submits an entirely new continuation chain, and requires
 both global audits plus finalization. No old shard is imported into that result.
+Recovery barrier `147305` completed and dispatcher `147306` validated the copied
+base. It submitted fresh 60-second full/official arrays `147307`/`147309`,
+audits `147308`/`147310`, and successor dispatcher `147311`, which releases the
+1,200-second stage only after both audits. The first full shard completed from
+the `/work` command and output paths.
 
 ## Opportunity Gates
 

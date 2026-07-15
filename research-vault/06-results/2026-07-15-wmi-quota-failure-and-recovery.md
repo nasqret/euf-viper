@@ -51,3 +51,19 @@ Quota at the live refresh:
 T6 job `146075` remains isolated at revision `9833ec3`. Its expected output is
 small, so it stays queued unless its own task accounting or storage preflight
 fails.
+
+## Live Replacement Graph
+
+- Exact P0 worktree: `/work/bnaskrecki/euf-viper-campaigns/30828a4f0c1e`.
+- Complete copied base: `results/p0-144990`, 357 MiB; checksum dry-run against
+  the immutable source returned no difference.
+- Scheduler barrier: `147305`, complete. Original audit identity remains
+  `144993`.
+- Continuation: dispatcher `147306`; full array/audit `147307`/`147308`;
+  official array/audit `147309`/`147310`; successor dispatcher `147311`.
+- Certificate full: prepare/array/audit `147315`/`147316`/`147317`.
+- Certificate official: prepare/array/audit `147318`/`147319`/`147320`.
+
+The certificate submitter's empty optional-dependency expansion was fixed at
+`026f283`. The interrupted pre-fix attempt created no Slurm job and is not part
+of either replacement chain.

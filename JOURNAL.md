@@ -1330,6 +1330,23 @@
   clone `/private/tmp/euf-viper-t5-recovered`, whose object database passes
   `git fsck`. Review and any future commit proceed only from that recovered
   clone; `6249393` is never cited as evidence.
+- Created `/work/bnaskrecki/euf-viper-campaigns/30828a4f0c1e` at exact revision
+  `30828a4f0c1e7e478a9c6f406ccb245eeefc4961` and copied the complete 357 MiB
+  `p0-144990` base. An `rsync -ainc --delete` checksum dry-run returned no
+  difference. Slurm had aged completed audit `144993` out of the dependency
+  controller, so commit `b99bff3` separated immutable base-audit identity from
+  a fresh scheduler barrier. Barrier `147305` completed; dispatcher `147306`
+  revalidated the base and submitted fresh 60-second full/official arrays
+  `147307`/`147309`, audits `147308`/`147310`, and successor dispatcher `147311`.
+  The first full shard completed successfully from the `/work` command and
+  output paths. No result is read before both audits and finalization.
+- The first `/work` certificate submission exposed an empty-array expansion in
+  the optional-dependency path under Bash `set -u` and stopped before any job.
+  Commit `026f283` replaced it with a scalar option and added a regression
+  contract. Fresh exact-`8f78543` chains are full
+  `147315`/`147316`/`147317` and official `147318`/`147319`/`147320`; their P0
+  inputs and pinned `drat-trim` now reside under `/work`. Both audits remain
+  mandatory and no prior partial certificate artifact is reused.
 
 ## Next Entry Template
 
