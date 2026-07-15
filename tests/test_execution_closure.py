@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,59 @@ LINUX = sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir()
 
 
 class ExecutionClosureTests(unittest.TestCase):
+    def test_loader_target_second_read_substitution_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "tool"
+            replacement = Path(temporary) / "replacement"
+            executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+            replacement.write_bytes(b"#!/bin/sh\nexit 9\n")
+            executable.chmod(0o755)
+            replacement.chmod(0o755)
+            original = CLOSURE.stable_read
+            replaced = False
+
+            def substitute(path: Path, label: str):
+                nonlocal replaced
+                result = original(path, label)
+                if path == executable and not replaced:
+                    os.replace(replacement, executable)
+                    replaced = True
+                return result
+
+            with mock.patch.object(CLOSURE, "stable_read", side_effect=substitute):
+                with self.assertRaisesRegex(CLOSURE.ClosureError, "descriptor differs"):
+                    CLOSURE.open_verified_descriptor(executable, "fixture loader target")
+            self.assertTrue(replaced)
+
+    def test_production_runtime_forbids_unbound_recursive_copy_roots(self) -> None:
+        helper = MODULE_PATH.read_text(encoding="ascii")
+        for script_name in (
+            "euf_viper_locked_shard.sbatch",
+            "euf_viper_locked_audit.sbatch",
+        ):
+            script = (ROOT / "scripts" / "wmi" / script_name).read_text(
+                encoding="ascii"
+            )
+            self.assertNotIn("--copy-root", script)
+            self.assertIn("os.memfd_create", script)
+            self.assertIn("compile(raw, helper, \"exec\")", script)
+            self.assertIn("exec 9<\"$PYTHON_BIN\"", script)
+            self.assertIn("python_expected", script)
+            self.assertNotIn(
+                'python_clean "$EXECUTION_CLOSURE_HELPER"', script
+            )
+        prepare = (
+            ROOT / "scripts" / "wmi" / "euf_viper_locked_prepare.sbatch"
+        ).read_text(encoding="ascii")
+        for helper_name in (
+            "SEALED_BUILD_HELPER",
+            "EXECUTION_CLOSURE_HELPER",
+            "BUILD_ATTESTOR",
+        ):
+            self.assertIn(f'python_bound "${helper_name}"', prepare)
+        self.assertIn('exec 9<"$PYTHON_BIN"', prepare)
+        self.assertIn("unbound recursive runtime copy roots are forbidden", helper)
+
     @unittest.skipUnless(LINUX, "real execution-closure inventory requires Linux")
     def test_dynamic_loader_and_executable_substitution_are_bound(self) -> None:
         ldd = Path(shutil.which("ldd") or "").resolve(strict=True)
@@ -45,6 +99,7 @@ class ExecutionClosureTests(unittest.TestCase):
                 python_scripts={"probe": python_script.resolve(strict=True)},
             )
             self.assertTrue(value["libraries"])
+            self.assertTrue(value["python_runtime"]["native_extensions"])
             self.assertTrue(
                 any(
                     "ld-linux" in record["path"] or "ld-musl" in record["path"]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ from tests.test_run_locked_campaign import (
     sha256_bytes,
     sha256_file,
 )
+from tests.sealed_build_fixture import independent_attestation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -226,7 +228,7 @@ class LockedProductionEvidenceTests(unittest.TestCase):
                 "target": "x86_64-unknown-linux-gnu",
                 "toolchain": {"cargo": "cargo test", "rustc": "rustc test"},
             },
-            "schema": "euf-viper.sealed-build-receipt.v2",
+            "schema": "euf-viper.sealed-build-receipt.v3",
             "sealed_build_manifest_sha256": "3" * 64,
             "source": {
                 "dirty": False,
@@ -236,16 +238,22 @@ class LockedProductionEvidenceTests(unittest.TestCase):
             },
             "status": "accepted",
         }
+        receipt["independent_attestation"] = independent_attestation(
+            artifacts=receipt["artifacts"],
+            features=receipt["build"]["features"],
+            toolchain=receipt["build"]["toolchain"],
+            revision=receipt["source"]["revision"],
+            tree=receipt["source"]["tree"],
+            source_manifest_sha256=receipt["source"]["snapshot_manifest_sha256"],
+            closure_sha256=receipt["build"]["execution_closure_sha256"],
+            build_manifest_sha256=receipt["sealed_build_manifest_sha256"],
+        )
         receipt_path = self.root / "sealed-build-receipt.json"
         receipt_path.write_bytes(canonical_bytes(receipt))
-        candidate["environment"].update(
-            {
-                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(receipt_path.resolve()),
-                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": sha256_file(
-                    receipt_path
-                ),
-            }
+        candidate["environment"]["EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"] = (
+            sha256_file(receipt_path)
         )
+        fixture.sealed_build_receipt = receipt_path
         fixture.solver_config.write_bytes(
             canonical_bytes({"schema_version": 1, "solvers": payload["solvers"]})
         )
@@ -262,6 +270,12 @@ class LockedProductionEvidenceTests(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+            env={
+                **os.environ,
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(
+                    fixture.sealed_build_receipt.resolve()
+                ),
+            },
         )
 
     def test_locked_record_binds_artifact_and_audit_rejects_tampering(self) -> None:

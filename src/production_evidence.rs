@@ -19,7 +19,8 @@ const RUN_NONCE_ENV: &str = "EUF_VIPER_RUN_NONCE";
 const TRUSTED_EXECUTABLE_SHA256_ENV: &str = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256";
 const SEALED_BUILD_RECEIPT_ENV: &str = "EUF_VIPER_SEALED_BUILD_RECEIPT";
 const SEALED_BUILD_RECEIPT_SHA256_ENV: &str = "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256";
-const SEALED_BUILD_RECEIPT_SCHEMA: &str = "euf-viper.sealed-build-receipt.v2";
+const SEALED_BUILD_RECEIPT_SCHEMA: &str = "euf-viper.sealed-build-receipt.v3";
+const SEALED_BUILD_ATTESTATION_SCHEMA: &str = "euf-viper.sealed-build-attestation.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EvidenceDisposition {
@@ -48,7 +49,7 @@ struct EvidenceSolver {
     sealed_build: EvidenceSealedBuild,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SealedArtifact {
     bytes: u64,
@@ -77,9 +78,58 @@ struct SealedBuild {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct AttestedSource {
+    bundle_sha256: String,
+    file_count: u64,
+    manifest_sha256: String,
+    revision: String,
+    tree: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttestedBuildInputs {
+    archive_sha256: String,
+    cargo_sha256: String,
+    file_count: u64,
+    index_sha256: String,
+    object_count: u64,
+    rustc_sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct AttestedBuildTraces {
+    canonical_sha256: String,
+    discovery_raw_sha256: String,
+    network: String,
+    production_raw_sha256: String,
+    randomness_events: u64,
+    time_events: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct IndependentBuildAttestation {
+    artifacts: BTreeMap<String, SealedArtifact>,
+    attestor_sha256: String,
+    build_inputs: AttestedBuildInputs,
+    build_manifest_sha256: String,
+    closure_sha256: String,
+    features: Vec<String>,
+    schema: String,
+    source: AttestedSource,
+    status: String,
+    toolchain: BTreeMap<String, String>,
+    traces: AttestedBuildTraces,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct SealedBuildReceipt {
     artifacts: BTreeMap<String, SealedArtifact>,
     build: SealedBuild,
+    independent_attestation: IndependentBuildAttestation,
     schema: String,
     sealed_build_manifest_sha256: String,
     source: SealedSource,
@@ -399,6 +449,64 @@ fn validated_sealed_build() -> Result<EvidenceSealedBuild, String> {
                 "sealed build receipt has invalid metadata for {name}"
             ));
         }
+    }
+    let attestation = &receipt.independent_attestation;
+    if attestation.schema != SEALED_BUILD_ATTESTATION_SCHEMA
+        || attestation.status != "accepted"
+        || attestation.artifacts != receipt.artifacts
+        || attestation.features != receipt.build.features
+        || attestation.toolchain != receipt.build.toolchain
+        || attestation.closure_sha256 != receipt.build.execution_closure_sha256
+        || attestation.build_manifest_sha256 != receipt.sealed_build_manifest_sha256
+    {
+        return Err("independent sealed build attestation differs".to_owned());
+    }
+    for (name, value) in [
+        ("attestor SHA-256", &attestation.attestor_sha256),
+        (
+            "attested source bundle SHA-256",
+            &attestation.source.bundle_sha256,
+        ),
+        (
+            "attested build-input archive SHA-256",
+            &attestation.build_inputs.archive_sha256,
+        ),
+        (
+            "attested cargo SHA-256",
+            &attestation.build_inputs.cargo_sha256,
+        ),
+        (
+            "attested build-input index SHA-256",
+            &attestation.build_inputs.index_sha256,
+        ),
+        (
+            "attested rustc SHA-256",
+            &attestation.build_inputs.rustc_sha256,
+        ),
+        (
+            "attested canonical trace SHA-256",
+            &attestation.traces.canonical_sha256,
+        ),
+        (
+            "attested discovery trace SHA-256",
+            &attestation.traces.discovery_raw_sha256,
+        ),
+        (
+            "attested production trace SHA-256",
+            &attestation.traces.production_raw_sha256,
+        ),
+    ] {
+        require_hash(name, value)?;
+    }
+    if attestation.source.file_count == 0
+        || attestation.source.revision != receipt.source.revision
+        || attestation.source.tree != receipt.source.tree
+        || attestation.source.manifest_sha256 != receipt.source.snapshot_manifest_sha256
+        || attestation.build_inputs.file_count == 0
+        || attestation.build_inputs.object_count == 0
+        || attestation.traces.network != "denied-and-namespaced"
+    {
+        return Err("independent sealed build reconstruction is incomplete".to_owned());
     }
     let (executable_sha256, executable_bytes) = trusted_executable()?;
     let executable = &receipt.artifacts["euf-viper"];

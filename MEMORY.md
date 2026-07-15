@@ -887,10 +887,13 @@
   changes the default feature binary without timing, disables several normal
   fast routes in evidence mode, and makes UNSAT nondecisive. Reconstruct it on
   current main as opt-in, then require a 7,503-source shadow and off-mode timing.
-- Production-evidence v4 repair from exact `cd62e3c9` makes external
-  `sealed-build-receipt.v2` plus its independently supplied digest authoritative;
+- Production-evidence v4 repair resumed from exact `afa2a844` makes external
+  `sealed-build-receipt.v3`, its independently reconstructed attestation, and
+  the independently supplied receipt digest authoritative;
   `build.rs` revision/dirty/manifest/closure strings are diagnostics only.
-  Build inputs use two-pass trace discovery, sealed read-only files and checked
-  directories, while runtime verification reruns loader resolution and Python
-  imports. Hosted CI remains diagnostic/non-attesting. No merge, push, WMI, or
-  corpus authority follows from the local repair.
+  Build inputs use two-pass all-syscall trace discovery, retained native/Python
+  bytes, canonical traces, sealed read-only files, and checked directories.
+  Runtime execution uses a private root containing only bound files and reruns
+  loader, Python import, and native-extension resolution. Hosted CI remains
+  diagnostic/non-attesting. No merge, push, WMI, or corpus authority follows
+  from the local repair.

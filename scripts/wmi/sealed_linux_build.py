@@ -24,10 +24,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-SCHEMA = "euf-viper.sealed-linux-build.v2"
+SCHEMA = "euf-viper.sealed-linux-build.v3"
 SOURCE_SCHEMA = "euf-viper.sealed-source-snapshot.v1"
-CLOSURE_SCHEMA = "euf-viper.build-execution-closure.v2"
-RECEIPT_SCHEMA = "euf-viper.sealed-build-receipt.v2"
+CLOSURE_SCHEMA = "euf-viper.build-execution-closure.v3"
+RECEIPT_SCHEMA = "euf-viper.sealed-build-receipt.v3"
+TRACE_SCHEMA = "euf-viper.canonical-build-trace.v1"
+TRACE_SET_SCHEMA = "euf-viper.canonical-build-traces.v1"
+INPUTS_SCHEMA = "euf-viper.retained-build-inputs.v1"
+ATTESTATION_SCHEMA = "euf-viper.sealed-build-attestation.v1"
 HEX_REVISION = frozenset("0123456789abcdef")
 MS_RDONLY = 1
 MS_NOSUID = 2
@@ -125,18 +129,31 @@ def stable_command(
     cwd: Path | None = None,
     input_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
-    descriptor = os.open(executable, os.O_RDONLY | os.O_NOFOLLOW)
+    descriptor = os.open(executable, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
-        command = [f"/proc/self/fd/{descriptor}", *arguments]
-        return subprocess.run(
-            command,
-            cwd=cwd,
-            env=environment,
-            input=input_bytes,
-            capture_output=True,
-            check=False,
-            pass_fds=(descriptor,),
+        expected_sha256 = sha256_bytes(
+            read_open_descriptor(descriptor, f"command executable {executable}")
         )
+        command = [f"/proc/self/fd/{descriptor}", *arguments]
+        options: dict[str, Any] = {
+            "cwd": cwd,
+            "env": environment,
+            "capture_output": True,
+            "check": False,
+            "pass_fds": (descriptor,),
+        }
+        if input_bytes is None:
+            options["stdin"] = subprocess.DEVNULL
+        else:
+            options["input"] = input_bytes
+        completed = subprocess.run(
+            command,
+            **options,
+        )
+        reverify_open_descriptor(
+            descriptor, expected_sha256, f"command executable {executable}"
+        )
+        return completed
     finally:
         os.close(descriptor)
 
@@ -294,6 +311,142 @@ def sealed_bundle(
     except BaseException:
         os.close(descriptor)
         raise
+
+
+def read_sealed_descriptor(descriptor: int, label: str) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    while True:
+        block = os.read(descriptor, 1024 * 1024)
+        if not block:
+            break
+        chunks.append(block)
+    content = b"".join(chunks)
+    if not content:
+        raise SealedBuildError(f"{label} is empty")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    return content
+
+
+def sealed_content_descriptor(name: str, content: bytes, mode: int) -> int:
+    if not content:
+        raise SealedBuildError(f"cannot seal empty {name}")
+    descriptor = os.memfd_create(
+        f"euf-viper-{name}", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
+    )
+    try:
+        offset = 0
+        while offset < len(content):
+            written = os.write(descriptor, content[offset:])
+            if written <= 0:
+                raise SealedBuildError(f"short sealed write for {name}")
+            offset += written
+        os.fchmod(descriptor, stat.S_IMODE(mode))
+        os.fsync(descriptor)
+        fcntl.fcntl(descriptor, F_ADD_SEALS, REQUIRED_SEALS)
+        if fcntl.fcntl(descriptor, F_GET_SEALS) & REQUIRED_SEALS != REQUIRED_SEALS:
+            raise SealedBuildError(f"sealed {name} descriptor lacks required seals")
+        if read_sealed_descriptor(descriptor, name) != content:
+            raise SealedBuildError(f"sealed {name} descriptor bytes differ")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def open_verified_descriptor(path: Path, label: str) -> tuple[int, str]:
+    expected, expected_metadata = stable_read(path, label)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise SealedBuildError(f"{label} descriptor is not a regular file")
+        content = read_open_descriptor(descriptor, label)
+        digest = sha256_bytes(content)
+        if (
+            content != expected
+            or fingerprint(metadata) != fingerprint(expected_metadata)
+            or not metadata.st_mode & 0o111
+        ):
+            raise SealedBuildError(f"{label} descriptor differs from verified bytes")
+        return descriptor, digest
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def read_open_descriptor(descriptor: int, label: str) -> bytes:
+    before = os.fstat(descriptor)
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    while True:
+        block = os.read(descriptor, 1024 * 1024)
+        if not block:
+            break
+        chunks.append(block)
+    after = os.fstat(descriptor)
+    content = b"".join(chunks)
+    if fingerprint(before) != fingerprint(after) or len(content) != after.st_size:
+        raise SealedBuildError(f"{label} changed while its exact descriptor was read")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    return content
+
+
+def reverify_open_descriptor(descriptor: int, expected_sha256: str, label: str) -> None:
+    if sha256_bytes(read_open_descriptor(descriptor, label)) != expected_sha256:
+        raise SealedBuildError(f"{label} changed while it was executed")
+
+
+def current_helper_bytes() -> tuple[bytes, os.stat_result]:
+    raw_path = str(__file__)
+    prefix = "/proc/self/fd/"
+    if raw_path.startswith(prefix) and raw_path[len(prefix) :].isdigit():
+        descriptor = os.dup(int(raw_path[len(prefix) :]))
+        try:
+            content = read_open_descriptor(descriptor, "current sealed build helper")
+            metadata = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        return content, metadata
+    return stable_read(Path(raw_path), "current sealed build helper")
+
+
+def retained_input_bundle(
+    paths: dict[Path, str],
+) -> tuple[bytes, dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    objects: dict[str, tuple[bytes, int]] = {}
+    for path, category in sorted(paths.items(), key=lambda item: str(item[0])):
+        resolved = path.resolve(strict=True)
+        content, metadata = stable_read(resolved, f"retained {category} input")
+        digest = sha256_bytes(content)
+        objects.setdefault(digest, (content, stat.S_IMODE(metadata.st_mode)))
+        records.append(
+            {
+                "bytes": len(content),
+                "category": category,
+                "mode": f"{stat.S_IMODE(metadata.st_mode):04o}",
+                "object": f"objects/{digest}",
+                "path": str(resolved),
+                "sha256": digest,
+            }
+        )
+    index = {
+        "files": records,
+        "object_count": len(objects),
+        "schema": INPUTS_SCHEMA,
+    }
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w:") as archive:
+        for digest, (content, mode) in sorted(objects.items()):
+            add_tar_file(archive, f"objects/{digest}", content, mode)
+        add_tar_file(
+            archive,
+            "retained-build-inputs.json",
+            canonical_bytes(index),
+            0o400,
+        )
+    return raw.getvalue(), index
 
 
 def mount(source: str | None, target: Path, filesystem: str | None, flags: int, data: str | None) -> None:
@@ -566,6 +719,11 @@ def native_closure(
 
 TRACE_ANNOTATION = re.compile(r"<(/(?:\\.|[^>])*)>")
 TRACE_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+TRACE_LEADING_PID = re.compile(r"^(?:\[pid +)?([0-9]+)(?:\] +| +)")
+FORBIDDEN_NETWORK = re.compile(
+    r"\b(?:connect|accept|accept4|sendto|recvfrom|sendmsg|recvmsg)\("
+    r"|\bsocket\((?:AF_INET|AF_INET6|AF_NETLINK|AF_PACKET)"
+)
 
 
 def _trace_string(raw: str) -> str:
@@ -583,6 +741,57 @@ def normalize_virtual_path(raw: str) -> str:
     value = re.sub(r"^/proc/(?:self|\$PID)/fd/[0-9]+", "/proc/self/fd/$FD", value)
     value = re.sub(r"^/dev/fd/[0-9]+", "/dev/fd/$FD", value)
     return value
+
+
+def canonical_trace_payload(
+    raw: bytes, *, workspace: Path, phase: str
+) -> dict[str, Any]:
+    try:
+        text = raw.decode("utf-8", "strict")
+    except UnicodeError as error:
+        raise SealedBuildError(f"{phase} strace output is not UTF-8") from error
+    pid_names: dict[str, str] = {}
+    lines: list[str] = []
+    network_lines: list[str] = []
+    randomness_lines: list[str] = []
+    time_lines: list[str] = []
+    for raw_line in text.splitlines():
+        if "strace: Process" in raw_line:
+            continue
+        line = raw_line
+        match = TRACE_LEADING_PID.match(line)
+        if match is not None:
+            pid = match.group(1)
+            name = pid_names.setdefault(pid, f"$PID{len(pid_names)}")
+            line = name + " " + line[match.end() :]
+        line = line.replace(str(workspace), "$WORKSPACE")
+        line = re.sub(r"/proc/[0-9]+", "/proc/$PID", line)
+        if FORBIDDEN_NETWORK.search(line):
+            network_lines.append(line)
+        if "getrandom(" in line or "/dev/urandom" in line or "/dev/random" in line:
+            randomness_lines.append(line)
+        if re.search(r"\b(?:clock_gettime|clock_getres|gettimeofday|time)\(", line):
+            time_lines.append(line)
+        lines.append(line)
+    if not lines:
+        raise SealedBuildError(f"{phase} strace output has no syscall records")
+    if network_lines:
+        raise SealedBuildError(
+            f"{phase} build attempted a denied network channel: {network_lines[0]}"
+        )
+    canonical_lines = ("\n".join(lines) + "\n").encode("utf-8")
+    return {
+        "canonical_lines": lines,
+        "canonical_sha256": sha256_bytes(canonical_lines),
+        "channels": {
+            "network": "denied",
+            "randomness_events": len(randomness_lines),
+            "time_events": len(time_lines),
+        },
+        "phase": phase,
+        "raw_sha256": sha256_bytes(raw),
+        "schema": TRACE_SCHEMA,
+    }
 
 
 def traced_paths(trace: Path) -> tuple[set[Path], set[Path], set[str], set[str]]:
@@ -682,34 +891,53 @@ def trace_build(
     trace: Path,
     label: str,
 ) -> None:
-    completed = subprocess.run(
-        [
-            str(strace),
+    strace_fd = os.open(strace, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    cargo_fd = os.open(cargo, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        strace_sha256 = sha256_bytes(
+            read_open_descriptor(strace_fd, "strace executable")
+        )
+        cargo_sha256 = sha256_bytes(
+            read_open_descriptor(cargo_fd, "Cargo executable")
+        )
+        completed = subprocess.run(
+            [
+            f"/proc/self/fd/{strace_fd}",
             "-f",
             "-qq",
             "-yy",
+            "-xx",
+            "-v",
             "-s",
-            "4096",
+            "65535",
             "-o",
             str(trace),
             "-e",
-            "trace=%file,getdents64",
+            "trace=all",
             "--",
-            str(cargo),
+            f"/proc/self/fd/{cargo_fd}",
             *arguments,
-        ],
-        cwd=cwd,
-        env=environment,
-        capture_output=True,
-        check=False,
-    )
+            ],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            check=False,
+            pass_fds=(strace_fd, cargo_fd),
+            stdin=subprocess.DEVNULL,
+        )
+        reverify_open_descriptor(strace_fd, strace_sha256, "strace executable")
+        reverify_open_descriptor(cargo_fd, cargo_sha256, "Cargo executable")
+    finally:
+        os.close(strace_fd)
+        os.close(cargo_fd)
     require_success(completed, label)
     if not trace.is_file() or trace.stat().st_size == 0:
         raise SealedBuildError(f"{label} did not produce a file-access trace")
 
 
 def python_runtime_snapshot(ldd: Path, environment: dict[str, str]) -> dict[str, Any]:
-    paths: set[Path] = {Path(sys.executable).resolve(strict=True), Path(__file__).resolve(strict=True)}
+    helper_content, _ = current_helper_bytes()
+    paths: set[Path] = {Path(sys.executable).resolve(strict=True)}
     frozen: set[str] = set()
     for name, module in sorted(sys.modules.items()):
         origin = getattr(module, "__file__", None)
@@ -758,6 +986,7 @@ def python_runtime_snapshot(ldd: Path, environment: dict[str, str]) -> dict[str,
             for content, metadata in [stable_read(path, "Python runtime input")]
         ],
         "frozen_or_builtin_modules": sorted(frozen),
+        "invoked_helper_sha256": sha256_bytes(helper_content),
         "implementation": sys.implementation.name,
         "version": sys.version,
     }
@@ -1054,6 +1283,7 @@ def inside_build(args: argparse.Namespace) -> int:
     base_build_environment = {
         "AR": str(native_tools["ar"]),
         "CC": str(native_tools["cc"]),
+        "CARGO_BUILD_JOBS": "1",
         "CXX": str(native_tools["cxx"]),
         "EUF_VIPER_SEALED_GIT_REVISION": args.revision,
         "EUF_VIPER_SEALED_SOURCE_MANIFEST_SHA256": args.source_manifest_sha256,
@@ -1064,6 +1294,8 @@ def inside_build(args: argparse.Namespace) -> int:
         "PATH": f"{toolchain / 'bin'}:{declared_bin}",
         "RANLIB": str(native_tools["ranlib"]),
         "RUSTC": str(copied_rustc),
+        "RUSTFLAGS": "-Ctarget-cpu=generic",
+        "SOURCE_DATE_EPOCH": str(args.source_date_epoch),
         "TMPDIR": str(temporary),
         "TZ": "UTC",
     }
@@ -1098,6 +1330,10 @@ def inside_build(args: argparse.Namespace) -> int:
         discovery_virtual,
         discovery_missing,
     ) = traced_paths(discovery_trace)
+    discovery_trace_raw = stable_read(discovery_trace, "discovery trace")[0]
+    discovery_trace_record = canonical_trace_payload(
+        discovery_trace_raw, workspace=workspace, phase="discovery"
+    )
     python_runtime = python_runtime_snapshot(Path(args.ldd), environment)
     external_paths = {
         path
@@ -1112,6 +1348,14 @@ def inside_build(args: argparse.Namespace) -> int:
         ldd_paths(Path(args.ldd), strace, environment)
     )
     external_paths.update({Path(args.ldd).resolve(strict=True), strace})
+    retained_paths = {path: "external_build_input" for path in external_paths}
+    for path in discovery_paths:
+        if path_below(path, (toolchain.resolve(strict=True),)):
+            retained_paths[path] = "rust_toolchain_input"
+    retained_paths[copied_cargo] = "rust_toolchain_input"
+    retained_paths[copied_rustc] = "rust_toolchain_input"
+    retained_archive, retained_index = retained_input_bundle(retained_paths)
+    source_bundle = read_sealed_descriptor(args.bundle_fd, "sealed source snapshot")
     workspace_root = workspace.resolve(strict=True)
     external_directories = {
         path
@@ -1141,12 +1385,18 @@ def inside_build(args: argparse.Namespace) -> int:
         closure = {
             "access_discovery": {
                 "missing_paths": sorted(discovery_missing),
-                "sha256": sha256_bytes(stable_read(discovery_trace, "discovery trace")[0]),
+                "sha256": sha256_bytes(discovery_trace_raw),
                 "virtual_paths": sorted(discovery_virtual),
             },
             "external_directories": directory_inputs,
             "external_inputs": native_inputs,
-            "policy": "two-pass-strace-sealed-memfd-v1",
+            "policy": "two-pass-all-syscall-trace-sealed-memfd-v2",
+            "retained_inputs": {
+                "archive_sha256": sha256_bytes(retained_archive),
+                "index": retained_index,
+                "index_sha256": sha256_bytes(canonical_bytes(retained_index)),
+                "source_snapshot_sha256": sha256_bytes(source_bundle),
+            },
             "python_runtime": python_runtime,
             "rust_toolchain": copied_toolchain,
             "schema": CLOSURE_SCHEMA,
@@ -1183,6 +1433,10 @@ def inside_build(args: argparse.Namespace) -> int:
         )
         actual_paths, actual_directories, actual_virtual, actual_missing = traced_paths(
             actual_trace
+        )
+        actual_trace_raw = stable_read(actual_trace, "actual build trace")[0]
+        actual_trace_record = canonical_trace_payload(
+            actual_trace_raw, workspace=workspace, phase="production"
         )
         unexpected = sorted(
             path
@@ -1237,9 +1491,8 @@ def inside_build(args: argparse.Namespace) -> int:
         if python_runtime_snapshot(Path(args.ldd), environment) != python_runtime:
             raise SealedBuildError("Python runtime changed during the sealed build")
         execution_verification = {
-            "actual_trace_sha256": sha256_bytes(
-                stable_read(actual_trace, "actual build trace")[0]
-            ),
+            "actual_trace_sha256": sha256_bytes(actual_trace_raw),
+            "canonical_trace_sha256": "",
             "external_directory_count": len(directory_inputs),
             "external_input_count": len(native_inputs),
             "status": "accepted",
@@ -1267,6 +1520,23 @@ def inside_build(args: argparse.Namespace) -> int:
             "sha256": sha256_bytes(content),
         }
 
+    canonical_traces = {
+        "discovery": discovery_trace_record,
+        "namespace": {"network": "isolated", "root": "private-mount-namespace"},
+        "production": actual_trace_record,
+        "recipe": {
+            "arguments": cargo_arguments,
+            "environment": build_environment,
+            "features": args.features,
+            "strace": ["-f", "-qq", "-yy", "-xx", "-v", "-s65535", "trace=all"],
+        },
+        "schema": TRACE_SET_SCHEMA,
+    }
+    canonical_trace_bytes = canonical_bytes(canonical_traces)
+    execution_verification["canonical_trace_sha256"] = sha256_bytes(
+        canonical_trace_bytes
+    )
+
     payload = {
         "schema": SCHEMA,
         "status": "built",
@@ -1290,6 +1560,16 @@ def inside_build(args: argparse.Namespace) -> int:
                 0o500,
             ),
             ("sealed-build-manifest.json", canonical_bytes(payload), 0o400),
+            ("sealed-source-snapshot.tar", source_bundle, 0o400),
+            ("retained-build-inputs.tar", retained_archive, 0o400),
+            (
+                "retained-build-inputs.json",
+                canonical_bytes(retained_index),
+                0o400,
+            ),
+            ("build-discovery.strace", discovery_trace_raw, 0o400),
+            ("build-production.strace", actual_trace_raw, 0o400),
+            ("canonical-build-traces.json", canonical_trace_bytes, 0o400),
         ],
     )
     return 0
@@ -1378,6 +1658,8 @@ def verify_published_build(
     tree: str,
     source_manifest_sha256: str,
     toolchain: dict[str, str],
+    attestor_sha256: str | None = None,
+    attestation_sha256: str | None = None,
     receipt_sha256: str | None = None,
 ) -> dict[str, Any]:
     rebound_directory = os.open(
@@ -1402,12 +1684,20 @@ def verify_published_build(
         ):
             raise SealedBuildError("artifact directory path changed during publication")
         expected_names = {
+            "build-discovery.strace",
+            "build-production.strace",
+            "canonical-build-traces.json",
             "euf-viper",
             "euf-viper-build-features",
+            "retained-build-inputs.json",
+            "retained-build-inputs.tar",
             "sealed-build-manifest.json",
+            "sealed-source-snapshot.tar",
         }
         if receipt_sha256 is not None:
             expected_names.add("sealed-build-receipt.json")
+        if attestation_sha256 is not None:
+            expected_names.add("sealed-build-attestation.json")
         if set(os.listdir(bound_directory)) != expected_names:
             raise SealedBuildError("artifact directory contains an unbound entry")
         manifest_raw, manifest_metadata = stable_read_at(
@@ -1459,6 +1749,7 @@ def verify_published_build(
             or set(verification)
             != {
                 "actual_trace_sha256",
+                "canonical_trace_sha256",
                 "external_directory_count",
                 "external_input_count",
                 "status",
@@ -1480,6 +1771,37 @@ def verify_published_build(
                 fingerprint(manifest_metadata),
             )
         }
+        retained = closure.get("retained_inputs")
+        if type(retained) is not dict or set(retained) != {
+            "archive_sha256",
+            "index",
+            "index_sha256",
+            "source_snapshot_sha256",
+        }:
+            raise SealedBuildError("retained build-input closure is malformed")
+        auxiliary_expectations = {
+            "build-discovery.strace": closure["access_discovery"]["sha256"],
+            "build-production.strace": verification["actual_trace_sha256"],
+            "canonical-build-traces.json": verification[
+                "canonical_trace_sha256"
+            ],
+            "retained-build-inputs.json": retained["index_sha256"],
+            "retained-build-inputs.tar": retained["archive_sha256"],
+            "sealed-source-snapshot.tar": retained["source_snapshot_sha256"],
+        }
+        for name, expected_sha256 in auxiliary_expectations.items():
+            content, metadata = stable_read_at(
+                bound_directory, name, f"sealed auxiliary artifact {name}"
+            )
+            if (
+                sha256_bytes(content) != expected_sha256
+                or stat.S_IMODE(metadata.st_mode) != 0o400
+            ):
+                raise SealedBuildError(f"sealed auxiliary artifact differs: {name}")
+            verified_files[name] = (content, fingerprint(metadata))
+        index_raw = verified_files["retained-build-inputs.json"][0]
+        if index_raw != canonical_bytes(retained["index"]):
+            raise SealedBuildError("retained build-input index differs from manifest")
         for name, record in manifest["artifacts"].items():
             content, metadata = stable_read_at(
                 bound_directory, name, f"sealed artifact {name}"
@@ -1538,6 +1860,43 @@ def verify_published_build(
             "source_snapshot_manifest_sha256": source_manifest_sha256,
             "status": "built",
         }
+        if attestation_sha256 is not None:
+            attestation_raw, attestation_metadata = stable_read_at(
+                bound_directory,
+                "sealed-build-attestation.json",
+                "independent sealed build attestation",
+            )
+            if (
+                sha256_bytes(attestation_raw) != attestation_sha256
+                or stat.S_IMODE(attestation_metadata.st_mode) != 0o400
+            ):
+                raise SealedBuildError("independent sealed build attestation differs")
+            try:
+                attestation = json.loads(attestation_raw)
+            except (UnicodeError, json.JSONDecodeError) as error:
+                raise SealedBuildError("independent attestation is invalid JSON") from error
+            if (
+                canonical_bytes(attestation) != attestation_raw
+                or attestation.get("schema") != ATTESTATION_SCHEMA
+                or attestation.get("status") != "accepted"
+                or attestation.get("attestor_sha256") != attestor_sha256
+                or attestation.get("build_manifest_sha256")
+                != sha256_bytes(manifest_raw)
+                or attestation.get("artifacts")
+                != {
+                    name: {
+                        "bytes": record["bytes"],
+                        "mode": "0500",
+                        "sha256": record["sha256"],
+                    }
+                    for name, record in manifest["artifacts"].items()
+                }
+            ):
+                raise SealedBuildError("independent attestation bindings differ")
+            result["attestation"] = str(
+                artifact_dir / "sealed-build-attestation.json"
+            )
+            result["attestation_sha256"] = attestation_sha256
         if receipt_sha256 is not None:
             receipt_raw, receipt_metadata = stable_read_at(
                 bound_directory,
@@ -1565,7 +1924,9 @@ def verify_published_build(
                 raise SealedBuildError("external sealed build receipt is invalid JSON") from error
             if canonical_bytes(receipt) != receipt_raw:
                 raise SealedBuildError("external sealed build receipt is not canonical")
-            if receipt != create_external_receipt(bound_directory):
+            if receipt != create_external_receipt(
+                bound_directory, expected_attestor_sha256=attestor_sha256
+            ):
                 raise SealedBuildError("external sealed build receipt binding differs")
             os.fsync(bound_directory)
             final_receipt_directory = os.open(
@@ -1603,13 +1964,16 @@ def execute_published(parent_fd: int, name: str) -> bytes:
             check=False,
             env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
             pass_fds=(descriptor,),
+            stdin=subprocess.DEVNULL,
         )
     finally:
         os.close(descriptor)
     return require_success(completed, f"published executable {name}")
 
 
-def create_external_receipt(parent_fd: int) -> dict[str, Any]:
+def create_external_receipt(
+    parent_fd: int, *, expected_attestor_sha256: str | None = None
+) -> dict[str, Any]:
     manifest_raw, _ = stable_read_at(
         parent_fd, "sealed-build-manifest.json", "sealed build manifest"
     )
@@ -1658,6 +2022,31 @@ def create_external_receipt(parent_fd: int) -> dict[str, Any]:
             "mode": "0500",
             "sha256": expected["sha256"],
         }
+    attestation_raw, attestation_metadata = stable_read_at(
+        parent_fd,
+        "sealed-build-attestation.json",
+        "independent sealed build attestation",
+    )
+    try:
+        attestation = json.loads(attestation_raw)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise SealedBuildError("independent attestation is invalid JSON") from error
+    if (
+        canonical_bytes(attestation) != attestation_raw
+        or stat.S_IMODE(attestation_metadata.st_mode) != 0o400
+        or attestation.get("schema") != ATTESTATION_SCHEMA
+        or attestation.get("status") != "accepted"
+        or (
+            expected_attestor_sha256 is not None
+            and attestation.get("attestor_sha256") != expected_attestor_sha256
+        )
+        or attestation.get("build_manifest_sha256") != sha256_bytes(manifest_raw)
+        or attestation.get("artifacts") != artifacts
+        or attestation.get("features") != features
+        or attestation.get("closure_sha256")
+        != manifest["build_execution_closure_sha256"]
+    ):
+        raise SealedBuildError("independent attestation differs before receipt")
     return {
         "artifacts": artifacts,
         "build": {
@@ -1667,6 +2056,7 @@ def create_external_receipt(parent_fd: int) -> dict[str, Any]:
             "target": target,
             "toolchain": manifest["toolchain"],
         },
+        "independent_attestation": attestation,
         "schema": RECEIPT_SCHEMA,
         "sealed_build_manifest_sha256": sha256_bytes(manifest_raw),
         "source": {
@@ -1692,6 +2082,10 @@ def outer_build(args: argparse.Namespace) -> int:
     )
     if os.path.lexists(artifact_dir):
         raise SealedBuildError("sealed build destination must not exist")
+    attestor_path = args.attestor.resolve(strict=True)
+    attestor_content, _ = stable_read(attestor_path, "independent build attestor")
+    if sha256_bytes(attestor_content) != args.attestor_sha256:
+        raise SealedBuildError("independent build attestor SHA-256 differs")
 
     tools = {
         "git": checked_executable(args.git, "git"),
@@ -1722,6 +2116,24 @@ def outer_build(args: argparse.Namespace) -> int:
         ),
         "Git tree lookup",
     ).decode("ascii").strip()
+    source_date_raw = require_success(
+        stable_command(
+            tools["git"],
+            [
+                "-C",
+                str(repository),
+                "show",
+                "-s",
+                "--format=%ct",
+                args.revision,
+            ],
+            environment=environment,
+        ),
+        "Git commit timestamp lookup",
+    ).decode("ascii").strip()
+    if not source_date_raw.isdigit():
+        raise SealedBuildError("Git commit timestamp is not a positive integer")
+    source_date_epoch = int(source_date_raw)
 
     staging_parent = args.staging_root.absolute()
     staging_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1761,10 +2173,20 @@ def outer_build(args: argparse.Namespace) -> int:
             )
         )
         output_fd = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        script_fd = os.open(Path(__file__).resolve(), os.O_RDONLY | os.O_NOFOLLOW)
+        script_content, script_metadata = current_helper_bytes()
+        script_fd = sealed_content_descriptor(
+            "build-helper", script_content, stat.S_IMODE(script_metadata.st_mode)
+        )
         python_path = checked_executable(Path(sys.executable), "Python")
-        python_fd = os.open(python_path, os.O_RDONLY | os.O_NOFOLLOW)
-        unshare_fd = os.open(tools["unshare"], os.O_RDONLY | os.O_NOFOLLOW)
+        python_fd, python_descriptor_sha256 = open_verified_descriptor(
+            python_path, "Python executable"
+        )
+        unshare_fd, unshare_descriptor_sha256 = open_verified_descriptor(
+            tools["unshare"], "unshare executable"
+        )
+        attestor_fd = sealed_content_descriptor(
+            "build-attestor", attestor_content, 0o400
+        )
         workspace = staging_parent / f"namespace-{os.getpid()}"
         published_final = False
         publication_complete = False
@@ -1776,6 +2198,7 @@ def outer_build(args: argparse.Namespace) -> int:
                 "--user",
                 "--map-root-user",
                 "--mount",
+                "--net",
                 "--fork",
                 "--",
                 f"/proc/self/fd/{python_fd}",
@@ -1804,6 +2227,8 @@ def outer_build(args: argparse.Namespace) -> int:
                 tree,
                 "--source-manifest-sha256",
                 source_manifest_sha256,
+                "--source-date-epoch",
+                str(source_date_epoch),
                 "--features",
                 args.features,
                 "--toolchain",
@@ -1821,8 +2246,15 @@ def outer_build(args: argparse.Namespace) -> int:
                     unshare_fd,
                 ),
                 env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
             )
             require_success(completed, "sealed Linux namespace build")
+            reverify_open_descriptor(
+                python_fd, python_descriptor_sha256, "Python executable"
+            )
+            reverify_open_descriptor(
+                unshare_fd, unshare_descriptor_sha256, "unshare executable"
+            )
             verify_published_build(
                 output_fd,
                 attempt,
@@ -1831,7 +2263,49 @@ def outer_build(args: argparse.Namespace) -> int:
                 source_manifest_sha256=source_manifest_sha256,
                 toolchain=toolchain,
             )
-            receipt_bytes = canonical_bytes(create_external_receipt(output_fd))
+            attestation_process = subprocess.run(
+                [
+                    f"/proc/self/fd/{python_fd}",
+                    "-B",
+                    "-I",
+                    "-S",
+                    f"/proc/self/fd/{attestor_fd}",
+                    "create",
+                    "--artifact-dir-fd",
+                    str(output_fd),
+                ],
+                capture_output=True,
+                check=False,
+                pass_fds=(python_fd, attestor_fd, output_fd),
+                env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
+            )
+            attestation_bytes = require_success(
+                attestation_process, "independent sealed build attestation"
+            )
+            published_attestation, _ = stable_read_at(
+                output_fd,
+                "sealed-build-attestation.json",
+                "published independent attestation",
+            )
+            if published_attestation != attestation_bytes:
+                raise SealedBuildError("attestor output differs from published bytes")
+            attestation_sha256 = sha256_bytes(attestation_bytes)
+            verify_published_build(
+                output_fd,
+                attempt,
+                revision=args.revision,
+                tree=tree,
+                source_manifest_sha256=source_manifest_sha256,
+                toolchain=toolchain,
+                attestor_sha256=args.attestor_sha256,
+                attestation_sha256=attestation_sha256,
+            )
+            receipt_bytes = canonical_bytes(
+                create_external_receipt(
+                    output_fd, expected_attestor_sha256=args.attestor_sha256
+                )
+            )
             receipt_sha256 = sha256_bytes(receipt_bytes)
             publish_bytes(
                 output_fd, "sealed-build-receipt.json", receipt_bytes, 0o400
@@ -1843,6 +2317,8 @@ def outer_build(args: argparse.Namespace) -> int:
                 tree=tree,
                 source_manifest_sha256=source_manifest_sha256,
                 toolchain=toolchain,
+                attestor_sha256=args.attestor_sha256,
+                attestation_sha256=attestation_sha256,
                 receipt_sha256=receipt_sha256,
             )
             rename_noreplace(attempt, artifact_dir)
@@ -1861,13 +2337,49 @@ def outer_build(args: argparse.Namespace) -> int:
                 tree=tree,
                 source_manifest_sha256=source_manifest_sha256,
                 toolchain=toolchain,
+                attestor_sha256=args.attestor_sha256,
+                attestation_sha256=attestation_sha256,
                 receipt_sha256=receipt_sha256,
+            )
+            final_attestation = subprocess.run(
+                [
+                    f"/proc/self/fd/{python_fd}",
+                    "-B",
+                    "-I",
+                    "-S",
+                    f"/proc/self/fd/{attestor_fd}",
+                    "verify",
+                    "--artifact-dir-fd",
+                    str(output_fd),
+                ],
+                capture_output=True,
+                check=False,
+                pass_fds=(python_fd, attestor_fd, output_fd),
+                env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
+            )
+            if require_success(
+                final_attestation, "final independent sealed build attestation"
+            ) != attestation_bytes:
+                raise SealedBuildError("final independent attestation reconstruction differs")
+            reverify_open_descriptor(
+                python_fd, python_descriptor_sha256, "Python executable"
+            )
+            reverify_open_descriptor(
+                unshare_fd, unshare_descriptor_sha256, "unshare executable"
             )
             publication_complete = True
         finally:
             if published_final and not publication_complete:
                 rollback_bound_publication(output_fd, artifact_dir)
-            for descriptor in (bundle_fd, output_fd, script_fd, python_fd, unshare_fd):
+            for descriptor in (
+                bundle_fd,
+                output_fd,
+                script_fd,
+                python_fd,
+                unshare_fd,
+                attestor_fd,
+            ):
                 os.close(descriptor)
             if workspace.exists():
                 workspace.rmdir()
@@ -1919,10 +2431,12 @@ def probe(args: argparse.Namespace) -> int:
         os.close(descriptor)
     unshare = checked_executable(args.unshare, "unshare")
     python_path = checked_executable(Path(sys.executable), "Python")
-    script = Path(__file__).resolve(strict=True)
     unshare_fd = os.open(unshare, os.O_RDONLY | os.O_NOFOLLOW)
     python_fd = os.open(python_path, os.O_RDONLY | os.O_NOFOLLOW)
-    script_fd = os.open(script, os.O_RDONLY | os.O_NOFOLLOW)
+    script_content, script_metadata = current_helper_bytes()
+    script_fd = sealed_content_descriptor(
+        "probe-helper", script_content, stat.S_IMODE(script_metadata.st_mode)
+    )
     workspace = staging / f"probe-namespace-{os.getpid()}"
     try:
         set_nondumpable()
@@ -1932,6 +2446,7 @@ def probe(args: argparse.Namespace) -> int:
                 "--user",
                 "--map-root-user",
                 "--mount",
+                "--net",
                 "--fork",
                 "--",
                 f"/proc/self/fd/{python_fd}",
@@ -1979,6 +2494,8 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--ar", type=Path, required=True)
     build.add_argument("--ranlib", type=Path, required=True)
     build.add_argument("--strace", type=Path, required=True)
+    build.add_argument("--attestor", type=Path, required=True)
+    build.add_argument("--attestor-sha256", required=True)
     build.add_argument(
         "--features", default="certificates,production-evidence"
     )
@@ -1993,6 +2510,7 @@ def parser() -> argparse.ArgumentParser:
     inside.add_argument("--revision", required=True)
     inside.add_argument("--tree", required=True)
     inside.add_argument("--source-manifest-sha256", required=True)
+    inside.add_argument("--source-date-epoch", type=int, required=True)
     inside.add_argument("--features", required=True)
     inside.add_argument("--toolchain", type=json.loads, required=True)
     probe_inside_parser = subparsers.add_parser("_probe_inside")

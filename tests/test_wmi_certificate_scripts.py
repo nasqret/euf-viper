@@ -19,7 +19,7 @@ SBATCH_FILES = [
 ]
 SUBMIT = WMI / "submit_certificate_shadow.sh"
 STAGED_SUBMIT = WMI / "submit_staged_certificate_audit.sh"
-ALL_SCRIPTS = [P0_PREPARE, *SBATCH_FILES, SUBMIT, STAGED_SUBMIT]
+ALL_SCRIPTS = [P0_PREPARE, P0_SHARD, P0_AUDIT, *SBATCH_FILES, SUBMIT, STAGED_SUBMIT]
 
 
 class WmiCertificateScriptTests(unittest.TestCase):
@@ -38,7 +38,7 @@ class WmiCertificateScriptTests(unittest.TestCase):
 
     def test_p0_times_the_same_binary_that_emits_certificates(self) -> None:
         text = self.text(P0_PREPARE)
-        build = 'python_clean "$SEALED_BUILD_HELPER" build'
+        build = 'python_bound "$SEALED_BUILD_HELPER" "$SEALED_BUILD_HELPER_SHA256" build'
         self.assertIn(build, text)
         self.assertIn('VIPER_BINARY="$SEALED_ARTIFACT_DIR/euf-viper"', text)
         self.assertIn("--revision \"$EXPECTED_REVISION\"", text)

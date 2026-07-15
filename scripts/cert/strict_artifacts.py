@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import os
 import secrets
@@ -14,6 +16,106 @@ from typing import Any, Callable
 
 class StrictArtifactError(ValueError):
     """Raised when bytes, JSON, or a path traversal is ambiguous."""
+
+
+F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
+F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
+F_SEAL_SEAL = getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+F_SEAL_SHRINK = getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+F_SEAL_GROW = getattr(fcntl, "F_SEAL_GROW", 0x0004)
+F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+REQUIRED_MEMFD_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
+
+
+def _descriptor_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def open_verified_sealed_memfd(
+    path: Path, expected_sha256: str, context: str
+) -> int:
+    """Read a pathname once and return the independently rehashed sealed bytes."""
+
+    if not sys.platform.startswith("linux") or not Path("/proc/self/fd").is_dir():
+        raise StrictArtifactError(f"{context}: Linux /proc/self/fd is required")
+    if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
+        raise StrictArtifactError(f"{context}: Linux memfd sealing is required")
+    if len(expected_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in expected_sha256
+    ):
+        raise StrictArtifactError(f"{context}: expected SHA-256 is malformed")
+
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        source = os.open(path, flags)
+    except OSError as error:
+        raise StrictArtifactError(f"{context}: cannot open source descriptor: {error}") from error
+    snapshot = -1
+    try:
+        before = os.fstat(source)
+        if not stat.S_ISREG(before.st_mode):
+            raise StrictArtifactError(f"{context}: source is not a regular file")
+        snapshot = os.memfd_create(
+            f"euf-viper-{path.name}", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
+        )
+        digest = hashlib.sha256()
+        copied = 0
+        while True:
+            block = os.read(source, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            copied += len(block)
+            offset = 0
+            while offset < len(block):
+                written = os.write(snapshot, block[offset:])
+                if written <= 0:
+                    raise StrictArtifactError(f"{context}: short memfd write")
+                offset += written
+        after = os.fstat(source)
+        if _descriptor_identity(before) != _descriptor_identity(after) or copied != after.st_size:
+            raise StrictArtifactError(f"{context}: source changed during acquisition")
+        if digest.hexdigest() != expected_sha256:
+            raise StrictArtifactError(f"{context}: source SHA-256 mismatch")
+
+        os.fchmod(snapshot, stat.S_IMODE(after.st_mode))
+        os.fsync(snapshot)
+        fcntl.fcntl(snapshot, F_ADD_SEALS, REQUIRED_MEMFD_SEALS)
+        seals = fcntl.fcntl(snapshot, F_GET_SEALS)
+        if seals & REQUIRED_MEMFD_SEALS != REQUIRED_MEMFD_SEALS:
+            raise StrictArtifactError(f"{context}: memfd did not retain required seals")
+
+        os.lseek(snapshot, 0, os.SEEK_SET)
+        sealed_digest = hashlib.sha256()
+        sealed_size = 0
+        while True:
+            block = os.read(snapshot, 1024 * 1024)
+            if not block:
+                break
+            sealed_digest.update(block)
+            sealed_size += len(block)
+        sealed_metadata = os.fstat(snapshot)
+        if (
+            sealed_size != sealed_metadata.st_size
+            or sealed_digest.hexdigest() != expected_sha256
+        ):
+            raise StrictArtifactError(f"{context}: executed sealed bytes differ")
+        os.lseek(snapshot, 0, os.SEEK_SET)
+        os.close(source)
+        return snapshot
+    except BaseException:
+        if snapshot >= 0:
+            os.close(snapshot)
+        os.close(source)
+        raise
 
 
 def _reject_constant(value: str) -> Any:
@@ -229,6 +331,79 @@ def assert_descriptor_path_nofollow(path: Path, descriptor: int, context: str) -
         os.close(parent_fd)
 
 
+def open_read_nofollow(path: Path, context: str) -> tuple[Path, int]:
+    """Open one existing regular file beneath a stable no-symlink parent chain."""
+
+    absolute = _absolute(path)
+    parent_fd, fingerprints = _open_directory_chain(
+        absolute.parent, f"{context} parent", create=False
+    )
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor = -1
+    try:
+        descriptor = os.open(absolute.name, flags, dir_fd=parent_fd)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise StrictArtifactError(f"{context}: artifact is not a regular file")
+        post_fd, post_fingerprints = _open_directory_chain(
+            absolute.parent, f"{context} parent recheck", create=False
+        )
+        try:
+            if post_fingerprints != fingerprints:
+                raise StrictArtifactError(
+                    f"{context}: parent path changed while opening artifact"
+                )
+            path_metadata = os.stat(
+                absolute.name, dir_fd=post_fd, follow_symlinks=False
+            )
+        finally:
+            os.close(post_fd)
+        if (
+            not stat.S_ISREG(path_metadata.st_mode)
+            or path_metadata.st_dev != metadata.st_dev
+            or path_metadata.st_ino != metadata.st_ino
+        ):
+            raise StrictArtifactError(f"{context}: artifact path changed while opening")
+        result = descriptor
+        descriptor = -1
+        return absolute, result
+    except OSError as error:
+        raise StrictArtifactError(
+            f"{context}: cannot open {absolute} without symlinks: {error}"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(parent_fd)
+
+
+def read_open_descriptor(
+    descriptor: int, context: str
+) -> tuple[bytes, os.stat_result]:
+    """Read an already-bound regular descriptor and reject in-place mutation."""
+
+    before = os.fstat(descriptor)
+    if not stat.S_ISREG(before.st_mode):
+        raise StrictArtifactError(f"{context}: descriptor is not a regular file")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    while True:
+        block = os.read(descriptor, 1024 * 1024)
+        if not block:
+            break
+        chunks.append(block)
+    after = os.fstat(descriptor)
+    content = b"".join(chunks)
+    if (
+        _descriptor_identity(before) != _descriptor_identity(after)
+        or len(content) != after.st_size
+    ):
+        raise StrictArtifactError(f"{context}: descriptor changed while read")
+    return content, after
+
+
 def _same_regular_identity(
     parent_fd: int, name: str, metadata: os.stat_result
 ) -> bool:
@@ -280,8 +455,11 @@ def atomic_write_nofollow(
     context: str,
     *,
     immutable: bool,
+    mode: int = 0o600,
     pre_publish: Callable[[], None] | None = None,
 ) -> Path:
+    if mode < 0 or mode > 0o777:
+        raise StrictArtifactError(f"{context}: publication mode is invalid")
     absolute = ensure_parent_directory_nofollow(path, context)
     parent_fd, fingerprints = _open_directory_chain(
         absolute.parent, f"{context} parent", create=False
@@ -307,18 +485,21 @@ def atomic_write_nofollow(
                     raise StrictArtifactError(
                         f"{context}: existing artifact is not a regular file"
                     )
+                if stat.S_IMODE(existing.st_mode) != mode:
+                    raise StrictArtifactError(f"{context}: immutable artifact mode drift")
                 _, existing_bytes = read_regular_nofollow(absolute, context)
                 if existing_bytes != content:
                     raise StrictArtifactError(f"{context}: immutable artifact drift")
                 return absolute
 
-        descriptor = os.open(temporary_name, flags, 0o600, dir_fd=parent_fd)
+        descriptor = os.open(temporary_name, flags, mode, dir_fd=parent_fd)
         offset = 0
         while offset < len(content):
             written = os.write(descriptor, content[offset:])
             if written <= 0:
                 raise StrictArtifactError(f"{context}: short temporary write")
             offset += written
+        os.fchmod(descriptor, mode)
         os.fsync(descriptor)
         staging_metadata = os.fstat(descriptor)
 

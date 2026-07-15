@@ -13,6 +13,7 @@ import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -345,6 +346,49 @@ class LockedCampaignRunnerTests(unittest.TestCase):
                 os.close(source_fd)
             self.assertEqual((executed.returncode, executed.stdout), (0, b"original\n"))
             self.assertEqual((captured.returncode, captured.stdout), (0, b"original source\n"))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "Linux sealed-descriptor acquisition test",
+    )
+    def test_second_read_mutation_probe_cannot_change_executed_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "solver"
+            write_executable(source, "#!/bin/sh\nprintf 'original\\n'\n")
+            expected = sha256_file(source)
+            real_lseek = os.lseek
+            mutation_probe_reached = False
+
+            def mutate_if_source_is_rewound(
+                descriptor: int, offset: int, whence: int
+            ) -> int:
+                nonlocal mutation_probe_reached
+                try:
+                    target = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+                except OSError:
+                    target = Path()
+                if target == source and offset == 0 and whence == os.SEEK_SET:
+                    mutation_probe_reached = True
+                    source.write_text(
+                        "#!/bin/sh\nprintf 'attacker\\n'\n", encoding="ascii"
+                    )
+                return real_lseek(descriptor, offset, whence)
+
+            with mock.patch.object(os, "lseek", side_effect=mutate_if_source_is_rewound):
+                descriptor = RUNNER_MODULE._open_verified_descriptor(
+                    source, expected, "second-read counterexample"
+                )
+            try:
+                completed = subprocess.run(
+                    [f"/proc/self/fd/{descriptor}"],
+                    capture_output=True,
+                    check=False,
+                    pass_fds=(descriptor,),
+                )
+            finally:
+                os.close(descriptor)
+            self.assertFalse(mutation_probe_reached)
+            self.assertEqual((completed.returncode, completed.stdout), (0, b"original\n"))
 
     def test_optional_shard_metadata_is_validated_and_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

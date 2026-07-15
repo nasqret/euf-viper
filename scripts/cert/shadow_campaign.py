@@ -49,6 +49,7 @@ from strict_artifacts import (
     canonical_nofollow_path,
     ensure_directory_nofollow,
     ensure_parent_directory_nofollow,
+    open_verified_sealed_memfd,
     fsync_parent_nofollow,
     open_append_nofollow,
     read_regular_nofollow as strict_read_regular_nofollow,
@@ -1099,43 +1100,12 @@ def run_cold_process(
         try:
             for raw_path, expected_hash in sorted(descriptor_hashes.items()):
                 path = Path(raw_path)
-                flags = os.O_RDONLY | os.O_NOFOLLOW
-                if hasattr(os, "O_CLOEXEC"):
-                    flags |= os.O_CLOEXEC
-                descriptor = os.open(path, flags)
-                metadata = os.fstat(descriptor)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise ShadowError(f"bound execution input is not regular: {path}")
-                digest = hashlib.sha256()
-                size = 0
-                while True:
-                    block = os.read(descriptor, 1024 * 1024)
-                    if not block:
-                        break
-                    digest.update(block)
-                    size += len(block)
-                after = os.fstat(descriptor)
-                if (
-                    metadata.st_dev,
-                    metadata.st_ino,
-                    metadata.st_size,
-                    metadata.st_mtime_ns,
-                    metadata.st_ctime_ns,
-                ) != (
-                    after.st_dev,
-                    after.st_ino,
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                ) or size != after.st_size:
-                    raise ShadowError(f"bound execution input changed while read: {path}")
-                actual_hash = digest.hexdigest()
-                if actual_hash != expected_hash:
-                    raise ShadowError(
-                        f"bound execution SHA-256 mismatch for {path}: "
-                        f"expected {expected_hash}, got {actual_hash}"
+                try:
+                    descriptor = open_verified_sealed_memfd(
+                        path, expected_hash, f"bound execution input {path}"
                     )
-                os.lseek(descriptor, 0, os.SEEK_SET)
+                except StrictArtifactError as error:
+                    raise ShadowError(str(error)) from error
                 bound_descriptors.append(descriptor)
                 replacements[raw_path] = f"/proc/self/fd/{descriptor}"
                 descriptor_records.append(
@@ -1777,7 +1747,9 @@ def validate_attempt_record(
         checker = _validate_process_record(
             value["checker_process"], f"{context} checker process", output_directory
         )
-        expected_checker = _checker_command(plan, work, Path(f"{prefix}.euf.json"))
+        expected_checker = _checker_command(
+            plan, work, Path(f"{prefix}.euf.json"), prefix
+        )
         if value["checker_command"] != expected_checker:
             raise ShadowError(f"{context}: checker command drift")
     elif value["checker_command"] is not None:
@@ -2085,7 +2057,7 @@ def build_summary(
         "solver": plan["solver"],
         "python": plan.get("python"),
         "checker": plan["checker"],
-        "independent_parser": plan["independent_parser"],
+        "independent_parser": plan.get("independent_parser"),
         "drat_trim": plan["drat_trim"],
         "selection": plan["selection"],
         "counts": {

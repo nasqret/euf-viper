@@ -13,6 +13,8 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from tests.sealed_build_fixture import independent_attestation
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER_PATH = ROOT / "scripts" / "cert" / "check_production_evidence.py"
@@ -89,7 +91,7 @@ class SealedReceiptCheckerSchemaTests(unittest.TestCase):
                 "target": "x86_64-unknown-linux-gnu",
                 "toolchain": {"compiler": "forged"},
             },
-            "schema": "euf-viper.sealed-build-receipt.v2",
+            "schema": "euf-viper.sealed-build-receipt.v3",
             "sealed_build_manifest_sha256": "3" * 64,
             "source": {
                 "dirty": False,
@@ -99,6 +101,16 @@ class SealedReceiptCheckerSchemaTests(unittest.TestCase):
             },
             "status": "accepted",
         }
+        receipt["independent_attestation"] = independent_attestation(
+            artifacts=receipt["artifacts"],
+            features=receipt["build"]["features"],
+            toolchain=receipt["build"]["toolchain"],
+            revision=revision,
+            tree=receipt["source"]["tree"],
+            source_manifest_sha256=receipt["source"]["snapshot_manifest_sha256"],
+            closure_sha256=receipt["build"]["execution_closure_sha256"],
+            build_manifest_sha256=receipt["sealed_build_manifest_sha256"],
+        )
         receipt_sha256 = hashlib.sha256(
             CHECKER.canonical_bytes(receipt)
         ).hexdigest()
@@ -271,7 +283,7 @@ class ProductionEvidenceTests(unittest.TestCase):
                 "target": target,
                 "toolchain": {"cargo": cargo, "rustc": rustc},
             },
-            "schema": "euf-viper.sealed-build-receipt.v2",
+            "schema": "euf-viper.sealed-build-receipt.v3",
             "sealed_build_manifest_sha256": "3" * 64,
             "source": {
                 "dirty": False,
@@ -281,8 +293,21 @@ class ProductionEvidenceTests(unittest.TestCase):
             },
             "status": "accepted",
         }
+        receipt["independent_attestation"] = independent_attestation(
+            artifacts=receipt["artifacts"],
+            features=receipt["build"]["features"],
+            toolchain=receipt["build"]["toolchain"],
+            revision=revision,
+            tree=tree,
+            source_manifest_sha256=receipt["source"]["snapshot_manifest_sha256"],
+            closure_sha256=receipt["build"]["execution_closure_sha256"],
+            build_manifest_sha256=receipt["sealed_build_manifest_sha256"],
+        )
         cls.sealed_receipt = Path(cls.clean_build.name) / "sealed-build-receipt.json"
         cls.sealed_receipt.write_bytes(CHECKER.canonical_bytes(receipt))
+        (Path(cls.clean_build.name) / "sealed-build-attestation.json").write_bytes(
+            CHECKER.canonical_bytes(receipt["independent_attestation"])
+        )
         cls.sealed_receipt_sha256 = hashlib.sha256(
             cls.sealed_receipt.read_bytes()
         ).hexdigest()

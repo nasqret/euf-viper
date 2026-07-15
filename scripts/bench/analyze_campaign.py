@@ -45,6 +45,7 @@ from check_production_evidence import (  # noqa: E402
 )
 from strict_artifacts import (  # noqa: E402
     StrictArtifactError,
+    atomic_write_nofollow,
     read_regular_nofollow as strict_read_regular_nofollow,
 )
 
@@ -2860,8 +2861,16 @@ def _emit_json(payload: Mapping[str, Any], output: Path | None) -> None:
     if output is None:
         sys.stdout.write(text)
         return
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text, encoding="utf-8")
+    try:
+        atomic_write_nofollow(
+            output,
+            text.encode("ascii"),
+            "campaign analysis",
+            immutable=True,
+            mode=0o400,
+        )
+    except StrictArtifactError as error:
+        raise CampaignInputError(str(error)) from error
 
 
 def _safe_hash(path: Path) -> str | None:

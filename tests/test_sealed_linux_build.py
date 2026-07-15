@@ -70,11 +70,108 @@ class SealedLinuxBuildTests(unittest.TestCase):
                 [("rust-toolchain.toml", moving, 0o444, "git")]
             )
 
+    def test_executed_descriptor_is_rehashed_after_path_substitution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = Path(temporary) / "tool"
+            executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+            executable.chmod(0o755)
+            replacement = Path(temporary) / "replacement"
+            replacement.write_bytes(b"#!/bin/sh\nexit 9\n")
+            replacement.chmod(0o755)
+            original = SEALED.stable_read
+            replaced = False
+
+            def substitute(path: Path, label: str):
+                nonlocal replaced
+                result = original(path, label)
+                if path == executable and not replaced:
+                    os.replace(replacement, executable)
+                    replaced = True
+                return result
+
+            with mock.patch.object(SEALED, "stable_read", side_effect=substitute):
+                with self.assertRaisesRegex(
+                    SEALED.SealedBuildError, "descriptor differs"
+                ):
+                    SEALED.open_verified_descriptor(executable, "fixture executable")
+            self.assertTrue(replaced)
+
     def test_second_binary_failure_rolls_back_the_entire_build_set(self) -> None:
         self._assert_publication_failure_rolls_back(failure_index=2)
 
     def test_manifest_failure_rolls_back_both_published_binaries(self) -> None:
         self._assert_publication_failure_rolls_back(failure_index=3)
+
+    def test_receipt_rejects_attestor_outside_the_external_binding(self) -> None:
+        binary = b"solver"
+        features_binary = b"features"
+        artifacts = {
+            "euf-viper": {
+                "bytes": len(binary),
+                "name": "euf-viper",
+                "sha256": hashlib.sha256(binary).hexdigest(),
+            },
+            "euf-viper-build-features": {
+                "bytes": len(features_binary),
+                "name": "euf-viper-build-features",
+                "sha256": hashlib.sha256(features_binary).hexdigest(),
+            },
+        }
+        manifest = {
+            "artifacts": artifacts,
+            "build_execution_closure_sha256": "1" * 64,
+            "revision": "2" * 40,
+            "source_snapshot_manifest_sha256": "3" * 64,
+            "source_tree": "4" * 40,
+            "toolchain": {
+                "cargo": "cargo fixture",
+                "rustc": "rustc fixture\nhost: x86_64-unknown-linux-gnu",
+            },
+        }
+        manifest_raw = SEALED.canonical_bytes(manifest)
+        attestation = {
+            "artifacts": {
+                name: {
+                    "bytes": record["bytes"],
+                    "mode": "0500",
+                    "sha256": record["sha256"],
+                }
+                for name, record in artifacts.items()
+            },
+            "attestor_sha256": "5" * 64,
+            "build_manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+            "closure_sha256": manifest["build_execution_closure_sha256"],
+            "features": ["production-evidence"],
+            "schema": SEALED.ATTESTATION_SCHEMA,
+            "status": "accepted",
+            "toolchain": manifest["toolchain"],
+        }
+        files = {
+            "sealed-build-manifest.json": (manifest_raw, 0o400),
+            "sealed-build-attestation.json": (
+                SEALED.canonical_bytes(attestation),
+                0o400,
+            ),
+            "euf-viper": (binary, 0o500),
+            "euf-viper-build-features": (features_binary, 0o500),
+        }
+
+        def fake_read(_parent_fd: int, name: str, _label: str):
+            content, mode = files[name]
+            metadata = os.stat_result((mode, 0, 0, 1, 0, 0, len(content), 0, 0, 0))
+            return content, metadata
+
+        with mock.patch.object(
+            SEALED, "stable_read_at", side_effect=fake_read
+        ), mock.patch.object(
+            SEALED, "execute_published", return_value=b"production-evidence\n"
+        ):
+            with self.assertRaisesRegex(
+                SEALED.SealedBuildError, "attestation differs"
+            ):
+                SEALED.create_external_receipt(
+                    7, expected_attestor_sha256="6" * 64
+                )
 
     def _assert_publication_failure_rolls_back(self, *, failure_index: int) -> None:
         with tempfile.TemporaryDirectory() as temporary:

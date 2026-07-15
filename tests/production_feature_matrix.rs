@@ -184,7 +184,7 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
         .filter(|feature| !feature.is_empty())
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let receipt = serde_json::json!({
+    let mut receipt = serde_json::json!({
         "artifacts": {
             "euf-viper": {
                 "bytes": binary_path.metadata().expect("binary metadata").len(),
@@ -204,7 +204,7 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
             "target": "x86_64-unknown-linux-gnu",
             "toolchain": {"cargo": "test", "rustc": "test"},
         },
-        "schema": "euf-viper.sealed-build-receipt.v2",
+        "schema": "euf-viper.sealed-build-receipt.v3",
         "sealed_build_manifest_sha256": "3".repeat(64),
         "source": {
             "dirty": false,
@@ -214,9 +214,58 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
         },
         "status": "accepted",
     });
+    let attestation = serde_json::json!({
+        "artifacts": receipt["artifacts"].clone(),
+        "attestor_sha256": "8".repeat(64),
+        "build_inputs": {
+            "archive_sha256": "9".repeat(64),
+            "cargo_sha256": "a".repeat(64),
+            "file_count": 2,
+            "index_sha256": "b".repeat(64),
+            "object_count": 2,
+            "rustc_sha256": "c".repeat(64),
+        },
+        "build_manifest_sha256": receipt["sealed_build_manifest_sha256"].clone(),
+        "closure_sha256": receipt["build"]["execution_closure_sha256"].clone(),
+        "features": receipt["build"]["features"].clone(),
+        "schema": "euf-viper.sealed-build-attestation.v1",
+        "source": {
+            "bundle_sha256": "d".repeat(64),
+            "file_count": 1,
+            "manifest_sha256": receipt["source"]["snapshot_manifest_sha256"].clone(),
+            "revision": receipt["source"]["revision"].clone(),
+            "tree": receipt["source"]["tree"].clone(),
+        },
+        "status": "accepted",
+        "toolchain": receipt["build"]["toolchain"].clone(),
+        "traces": {
+            "canonical_sha256": "e".repeat(64),
+            "discovery_raw_sha256": "f".repeat(64),
+            "network": "denied-and-namespaced",
+            "production_raw_sha256": "0".repeat(64),
+            "randomness_events": 1,
+            "time_events": 1,
+        },
+    });
+    receipt["independent_attestation"] = attestation.clone();
     let mut receipt_bytes = serde_json::to_vec(&receipt).expect("receipt serialization");
     receipt_bytes.push(b'\n');
     std::fs::write(&receipt_path, receipt_bytes).expect("receipt should be writable");
+    std::fs::set_permissions(&receipt_path, std::fs::Permissions::from_mode(0o400))
+        .expect("receipt mode should be immutable");
+    let mut attestation_bytes =
+        serde_json::to_vec(&attestation).expect("attestation serialization");
+    attestation_bytes.push(b'\n');
+    std::fs::write(
+        root.join("sealed-build-attestation.json"),
+        attestation_bytes,
+    )
+    .expect("attestation should be writable");
+    std::fs::set_permissions(
+        root.join("sealed-build-attestation.json"),
+        std::fs::Permissions::from_mode(0o400),
+    )
+    .expect("attestation mode should be immutable");
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let completed = Command::new("python3")
         .arg(repository.join("scripts/bench/record_solver_config.py"))

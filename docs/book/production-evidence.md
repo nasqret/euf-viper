@@ -79,7 +79,12 @@ every source assertion, and the exact status/backend-status pairs `sat/sat`,
 `unsupported/sat`, `unsupported/unsupported`, and `unsupported/unsat`.
 
 Decisive evidence is rejected unless it carries an externally captured,
-digest-bound `euf-viper.sealed-build-receipt.v2`. Values embedded by `build.rs`
+digest-bound `euf-viper.sealed-build-receipt.v3`. The receipt embeds an
+independent attestation reconstructed from the retained source archive, native
+and Python build inputs, compiler bytes, actual binary bytes, and canonical
+all-syscall traces. The build runs in private mount and network namespaces;
+network syscalls are denied, while observed time and randomness values remain
+bound by the retained trace bytes. Values embedded by `build.rs`
 are diagnostics only: revision, dirty, manifest, and closure environment strings
 cannot authorize evidence. The emitter compares diagnostic feature, target, and
 profile markers with the receipt to detect a mixed build, but authority comes
@@ -108,7 +113,9 @@ python3 -B scripts/wmi/sealed_linux_build.py build \
   --unshare "$(command -v unshare)" --ldd "$(command -v ldd)" \
   --cc "$(command -v cc)" --cxx "$(command -v c++)" \
   --ar "$(command -v ar)" --ranlib "$(command -v ranlib)" \
-  --strace "$(command -v strace)"
+  --strace "$(command -v strace)" \
+  --attestor scripts/wmi/attest_sealed_build.py \
+  --attestor-sha256 "$(sha256sum scripts/wmi/attest_sealed_build.py | awk '{print $1}')"
 export EUF_VIPER_RUN_NONCE="$(openssl rand -hex 32)"
 export EUF_VIPER_TRUSTED_EXECUTABLE_SHA256="$(sha256sum \
   "$ATTEMPT/publish/release/euf-viper" | awk '{print $1}')"

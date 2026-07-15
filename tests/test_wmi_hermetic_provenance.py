@@ -13,11 +13,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.sealed_build_fixture import independent_attestation
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_PATH = ROOT / "scripts" / "wmi" / "hermetic_provenance.py"
 SEALED_BUILD_HELPER_PATH = ROOT / "scripts" / "wmi" / "sealed_linux_build.py"
 EXECUTION_CLOSURE_HELPER_PATH = ROOT / "scripts" / "wmi" / "execution_closure.py"
+ATTESTOR_HELPER_PATH = ROOT / "scripts" / "wmi" / "attest_sealed_build.py"
 SPEC = importlib.util.spec_from_file_location("hermetic_provenance_test", HELPER_PATH)
 assert SPEC is not None and SPEC.loader is not None
 PROVENANCE = importlib.util.module_from_spec(SPEC)
@@ -54,6 +57,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             HELPER_PATH,
             SEALED_BUILD_HELPER_PATH,
             EXECUTION_CLOSURE_HELPER_PATH,
+            ATTESTOR_HELPER_PATH,
         ):
             helper = checkout / "scripts" / "wmi" / source.name
             helper.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +163,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         with mock.patch.dict(os.environ, environment, clear=True):
             verified = PROVENANCE.verify_manifest(verify_args)
         self.assertEqual(verified["attempt"]["id"], args.attempt_id)
-        self.assertEqual(verified["source_blob_count"], 4)
+        self.assertEqual(verified["source_blob_count"], 5)
         self.assertEqual(
             set(verified["runtime_tools"]), PROVENANCE.REQUIRED_RUNTIME_TOOLS
         )
@@ -394,13 +398,27 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             PROVENANCE.canonical_bytes(source_snapshot)
         ).hexdigest()
         build_closure = {
-            "access_discovery": {"sha256": "6" * 64, "virtual_paths": []},
+            "access_discovery": {
+                "missing_paths": [],
+                "sha256": "6" * 64,
+                "virtual_paths": [],
+            },
             "external_directories": [],
             "external_inputs": [],
-            "policy": "two-pass-strace-sealed-memfd-v1",
+            "policy": "two-pass-all-syscall-trace-sealed-memfd-v2",
             "python_runtime": {"files": [], "frozen_or_builtin_modules": []},
+            "retained_inputs": {
+                "archive_sha256": "9" * 64,
+                "index": {
+                    "files": [],
+                    "objects": [],
+                    "schema": "euf-viper.retained-build-inputs.v1",
+                },
+                "index_sha256": "b" * 64,
+                "source_snapshot_sha256": "d" * 64,
+            },
             "rust_toolchain": [],
-            "schema": "euf-viper.build-execution-closure.v2",
+            "schema": "euf-viper.build-execution-closure.v3",
         }
         build_closure_sha256 = hashlib.sha256(
             PROVENANCE.canonical_bytes(build_closure)
@@ -415,7 +433,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         sealed_manifest.write_bytes(
             PROVENANCE.canonical_bytes(
                 {
-                    "schema": "euf-viper.sealed-linux-build.v2",
+                    "schema": "euf-viper.sealed-linux-build.v3",
                     "status": "built",
                     "artifacts": {
                         "euf-viper": sealed_artifact,
@@ -432,6 +450,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                     "build_execution_closure_sha256": build_closure_sha256,
                     "build_execution_verification": {
                         "actual_trace_sha256": "7" * 64,
+                        "canonical_trace_sha256": "e" * 64,
                         "external_directory_count": 0,
                         "external_input_count": 0,
                         "status": "accepted",
@@ -442,38 +461,52 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                 }
             )
         )
+        attested_artifacts = {
+            "euf-viper": {
+                "bytes": closure_member["bytes"],
+                "mode": "0500",
+                "sha256": closure_member["sha256"],
+            },
+            "euf-viper-build-features": {
+                "bytes": closure_member["bytes"],
+                "mode": "0500",
+                "sha256": closure_member["sha256"],
+            },
+        }
+        features = [
+            "certificates",
+            "default",
+            "finite-symmetry",
+            "production-evidence",
+        ]
+        toolchain = {"cargo": "cargo fixture", "rustc": "rustc fixture"}
+        attestation = independent_attestation(
+            artifacts=attested_artifacts,
+            features=features,
+            toolchain=toolchain,
+            revision=provenance["revision"],
+            tree=provenance["source_tree"],
+            source_manifest_sha256=source_snapshot_sha256,
+            closure_sha256=build_closure_sha256,
+            build_manifest_sha256=hashlib.sha256(sealed_manifest.read_bytes()).hexdigest(),
+            attestor_sha256=provenance["attestor_helper_sha256"],
+        )
+        sealed_attestation = run_root / "sealed-build-attestation.json"
+        sealed_attestation.write_bytes(PROVENANCE.canonical_bytes(attestation))
         sealed_receipt = run_root / "sealed-build-receipt.json"
         sealed_receipt.write_bytes(
             PROVENANCE.canonical_bytes(
                 {
-                    "artifacts": {
-                        "euf-viper": {
-                            "bytes": closure_member["bytes"],
-                            "mode": "0500",
-                            "sha256": closure_member["sha256"],
-                        },
-                        "euf-viper-build-features": {
-                            "bytes": closure_member["bytes"],
-                            "mode": "0500",
-                            "sha256": closure_member["sha256"],
-                        },
-                    },
+                    "artifacts": attested_artifacts,
                     "build": {
                         "execution_closure_sha256": build_closure_sha256,
-                        "features": [
-                            "certificates",
-                            "default",
-                            "finite-symmetry",
-                            "production-evidence",
-                        ],
+                        "features": features,
                         "profile": "release",
                         "target": "x86_64-unknown-linux-gnu",
-                        "toolchain": {
-                            "cargo": "cargo fixture",
-                            "rustc": "rustc fixture",
-                        },
+                        "toolchain": toolchain,
                     },
-                    "schema": "euf-viper.sealed-build-receipt.v2",
+                    "independent_attestation": attestation,
+                    "schema": "euf-viper.sealed-build-receipt.v3",
                     "sealed_build_manifest_sha256": hashlib.sha256(
                         sealed_manifest.read_bytes()
                     ).hexdigest(),
@@ -515,6 +548,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             "files": [],
             "implementation": "cpython",
             "modules": [],
+            "runtime_roots": [],
             "scripts": {
                 "fixture": {
                     "bytes": closure_member["bytes"],
@@ -529,7 +563,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         execution_closure.write_bytes(
             PROVENANCE.canonical_bytes(
                 {
-                    "schema": "euf-viper.linux-execution-closure.v2",
+                    "schema": "euf-viper.linux-execution-closure.v3",
                     "artifacts": {
                         name: closure_artifact(
                             name,
@@ -537,13 +571,17 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                             if name == "sealed-build"
                             else sealed_receipt
                             if name == "sealed-build-receipt"
+                            else sealed_attestation
+                            if name == "sealed-build-attestation"
                             else fake_tool,
                         )
                         for name in (
                             "checker",
                             "independent-parser",
                             "libz3",
+                            "ld-cache",
                             "sealed-build",
+                            "sealed-build-attestation",
                             "sealed-build-receipt",
                         )
                     },
@@ -552,7 +590,9 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                         for name in (
                             "euf-viper",
                             "feature-report",
+                            "git",
                             "python",
+                            "unshare",
                             "z3",
                             "cvc5",
                             "yices2",
@@ -569,6 +609,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                     ],
                     "python_runtime": {
                         "executable_name": "python",
+                        "native_extensions": [],
                         "probe": python_probe,
                         "probe_sha256": hashlib.sha256(
                             PROVENANCE.canonical_bytes(python_probe)
@@ -615,6 +656,10 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             "revision": provenance["revision"],
             "runtime_tools": provenance["runtime_tools"],
             "sealed_build": {
+                "attestation_path": str(sealed_attestation),
+                "attestation_sha256": hashlib.sha256(
+                    sealed_attestation.read_bytes()
+                ).hexdigest(),
                 "path": str(sealed_manifest),
                 "sha256": hashlib.sha256(sealed_manifest.read_bytes()).hexdigest(),
                 "source_snapshot_manifest_sha256": source_snapshot_sha256,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,12 +11,20 @@ WORKFLOW = ROOT / ".github" / "workflows" / "campaign-contract.yml"
 SMOKE = ROOT / "scripts" / "ci" / "release_evidence_smoke.py"
 CLI_CONTRACT = ROOT / "scripts" / "ci" / "check_ordinary_cli_contract.py"
 CLI_BASELINE = ROOT / "scripts" / "ci" / "build_cli_baseline.py"
+CLI_CASES = ROOT / "scripts" / "ci" / "ordinary_cli_cases.py"
+CLI_ORACLE = ROOT / "scripts" / "ci" / "record_cli_oracle.py"
 CLI_CONTRACT_SPEC = importlib.util.spec_from_file_location(
     "check_ordinary_cli_contract_test", CLI_CONTRACT
 )
 assert CLI_CONTRACT_SPEC is not None and CLI_CONTRACT_SPEC.loader is not None
 CLI_CONTRACT_MODULE = importlib.util.module_from_spec(CLI_CONTRACT_SPEC)
 CLI_CONTRACT_SPEC.loader.exec_module(CLI_CONTRACT_MODULE)
+CLI_BASELINE_SPEC = importlib.util.spec_from_file_location(
+    "build_cli_baseline_test", CLI_BASELINE
+)
+assert CLI_BASELINE_SPEC is not None and CLI_BASELINE_SPEC.loader is not None
+CLI_BASELINE_MODULE = importlib.util.module_from_spec(CLI_BASELINE_SPEC)
+CLI_BASELINE_SPEC.loader.exec_module(CLI_BASELINE_MODULE)
 
 
 class ReleaseEvidenceWorkflowTests(unittest.TestCase):
@@ -62,9 +71,12 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
 
     def test_cli_contract_uses_an_independently_built_baseline(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")
+        case_text = CLI_CASES.read_text(encoding="ascii")
+        oracle_text = CLI_ORACLE.read_text(encoding="ascii")
         self.assertIn("f8d9205", text)
         self.assertIn("--baseline-binary", text)
         self.assertIn("--baseline-receipt", text)
+        self.assertIn("--oracle", text)
         self.assertIn("cli-baseline-build.v2", text)
         self.assertIn("f8d9205e8a18e3496d236fb9b94ed181add93e80", text)
         self.assertIn("effective_compiler", text)
@@ -72,6 +84,9 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("completed.stderr", text)
         self.assertNotIn("BASE_USAGE", text)
         self.assertNotIn("CERTIFICATE_USAGE", text)
+        self.assertIn("ordinary-cli-oracle.v1", text)
+        self.assertIn("open_verified_sealed_memfd", oracle_text)
+        self.assertNotIn("execute(baseline", text)
         for case in (
             "no arguments",
             "unknown top-level command",
@@ -79,7 +94,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "parse-check stdin",
             "missing file",
         ):
-            self.assertIn(case, text)
+            self.assertIn(case, case_text)
 
     def test_hosted_dependencies_are_pinned_and_non_attesting(self) -> None:
         text = WORKFLOW.read_text(encoding="ascii")
@@ -95,6 +110,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("diagnostic", text)
         self.assertIn("not production attestation", text)
         self.assertNotIn("ubuntu-latest", text)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', text)
 
     def test_cli_baseline_forces_effective_compiler_and_sanitizes_ambient_controls(self) -> None:
         text = CLI_BASELINE.read_text(encoding="ascii")
@@ -105,6 +121,9 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn('"RUSTC": str(rustc_path)', text)
         self.assertIn("effective_rustc_invocations", text)
         self.assertIn("verbose_invocations", text)
+        self.assertIn("EXPECTED_TREE", text)
+        self.assertIn("EXPECTED_CARGO_LOCK_SHA256", text)
+        self.assertIn("reject_ambient_cargo_configs", text)
         self.assertNotIn("**os.environ", text)
         for control in (
             "RUSTC_WRAPPER",
@@ -113,6 +132,20 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "CARGO_ENCODED_RUSTFLAGS",
         ):
             self.assertIn(control, text)
+
+    def test_cli_baseline_rejects_cargo_config_in_a_checkout_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            checkout = root / "output" / "source"
+            checkout.mkdir(parents=True)
+            CLI_BASELINE_MODULE.reject_ambient_cargo_configs(checkout)
+            cargo_directory = root / "output" / ".cargo"
+            cargo_directory.mkdir()
+            (cargo_directory / "config.toml").write_text(
+                "[build]\nrustc-wrapper = '/attacker'\n", encoding="ascii"
+            )
+            with self.assertRaisesRegex(SystemExit, "config search path"):
+                CLI_BASELINE_MODULE.reject_ambient_cargo_configs(checkout)
 
     def test_cli_checker_reparses_the_bound_effective_compiler_log(self) -> None:
         rustc = Path("/bound/toolchain/bin/rustc")

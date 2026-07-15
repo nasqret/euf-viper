@@ -44,7 +44,8 @@ from strict_artifacts import (  # noqa: E402
 
 SCHEMA: Final = "euf-viper.production-evidence.v4"
 CONTRACT: Final = "deterministic-cnf-transcript-v1"
-SEALED_BUILD_RECEIPT_SCHEMA: Final = "euf-viper.sealed-build-receipt.v2"
+SEALED_BUILD_RECEIPT_SCHEMA: Final = "euf-viper.sealed-build-receipt.v3"
+SEALED_BUILD_ATTESTATION_SCHEMA: Final = "euf-viper.sealed-build-attestation.v1"
 SEALED_BUILD_RECEIPT_SHA256_ENV: Final = "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 INDEPENDENT_INTERNAL = re.compile(r"@independent_(.+)_[0-9]+\Z")
@@ -805,6 +806,7 @@ def _validate_sealed_build_receipt(
         {
             "artifacts",
             "build",
+            "independent_attestation",
             "schema",
             "sealed_build_manifest_sha256",
             "source",
@@ -916,6 +918,88 @@ def _validate_sealed_build_receipt(
         _hash(record["sha256"], f"sealed artifact {name}.sha256")
     if artifacts["euf-viper"]["sha256"] != executable_sha256:
         raise ProductionEvidenceError("sealed build receipt executable hash differs")
+    attestation = _exact(
+        receipt["independent_attestation"],
+        {
+            "artifacts",
+            "attestor_sha256",
+            "build_inputs",
+            "build_manifest_sha256",
+            "closure_sha256",
+            "features",
+            "schema",
+            "source",
+            "status",
+            "toolchain",
+            "traces",
+        },
+        "solver.sealed_build.receipt.independent_attestation",
+    )
+    if (
+        attestation["schema"] != SEALED_BUILD_ATTESTATION_SCHEMA
+        or attestation["status"] != "accepted"
+        or attestation["artifacts"] != artifacts
+        or attestation["features"] != features
+        or attestation["toolchain"] != toolchain
+        or attestation["closure_sha256"] != build["execution_closure_sha256"]
+        or attestation["build_manifest_sha256"]
+        != receipt["sealed_build_manifest_sha256"]
+    ):
+        raise ProductionEvidenceError("independent sealed build attestation differs")
+    _hash(attestation["attestor_sha256"], "sealed build attestor SHA-256")
+    attested_source = _exact(
+        attestation["source"],
+        {"bundle_sha256", "file_count", "manifest_sha256", "revision", "tree"},
+        "sealed build attestation source",
+    )
+    if (
+        attested_source["revision"] != source["revision"]
+        or attested_source["tree"] != source["tree"]
+        or attested_source["manifest_sha256"]
+        != source["snapshot_manifest_sha256"]
+        or _integer(attested_source["file_count"], "attested source file count") < 1
+    ):
+        raise ProductionEvidenceError("attested source reconstruction differs")
+    _hash(attested_source["bundle_sha256"], "attested source bundle SHA-256")
+    build_inputs = _exact(
+        attestation["build_inputs"],
+        {
+            "archive_sha256",
+            "cargo_sha256",
+            "file_count",
+            "index_sha256",
+            "object_count",
+            "rustc_sha256",
+        },
+        "sealed build attestation inputs",
+    )
+    for field in ("archive_sha256", "cargo_sha256", "index_sha256", "rustc_sha256"):
+        _hash(build_inputs[field], f"attested build input {field}")
+    if (
+        _integer(build_inputs["file_count"], "attested build input file count") < 1
+        or _integer(build_inputs["object_count"], "attested build input object count") < 1
+    ):
+        raise ProductionEvidenceError("attested build input closure is empty")
+    traces = _exact(
+        attestation["traces"],
+        {
+            "canonical_sha256",
+            "discovery_raw_sha256",
+            "network",
+            "production_raw_sha256",
+            "randomness_events",
+            "time_events",
+        },
+        "sealed build attestation traces",
+    )
+    for field in ("canonical_sha256", "discovery_raw_sha256", "production_raw_sha256"):
+        _hash(traces[field], f"attested build trace {field}")
+    if (
+        traces["network"] != "denied-and-namespaced"
+        or _integer(traces["randomness_events"], "attested randomness event count") < 0
+        or _integer(traces["time_events"], "attested time event count") < 0
+    ):
+        raise ProductionEvidenceError("attested build input channels differ")
     return receipt_sha256
 
 

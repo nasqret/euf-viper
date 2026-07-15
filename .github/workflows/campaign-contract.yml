@@ -20,6 +20,12 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12.11"
+      - name: Bind workflow revision to checkout
+        run: |
+          test -n "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse --verify "$GITHUB_SHA^{commit}")" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Record diagnostic hosted-runner identity
         run: |
           python3 -B scripts/ci/record_hosted_runner_identity.py \
@@ -66,10 +72,14 @@ jobs:
           python3 -B -m py_compile \
             scripts/ci/check_ordinary_cli_contract.py \
             scripts/ci/build_cli_baseline.py \
+            scripts/ci/ordinary_cli_cases.py \
+            scripts/ci/record_cli_oracle.py \
             scripts/ci/release_evidence_smoke.py \
             scripts/ci/record_hosted_runner_identity.py \
             scripts/wmi/hermetic_provenance.py \
             scripts/wmi/execution_closure.py \
+            scripts/wmi/attest_sealed_build.py \
+            scripts/wmi/finalize_locked_audit.py \
             scripts/wmi/sealed_linux_build.py
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
@@ -107,11 +117,14 @@ jobs:
             --cxx "$(command -v c++)" \
             --ar "$(command -v ar)" \
             --ranlib "$(command -v ranlib)" \
-            --strace "$(command -v strace)"
+            --strace "$(command -v strace)" \
+            --attestor scripts/wmi/attest_sealed_build.py \
+            --attestor-sha256 "$(sha256sum scripts/wmi/attest_sealed_build.py | cut -d' ' -f1)"
           echo "SEALED_RELEASE=$SEALED_ROOT/release" >> "$GITHUB_ENV"
           test -x "$SEALED_ROOT/release/euf-viper"
           test -x "$SEALED_ROOT/release/euf-viper-build-features"
           test -f "$SEALED_ROOT/release/sealed-build-manifest.json"
+          test -f "$SEALED_ROOT/release/sealed-build-attestation.json"
           test -f "$SEALED_ROOT/release/sealed-build-receipt.json"
           test "$("$SEALED_ROOT/release/euf-viper-build-features")" = \
             "certificates,default,finite-symmetry,production-evidence"
@@ -125,13 +138,21 @@ jobs:
             --git "$(command -v git)"
       - name: Install pinned real comparators
         run: scripts/bench/install_solvers.sh "$RUNNER_TEMP/euf-viper-solvers"
+      - name: Record independent f8d9205 CLI oracle
+        run: |
+          python3 -B scripts/ci/record_cli_oracle.py \
+            --baseline-binary "$RUNNER_TEMP/euf-viper-cli-baseline/target/release/euf-viper" \
+            --baseline-receipt "$RUNNER_TEMP/euf-viper-cli-baseline/baseline-build.json" \
+            --repository . \
+            --out "$RUNNER_TEMP/euf-viper-cli-baseline/oracle.json"
       - name: Check exact ordinary release CLI
         run: |
           python3 -B scripts/ci/check_ordinary_cli_contract.py \
             --binary "$SEALED_RELEASE/euf-viper" \
             --repository . \
             --baseline-binary "$RUNNER_TEMP/euf-viper-cli-baseline/target/release/euf-viper" \
-            --baseline-receipt "$RUNNER_TEMP/euf-viper-cli-baseline/baseline-build.json"
+            --baseline-receipt "$RUNNER_TEMP/euf-viper-cli-baseline/baseline-build.json" \
+            --oracle "$RUNNER_TEMP/euf-viper-cli-baseline/oracle.json"
       - name: Run real release evidence and locked campaign smoke
         run: |
           python3 -B scripts/ci/release_evidence_smoke.py \
@@ -142,6 +163,7 @@ jobs:
             --sealed-build-receipt "$SEALED_RELEASE/sealed-build-receipt.json" \
             --baseline-binary "$RUNNER_TEMP/euf-viper-cli-baseline/target/release/euf-viper" \
             --baseline-receipt "$RUNNER_TEMP/euf-viper-cli-baseline/baseline-build.json" \
+            --baseline-oracle "$RUNNER_TEMP/euf-viper-cli-baseline/oracle.json" \
             --z3 "$RUNNER_TEMP/euf-viper-solvers/bin/z3" \
             --cvc5 "$RUNNER_TEMP/euf-viper-solvers/bin/cvc5" \
             --yices2 "$RUNNER_TEMP/euf-viper-solvers/bin/yices-smt2" \

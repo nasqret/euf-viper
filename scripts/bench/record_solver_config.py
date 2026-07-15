@@ -28,6 +28,8 @@ from strict_artifacts import (  # noqa: E402
     StrictArtifactError,
     atomic_write_nofollow,
     canonical_json_bytes,
+    open_read_nofollow,
+    read_open_descriptor,
     strict_json_loads,
 )
 from validate_campaign_spec import CampaignSpecError, validate_spec  # noqa: E402
@@ -156,17 +158,28 @@ def require_sealed_build_receipt(
     feature_report: Path,
     features: frozenset[str],
 ) -> tuple[Path, str]:
-    receipt = receipt_path.resolve(strict=True)
+    receipt_fd = -1
     try:
-        raw = receipt.read_bytes()
+        receipt, receipt_fd = open_read_nofollow(
+            receipt_path.absolute(), "sealed build receipt"
+        )
+        raw, receipt_metadata = read_open_descriptor(
+            receipt_fd, "sealed build receipt"
+        )
         value = strict_json_loads(raw.decode("utf-8"), "sealed build receipt")
     except (OSError, UnicodeError, StrictArtifactError) as error:
         raise SolverConfigError(f"cannot read sealed build receipt: {error}") from error
+    finally:
+        if receipt_fd >= 0:
+            os.close(receipt_fd)
+    if stat.S_IMODE(receipt_metadata.st_mode) != 0o400:
+        raise SolverConfigError("sealed build receipt mode must be 0400")
     if canonical_json_bytes(value) != raw:
         raise SolverConfigError("sealed build receipt is not canonical JSON")
     expected_keys = {
         "artifacts",
         "build",
+        "independent_attestation",
         "schema",
         "sealed_build_manifest_sha256",
         "source",
@@ -178,7 +191,7 @@ def require_sealed_build_receipt(
     build = value["build"]
     source = value["source"]
     if (
-        value["schema"] != "euf-viper.sealed-build-receipt.v2"
+        value["schema"] != "euf-viper.sealed-build-receipt.v3"
         or value["status"] != "accepted"
         or type(artifacts) is not dict
         or set(artifacts) != {"euf-viper", "euf-viper-build-features"}
@@ -240,6 +253,40 @@ def require_sealed_build_receipt(
             raise SolverConfigError(
                 f"sealed build receipt does not bind {name} bytes and mode"
             )
+    attestation_path = receipt.parent / "sealed-build-attestation.json"
+    attestation_fd = -1
+    try:
+        _, attestation_fd = open_read_nofollow(
+            attestation_path, "independent sealed build attestation"
+        )
+        attestation_raw, attestation_metadata = read_open_descriptor(
+            attestation_fd, "independent sealed build attestation"
+        )
+        attestation = strict_json_loads(
+            attestation_raw.decode("utf-8"), "independent sealed build attestation"
+        )
+    except (OSError, UnicodeError, StrictArtifactError) as error:
+        raise SolverConfigError(
+            f"cannot read independent sealed build attestation: {error}"
+        ) from error
+    finally:
+        if attestation_fd >= 0:
+            os.close(attestation_fd)
+    if (
+        stat.S_IMODE(attestation_metadata.st_mode) != 0o400
+        or canonical_json_bytes(attestation) != attestation_raw
+        or attestation != value["independent_attestation"]
+        or attestation.get("schema") != "euf-viper.sealed-build-attestation.v1"
+        or attestation.get("status") != "accepted"
+        or attestation.get("artifacts") != artifacts
+        or attestation.get("features") != build["features"]
+        or attestation.get("toolchain") != build["toolchain"]
+        or attestation.get("closure_sha256")
+        != build["execution_closure_sha256"]
+        or attestation.get("build_manifest_sha256")
+        != value["sealed_build_manifest_sha256"]
+    ):
+        raise SolverConfigError("independent sealed build attestation binding differs")
     return receipt, hashlib.sha256(raw).hexdigest()
 
 
@@ -251,7 +298,13 @@ def result_token(output: str) -> str | None:
     return None
 
 
-def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
+def smoke_solver(
+    record: dict[str, Any],
+    instance: Path,
+    expected: str,
+    *,
+    sealed_build_receipt: Path | None = None,
+) -> None:
     substitutions = {
         "{binary}": record["binary"],
         "{instance}": str(instance.resolve()),
@@ -272,6 +325,17 @@ def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
             evidence_path = Path(directory) / "production-evidence.json"
             evidence = record.get("evidence")
             if evidence is not None:
+                receipt = sealed_build_receipt
+                if receipt is None:
+                    raw_receipt = os.environ.get("EUF_VIPER_SEALED_BUILD_RECEIPT")
+                    receipt = Path(raw_receipt) if raw_receipt else None
+                if receipt is None:
+                    raise SolverConfigError(
+                        "external sealed build receipt is required for evidence smoke"
+                    )
+                environment["EUF_VIPER_SEALED_BUILD_RECEIPT"] = str(
+                    receipt.resolve(strict=True)
+                )
                 environment["EUF_VIPER_RUN_NONCE"] = secrets.token_hex(32)
                 environment["EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"] = record["sha256"]
                 command.extend([evidence["argv_flag"], str(evidence_path)])
@@ -367,7 +431,6 @@ def make_records(
                 "accepted_decisive_statuses": ["sat"],
             },
             "environment": {
-                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(sealed_receipt),
                 "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": sealed_receipt_sha256,
             },
             "version_argv": ["--version"],
@@ -490,7 +553,16 @@ def main() -> int:
                     f"smoke instance is not a file: {args.smoke_instance}"
                 )
             for record in records:
-                smoke_solver(record, args.smoke_instance, args.smoke_expected)
+                smoke_solver(
+                    record,
+                    args.smoke_instance,
+                    args.smoke_expected,
+                    sealed_build_receipt=(
+                        args.viper_sealed_build_receipt
+                        if record["id"] == "euf-viper"
+                        else None
+                    ),
+                )
     except SolverConfigError as error:
         parser.exit(2, f"record failed: {error}\n")
     payload = {

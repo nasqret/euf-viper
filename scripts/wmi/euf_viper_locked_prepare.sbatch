@@ -25,11 +25,84 @@ SHARED_CORPUS="${EUF_VIPER_SHARED_CORPUS:?set EUF_VIPER_SHARED_CORPUS}"
 PROVENANCE_HELPER="$CHECKOUT/scripts/wmi/hermetic_provenance.py"
 SEALED_BUILD_HELPER="$CHECKOUT/scripts/wmi/sealed_linux_build.py"
 EXECUTION_CLOSURE_HELPER="$CHECKOUT/scripts/wmi/execution_closure.py"
+BUILD_ATTESTOR="$CHECKOUT/scripts/wmi/attest_sealed_build.py"
 
 hash_file() {
   local OUTPUT
   OUTPUT="$("$SHA256SUM_BIN" "$1")"
   printf '%s' "${OUTPUT%% *}"
+}
+
+BOUND_PYTHON_CODE='import fcntl, hashlib, os, stat, sys
+path, expected, python_expected, *arguments = sys.argv[1:]
+python_descriptor = os.dup(9)
+try:
+    python_before = os.fstat(python_descriptor)
+    python_chunks = []
+    while True:
+        block = os.read(python_descriptor, 1024 * 1024)
+        if not block:
+            break
+        python_chunks.append(block)
+    python_after = os.fstat(python_descriptor)
+finally:
+    os.close(python_descriptor)
+python_identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+if python_identity(python_before) != python_identity(python_after) or hashlib.sha256(b"".join(python_chunks)).hexdigest() != python_expected:
+    raise SystemExit("bound Python executable descriptor mismatch")
+descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+try:
+    before = os.fstat(descriptor)
+    chunks = []
+    while True:
+        block = os.read(descriptor, 1024 * 1024)
+        if not block:
+            break
+        chunks.append(block)
+    after = os.fstat(descriptor)
+finally:
+    os.close(descriptor)
+raw = b"".join(chunks)
+identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+if not stat.S_ISREG(after.st_mode) or identity(before) != identity(after) or len(raw) != after.st_size:
+    raise SystemExit("bound Python helper changed while read")
+if hashlib.sha256(raw).hexdigest() != expected:
+    raise SystemExit("bound Python helper SHA-256 mismatch")
+sealed = os.memfd_create("euf-viper-bound-helper", os.MFD_ALLOW_SEALING)
+offset = 0
+while offset < len(raw):
+    written = os.write(sealed, raw[offset:])
+    if written <= 0:
+        raise SystemExit("short bound Python helper write")
+    offset += written
+os.fchmod(sealed, 0o400)
+fcntl.fcntl(sealed, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE)
+os.lseek(sealed, 0, os.SEEK_SET)
+sealed_chunks = []
+while True:
+    block = os.read(sealed, 1024 * 1024)
+    if not block:
+        break
+    sealed_chunks.append(block)
+if hashlib.sha256(b"".join(sealed_chunks)).hexdigest() != expected:
+    raise SystemExit("sealed Python helper SHA-256 mismatch")
+helper = f"/proc/self/fd/{sealed}"
+sys.argv = [helper, *arguments]
+scope = {"__name__": "__main__", "__file__": helper, "__package__": None, "__cached__": None}
+exec(compile(raw, helper, "exec"), scope, scope)'
+
+python_bound_bootstrap() {
+  local SCRIPT="$1" EXPECTED="$2"
+  shift 2
+  (
+    exec 9<"$PYTHON_BIN"
+    if [ "$(hash_file /proc/self/fd/9)" != "$PYTHON_SHA256" ]; then
+      echo "bound Python descriptor SHA-256 mismatch" >&2
+      exit 2
+    fi
+    /proc/self/fd/9 -B -I -S -c "$BOUND_PYTHON_CODE" \
+      "$SCRIPT" "$EXPECTED" "$PYTHON_SHA256" "$@"
+  )
 }
 
 if [ "$(hash_file "$PYTHON_BIN")" != "$PYTHON_SHA256" ]; then
@@ -45,7 +118,8 @@ if [ "$(hash_file "$SUBMISSION_MANIFEST")" != "$SUBMISSION_MANIFEST_SHA256" ]; t
   exit 2
 fi
 
-VERIFIED_PROVENANCE="$("$PYTHON_BIN" -B -I -S "$PROVENANCE_HELPER" verify \
+VERIFIED_PROVENANCE="$(python_bound_bootstrap "$PROVENANCE_HELPER" \
+  "$PROVENANCE_HELPER_SHA256" verify \
   --manifest "$SUBMISSION_MANIFEST" \
   --expected-sha256 "$SUBMISSION_MANIFEST_SHA256" \
   --stage prepare)"
@@ -66,6 +140,7 @@ fields = [
     tools["ranlib"]["realpath"], tools["rustc"]["realpath"], tools["find"]["realpath"],
     tools["strace"]["realpath"],
     value["sealed_build_helper_sha256"], value["execution_closure_helper_sha256"],
+    value["attestor_helper_sha256"],
 ]
 if any("\t" in item or "\n" in item for item in fields):
     raise SystemExit("unsafe execution-environment field")
@@ -75,11 +150,12 @@ IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_HOME CARGO_TARGET_
   PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME BASH_BIN CARGO_BIN GIT_BIN \
   CHMOD_BIN ENV_BIN MKDIR_BIN LDD_BIN UNSHARE_BIN CC_BIN CXX_BIN AR_BIN \
   RANLIB_BIN RUSTC_BIN FIND_BIN STRACE_BIN SEALED_BUILD_HELPER_SHA256 \
-  EXECUTION_CLOSURE_HELPER_SHA256 \
+  EXECUTION_CLOSURE_HELPER_SHA256 BUILD_ATTESTOR_SHA256 \
   <<<"$EXECUTION_FIELDS"
 
 if [ "$(hash_file "$SEALED_BUILD_HELPER")" != "$SEALED_BUILD_HELPER_SHA256" ] || \
-   [ "$(hash_file "$EXECUTION_CLOSURE_HELPER")" != "$EXECUTION_CLOSURE_HELPER_SHA256" ]; then
+   [ "$(hash_file "$EXECUTION_CLOSURE_HELPER")" != "$EXECUTION_CLOSURE_HELPER_SHA256" ] || \
+   [ "$(hash_file "$BUILD_ATTESTOR")" != "$BUILD_ATTESTOR_SHA256" ]; then
   echo "receipt-bound build helper SHA-256 mismatch" >&2
   exit 2
 fi
@@ -108,6 +184,19 @@ clean_env() {
 python_clean() {
   clean_env "$PYTHON_BIN" -B -I -S "$@"
 }
+python_bound() {
+  local SCRIPT="$1" EXPECTED="$2"
+  shift 2
+  (
+    exec 9<"$PYTHON_BIN"
+    if [ "$(hash_file /proc/self/fd/9)" != "$PYTHON_SHA256" ]; then
+      echo "bound Python descriptor SHA-256 mismatch" >&2
+      exit 2
+    fi
+    clean_env /proc/self/fd/9 -B -I -S -c "$BOUND_PYTHON_CODE" \
+      "$SCRIPT" "$EXPECTED" "$PYTHON_SHA256" "$@"
+  )
+}
 
 cd "$CHECKOUT"
 RUN_ROOT="$ATTEMPT_ROOT/results/p0-${SLURM_JOB_ID}"
@@ -120,7 +209,7 @@ python_clean scripts/bench/validate_campaign_spec.py \
 
 SEALED_ARTIFACT_DIR="$ATTEMPT_ROOT/build/sealed-release"
 "$MKDIR_BIN" -p "$ATTEMPT_ROOT/build" "$ATTEMPT_ROOT/build/sealed-staging"
-python_clean "$SEALED_BUILD_HELPER" build \
+python_bound "$SEALED_BUILD_HELPER" "$SEALED_BUILD_HELPER_SHA256" build \
   --repository "$CHECKOUT" \
   --revision "$EXPECTED_REVISION" \
   --artifact-dir "$SEALED_ARTIFACT_DIR" \
@@ -138,10 +227,16 @@ python_clean "$SEALED_BUILD_HELPER" build \
   --ar "$AR_BIN" \
   --ranlib "$RANLIB_BIN" \
   --strace "$STRACE_BIN" \
+  --attestor "$BUILD_ATTESTOR" \
+  --attestor-sha256 "$BUILD_ATTESTOR_SHA256" \
   >"$RUN_ROOT/sealed-build-summary.json"
+python_bound "$BUILD_ATTESTOR" "$BUILD_ATTESTOR_SHA256" verify \
+  --artifact-dir "$SEALED_ARTIFACT_DIR" \
+  >"$RUN_ROOT/sealed-build-attestation-verification.json"
 VIPER_BINARY="$SEALED_ARTIFACT_DIR/euf-viper"
 VIPER_FEATURE_REPORT="$SEALED_ARTIFACT_DIR/euf-viper-build-features"
 SEALED_BUILD_MANIFEST="$SEALED_ARTIFACT_DIR/sealed-build-manifest.json"
+SEALED_BUILD_ATTESTATION="$SEALED_ARTIFACT_DIR/sealed-build-attestation.json"
 SEALED_BUILD_RECEIPT="$SEALED_ARTIFACT_DIR/sealed-build-receipt.json"
 if [ ! -x "$VIPER_FEATURE_REPORT" ]; then
   echo "locked build omitted the production-evidence feature report" >&2
@@ -211,12 +306,14 @@ if [ -z "$Z3_LIBZ3" ]; then
   exit 2
 fi
 EXECUTION_CLOSURE_MANIFEST="$RUN_ROOT/execution-closure.json"
-python_clean "$EXECUTION_CLOSURE_HELPER" create \
+python_bound "$EXECUTION_CLOSURE_HELPER" "$EXECUTION_CLOSURE_HELPER_SHA256" create \
   --ldd "$LDD_BIN" \
   --python-executable-name python \
   --executable "euf-viper=$VIPER_BINARY" \
   --executable "feature-report=$VIPER_FEATURE_REPORT" \
   --executable "python=$PYTHON_BIN" \
+  --executable "git=$GIT_BIN" \
+  --executable "unshare=$UNSHARE_BIN" \
   --executable "z3=$SOLVER_ROOT/bin/z3" \
   --executable "cvc5=$SOLVER_ROOT/bin/cvc5" \
   --executable "yices2=$SOLVER_ROOT/bin/yices-smt2" \
@@ -225,12 +322,15 @@ python_clean "$EXECUTION_CLOSURE_HELPER" create \
   --artifact "independent-parser=$CHECKOUT/scripts/cert/independent_qfuf.py" \
   --artifact "libz3=$Z3_LIBZ3" \
   --artifact "sealed-build=$SEALED_BUILD_MANIFEST" \
+  --artifact "sealed-build-attestation=$SEALED_BUILD_ATTESTATION" \
   --artifact "sealed-build-receipt=$SEALED_BUILD_RECEIPT" \
+  --artifact "ld-cache=/etc/ld.so.cache" \
   --python-script "provenance-helper=$PROVENANCE_HELPER" \
   --python-script "execution-closure-helper=$EXECUTION_CLOSURE_HELPER" \
   --python-script "bind-campaign-cpu=$CHECKOUT/scripts/bench/bind_campaign_cpu.py" \
   --python-script "run-locked-campaign=$CHECKOUT/scripts/bench/run_locked_campaign.py" \
   --python-script "analyze-campaign=$CHECKOUT/scripts/bench/analyze_campaign.py" \
+  --python-script "finalize-locked-audit=$CHECKOUT/scripts/wmi/finalize_locked_audit.py" \
   --python-script "production-checker=$CHECKOUT/scripts/cert/check_production_evidence.py" \
   --python-script "independent-parser=$CHECKOUT/scripts/cert/independent_qfuf.py" \
   --out "$EXECUTION_CLOSURE_MANIFEST" \
@@ -278,7 +378,8 @@ python_clean scripts/bench/shard_campaign_lock.py \
   --out-dir "$RUN_ROOT/locks/official" \
   >"$RUN_ROOT/locks/official-shards-summary.json"
 
-FINAL_PROVENANCE="$("$PYTHON_BIN" -B -I -S "$PROVENANCE_HELPER" verify \
+FINAL_PROVENANCE="$(python_bound_bootstrap "$PROVENANCE_HELPER" \
+  "$PROVENANCE_HELPER_SHA256" verify \
   --manifest "$SUBMISSION_MANIFEST" \
   --expected-sha256 "$SUBMISSION_MANIFEST_SHA256" \
   --stage prepare)"
@@ -291,7 +392,8 @@ python_clean - "$RUN_ROOT/prepare.json" "$VERIFIED_PROVENANCE" \
   "$RUN_ROOT" "$CORPUS_ROOT" "$FULL_MANIFEST" "$OFFICIAL_MANIFEST" \
   "$VIPER_BINARY" "$VIPER_BUILD_FEATURES" "$VIPER_FEATURE_REPORT" "$SLURM_JOB_ID" \
   "${SLURM_SUBMIT_DIR:-}" "$SHARDS" "$SEALED_BUILD_MANIFEST" \
-  "$SEALED_BUILD_RECEIPT" "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
+  "$SEALED_BUILD_ATTESTATION" "$SEALED_BUILD_RECEIPT" \
+  "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
 import hashlib
 import json
 import os
@@ -303,8 +405,8 @@ from pathlib import Path
 (
     raw_out, raw_provenance, raw_root, raw_corpus, raw_full_manifest,
     raw_official_manifest, raw_viper, build_features, raw_feature_report, job_id,
-    submit_directory, shards, raw_sealed_build, raw_sealed_receipt,
-    raw_execution_closure,
+    submit_directory, shards, raw_sealed_build, raw_sealed_attestation,
+    raw_sealed_receipt, raw_execution_closure,
 ) = sys.argv[1:]
 out = Path(raw_out)
 root = Path(raw_root).resolve(strict=True)
@@ -342,6 +444,7 @@ for name in (
 solver_config = json.loads((root / "solver-config.json").read_text(encoding="utf-8"))
 sealed_build_path = Path(raw_sealed_build).resolve(strict=True)
 sealed_build = json.loads(sealed_build_path.read_text(encoding="utf-8"))
+sealed_attestation_path = Path(raw_sealed_attestation).resolve(strict=True)
 sealed_receipt_path = Path(raw_sealed_receipt).resolve(strict=True)
 execution_closure_path = Path(raw_execution_closure).resolve(strict=True)
 payload = {
@@ -381,6 +484,8 @@ payload = {
         "sha256": digest(sealed_build_path),
         "source_snapshot_manifest_sha256": sealed_build["source_snapshot_manifest_sha256"],
         "build_execution_closure_sha256": sealed_build["build_execution_closure_sha256"],
+        "attestation_path": str(sealed_attestation_path),
+        "attestation_sha256": digest(sealed_attestation_path),
         "receipt_path": str(sealed_receipt_path),
         "receipt_sha256": digest(sealed_receipt_path),
     },

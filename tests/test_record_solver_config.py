@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.sealed_build_fixture import independent_attestation
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "bench" / "record_solver_config.py"
@@ -69,7 +71,7 @@ class RecordSolverConfigTests(unittest.TestCase):
                 "target": "x86_64-unknown-linux-gnu",
                 "toolchain": {"cargo": "test", "rustc": "test"},
             },
-            "schema": "euf-viper.sealed-build-receipt.v2",
+            "schema": "euf-viper.sealed-build-receipt.v3",
             "sealed_build_manifest_sha256": "3" * 64,
             "source": {
                 "dirty": False,
@@ -79,7 +81,22 @@ class RecordSolverConfigTests(unittest.TestCase):
             },
             "status": "accepted",
         }
+        receipt["independent_attestation"] = independent_attestation(
+            artifacts=receipt["artifacts"],
+            features=receipt["build"]["features"],
+            toolchain=receipt["build"]["toolchain"],
+            revision=receipt["source"]["revision"],
+            tree=receipt["source"]["tree"],
+            source_manifest_sha256=receipt["source"]["snapshot_manifest_sha256"],
+            closure_sha256=receipt["build"]["execution_closure_sha256"],
+            build_manifest_sha256=receipt["sealed_build_manifest_sha256"],
+        )
+        (self.root / "sealed-build-attestation.json").write_bytes(
+            RECORDER.canonical_json_bytes(receipt["independent_attestation"])
+        )
+        (self.root / "sealed-build-attestation.json").chmod(0o400)
         self.sealed_receipt.write_bytes(RECORDER.canonical_json_bytes(receipt))
+        self.sealed_receipt.chmod(0o400)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -114,7 +131,14 @@ class RecordSolverConfigTests(unittest.TestCase):
         smoke = self.root / "smoke.smt2"
         smoke.write_text("(check-sat)\n", encoding="utf-8")
         for record in records:
-            RECORDER.smoke_solver(record, smoke, "sat")
+            RECORDER.smoke_solver(
+                record,
+                smoke,
+                "sat",
+                sealed_build_receipt=(
+                    self.sealed_receipt if record["id"] == "euf-viper" else None
+                ),
+            )
 
     def test_non_executable_binary_is_rejected(self) -> None:
         self.binary.chmod(0o644)
@@ -188,11 +212,28 @@ class RecordSolverConfigTests(unittest.TestCase):
                 viper_sealed_build_receipt=self.sealed_receipt,
             )
 
+    def test_sealed_receipt_path_cannot_be_a_symlink(self) -> None:
+        link = self.root / "sealed-build-receipt-link.json"
+        link.symlink_to(self.sealed_receipt)
+        with self.assertRaisesRegex(RECORDER.SolverConfigError, "symlink|links"):
+            RECORDER.make_records(
+                versions=RECORDER.load_versions(CAMPAIGN),
+                viper=self.binary,
+                z3=self.binary,
+                cvc5=self.binary,
+                yices2=self.binary,
+                opensmt=self.binary,
+                viper_version="test-build",
+                viper_feature_report=self.feature_report,
+                viper_sealed_build_receipt=link,
+            )
+
     def test_configuration_publication_is_immutable_and_no_follow(self) -> None:
         existing = self.root / "existing.json"
         existing.write_bytes(b"preserve\n")
         with self.assertRaisesRegex(
-            RECORDER.SolverConfigError, "already exists|immutable artifact drift"
+            RECORDER.SolverConfigError,
+            "already exists|immutable artifact (?:mode )?drift",
         ):
             RECORDER.atomic_write(existing, {"schema_version": 1})
         self.assertEqual(existing.read_bytes(), b"preserve\n")
@@ -203,7 +244,7 @@ class RecordSolverConfigTests(unittest.TestCase):
         link.symlink_to(victim)
         with self.assertRaisesRegex(
             RECORDER.SolverConfigError,
-            "already exists|symlink|immutable artifact drift|not a regular file",
+            "already exists|symlink|immutable artifact (?:mode )?drift|not a regular file",
         ):
             RECORDER.atomic_write(link, {"schema_version": 1})
         self.assertEqual(victim.read_bytes(), b"victim\n")

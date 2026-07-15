@@ -127,6 +127,7 @@ def main() -> int:
     parser.add_argument("--sealed-build-receipt", type=Path, required=True)
     parser.add_argument("--baseline-binary", type=Path, required=True)
     parser.add_argument("--baseline-receipt", type=Path, required=True)
+    parser.add_argument("--baseline-oracle", type=Path, required=True)
     parser.add_argument("--z3", type=Path, required=True)
     parser.add_argument("--cvc5", type=Path, required=True)
     parser.add_argument("--yices2", type=Path, required=True)
@@ -149,7 +150,7 @@ def main() -> int:
     sealed_receipt = args.sealed_build_receipt.resolve(strict=True)
     sealed_receipt_sha256 = sha256(sealed_receipt)
     if (
-        sealed_build.get("schema") != "euf-viper.sealed-linux-build.v2"
+        sealed_build.get("schema") != "euf-viper.sealed-linux-build.v3"
         or sealed_build.get("status") != "built"
     ):
         raise SystemExit("release smoke received an invalid sealed build manifest")
@@ -174,6 +175,8 @@ def main() -> int:
             args.baseline_binary.resolve(strict=True),
             "--baseline-receipt",
             args.baseline_receipt.resolve(strict=True),
+            "--oracle",
+            args.baseline_oracle.resolve(strict=True),
         ],
         cwd=repository,
     )

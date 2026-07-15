@@ -53,6 +53,7 @@ from strict_artifacts import (  # noqa: E402
     ensure_directory_nofollow,
     ensure_parent_directory_nofollow,
     fsync_parent_nofollow,
+    open_verified_sealed_memfd,
     open_append_nofollow,
     read_regular_nofollow as strict_read_regular_nofollow,
 )
@@ -1157,88 +1158,40 @@ def _descriptor_execution_available(*, required: bool) -> bool:
 
 
 def _open_verified_descriptor(path: Path, expected_sha256: str, context: str) -> int:
-    flags = os.O_RDONLY | os.O_NOFOLLOW
-    if hasattr(os, "O_CLOEXEC"):
-        flags |= os.O_CLOEXEC
     try:
-        descriptor = os.open(path, flags)
-    except OSError as error:
-        raise CampaignError(f"cannot open {context} by descriptor: {error}") from error
-    try:
-        before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode):
-            raise CampaignError(f"{context} descriptor is not a regular file")
-        digest = hashlib.sha256()
-        size = 0
-        while True:
-            block = os.read(descriptor, 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-            size += len(block)
-        after = os.fstat(descriptor)
-        identity = lambda item: (
-            item.st_dev,
-            item.st_ino,
-            item.st_size,
-            item.st_mtime_ns,
-            item.st_ctime_ns,
-        )
-        if identity(before) != identity(after) or size != after.st_size:
-            raise CampaignError(f"{context} changed while its descriptor was bound")
-        actual = digest.hexdigest()
-        if actual != expected_sha256:
-            raise CampaignError(
-                f"{context} descriptor SHA-256 mismatch: expected {expected_sha256}, got {actual}"
-            )
-        if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
-            raise CampaignError(
-                f"{context} binding requires Linux memfd sealing"
-            )
-        snapshot = os.memfd_create(
-            f"euf-viper-{path.name}", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
-        )
-        try:
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            while True:
-                block = os.read(descriptor, 1024 * 1024)
-                if not block:
-                    break
-                offset = 0
-                while offset < len(block):
-                    offset += os.write(snapshot, block[offset:])
-            os.fchmod(snapshot, stat.S_IMODE(after.st_mode))
-            os.fsync(snapshot)
-            fcntl.fcntl(snapshot, F_ADD_SEALS, REQUIRED_MEMFD_SEALS)
-            if fcntl.fcntl(snapshot, F_GET_SEALS) & REQUIRED_MEMFD_SEALS != REQUIRED_MEMFD_SEALS:
-                raise CampaignError(f"{context} snapshot did not retain required seals")
-            os.lseek(snapshot, 0, os.SEEK_SET)
-            os.close(descriptor)
-            return snapshot
-        except BaseException:
-            os.close(snapshot)
-            raise
-    except BaseException:
-        os.close(descriptor)
-        raise
+        return open_verified_sealed_memfd(path, expected_sha256, context)
+    except StrictArtifactError as error:
+        raise CampaignError(str(error)) from error
 
 
-def _bound_job_command(job: Job) -> tuple[list[str], tuple[int, ...], dict[str, str]]:
+def _bound_job_command(
+    job: Job,
+) -> tuple[list[str], tuple[int, ...], dict[str, str], dict[str, str]]:
     required = "evidence" in job.solver or os.environ.get(
         "EUF_VIPER_DESCRIPTOR_EXECUTION"
     ) == "required"
     if not required:
-        return list(job.argv), (), {
-            "mechanism": "platform_pathname",
-            "solver_sha256": job.solver["sha256"],
-            "source_sha256": job.instance["sha256"],
-        }
+        return (
+            list(job.argv),
+            (),
+            {
+                "mechanism": "platform_pathname",
+                "solver_sha256": job.solver["sha256"],
+                "source_sha256": job.instance["sha256"],
+            },
+            {},
+        )
     if not _descriptor_execution_available(required=True):
-        return list(job.argv), (), {
-            "mechanism": "platform_pathname",
-            "solver_sha256": job.solver["sha256"],
-            "source_sha256": job.instance["sha256"],
-        }
+        return (
+            list(job.argv),
+            (),
+            {
+                "mechanism": "platform_pathname",
+                "solver_sha256": job.solver["sha256"],
+                "source_sha256": job.instance["sha256"],
+            },
+            {},
+        )
     solver_path = Path(job.solver["binary"])
     source_path = Path(job.instance["path"])
     solver_fd = _open_verified_descriptor(
@@ -1266,11 +1219,44 @@ def _bound_job_command(job: Job) -> tuple[list[str], tuple[int, ...], dict[str, 
         os.close(source_fd)
         os.close(solver_fd)
         raise CampaignError("locked argv must bind the SMT source descriptor exactly once")
-    return command, (solver_fd, source_fd), {
+    descriptors = [solver_fd, source_fd]
+    runtime_controls: dict[str, str] = {}
+    descriptor_binding = {
         "mechanism": "linux_procfd",
         "solver_sha256": job.solver["sha256"],
         "source_sha256": job.instance["sha256"],
     }
+    if "evidence" in job.solver:
+        receipt_path_value = os.environ.get("EUF_VIPER_SEALED_BUILD_RECEIPT")
+        receipt_sha256 = job.environment.get(
+            "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
+        )
+        if not receipt_path_value:
+            os.close(source_fd)
+            os.close(solver_fd)
+            raise CampaignError(
+                "runner environment must supply EUF_VIPER_SEALED_BUILD_RECEIPT"
+            )
+        if receipt_sha256 is None or HEX64.fullmatch(receipt_sha256) is None:
+            os.close(source_fd)
+            os.close(solver_fd)
+            raise CampaignError(
+                "locked evidence contract lacks a sealed build receipt SHA-256"
+            )
+        try:
+            receipt_fd = _open_verified_descriptor(
+                Path(receipt_path_value), receipt_sha256, "sealed build receipt"
+            )
+        except BaseException:
+            os.close(source_fd)
+            os.close(solver_fd)
+            raise
+        descriptors.append(receipt_fd)
+        runtime_controls["EUF_VIPER_SEALED_BUILD_RECEIPT"] = (
+            f"/proc/self/fd/{receipt_fd}"
+        )
+        descriptor_binding["sealed_build_receipt_sha256"] = receipt_sha256
+    return command, tuple(descriptors), descriptor_binding, runtime_controls
 
 
 def _verify_hash(
@@ -1791,7 +1777,13 @@ def run_job(
         child_environment[TRUSTED_EXECUTABLE_SHA256_ENV] = job.solver["sha256"]
     try:
         try:
-            execution_command, bound_descriptors, descriptor_binding = _bound_job_command(job)
+            (
+                execution_command,
+                bound_descriptors,
+                descriptor_binding,
+                runtime_controls,
+            ) = _bound_job_command(job)
+            child_environment.update(runtime_controls)
             process = subprocess.Popen(
                 execution_command,
                 stdin=subprocess.DEVNULL,
@@ -2026,6 +2018,15 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
             ),
             "solver_sha256": job.solver["sha256"],
             "source_sha256": job.instance["sha256"],
+            **(
+                {
+                    "sealed_build_receipt_sha256": job.environment.get(
+                        "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
+                    )
+                }
+                if "evidence" in job.solver
+                else {}
+            ),
         },
         "environment_sha256": job.environment_sha256,
     }

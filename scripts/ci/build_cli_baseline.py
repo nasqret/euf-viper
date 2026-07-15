@@ -14,6 +14,10 @@ from pathlib import Path
 
 REVISION = "f8d9205e8a18e3496d236fb9b94ed181add93e80"
 REVISION_SHORT = "f8d9205"
+EXPECTED_TREE = "c568afb1760f7f8a74fb6aceae58de6749683e5c"
+EXPECTED_CARGO_LOCK_SHA256 = (
+    "66c19c2bdd228d51c2c2d6f31822125b3ce1d8cb1f8f34e03bdec65a5bbfa52f"
+)
 SCHEMA = "euf-viper.cli-baseline-build.v2"
 PINNED_TOOLCHAIN = "1.96.0"
 
@@ -97,6 +101,16 @@ def effective_rustc_invocations(build_log: bytes, rustc: Path) -> int:
     return count
 
 
+def reject_ambient_cargo_configs(checkout: Path) -> None:
+    for directory in (checkout, *checkout.parents):
+        for relative in (Path(".cargo/config"), Path(".cargo/config.toml")):
+            candidate = directory / relative
+            if os.path.lexists(candidate):
+                raise SystemExit(
+                    f"baseline Cargo config search path is not empty: {candidate}"
+                )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, required=True)
@@ -134,6 +148,7 @@ def main() -> int:
     environment = {
         "CARGO_HOME": str(cargo_home),
         "CARGO_INCREMENTAL": "0",
+        "CARGO_NET_GIT_FETCH_WITH_CLI": "false",
         "CARGO_TARGET_DIR": str(target),
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -143,6 +158,7 @@ def main() -> int:
         "LC_ALL": "C",
         "PATH": os.pathsep.join(path_entries),
         "RUSTC": str(rustc_path),
+        "RUSTUP_TOOLCHAIN": PINNED_TOOLCHAIN,
         "TMPDIR": str(temporary),
         "TZ": "UTC",
     }
@@ -159,8 +175,14 @@ def main() -> int:
     tree = run([git, "-C", str(checkout), "rev-parse", "HEAD^{tree}"], cwd=output, environment=environment).decode().strip()
     if revision != REVISION:
         raise SystemExit(f"independent baseline resolved to wrong revision: {revision}")
+    if tree != EXPECTED_TREE:
+        raise SystemExit(f"independent baseline resolved to wrong tree: {tree}")
     if run([git, "-C", str(checkout), "status", "--porcelain=v1", "--untracked-files=all"], cwd=output, environment=environment):
         raise SystemExit("independent baseline checkout is not clean")
+    reject_ambient_cargo_configs(checkout)
+    cargo_lock_sha256 = sha256(checkout / "Cargo.lock")
+    if cargo_lock_sha256 != EXPECTED_CARGO_LOCK_SHA256:
+        raise SystemExit("baseline Cargo.lock differs from the pinned f8d9205 bytes")
     cargo_version = run([cargo, "-V"], cwd=checkout, environment=environment).decode().strip()
     rustc_version = run([rustc, "-Vv"], cwd=checkout, environment=environment).decode().strip()
     rustc_release = next(
@@ -210,7 +232,7 @@ def main() -> int:
         "revision_short": REVISION_SHORT,
         "tree": tree,
         "checkout": str(checkout.resolve(strict=True)),
-        "cargo_lock_sha256": sha256(checkout / "Cargo.lock"),
+        "cargo_lock_sha256": cargo_lock_sha256,
         "toolchain": {"cargo": cargo_version, "rustc": rustc_version},
         "effective_compiler": {
             "path": str(rustc_path),

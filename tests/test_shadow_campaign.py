@@ -12,6 +12,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from typing import Any
 
 
@@ -625,6 +626,50 @@ class DescriptorExecutionContractTests(unittest.TestCase):
                 )
             self.assertFalse((root / "stdout").exists())
             self.assertFalse((root / "stderr").exists())
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir(),
+        "Linux sealed-descriptor acquisition test",
+    )
+    def test_shadow_never_executes_a_second_read_from_the_mutable_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "checker"
+            executable.write_text("#!/bin/sh\nprintf 'original\\n'\n", encoding="ascii")
+            executable.chmod(0o755)
+            expected = sha256_file(executable)
+            real_lseek = os.lseek
+            mutation_probe_reached = False
+
+            def mutate_if_source_is_rewound(
+                descriptor: int, offset: int, whence: int
+            ) -> int:
+                nonlocal mutation_probe_reached
+                try:
+                    target = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+                except OSError:
+                    target = Path()
+                if target == executable and offset == 0 and whence == os.SEEK_SET:
+                    mutation_probe_reached = True
+                    executable.write_text(
+                        "#!/bin/sh\nprintf 'attacker\\n'\n", encoding="ascii"
+                    )
+                return real_lseek(descriptor, offset, whence)
+
+            with mock.patch.object(os, "lseek", side_effect=mutate_if_source_is_rewound):
+                process = SHADOW.run_cold_process(
+                    [str(executable)],
+                    environment={"PATH": "/usr/bin:/bin"},
+                    timeout_s=1.0,
+                    grace_s=0.1,
+                    stdout_path=root / "stdout",
+                    stderr_path=root / "stderr",
+                    output_directory=root,
+                    descriptor_hashes={str(executable): expected},
+                )
+            self.assertFalse(mutation_probe_reached)
+            self.assertEqual(process["exit_code"], 0)
+            self.assertEqual((root / "stdout").read_bytes(), b"original\n")
 
 
 @unittest.skipUnless(
