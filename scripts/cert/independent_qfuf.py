@@ -1909,6 +1909,7 @@ def _certificate_theory_variables(
 _CERTIFICATE_EAGER_CLAUSE_BUDGET: Final = 262_144
 _CERTIFICATE_EAGER_LITERAL_BUDGET: Final = 1_048_576
 _CERTIFICATE_MAX_CANDIDATES_PER_APPLICATION: Final = 4_096
+_CERTIFICATE_MAX_CANDIDATE_VISITS: Final = 4_194_304
 
 
 class _CertificateSeedBudgetExceeded(Exception):
@@ -1920,7 +1921,7 @@ def _normalized_term_pair(left: int, right: int) -> tuple[int, int]:
 
 
 def _append_certificate_seed(
-    target: list[tuple[int, ...]],
+    target: list[tuple[int, ...]] | None,
     clause: Sequence[int],
     totals: list[int],
     *,
@@ -1941,15 +1942,18 @@ def _append_certificate_seed(
         raise _CertificateSeedBudgetExceeded
     totals[0] = next_clauses
     totals[1] = next_literals
-    target.append(normalized)
+    if target is not None:
+        target.append(normalized)
 
 
 def _reconstruct_certificate_transitivity(
     problem: EncodedProblem,
     equality_variables: Mapping[tuple[int, int], int],
     totals: list[int],
+    *,
+    materialize: bool,
 ) -> list[tuple[int, ...]]:
-    clauses: list[tuple[int, ...]] = []
+    clauses: list[tuple[int, ...]] | None = [] if materialize else None
     edges = sorted(
         (left, right, variable)
         for (left, right), variable in equality_variables.items()
@@ -1994,6 +1998,8 @@ def _reconstruct_certificate_transitivity(
             _append_certificate_seed(
                 clauses, (-left_third, -right_third, left_right), totals
             )
+    if clauses is None:
+        return []
     clauses.sort()
     return clauses
 
@@ -2003,8 +2009,10 @@ def _reconstruct_certificate_congruence(
     equality_variables: Mapping[tuple[int, int], int],
     bool_variables: Mapping[int, int],
     totals: list[int],
+    *,
+    materialize: bool,
 ) -> list[tuple[int, ...]]:
-    clauses: list[tuple[int, ...]] = []
+    clauses: list[tuple[int, ...]] | None = [] if materialize else None
     equality_neighbors: list[list[tuple[int, int]]] = [
         [] for _ in range(len(problem.terms))
     ]
@@ -2039,12 +2047,21 @@ def _reconstruct_certificate_congruence(
         term_ids[key] = term.id
 
     candidate_counts: dict[int, int] = {}
+    candidate_visits = 0
     for application in applications:
         count = 1
         for argument in problem.terms[application].args:
-            count *= len(equality_neighbors[argument]) + 1
-        if count <= _CERTIFICATE_MAX_CANDIDATES_PER_APPLICATION:
-            candidate_counts[application] = count
+            choices = len(equality_neighbors[argument]) + 1
+            if count > _CERTIFICATE_MAX_CANDIDATES_PER_APPLICATION // choices:
+                count = 0
+                break
+            count *= choices
+        if count == 0:
+            continue
+        candidate_visits += max(count - 1, 0)
+        if candidate_visits > _CERTIFICATE_MAX_CANDIDATE_VISITS:
+            raise _CertificateSeedBudgetExceeded
+        candidate_counts[application] = count
 
     for left_id in applications:
         candidate_count = candidate_counts.get(left_id)
@@ -2102,6 +2119,8 @@ def _reconstruct_certificate_congruence(
                 totals,
                 normalize=True,
             )
+    if clauses is None:
+        return []
     clauses.sort()
     return clauses
 
@@ -2110,16 +2129,47 @@ def _reconstruct_certificate_static_prefix(
     problem: EncodedProblem,
 ) -> tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]]:
     equality_variables, bool_variables = _certificate_theory_variables(problem)
-    totals = [0, 0]
+    planned_totals = [0, 0]
     try:
-        transitivity = _reconstruct_certificate_transitivity(
-            problem, equality_variables, totals
+        _reconstruct_certificate_transitivity(
+            problem,
+            equality_variables,
+            planned_totals,
+            materialize=False,
         )
-        congruence = _reconstruct_certificate_congruence(
-            problem, equality_variables, bool_variables, totals
+        _reconstruct_certificate_congruence(
+            problem,
+            equality_variables,
+            bool_variables,
+            planned_totals,
+            materialize=False,
         )
     except _CertificateSeedBudgetExceeded:
         return (), ()
+
+    materialized_totals = [0, 0]
+    try:
+        transitivity = _reconstruct_certificate_transitivity(
+            problem,
+            equality_variables,
+            materialized_totals,
+            materialize=True,
+        )
+        congruence = _reconstruct_certificate_congruence(
+            problem,
+            equality_variables,
+            bool_variables,
+            materialized_totals,
+            materialize=True,
+        )
+    except _CertificateSeedBudgetExceeded:
+        raise IndependentQfufError(
+            "certificate seed materialization differs from the planning pass"
+        ) from None
+    if materialized_totals != planned_totals:
+        raise IndependentQfufError(
+            "certificate seed materialization count differs from the planning pass"
+        )
     return tuple(transitivity), tuple(congruence)
 
 

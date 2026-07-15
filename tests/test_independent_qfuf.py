@@ -931,6 +931,74 @@ class ManifestAndTamperTests(unittest.TestCase):
         )
         self.assertEqual(QFUF._reconstruct_certificate_static_prefix(problem), ((), ()))
 
+    def test_candidate_product_cap_skips_high_arity_without_global_fallback(
+        self,
+    ) -> None:
+        declarations = "\n".join(
+            f"(declare-const {name}{index} U)"
+            for name in ("a", "b")
+            for index in range(64)
+        )
+        signature = " ".join("U" for _ in range(64))
+        equalities = "\n".join(
+            f"(assert (= a{index} b{index}))" for index in range(64)
+        )
+        left = " ".join(f"a{index}" for index in range(64))
+        right = " ".join(f"b{index}" for index in range(64))
+        problem = QFUF._validate_problem(
+            QFUF.parse_and_encode(
+                query(
+                    f"""
+                    (declare-sort U 0)
+                    {declarations}
+                    (declare-fun f (U) U)
+                    (declare-fun h ({signature}) U)
+                    {equalities}
+                    (assert (= (f a0) (f b0)))
+                    (assert (= (h {left}) (h {right})))
+                    """
+                )
+            )
+        )
+        transitivity, congruence = QFUF._reconstruct_certificate_static_prefix(problem)
+        self.assertEqual(transitivity, ())
+        self.assertEqual(len(congruence), 1)
+
+    def test_aggregate_candidate_visit_cap_discards_the_whole_static_prefix(
+        self,
+    ) -> None:
+        declarations = "\n".join(
+            f"(declare-const {name}{index} U)"
+            for name in ("a", "b")
+            for index in range(12)
+        )
+        equalities = "\n".join(
+            f"(assert (= a{index} b{index}))" for index in range(12)
+        )
+        signature = " ".join("U" for _ in range(12))
+        arguments = " ".join(f"a{index}" for index in range(12))
+        functions = "\n".join(
+            f"(declare-fun f{index} ({signature}) U)" for index in range(1_025)
+        )
+        applications = "\n".join(
+            f"(assert (= (f{index} {arguments}) (f{index} {arguments})))"
+            for index in range(1_025)
+        )
+        problem = QFUF._validate_problem(
+            QFUF.parse_and_encode(
+                query(
+                    f"""
+                    (declare-sort U 0)
+                    {declarations}
+                    {functions}
+                    {equalities}
+                    {applications}
+                    """
+                )
+            )
+        )
+        self.assertEqual(QFUF._reconstruct_certificate_static_prefix(problem), ((), ()))
+
     def test_unsat_manifest_accepts_boolean_predicate_congruence_seeds(self) -> None:
         problem = QFUF.parse_and_encode(
             query(
