@@ -478,7 +478,7 @@ def atomic_write_nofollow(
     try:
         if immutable:
             try:
-                read_flags = os.O_RDONLY | os.O_NOFOLLOW
+                read_flags = os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW
                 if hasattr(os, "O_CLOEXEC"):
                     read_flags |= os.O_CLOEXEC
                 existing_descriptor = os.open(
@@ -596,6 +596,19 @@ def atomic_write_nofollow(
         _require_same_regular_identity(
             parent_fd, absolute.name, staging_metadata, context
         )
+        final_fd, final_fingerprints = _open_directory_chain(
+            absolute.parent, f"{context} final parent recheck", create=False
+        )
+        try:
+            if final_fingerprints != fingerprints:
+                raise StrictArtifactError(
+                    f"{context}: parent path changed during post-publish callback"
+                )
+            _require_same_regular_identity(
+                final_fd, absolute.name, staging_metadata, context
+            )
+        finally:
+            os.close(final_fd)
         complete = True
         return absolute
     except OSError as error:

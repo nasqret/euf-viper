@@ -3,6 +3,8 @@ from __future__ import annotations
 import errno
 import importlib.util
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -132,6 +134,69 @@ class StrictArtifactPublicationTests(unittest.TestCase):
         self.assertEqual(callbacks, ["before", "after"])
         self.assertFalse(output.exists())
         self.assertFalse(list(self.root.glob(".*.tmp-*")))
+
+    def test_fresh_post_publish_parent_replacement_preserves_replacement(self) -> None:
+        parent = self.root / "parent"
+        parent.mkdir()
+        moved = self.root / "moved"
+        output = parent / "evidence.json"
+
+        def replace_parent() -> None:
+            parent.rename(moved)
+            parent.mkdir()
+            output.write_bytes(b"replacement\n")
+            output.chmod(0o600)
+
+        with self.assertRaisesRegex(STRICT.StrictArtifactError, "parent path changed"):
+            STRICT.atomic_write_nofollow(
+                output,
+                b"publisher\n",
+                "fresh parent replacement",
+                immutable=True,
+                post_publish=replace_parent,
+            )
+        self.assertEqual(output.read_bytes(), b"replacement\n")
+        self.assertFalse((moved / "evidence.json").exists())
+        self.assertFalse(list(parent.glob(".*.tmp-*")))
+        self.assertFalse(list(moved.glob(".*.tmp-*")))
+
+    def test_existing_fifo_is_rejected_without_blocking(self) -> None:
+        output = self.root / "evidence.json"
+        os.mkfifo(output, mode=0o600)
+        probe = """
+import importlib.util
+import pathlib
+import sys
+
+module_path = pathlib.Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("strict_fifo_probe", module_path)
+assert spec is not None and spec.loader is not None
+strict = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(strict)
+try:
+    strict.atomic_write_nofollow(
+        pathlib.Path(sys.argv[2]),
+        b"publisher\\n",
+        "existing FIFO",
+        immutable=True,
+    )
+except strict.StrictArtifactError as error:
+    if "regular file" not in str(error):
+        raise
+else:
+    raise AssertionError("existing FIFO was accepted")
+"""
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-c", probe, str(MODULE_PATH), str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except subprocess.TimeoutExpired as error:
+            self.fail(f"existing FIFO acquisition blocked: {error}")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_idempotent_post_publish_replacement_is_rejected_without_cleanup(self) -> None:
         output = self.root / "evidence.json"
