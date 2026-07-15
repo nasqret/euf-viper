@@ -5,7 +5,7 @@
   },
   "campaign": {
     "expected_sources": 7503,
-    "max_parallel": 32,
+    "max_parallel": 1,
     "source_count": 7503,
     "shards": 128
   },
@@ -19,8 +19,9 @@
   "execution": {
     "binary_command": "research-parser-timing",
     "byte_binding": "single-open-descriptor-buffer-replay.v1",
-    "executable_binding_linux": "inherited-descriptor.v1",
+    "executable_binding_linux": "inherited-descriptor-static-elf.v1",
     "measured_rounds": 5,
+    "native_runtime": "no-pt-interp-zero-dt-needed.v1",
     "order": [
       "tree",
       "stream",
@@ -69,21 +70,21 @@
     "rss_unit_linux": "KiB"
   },
   "name": "T1 typed stream parser causal timing gate",
-  "schema": "euf-viper.typed-parser-timing-contract.v2",
+  "schema": "euf-viper.typed-parser-timing-contract.v3",
   "timing_environment": {
     "allowed_hostnames": [
       "c1n1.cluster.wmi.amu.edu.pl"
     ],
     "core_binding": "slurm-cpu-bind-cores-singleton.v1",
     "canary_shards": 1,
-    "exclusive_allocation": "slurm-exclusive-node-runtime-verified.v1",
+    "exclusive_allocation": "serial-slurm-exclusive-node-runtime-verified.v1",
     "exclusive_control_required_for_promotion": true,
     "governor_control_required_for_promotion": true,
     "frequency_control": "slurm-srun-high-userspace-runtime-verified.v1",
-    "max_parallel": 32,
+    "max_parallel": 1,
     "memory_binding": "slurm-mem-bind-local.v1",
     "partition": "cpu_idle",
-    "promotion_eligibility": "research-only-first-campaign",
+    "promotion_eligibility": "permanently-nonpromotable-research-only",
     "slurm_nodelist": "c1n1",
     "threads_per_core": 1
   }

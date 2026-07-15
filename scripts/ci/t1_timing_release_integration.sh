@@ -13,6 +13,7 @@ DEPENDENCY_ROOT="$CI_ROOT/dependencies"
 VENDOR_DIR="$DEPENDENCY_ROOT/vendor"
 VENDOR_CONFIG="$DEPENDENCY_ROOT/cargo-vendor-config.toml"
 GUARD="$SOURCE/scripts/wmi/t1_timing_build_guard.py"
+HARNESS="$SOURCE/scripts/bench/typed_parser_timing.py"
 PRE="$CI_ROOT/pre-build-inventory.json"
 POST="$CI_ROOT/post-build-inventory.json"
 READY="$CI_ROOT/mutation-monitor-ready.json"
@@ -65,6 +66,25 @@ tool_identity cc /usr/bin/cc
 tool_identity ld /usr/bin/ld
 tool_identity ar /usr/bin/ar
 
+exec 18<"$GUARD" 19<"$HARNESS" 20<"$EUF_VIPER_PYTHON"
+[ "$(git -C "$ROOT" hash-object --no-filters -- /proc/self/fd/18)" = \
+  "$(git -C "$ROOT" rev-parse "$REVISION:scripts/wmi/t1_timing_build_guard.py")" ] || {
+  echo "opened hosted build guard differs from the immutable revision" >&2
+  exit 2
+}
+[ "$(git -C "$ROOT" hash-object --no-filters -- /proc/self/fd/19)" = \
+  "$(git -C "$ROOT" rev-parse "$REVISION:scripts/bench/typed_parser_timing.py")" ] || {
+  echo "opened hosted timing harness differs from the immutable revision" >&2
+  exit 2
+}
+[ "$(sha256sum /proc/self/fd/20 | awk '{print $1}')" = "$EUF_VIPER_PYTHON_SHA256" ] || {
+  echo "opened hosted Python descriptor hash mismatch" >&2
+  exit 2
+}
+GUARD_EXEC=/proc/self/fd/18
+HARNESS_EXEC=/proc/self/fd/19
+PYTHON_EXEC=/proc/self/fd/20
+
 MONITOR_PID=""
 DEPENDENCY_MONITOR_PID=""
 MONITOR_CONTROL_OPEN=0
@@ -73,6 +93,7 @@ SOURCE_MONITOR_EVIDENCE_OPEN=0
 DEPENDENCY_MONITOR_EVIDENCE_OPEN=0
 INVENTORY_EVIDENCE_OPEN=0
 BUILD_RECEIPT_OPEN=0
+EXECUTION_DESCRIPTORS_OPEN=1
 stop_monitor() {
   local status=$?
   trap - EXIT HUP INT TERM
@@ -102,6 +123,9 @@ stop_monitor() {
   if [ "$BUILD_RECEIPT_OPEN" -eq 1 ]; then
     exec 17>&-
   fi
+  if [ "$EXECUTION_DESCRIPTORS_OPEN" -eq 1 ]; then
+    exec 18<&- 19<&- 20<&-
+  fi
   rm -f "$CONTROL" "$DEPENDENCY_CONTROL"
   exit "$status"
 }
@@ -118,20 +142,28 @@ SOURCE_MONITOR_EVIDENCE_OPEN=1
 mkfifo -m 600 "$CONTROL"
 exec 8<>"$CONTROL"
 MONITOR_CONTROL_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" monitor \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" monitor \
   --snapshot "$SOURCE" --ready "$READY" --ready-fd 3 --control-fd 0 \
   --events "$EVENTS" --events-fd 4 \
   --receipt "$MONITOR_RECEIPT" --receipt-fd 5 < "$CONTROL" 8>&- &
 MONITOR_PID=$!
 rm -f "$CONTROL"
+READY_VALID=0
 for ((attempt = 0; attempt < 400; attempt++)); do
-  [ -s "$READY" ] && break
+  if [ -s "$READY" ] && \
+    "$PYTHON_EXEC" -I -B "$GUARD_EXEC" verify-ready \
+      --ready "$READY" --ready-fd 3 --expected-snapshot "$SOURCE" \
+      --expected-monitor-pid "$MONITOR_PID" --expected-parent-pid "$$" \
+      >/dev/null 2>&1; then
+    READY_VALID=1
+    break
+  fi
   kill -0 "$MONITOR_PID" 2>/dev/null || { echo "mutation monitor exited before ready" >&2; exit 2; }
   sleep 0.05
 done
-[ -s "$READY" ] || { echo "mutation monitor did not become ready" >&2; exit 2; }
+[ "$READY_VALID" -eq 1 ] || { echo "mutation monitor did not publish valid readiness" >&2; exit 2; }
 
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" inventory \
   --repository "$ROOT" --revision "$REVISION" --snapshot "$SOURCE" --output "$PRE" \
   3>&- 4>&- 5>&- 8>&-
 exec 13<"$PRE"
@@ -144,7 +176,7 @@ env -i \
   "$EUF_VIPER_CARGO" vendor \
     --manifest-path "$SOURCE/Cargo.toml" \
     --locked --versioned-dirs "$VENDOR_DIR" > "$VENDOR_CONFIG" \
-    3>&- 4>&- 5>&- 8>&- 13>&-
+    3>&- 4>&- 5>&- 8>&- 13>&- 18>&- 19>&- 20>&-
 [ -s "$VENDOR_CONFIG" ] || { echo "Cargo did not emit a vendor configuration" >&2; exit 2; }
 (
   set -o noclobber
@@ -159,26 +191,35 @@ DEPENDENCY_MONITOR_EVIDENCE_OPEN=1
 mkfifo -m 600 "$DEPENDENCY_CONTROL"
 exec 9<>"$DEPENDENCY_CONTROL"
 DEPENDENCY_MONITOR_CONTROL_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" monitor \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" monitor \
   --snapshot "$DEPENDENCY_ROOT" --ready "$DEPENDENCY_READY" --ready-fd 10 \
   --control-fd 0 --events "$DEPENDENCY_EVENTS" --events-fd 11 \
   --receipt "$DEPENDENCY_MONITOR_RECEIPT" --receipt-fd 12 \
   < "$DEPENDENCY_CONTROL" 3>&- 4>&- 5>&- 8>&- 9>&- &
 DEPENDENCY_MONITOR_PID=$!
 rm -f "$DEPENDENCY_CONTROL"
+DEPENDENCY_READY_VALID=0
 for ((attempt = 0; attempt < 400; attempt++)); do
-  [ -s "$DEPENDENCY_READY" ] && break
+  if [ -s "$DEPENDENCY_READY" ] && \
+    "$PYTHON_EXEC" -I -B "$GUARD_EXEC" verify-ready \
+      --ready "$DEPENDENCY_READY" --ready-fd 10 \
+      --expected-snapshot "$DEPENDENCY_ROOT" \
+      --expected-monitor-pid "$DEPENDENCY_MONITOR_PID" --expected-parent-pid "$$" \
+      >/dev/null 2>&1; then
+    DEPENDENCY_READY_VALID=1
+    break
+  fi
   kill -0 "$DEPENDENCY_MONITOR_PID" 2>/dev/null || {
     echo "dependency mutation monitor exited before ready" >&2
     exit 2
   }
   sleep 0.05
 done
-[ -s "$DEPENDENCY_READY" ] || {
-  echo "dependency mutation monitor did not become ready" >&2
+[ "$DEPENDENCY_READY_VALID" -eq 1 ] || {
+  echo "dependency mutation monitor did not publish valid readiness" >&2
   exit 2
 }
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory-tree \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" inventory-tree \
   --root "$DEPENDENCY_ROOT" --output "$DEPENDENCY_PRE" \
   3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&-
 exec 15<"$DEPENDENCY_PRE"
@@ -187,16 +228,17 @@ env -i \
   CARGO_HOME="$CARGO_HOME" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
   CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true \
   RUSTC="$EUF_VIPER_RUSTC" CC="$EUF_VIPER_CC" LD="$EUF_VIPER_LD" AR="$EUF_VIPER_AR" \
-  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd" \
+  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
   "$EUF_VIPER_CARGO" build \
     --manifest-path "$SOURCE/Cargo.toml" \
     --release --locked --offline \
     --config "source.crates-io.replace-with='vendored-sources'" \
     --config "source.vendored-sources.directory='$VENDOR_DIR'" \
-    3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- &
+    3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- \
+    18>&- 19>&- 20>&- &
 BUILD_PID=$!
 (
-  exec 3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&-
+  exec 3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- 18>&- 19>&- 20>&-
   monitor_is_live() {
     local state
     kill -0 "$1" 2>/dev/null || return 1
@@ -237,11 +279,11 @@ BINARY="$CARGO_TARGET_DIR/release/euf-viper"
 }
 exec 7<"$BINARY"
 cd "$ROOT"
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" inventory \
   --repository "$ROOT" --revision "$REVISION" --snapshot "$SOURCE" --output "$POST" \
   3>&- 4>&- 5>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&-
 exec 14<"$POST"
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory-tree \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" inventory-tree \
   --root "$DEPENDENCY_ROOT" --output "$DEPENDENCY_POST" \
   3>&- 4>&- 5>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&-
 exec 16<"$DEPENDENCY_POST"
@@ -272,28 +314,33 @@ trap - EXIT HUP INT TERM
 chmod 600 "$BUILD_RECEIPT"
 exec 17<>"$BUILD_RECEIPT"
 BUILD_RECEIPT_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$GUARD" receipt \
+"$PYTHON_EXEC" -I -B "$GUARD_EXEC" receipt \
   --revision "$REVISION" --pre-inventory "$PRE" --post-inventory "$POST" \
   --pre-inventory-fd 13 --post-inventory-fd 14 \
   --monitor-receipt "$MONITOR_RECEIPT" --monitor-receipt-fd 5 \
+  --monitor-ready "$READY" --monitor-ready-fd 3 \
   --monitor-events "$EVENTS" --monitor-events-fd 4 \
   --dependency-pre-inventory "$DEPENDENCY_PRE" --dependency-pre-inventory-fd 15 \
   --dependency-post-inventory "$DEPENDENCY_POST" --dependency-post-inventory-fd 16 \
   --dependency-monitor-receipt "$DEPENDENCY_MONITOR_RECEIPT" \
   --dependency-monitor-receipt-fd 12 \
+  --dependency-monitor-ready "$DEPENDENCY_READY" \
+  --dependency-monitor-ready-fd 10 \
   --dependency-monitor-events "$DEPENDENCY_EVENTS" \
   --dependency-monitor-events-fd 11 \
   --binary "$BINARY" --binary-fd 7 --cargo-home "$CARGO_HOME" \
   --fetch-cargo-home "$FETCH_CARGO_HOME" --target-dir "$CARGO_TARGET_DIR" \
-  --vendor-dir "$VENDOR_DIR" --output "$BUILD_RECEIPT" --output-fd 17 \
-  3>&- 10>&-
-"$EUF_VIPER_PYTHON" -I -B "$SOURCE/scripts/bench/typed_parser_timing.py" \
+  --vendor-dir "$VENDOR_DIR" --output "$BUILD_RECEIPT" --output-fd 17
+"$PYTHON_EXEC" -I -B "$HARNESS_EXEC" \
   verify-build-receipt --build-receipt "$BUILD_RECEIPT" --build-receipt-fd 17 \
   --binary "$BINARY" --binary-fd 7 --revision "$REVISION" >/dev/null \
   3>&- 4>&- 5>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&- 16>&-
 
 cd "$SOURCE"
 EUF_VIPER_T1_REAL_BINARY="$BINARY" EUF_VIPER_T1_REAL_BINARY_FD=7 \
-  "$EUF_VIPER_PYTHON" -I -B -m unittest \
+  "$PYTHON_EXEC" -I -B -m unittest \
   tests.test_typed_parser_timing.RealReleaseIntegrationTests \
   3>&- 4>&- 5>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&- 16>&- 17>&-
+
+exec 18<&- 19<&- 20<&-
+EXECUTION_DESCRIPTORS_OPEN=0

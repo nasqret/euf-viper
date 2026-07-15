@@ -47,11 +47,13 @@ COMMON_PATH="$T1_JOB_ROOT/$COMMON_RELATIVE"
 COMMON_ENTRY="$(t1_bootstrap_git ls-tree "$EXPECTED_REVISION" -- "$COMMON_RELATIVE")"
 [ "${COMMON_ENTRY%% *}" = 100755 ] || { echo "T1 common helper mode mismatch" >&2; exit 2; }
 COMMON_BLOB="$(printf '%s\n' "$COMMON_ENTRY" | /usr/bin/awk '{print $3}')"
-[ "$(t1_bootstrap_git hash-object --no-filters -- "$COMMON_PATH")" = "$COMMON_BLOB" ] || {
+exec 18<"$COMMON_PATH"
+[ "$(t1_bootstrap_git hash-object --no-filters -- /proc/self/fd/18)" = "$COMMON_BLOB" ] || {
   echo "T1 common helper blob mismatch" >&2
   exit 2
 }
-source "$COMMON_PATH"
+source /proc/self/fd/18
+exec 18<&-
 t1_reject_ambient_influence
 cd "$T1_JOB_ROOT"
 umask 077
@@ -121,6 +123,27 @@ t1_verify_bound_file "$PARITY_RECEIPT" "$EXPECTED_PARITY_RECEIPT_SHA256" "accept
   exit 2
 }
 
+BUILD_GUARD_ENTRY="$(t1_git ls-tree "$EXPECTED_REVISION" -- scripts/wmi/t1_timing_build_guard.py)"
+HARNESS_ENTRY="$(t1_git ls-tree "$EXPECTED_REVISION" -- scripts/bench/typed_parser_timing.py)"
+[ "${BUILD_GUARD_ENTRY%% *}" = 100755 ] || { echo "build guard mode mismatch" >&2; exit 2; }
+[ "${HARNESS_ENTRY%% *}" = 100755 ] || { echo "timing harness mode mismatch" >&2; exit 2; }
+exec 18<"$BUILD_GUARD" 19<"$HARNESS" 20<"$EUF_VIPER_PYTHON"
+[ "$(t1_git hash-object --no-filters -- /proc/self/fd/18)" = "$(printf '%s\n' "$BUILD_GUARD_ENTRY" | awk '{print $3}')" ] || {
+  echo "opened build guard differs from the immutable revision" >&2
+  exit 2
+}
+[ "$(t1_git hash-object --no-filters -- /proc/self/fd/19)" = "$(printf '%s\n' "$HARNESS_ENTRY" | awk '{print $3}')" ] || {
+  echo "opened timing harness differs from the immutable revision" >&2
+  exit 2
+}
+[ "$(sha256sum /proc/self/fd/20 | awk '{print $1}')" = "$EUF_VIPER_PYTHON_SHA256" ] || {
+  echo "opened Python descriptor hash mismatch" >&2
+  exit 2
+}
+BUILD_GUARD_EXEC=/proc/self/fd/18
+HARNESS_EXEC=/proc/self/fd/19
+PYTHON_EXEC=/proc/self/fd/20
+
 MONITOR_PID=""
 DEPENDENCY_MONITOR_PID=""
 MONITOR_CONTROL_OPEN=0
@@ -129,6 +152,7 @@ SOURCE_MONITOR_EVIDENCE_OPEN=0
 DEPENDENCY_MONITOR_EVIDENCE_OPEN=0
 INVENTORY_EVIDENCE_OPEN=0
 BUILD_RECEIPT_OPEN=0
+EXECUTION_DESCRIPTORS_OPEN=1
 stop_monitor() {
   local status=$?
   trap - EXIT HUP INT TERM
@@ -158,6 +182,9 @@ stop_monitor() {
   if [ "$BUILD_RECEIPT_OPEN" -eq 1 ]; then
     exec 17>&-
   fi
+  if [ "$EXECUTION_DESCRIPTORS_OPEN" -eq 1 ]; then
+    exec 18<&- 19<&- 20<&-
+  fi
   rm -f "$MONITOR_CONTROL" "$DEPENDENCY_MONITOR_CONTROL"
   exit "$status"
 }
@@ -174,7 +201,7 @@ SOURCE_MONITOR_EVIDENCE_OPEN=1
 mkfifo -m 600 "$MONITOR_CONTROL"
 exec 8<>"$MONITOR_CONTROL"
 MONITOR_CONTROL_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" monitor \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" monitor \
   --snapshot "$SOURCE_SNAPSHOT" \
   --ready "$MONITOR_READY" \
   --ready-fd 3 \
@@ -185,14 +212,23 @@ MONITOR_CONTROL_OPEN=1
   --receipt-fd 5 < "$MONITOR_CONTROL" 8>&- &
 MONITOR_PID=$!
 rm -f "$MONITOR_CONTROL"
+MONITOR_READY_VALID=0
 for ((attempt = 0; attempt < 400; attempt++)); do
-  [ -s "$MONITOR_READY" ] && break
+  if [ -s "$MONITOR_READY" ] && \
+    "$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" verify-ready \
+      --ready "$MONITOR_READY" --ready-fd 3 \
+      --expected-snapshot "$SOURCE_SNAPSHOT" \
+      --expected-monitor-pid "$MONITOR_PID" --expected-parent-pid "$$" \
+      >/dev/null 2>&1; then
+    MONITOR_READY_VALID=1
+    break
+  fi
   kill -0 "$MONITOR_PID" 2>/dev/null || { echo "mutation monitor exited before ready" >&2; exit 2; }
   sleep 0.05
 done
-[ -s "$MONITOR_READY" ] || { echo "mutation monitor did not become ready" >&2; exit 2; }
+[ "$MONITOR_READY_VALID" -eq 1 ] || { echo "mutation monitor did not publish valid readiness" >&2; exit 2; }
 
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" inventory \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" inventory \
   --repository "$CONTROL_REPO" \
   --revision "$EXPECTED_REVISION" \
   --snapshot "$SOURCE_SNAPSHOT" \
@@ -214,7 +250,7 @@ env -i \
     "$EUF_VIPER_CARGO" vendor \
     --manifest-path "$SOURCE_SNAPSHOT/Cargo.toml" \
     --locked --versioned-dirs "$VENDOR_DIR" > "$VENDOR_CONFIG" \
-    3>&- 4>&- 5>&- 8>&- 13>&-
+    3>&- 4>&- 5>&- 8>&- 13>&- 18>&- 19>&- 20>&-
 [ -s "$VENDOR_CONFIG" ] || { echo "Cargo did not emit a vendor configuration" >&2; exit 2; }
 (
   set -o noclobber
@@ -233,7 +269,7 @@ DEPENDENCY_MONITOR_EVIDENCE_OPEN=1
 mkfifo -m 600 "$DEPENDENCY_MONITOR_CONTROL"
 exec 9<>"$DEPENDENCY_MONITOR_CONTROL"
 DEPENDENCY_MONITOR_CONTROL_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" monitor \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" monitor \
   --snapshot "$DEPENDENCY_ROOT" \
   --ready "$DEPENDENCY_MONITOR_READY" \
   --ready-fd 10 \
@@ -245,19 +281,28 @@ DEPENDENCY_MONITOR_CONTROL_OPEN=1
   < "$DEPENDENCY_MONITOR_CONTROL" 3>&- 4>&- 5>&- 8>&- 9>&- &
 DEPENDENCY_MONITOR_PID=$!
 rm -f "$DEPENDENCY_MONITOR_CONTROL"
+DEPENDENCY_MONITOR_READY_VALID=0
 for ((attempt = 0; attempt < 400; attempt++)); do
-  [ -s "$DEPENDENCY_MONITOR_READY" ] && break
+  if [ -s "$DEPENDENCY_MONITOR_READY" ] && \
+    "$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" verify-ready \
+      --ready "$DEPENDENCY_MONITOR_READY" --ready-fd 10 \
+      --expected-snapshot "$DEPENDENCY_ROOT" \
+      --expected-monitor-pid "$DEPENDENCY_MONITOR_PID" --expected-parent-pid "$$" \
+      >/dev/null 2>&1; then
+    DEPENDENCY_MONITOR_READY_VALID=1
+    break
+  fi
   kill -0 "$DEPENDENCY_MONITOR_PID" 2>/dev/null || {
     echo "dependency mutation monitor exited before ready" >&2
     exit 2
   }
   sleep 0.05
 done
-[ -s "$DEPENDENCY_MONITOR_READY" ] || {
-  echo "dependency mutation monitor did not become ready" >&2
+[ "$DEPENDENCY_MONITOR_READY_VALID" -eq 1 ] || {
+  echo "dependency mutation monitor did not publish valid readiness" >&2
   exit 2
 }
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" inventory-tree \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" inventory-tree \
   --root "$DEPENDENCY_ROOT" \
   --output "$DEPENDENCY_PRE_INVENTORY" \
   3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&-
@@ -275,16 +320,17 @@ env -i \
   CC="$EUF_VIPER_CC" \
   LD="$EUF_VIPER_LD" \
   AR="$EUF_VIPER_AR" \
-  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd" \
+  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd -C target-feature=+crt-static" \
   "$EUF_VIPER_CARGO" build \
     --manifest-path "$SOURCE_SNAPSHOT/Cargo.toml" \
     --release --locked --offline \
     --config "source.crates-io.replace-with='vendored-sources'" \
     --config "source.vendored-sources.directory='$VENDOR_DIR'" \
-    3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- &
+    3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- \
+    18>&- 19>&- 20>&- &
 BUILD_PID=$!
 (
-  exec 3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&-
+  exec 3>&- 4>&- 5>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&- 18>&- 19>&- 20>&-
   monitor_is_live() {
     local state
     kill -0 "$1" 2>/dev/null || return 1
@@ -327,14 +373,14 @@ BINARY="$CARGO_TARGET_DIR/release/euf-viper"
 }
 exec 7<"$BINARY"
 cd "$CONTROL_REPO"
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" inventory \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" inventory \
   --repository "$CONTROL_REPO" \
   --revision "$EXPECTED_REVISION" \
   --snapshot "$SOURCE_SNAPSHOT" \
   --output "$POST_INVENTORY" \
   3>&- 4>&- 5>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 15>&-
 exec 14<"$POST_INVENTORY"
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" inventory-tree \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" inventory-tree \
   --root "$DEPENDENCY_ROOT" \
   --output "$DEPENDENCY_POST_INVENTORY" \
   3>&- 4>&- 5>&- 7>&- 8>&- 9>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&-
@@ -367,7 +413,7 @@ trap - EXIT HUP INT TERM
 chmod 600 "$BUILD_RECEIPT"
 exec 17<>"$BUILD_RECEIPT"
 BUILD_RECEIPT_OPEN=1
-"$EUF_VIPER_PYTHON" -I -B "$BUILD_GUARD" receipt \
+"$PYTHON_EXEC" -I -B "$BUILD_GUARD_EXEC" receipt \
   --revision "$EXPECTED_REVISION" \
   --pre-inventory "$PRE_INVENTORY" \
   --pre-inventory-fd 13 \
@@ -375,6 +421,8 @@ BUILD_RECEIPT_OPEN=1
   --post-inventory-fd 14 \
   --monitor-receipt "$MONITOR_RECEIPT" \
   --monitor-receipt-fd 5 \
+  --monitor-ready "$MONITOR_READY" \
+  --monitor-ready-fd 3 \
   --monitor-events "$MONITOR_EVENTS" \
   --monitor-events-fd 4 \
   --dependency-pre-inventory "$DEPENDENCY_PRE_INVENTORY" \
@@ -383,6 +431,8 @@ BUILD_RECEIPT_OPEN=1
   --dependency-post-inventory-fd 16 \
   --dependency-monitor-receipt "$DEPENDENCY_MONITOR_RECEIPT" \
   --dependency-monitor-receipt-fd 12 \
+  --dependency-monitor-ready "$DEPENDENCY_MONITOR_READY" \
+  --dependency-monitor-ready-fd 10 \
   --dependency-monitor-events "$DEPENDENCY_MONITOR_EVENTS" \
   --dependency-monitor-events-fd 11 \
   --binary "$BINARY" \
@@ -392,10 +442,10 @@ BUILD_RECEIPT_OPEN=1
   --target-dir "$CARGO_TARGET_DIR" \
   --vendor-dir "$VENDOR_DIR" \
   --output "$BUILD_RECEIPT" \
-  --output-fd 17 3>&- 10>&-
+  --output-fd 17
 
 cd "$CONTROL_REPO"
-"$EUF_VIPER_PYTHON" -I -B "$HARNESS" prepare \
+"$PYTHON_EXEC" -I -B "$HARNESS_EXEC" prepare \
   --manifest "$MANIFEST" \
   --repository-root "$CONTROL_REPO" \
   --source-root "$SOURCE_ROOT" \
@@ -414,5 +464,8 @@ cd "$CONTROL_REPO"
   --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" \
   --output-root "$CAMPAIGN_ROOT" \
   3>&- 4>&- 5>&- 10>&- 11>&- 12>&- 13>&- 14>&- 15>&- 16>&-
+
+exec 18<&- 19<&- 20<&-
+EXECUTION_DESCRIPTORS_OPEN=0
 
 printf 't1_timing_campaign_root=%s\nrevision=%s\n' "$CAMPAIGN_ROOT" "$EXPECTED_REVISION"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -44,8 +45,9 @@ class WmiT1TimingTests(unittest.TestCase):
                 self.assertNotIn("SLURM_SUBMIT_DIR", text)
                 self.assertLess(
                     text.index("T1 execution root published-ref mismatch"),
-                    text.index('source "$COMMON_PATH"'),
+                    text.index("source /proc/self/fd/18"),
                 )
+                self.assertIn("hash-object --no-filters -- /proc/self/fd/18", text)
                 self.assertIn("set -euo pipefail", text)
                 self.assertIn('scripts/bench/typed_parser_timing.py"', text)
                 self.assertNotIn(
@@ -70,20 +72,49 @@ class WmiT1TimingTests(unittest.TestCase):
         ):
             self.assertIn(required, text)
 
+    def test_opened_shell_helper_survives_path_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            helper = root / "helper.sh"
+            replacement = root / "replacement.sh"
+            helper.write_text("BOUND_HELPER=original\n", encoding="ascii")
+            replacement.write_text("BOUND_HELPER=replacement\n", encoding="ascii")
+            descriptor_path = "/proc/self/fd/18" if Path("/proc/self/fd").is_dir() else "/dev/fd/18"
+            completed = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    'set -euo pipefail; exec 18<"$1"; '
+                    f'git hash-object --no-filters -- {descriptor_path} >/dev/null; '
+                    'mv "$2" "$1"; '
+                    "env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c "
+                    "'import os; os.lseek(18, 0, os.SEEK_SET)'; "
+                    f'source {descriptor_path}; test "$BOUND_HELPER" = original',
+                    "t1-helper-test",
+                    str(helper),
+                    str(replacement),
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_prepare_builds_one_release_binary_and_uses_fixed_contract(self) -> None:
         text = PREPARE.read_text(encoding="utf-8")
         self.assertEqual(text.count("--release --locked"), 1)
         self.assertNotIn("--all-features", text)
         self.assertIn("campaigns/t1-typed-parser-timing-v1.json", text)
-        self.assertIn('"$HARNESS" prepare', text)
+        self.assertIn('"$PYTHON_EXEC" -I -B "$HARNESS_EXEC" prepare', text)
         self.assertIn("git archive --format=tar", text)
         self.assertIn("t1_timing_build_guard.py", text)
         self.assertIn(" monitor ", text)
         self.assertIn("--control-fd 0", text)
         self.assertNotIn("--stop", text)
         self.assertIn("mutation monitor lost liveness during compilation", text)
-        self.assertIn("3>&- 4>&- 5>&- 8>&- 13>&-", text)
-        self.assertIn("13>&- 15>&- &", text)
+        self.assertIn("3>&- 4>&- 5>&- 8>&- 13>&- 18>&- 19>&- 20>&-", text)
+        self.assertIn("18>&- 19>&- 20>&- &", text)
         self.assertIn("--binary-fd 7", text)
         self.assertIn("--output-fd 17", text)
         self.assertIn(" inventory ", text)
@@ -103,21 +134,32 @@ class WmiT1TimingTests(unittest.TestCase):
         self.assertIn("DEPENDENCY_MONITOR_RECEIPT", text)
         self.assertIn('--snapshot "$DEPENDENCY_ROOT"', text)
         self.assertIn("--dependency-monitor-receipt", text)
+        self.assertIn("--dependency-monitor-ready", text)
+        self.assertIn("verify-ready", text)
         self.assertIn("CARGO_NET_OFFLINE=true", text)
         self.assertIn("--release --locked --offline", text)
         self.assertIn("source.vendored-sources.directory", text)
+        self.assertIn("target-feature=+crt-static", text)
+        self.assertIn("BUILD_GUARD_EXEC=/proc/self/fd/18", text)
+        self.assertIn("HARNESS_EXEC=/proc/self/fd/19", text)
 
     def test_submit_chain_is_prepare_then_array_then_audit(self) -> None:
         text = SUBMIT.read_text(encoding="utf-8")
+        self.assertIn('exec 18<"$COMMON_PATH"', text)
+        self.assertIn("hash-object --no-filters -- \"$COMMON_DESCRIPTOR\"", text)
+        self.assertIn("os.lseek(18, 0, os.SEEK_SET)", text)
+        self.assertIn('source "$COMMON_DESCRIPTOR"', text)
+        self.assertNotIn("source scripts/wmi/t1_timing_common.sh", text)
+        self.assertIn('REVISION" = "$BOOTSTRAP_REVISION', text)
         self.assertIn("--dependency=afterok:$PREPARE_JOB", text)
         self.assertIn("--dependency=afterok:$ARRAY_JOB", text)
-        self.assertIn('ARRAY_SPEC="0-$LAST_SHARD%$MAX_PARALLEL"', text)
+        self.assertIn('ARRAY_SPEC="0-$LAST_SHARD%1"', text)
         self.assertIn('ARRAY_SPEC="0-$((CANARY_SHARDS - 1))%1"', text)
         self.assertIn('CANARY_SHARDS=1', text)
         self.assertIn('PARTITION="cpu_idle"', text)
         self.assertIn('NODELIST="c1n1"', text)
         self.assertIn('SHARDS=128', text)
-        self.assertIn('MAX_PARALLEL=32', text)
+        self.assertIn('MAX_PARALLEL=1', text)
         self.assertIn('WARMUP_ROUNDS=1', text)
         self.assertIn('MEASURED_ROUNDS=5', text)
         self.assertIn('TIMEOUT_SECONDS=2', text)
@@ -130,7 +172,7 @@ class WmiT1TimingTests(unittest.TestCase):
         self.assertIn("--threads-per-core=1", text)
         self.assertIn("--cpu-bind=cores", text)
         self.assertIn("--mem-bind=local", text)
-        self.assertIn('ARRAY_PLACEMENT="--exclusive"', text)
+        self.assertIn('ARRAY_PLACEMENT="--exclusive --cpu-freq=high:UserSpace"', text)
         self.assertIn('"frequency_contract": "high:UserSpace"', text)
         self.assertIn('MODE="${1#--}"', text)
         self.assertIn('REMOTE_HOST="wmicluster"', text)
@@ -151,6 +193,17 @@ class WmiT1TimingTests(unittest.TestCase):
         self.assertIn('ln "$TEMPORARY" "$RECEIPT"', text)
         self.assertNotIn('mv "$TEMPORARY" "$RECEIPT"', text)
         self.assertNotIn("git push", text)
+
+    def test_full_placement_is_exactly_serial_and_exclusive(self) -> None:
+        submit = SUBMIT.read_text(encoding="utf-8")
+        self.assertIn('ARRAY_SPEC="0-$LAST_SHARD%1"', submit)
+        self.assertIn('SCHEDULED_MAX_PARALLEL="$MAX_PARALLEL"', submit)
+        self.assertIn('"schedule": "serial-exclusive-array.v1"', submit)
+        self.assertNotIn('0-$LAST_SHARD%32', submit)
+        array = ARRAY.read_text(encoding="utf-8")
+        self.assertIn("srun --ntasks=1", array)
+        self.assertIn("--require-placement-controls", array)
+        self.assertIn("exec /proc/self/fd/19 -I -B /proc/self/fd/18", array)
 
     def test_canary_cannot_submit_a_complete_array_or_audit(self) -> None:
         text = SUBMIT.read_text(encoding="utf-8")
@@ -175,6 +228,8 @@ class WmiT1TimingTests(unittest.TestCase):
         self.assertIn("parent-owned-pipe-eof.v1", text)
         self.assertIn("PT_INTERP", text)
         self.assertIn("DT_NEEDED", text)
+        self.assertIn("must not contain PT_INTERP", text)
+        self.assertIn("must not contain DT_NEEDED", text)
         self.assertNotIn("/usr/bin/ldd", text)
 
 

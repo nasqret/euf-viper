@@ -9,7 +9,7 @@ NODELIST="c1n1"
 DEPENDENCY=""
 MODE=""
 SHARDS=128
-MAX_PARALLEL=32
+MAX_PARALLEL=1
 CANARY_SHARDS=1
 WARMUP_ROUNDS=1
 MEASURED_ROUNDS=5
@@ -18,7 +18,33 @@ MANIFEST_SHA256="32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d
 PARITY_RECEIPT_SHA256="c0c9c1879c9ac2da524c69f07affa991626c326ac0837f8f8066fde708d8482c"
 
 cd "$ROOT"
-source scripts/wmi/t1_timing_common.sh
+BOOTSTRAP_REVISION="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$ROOT" rev-parse --verify HEAD^{commit})"
+COMMON_RELATIVE="scripts/wmi/t1_timing_common.sh"
+COMMON_PATH="$ROOT/$COMMON_RELATIVE"
+COMMON_ENTRY="$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$ROOT" ls-tree "$BOOTSTRAP_REVISION" -- "$COMMON_RELATIVE")"
+[ "${COMMON_ENTRY%% *}" = 100755 ] || { echo "T1 common helper mode mismatch" >&2; exit 2; }
+COMMON_BLOB="$(printf '%s\n' "$COMMON_ENTRY" | awk '{print $3}')"
+exec 18<"$COMMON_PATH"
+if [ -d /proc/self/fd ]; then
+  COMMON_DESCRIPTOR=/proc/self/fd/18
+else
+  COMMON_DESCRIPTOR=/dev/fd/18
+fi
+[ "$(env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$ROOT" hash-object --no-filters -- "$COMMON_DESCRIPTOR")" = "$COMMON_BLOB" ] || {
+  echo "T1 common helper blob mismatch" >&2
+  exit 2
+}
+# macOS /dev/fd hashing shares and advances the opened file description.
+env -i PATH=/usr/bin:/bin /usr/bin/python3 -I -B -c \
+  'import os; os.lseek(18, 0, os.SEEK_SET)'
+source "$COMMON_DESCRIPTOR"
+exec 18<&-
 t1_reject_forbidden_euf_viper_environment
 
 usage() {
@@ -58,6 +84,10 @@ if [ -n "$DEPENDENCY" ]; then
 fi
 
 REVISION="$(t1_git rev-parse --verify HEAD^{commit})"
+[ "$REVISION" = "$BOOTSTRAP_REVISION" ] || {
+  echo "T1 checkout changed after binding the common helper" >&2
+  exit 2
+}
 t1_verify_checkout "$REVISION" "$PUBLISHED_REF"
 SHORT_REVISION="$(t1_git rev-parse --short=12 "$REVISION")"
 CONTRACT_SHA256="$(sha256sum campaigns/t1-typed-parser-timing-v1.json | awk '{print $1}')"
@@ -170,10 +200,11 @@ case "$PREPARE_JOB" in ''|*[!0-9]*) echo "invalid prepare job id: $PREPARE_SUBMI
 
 LAST_SHARD="$((SHARDS - 1))"
 if [ "$MODE" = full ]; then
-  ARRAY_SPEC="0-$LAST_SHARD%$MAX_PARALLEL"
+  [ "$MAX_PARALLEL" -eq 1 ] || { echo "full T1 schedule must be serial" >&2; exit 2; }
+  ARRAY_SPEC="0-$LAST_SHARD%1"
   SCHEDULED_SHARDS="$SHARDS"
   SCHEDULED_MAX_PARALLEL="$MAX_PARALLEL"
-  ARRAY_PLACEMENT="--exclusive"
+  ARRAY_PLACEMENT="--exclusive --cpu-freq=high:UserSpace"
 else
   ARRAY_SPEC="0-$((CANARY_SHARDS - 1))%1"
   SCHEDULED_SHARDS="$CANARY_SHARDS"
@@ -220,10 +251,11 @@ payload = {
         "exclusive_requested": "$MODE" == "full",
         "frequency_contract": "high:UserSpace" if "$MODE" == "full" else None,
         "memory_binding": "local",
+        "schedule": "serial-exclusive-array.v1" if "$MODE" == "full" else "single-shard-canary.v1",
         "threads_per_core": 1,
     },
     "promotable": False,
-    "promotion_reasons": ["T1 timing evidence is research-only"] +
+    "promotion_reasons": ["T1 timing evidence is permanently nonpromotable research evidence"] +
         (["bounded canary is incomplete"] if "$MODE" == "canary" else []),
     "prepare_job": "$PREPARE_JOB",
     "published_ref": "$PUBLISHED_REF",
@@ -233,7 +265,7 @@ payload = {
     "revision": "$REVISION",
     "scheduled_max_parallel": $SCHEDULED_MAX_PARALLEL,
     "scheduled_shards": $SCHEDULED_SHARDS,
-    "schema": "euf-viper.typed-parser-timing-submission.v2",
+    "schema": "euf-viper.typed-parser-timing-submission.v3",
     "shards": $SHARDS,
     "status": "submitted",
     "tools": {

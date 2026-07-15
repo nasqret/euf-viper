@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import subprocess
+import struct
 import sys
 import tempfile
 import time
@@ -175,7 +176,7 @@ def valid_worker() -> dict[str, object]:
         "slurm_cpu_freq_req": "high:UserSpace",
         "physical_cores_on_node": 64,
         "submission_mode": "full",
-        "placement_contract": "slurm-exclusive-core-local-high-userspace.v1",
+        "placement_contract": "slurm-serial-exclusive-core-local-high-userspace.v1",
         "governor_control": True,
         "exclusive_control": False,
         "libc": {
@@ -185,7 +186,7 @@ def valid_worker() -> dict[str, object]:
             "name": "glibc",
             "version": "2.35",
         },
-        "allocator": "system-libc",
+        "allocator": "rust-system-allocator-static-runtime",
         "backend": "auto",
     }
 
@@ -969,7 +970,7 @@ class IdentityAndExecutionTests(unittest.TestCase):
 
 
 class BuildReceiptValidationTests(unittest.TestCase):
-    def test_guarded_build_receipt_binds_inventory_monitor_tools_libc_and_binary(self) -> None:
+    def test_guarded_build_receipt_binds_inventory_monitor_tools_static_elf_and_binary(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:
             root = Path(directory_name).resolve()
             snapshot = root / "source"
@@ -988,8 +989,19 @@ class BuildReceiptValidationTests(unittest.TestCase):
             pre = TIMING.publish_json(root / "pre.json", inventory)
             post = TIMING.publish_json(root / "post.json", inventory)
             events = TIMING.publish_new(root / "events.jsonl", b"")
+            ready_payload = {
+                "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+                "control": "parent-owned-pipe-eof.v1",
+                "monitor_pid": 101,
+                "parent_pid": 100,
+                "snapshot": str(snapshot),
+                "watch_setup_complete": True,
+                "watched_directories": 1,
+                "watch_mask": 1,
+            }
+            ready = TIMING.publish_json(root / "ready.json", ready_payload)
             monitor_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-receipt.v2",
+                "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 101,
                 "parent_pid": 100,
@@ -998,6 +1010,7 @@ class BuildReceiptValidationTests(unittest.TestCase):
                 "watched_directories": 1,
                 "watch_mask": 1,
                 "event_count": 0,
+                "ready": TIMING.file_binding(ready),
                 "events": TIMING.file_binding(events),
                 "status": "clean",
             }
@@ -1009,8 +1022,21 @@ class BuildReceiptValidationTests(unittest.TestCase):
             dependency_events = TIMING.publish_new(
                 root / "dependency-events.jsonl", b""
             )
+            dependency_ready_payload = {
+                "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+                "control": "parent-owned-pipe-eof.v1",
+                "monitor_pid": 102,
+                "parent_pid": 100,
+                "snapshot": str(dependency_root),
+                "watch_setup_complete": True,
+                "watched_directories": 2,
+                "watch_mask": 1,
+            }
+            dependency_ready = TIMING.publish_json(
+                root / "dependency-ready.json", dependency_ready_payload
+            )
             dependency_monitor_payload = {
-                "schema": "euf-viper.t1-mutation-monitor-receipt.v2",
+                "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
                 "control": "parent-owned-pipe-eof.v1",
                 "monitor_pid": 102,
                 "parent_pid": 100,
@@ -1019,6 +1045,7 @@ class BuildReceiptValidationTests(unittest.TestCase):
                 "watched_directories": 2,
                 "watch_mask": 1,
                 "event_count": 0,
+                "ready": TIMING.file_binding(dependency_ready),
                 "events": TIMING.file_binding(dependency_events),
                 "status": "clean",
             }
@@ -1062,70 +1089,17 @@ class BuildReceiptValidationTests(unittest.TestCase):
                 }
                 for index, name in enumerate(sorted(TIMING.BUILD_TOOL_ENVIRONMENT), 1)
             }
-            elf_template = {
-                "abi_version": 0,
+            static_elf = {
+                "schema": "euf-viper.t1-static-linux-elf.v1",
+                "binary_sha256": binary["sha256"],
+                "binary_bytes": binary["bytes"],
                 "class": "ELF64",
                 "endianness": "little",
-                "interpreter": None,
                 "machine": "x86_64",
-                "needed": [],
-                "osabi": 0,
-                "rpath": [],
-                "runpath": [],
-                "soname": None,
                 "type": "shared-or-pie",
-            }
-            interpreter_path = "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"
-            libc_path = "/usr/lib/x86_64-linux-gnu/libc.so.6"
-            objects = [
-                {
-                    "bytes": binary["bytes"],
-                    "elf": {
-                        **elf_template,
-                        "interpreter": "/lib64/ld-linux-x86-64.so.2",
-                        "needed": ["libc.so.6"],
-                    },
-                    "path": binary["path"],
-                    "role": "binary",
-                    "sha256": binary["sha256"],
-                },
-                {
-                    "bytes": 1,
-                    "elf": {**elf_template, "soname": "ld-linux-x86-64.so.2"},
-                    "path": interpreter_path,
-                    "role": "interpreter",
-                    "sha256": "9" * 64,
-                },
-                {
-                    "bytes": 1,
-                    "elf": {**elf_template, "soname": "libc.so.6"},
-                    "path": libc_path,
-                    "role": "dependency",
-                    "sha256": "e" * 64,
-                },
-            ]
-            edges = [
-                {
-                    "needed": "libc.so.6",
-                    "resolved": libc_path,
-                    "source": binary["path"],
-                }
-            ]
-            linux_elf = {
-                "schema": "euf-viper.t1-linux-elf-provenance.v1",
-                "binary_sha256": binary["sha256"],
-                "closure_sha256": hashlib.sha256(
-                    TIMING.canonical_bytes({"edges": edges, "objects": objects})
-                ).hexdigest(),
-                "default_search": ["/usr/lib/x86_64-linux-gnu"],
-                "edges": edges,
-                "interpreter": {
-                    "bytes": 1,
-                    "path": interpreter_path,
-                    "requested": "/lib64/ld-linux-x86-64.so.2",
-                    "sha256": "9" * 64,
-                },
-                "objects": objects,
+                "pt_interp_count": 0,
+                "dt_needed_count": 0,
+                "native_runtime": "no-pt-interp-zero-dt-needed.v1",
             }
             (root / "cargo-home").mkdir()
             (root / "fetch-cargo-home").mkdir()
@@ -1169,7 +1143,7 @@ class BuildReceiptValidationTests(unittest.TestCase):
                     **{key: binary[key] for key in ("path", "sha256", "bytes")},
                     "attestation": "inherited-open-descriptor.v1",
                 },
-                "linux_elf": linux_elf,
+                "static_elf": static_elf,
                 "linker_selection": {
                     "driver_path": tools["cc"]["path"],
                     "driver_sha256": tools["cc"]["sha256"],
@@ -1179,15 +1153,8 @@ class BuildReceiptValidationTests(unittest.TestCase):
                 },
                 "python": {**python_identity, "bytes": 1},
                 "tools": tools,
-                "libc": {
-                    "path": libc_path,
-                    "sha256": "e" * 64,
-                    "bytes": 1,
-                    "name": "glibc",
-                    "version": "2.35",
-                },
                 "build": {
-                    "allocator": "system-libc",
+                    "allocator": "rust-system-allocator-static-runtime",
                     "backend": "auto",
                     "cargo_home": str(root / "cargo-home"),
                     "cargo_profile": "release",
@@ -1195,8 +1162,12 @@ class BuildReceiptValidationTests(unittest.TestCase):
                     "features": ["finite-symmetry"],
                     "fetch_cargo_home": str(root / "fetch-cargo-home"),
                     "locked": True,
+                    "native_linkage": "crt-static-no-interpreter-no-needed.v1",
                     "offline": True,
-                    "rustflags": f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd",
+                    "rustflags": (
+                        f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
+                        "-C target-feature=+crt-static"
+                    ),
                     "target_dir": str(root / "target"),
                     "vendor_dir": str(vendor_dir),
                 },
@@ -1258,6 +1229,21 @@ class BuildReceiptValidationTests(unittest.TestCase):
                     build_tools=tools,
                     where="online build receipt fixture",
                 )
+            ready.path.chmod(0o600)
+            ready.path.write_bytes(TIMING.canonical_bytes({"forged": True}))
+            ready.path.chmod(0o400)
+            with self.assertRaisesRegex(TIMING.CampaignError, "readiness"):
+                TIMING.validate_build_receipt(
+                    artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="forged readiness fixture",
+                )
+            ready.path.chmod(0o600)
+            ready.path.write_bytes(TIMING.canonical_bytes(ready_payload))
+            ready.path.chmod(0o400)
             dependency_events.path.chmod(0o600)
             dependency_events.path.write_bytes(b"transient dependency mutation\n")
             dependency_events.path.chmod(0o400)
@@ -1634,43 +1620,57 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
         self.assertIn("timed_parser_path_never_clones_symbol_telemetry", source)
 
 
-class LinuxElfProvenanceTests(unittest.TestCase):
-    @unittest.skipUnless(sys.platform.startswith("linux"), "ELF closure is Linux-only")
-    def test_elf_interpreter_and_recursive_needed_closure_are_bound(self) -> None:
-        binary_path = Path("/bin/true").resolve(strict=True)
-        descriptor = os.open(binary_path, os.O_RDONLY)
-        try:
-            content = BUILD_GUARD.descriptor_bytes(
-                descriptor, executable=True, label="ELF fixture"
-            )
-        finally:
-            os.close(descriptor)
-        binding = {
-            "path": str(binary_path),
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "bytes": len(content),
-            "attestation": "inherited-open-descriptor.v1",
-        }
-        provenance = BUILD_GUARD.attest_linux_elf(binary_path, content, binding)
-        TIMING.validate_linux_elf_provenance(
-            provenance,
-            binary=binding,
-            where="/bin/true provenance",
-            verify_runtime_paths=True,
+class LinuxStaticElfTests(unittest.TestCase):
+    @staticmethod
+    def _minimal_static_elf() -> bytes:
+        identity = b"\x7fELF\x02\x01\x01\x00\x00" + b"\x00" * 7
+        header = struct.pack(
+            "<HHIQQQIHHHHHH",
+            2,
+            62,
+            1,
+            0x400000,
+            64,
+            0,
+            0,
+            64,
+            56,
+            1,
+            0,
+            0,
+            0,
         )
-        self.assertEqual(provenance["binary_sha256"], binding["sha256"])
-        self.assertTrue(provenance["interpreter"]["requested"].startswith("/"))
-        self.assertGreaterEqual(len(provenance["objects"]), 3)
-        self.assertTrue(provenance["edges"])
-        self.assertTrue(
-            any(
-                (item["elf"]["soname"] or Path(item["path"]).name).startswith("libc.so")
-                for item in provenance["objects"]
-            )
+        program = struct.pack(
+            "<IIQQQQQQ", 1, 5, 0, 0x400000, 0x400000, 120, 120, 0x1000
         )
+        return identity + header + program
 
-    @unittest.skipUnless(sys.platform.startswith("linux"), "ELF closure is Linux-only")
-    def test_missing_recursive_needed_edge_fails_closed(self) -> None:
+    @unittest.skipUnless(sys.platform.startswith("linux"), "static ELF gate is Linux-only")
+    def test_minimal_static_elf_is_independently_attested(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            binary_path = Path(directory_name) / "static-euf-viper"
+            content = self._minimal_static_elf()
+            binary_path.write_bytes(content)
+            binary_path.chmod(0o500)
+            binding = {
+                "path": str(binary_path),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "bytes": len(content),
+                "attestation": "inherited-open-descriptor.v1",
+            }
+            attestation = BUILD_GUARD.attest_static_linux_elf(
+                binary_path, content, binding
+            )
+            independent = TIMING.inspect_static_linux_elf(
+                content, digest=binding["sha256"]
+            )
+            self.assertEqual(attestation, independent)
+            TIMING.validate_static_elf_attestation(
+                attestation, binary=binding, where="static fixture"
+            )
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "static ELF gate is Linux-only")
+    def test_dynamic_loader_runtime_is_rejected(self) -> None:
         binary_path = Path("/bin/true").resolve(strict=True)
         content = binary_path.read_bytes()
         binding = {
@@ -1679,21 +1679,33 @@ class LinuxElfProvenanceTests(unittest.TestCase):
             "bytes": len(content),
             "attestation": "inherited-open-descriptor.v1",
         }
-        provenance = BUILD_GUARD.attest_linux_elf(binary_path, content, binding)
-        broken = copy.deepcopy(provenance)
-        broken["edges"] = broken["edges"][1:]
-        broken["closure_sha256"] = hashlib.sha256(
-            TIMING.canonical_bytes(
-                {"edges": broken["edges"], "objects": broken["objects"]}
-            )
-        ).hexdigest()
-        with self.assertRaisesRegex(TIMING.CampaignError, "closure is incomplete"):
-            TIMING.validate_linux_elf_provenance(
-                broken,
-                binary=binding,
-                where="incomplete provenance",
-                verify_runtime_paths=False,
-            )
+        with self.assertRaisesRegex(SystemExit, "PT_INTERP|DT_NEEDED"):
+            BUILD_GUARD.attest_static_linux_elf(binary_path, content, binding)
+        with self.assertRaisesRegex(TIMING.CampaignError, "PT_INTERP|DT_NEEDED"):
+            TIMING.inspect_static_linux_elf(content, digest=binding["sha256"])
+
+    def test_attestation_cannot_claim_loader_or_dependency_counts(self) -> None:
+        binary = {"sha256": "a" * 64, "bytes": 10}
+        value = {
+            "schema": "euf-viper.t1-static-linux-elf.v1",
+            "binary_sha256": binary["sha256"],
+            "binary_bytes": binary["bytes"],
+            "class": "ELF64",
+            "endianness": "little",
+            "machine": "x86_64",
+            "type": "executable",
+            "pt_interp_count": 0,
+            "dt_needed_count": 0,
+            "native_runtime": "no-pt-interp-zero-dt-needed.v1",
+        }
+        for field in ("pt_interp_count", "dt_needed_count"):
+            broken = {**value, field: 1}
+            with self.subTest(field=field), self.assertRaisesRegex(
+                TIMING.CampaignError, "without PT_INTERP or DT_NEEDED"
+            ):
+                TIMING.validate_static_elf_attestation(
+                    broken, binary=binary, where="forged static attestation"
+                )
 
 
 class LinuxMutationMonitorTests(unittest.TestCase):
@@ -1737,11 +1749,25 @@ class LinuxMutationMonitorTests(unittest.TestCase):
             text=True,
             pass_fds=evidence_fds,
         )
+        ready_payload = None
         for _ in range(200):
-            if ready.is_file() or process.poll() is not None:
+            if os.fstat(ready_fd).st_size:
+                try:
+                    ready_payload, _ = BUILD_GUARD.validate_monitor_ready(
+                        ready_fd,
+                        ready,
+                        expected_snapshot=snapshot,
+                        expected_monitor_pid=process.pid,
+                        expected_parent_pid=os.getpid(),
+                    )
+                    break
+                except (SystemExit, json.JSONDecodeError):
+                    pass
+            if process.poll() is not None:
                 break
             time.sleep(0.01)
-        self.assertTrue(ready.is_file())
+        self.assertIsNotNone(ready_payload, "monitor never published valid readiness")
+        self.assertTrue(ready_payload["watch_setup_complete"])
         self.assertIsNone(process.poll())
         return process, ready, events, receipt, evidence_fds
 
@@ -1801,6 +1827,35 @@ class LinuxMutationMonitorTests(unittest.TestCase):
                 self.assertEqual(payload["events"]["path"], str(events))
                 self.assertIn("WRITE", events.read_text(encoding="ascii"))
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "descriptor attack runs in Linux CI")
+    def test_path_replacement_after_monitor_close_cannot_change_opened_script(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            snapshot = root / "source"
+            snapshot.mkdir()
+            script = snapshot / "tool.py"
+            script.write_text("print('original')\n", encoding="ascii")
+            descriptor = os.open(script, os.O_RDONLY)
+            try:
+                process, _, _, _, evidence_fds = self._start_monitor(root, snapshot)
+                stdout, stderr = self._close_monitor(process, evidence_fds)
+                self.assertEqual((process.returncode, stdout), (0, ""), stderr)
+                replacement = root / "replacement.py"
+                replacement.write_text("print('replacement')\n", encoding="ascii")
+                os.replace(replacement, script)
+                completed = subprocess.run(
+                    [sys.executable, "-I", "-B", f"/proc/self/fd/{descriptor}"],
+                    check=False,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    pass_fds=(descriptor,),
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout, "original\n")
+            finally:
+                os.close(descriptor)
+
 
 class RealReleaseIntegrationTests(unittest.TestCase):
     @unittest.skipUnless(
@@ -1815,7 +1870,7 @@ class RealReleaseIntegrationTests(unittest.TestCase):
         with TIMING.open_verified_executable(
             binary,
             inherited_descriptor=inherited_descriptor,
-            require_linux_elf=True,
+            require_static_linux_elf=True,
         ) as executable:
             semantics = TIMING.collect_semantic_attestations(
                 executable, source, timeout_seconds=2

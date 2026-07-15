@@ -8,7 +8,6 @@ import ctypes
 import hashlib
 import json
 import os
-import platform
 import select
 import stat
 import struct
@@ -451,16 +450,18 @@ def monitor_command(args: argparse.Namespace) -> None:
         event_count = 0
         poll_cycles = 0
         ready = {
-            "schema": "euf-viper.t1-mutation-monitor-ready.v2",
+            "schema": "euf-viper.t1-mutation-monitor-ready.v3",
             "control": "parent-owned-pipe-eof.v1",
             "monitor_pid": os.getpid(),
             "parent_pid": os.getppid(),
             "snapshot": str(snapshot),
+            "watch_setup_complete": True,
             "watched_directories": len(watches),
             "watch_mask": WATCH_MASK,
         }
+        ready_content = canonical_bytes(ready)
         publish_descriptor(
-            args.ready_fd, args.ready, canonical_bytes(ready), "monitor ready output"
+            args.ready_fd, args.ready, ready_content, "monitor ready output"
         )
         poller = select.poll()
         poller.register(inotify_descriptor, select.POLLIN | select.POLLERR)
@@ -536,7 +537,7 @@ def monitor_command(args: argparse.Namespace) -> None:
         finally:
             pass
         receipt = {
-            "schema": "euf-viper.t1-mutation-monitor-receipt.v2",
+            "schema": "euf-viper.t1-mutation-monitor-receipt.v3",
             "control": "parent-owned-pipe-eof.v1",
             "monitor_pid": os.getpid(),
             "parent_pid": os.getppid(),
@@ -545,6 +546,11 @@ def monitor_command(args: argparse.Namespace) -> None:
             "watched_directories": len(watches),
             "watch_mask": WATCH_MASK,
             "event_count": event_count,
+            "ready": {
+                "path": str(args.ready),
+                "sha256": sha256(ready_content),
+                "bytes": len(ready_content),
+            },
             "events": {
                 "path": str(args.events),
                 "sha256": events_digest.hexdigest(),
@@ -562,6 +568,53 @@ def monitor_command(args: argparse.Namespace) -> None:
             raise SystemExit(3)
     finally:
         os.close(inotify_descriptor)
+
+
+def validate_monitor_ready(
+    descriptor: int,
+    path: Path,
+    *,
+    expected_snapshot: Path,
+    expected_monitor_pid: int,
+    expected_parent_pid: int,
+) -> tuple[dict[str, Any], bytes]:
+    ready, content = load_canonical_descriptor(descriptor, path, "monitor readiness")
+    expected_keys = {
+        "schema",
+        "control",
+        "monitor_pid",
+        "parent_pid",
+        "snapshot",
+        "watch_setup_complete",
+        "watched_directories",
+        "watch_mask",
+    }
+    if set(ready) != expected_keys:
+        die("monitor readiness fields are incomplete or unexpected")
+    if (
+        ready["schema"] != "euf-viper.t1-mutation-monitor-ready.v3"
+        or ready["control"] != "parent-owned-pipe-eof.v1"
+        or ready["monitor_pid"] != expected_monitor_pid
+        or ready["parent_pid"] != expected_parent_pid
+        or ready["snapshot"] != str(expected_snapshot.resolve(strict=True))
+        or ready["watch_setup_complete"] is not True
+        or type(ready["watched_directories"]) is not int
+        or ready["watched_directories"] < 1
+        or type(ready["watch_mask"]) is not int
+        or ready["watch_mask"] != WATCH_MASK
+    ):
+        die("monitor readiness is not PID-bound to a completed watch setup")
+    return ready, content
+
+
+def verify_ready_command(args: argparse.Namespace) -> None:
+    validate_monitor_ready(
+        args.ready_fd,
+        args.ready,
+        expected_snapshot=args.expected_snapshot,
+        expected_monitor_pid=args.expected_monitor_pid,
+        expected_parent_pid=args.expected_parent_pid,
+    )
 
 
 def load_canonical(path: Path) -> dict[str, Any]:
@@ -816,144 +869,29 @@ def parse_linux_elf(content: bytes, *, label: str) -> dict[str, Any]:
     }
 
 
-def _runtime_object(path: Path) -> tuple[Path, bytes, dict[str, Any]]:
-    canonical = path.resolve(strict=True)
-    descriptor = os.open(canonical, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
-    try:
-        content = descriptor_bytes(descriptor, executable=False, label=str(canonical))
-    finally:
-        os.close(descriptor)
-    return canonical, content, parse_linux_elf(content, label=str(canonical))
-
-
-def _expanded_elf_search_paths(values: list[str], origin: Path) -> list[Path]:
-    paths: list[Path] = []
-    for value in values:
-        expanded = value.replace("${ORIGIN}", str(origin)).replace("$ORIGIN", str(origin))
-        if "$" in expanded:
-            die(f"unsupported ELF dynamic search token in {value!r}")
-        candidate = Path(expanded)
-        if not candidate.is_absolute():
-            die(f"relative ELF dynamic search path is forbidden: {value!r}")
-        if candidate.is_dir():
-            paths.append(candidate.resolve(strict=True))
-    return paths
-
-
-def attest_linux_elf(
+def attest_static_linux_elf(
     binary_path: Path, binary_content: bytes, binary_binding: dict[str, Any]
 ) -> dict[str, Any]:
     if not sys.platform.startswith("linux"):
-        die("Linux ELF provenance is required for a guarded T1 release")
-    root_elf = parse_linux_elf(binary_content, label=str(binary_path))
-    interpreter_name = root_elf["interpreter"]
-    if interpreter_name is None:
-        die("guarded T1 release ELF has no PT_INTERP")
-    interpreter_path, interpreter_content, interpreter_elf = _runtime_object(
-        Path(interpreter_name)
-    )
-    if interpreter_elf["machine"] != root_elf["machine"]:
-        die("ELF interpreter machine differs from the release binary")
-
-    triplet = {"x86_64": "x86_64-linux-gnu", "aarch64": "aarch64-linux-gnu"}[
-        root_elf["machine"]
-    ]
-    default_candidates = [
-        interpreter_path.parent,
-        Path("/lib64"),
-        Path("/usr/lib64"),
-        Path("/lib") / triplet,
-        Path("/usr/lib") / triplet,
-        Path("/lib"),
-        Path("/usr/lib"),
-    ]
-    default_search: list[Path] = []
-    for candidate in default_candidates:
-        if candidate.is_dir():
-            canonical = candidate.resolve(strict=True)
-            if canonical not in default_search:
-                default_search.append(canonical)
-    if not default_search:
-        die("no canonical native runtime search directories are available")
-
-    object_data: dict[Path, tuple[bytes, dict[str, Any], str]] = {
-        binary_path: (binary_content, root_elf, "binary"),
-        interpreter_path: (interpreter_content, interpreter_elf, "interpreter"),
-    }
-    pending = [binary_path, interpreter_path]
-    edges: list[dict[str, str]] = []
-    while pending:
-        source = pending.pop(0)
-        _, elf, _ = object_data[source]
-        dynamic_search = _expanded_elf_search_paths(
-            elf["runpath"] if elf["runpath"] else elf["rpath"], source.parent
-        )
-        search = [*dynamic_search, *default_search]
-        for needed in elf["needed"]:
-            if "/" in needed or needed in {".", ".."}:
-                die(f"unsafe DT_NEEDED name in {source}: {needed!r}")
-            resolved: Path | None = None
-            for directory in search:
-                candidate = directory / needed
-                if candidate.exists():
-                    resolved = candidate.resolve(strict=True)
-                    break
-            if resolved is None:
-                die(f"cannot resolve DT_NEEDED {needed!r} from {source}")
-            if resolved not in object_data:
-                path, content, dependency_elf = _runtime_object(resolved)
-                if dependency_elf["machine"] != root_elf["machine"]:
-                    die(f"native dependency machine mismatch: {path}")
-                object_data[path] = (content, dependency_elf, "dependency")
-                pending.append(path)
-            edges.append({"needed": needed, "resolved": str(resolved), "source": str(source)})
-
-    objects = [
-        {
-            "bytes": len(content),
-            "elf": elf,
-            "path": str(path),
-            "role": role,
-            "sha256": sha256(content),
-        }
-        for path, (content, elf, role) in sorted(object_data.items(), key=lambda item: str(item[0]))
-    ]
-    edges.sort(key=lambda edge: (edge["source"], edge["needed"], edge["resolved"]))
-    closure = {"edges": edges, "objects": objects}
+        die("static Linux ELF attestation is required for a guarded T1 release")
+    elf = parse_linux_elf(binary_content, label=str(binary_path))
+    if elf["interpreter"] is not None:
+        die("guarded T1 release must not contain PT_INTERP")
+    if elf["needed"]:
+        die("guarded T1 release must not contain DT_NEEDED entries")
+    if elf["rpath"] or elf["runpath"]:
+        die("guarded T1 release must not contain dynamic-loader search paths")
     return {
-        "schema": "euf-viper.t1-linux-elf-provenance.v1",
+        "schema": "euf-viper.t1-static-linux-elf.v1",
         "binary_sha256": binary_binding["sha256"],
-        "closure_sha256": sha256(canonical_bytes(closure)),
-        "default_search": [str(path) for path in default_search],
-        "edges": edges,
-        "interpreter": {
-            "bytes": len(interpreter_content),
-            "path": str(interpreter_path),
-            "requested": interpreter_name,
-            "sha256": sha256(interpreter_content),
-        },
-        "objects": objects,
-    }
-
-
-def linked_libc_identity(provenance: dict[str, Any]) -> dict[str, Any]:
-    candidates = [
-        item
-        for item in provenance["objects"]
-        if (item["elf"]["soname"] or Path(item["path"]).name).startswith("libc.so")
-    ]
-    if len(candidates) != 1:
-        die("ELF closure does not contain exactly one libc identity")
-    candidate = candidates[0]
-    name, version = platform.libc_ver()
-    if not name or not version:
-        die("cannot identify libc name and version")
-    return {
-        "path": candidate["path"],
-        "sha256": candidate["sha256"],
-        "bytes": candidate["bytes"],
-        "name": name,
-        "version": version,
+        "binary_bytes": binary_binding["bytes"],
+        "class": elf["class"],
+        "endianness": elf["endianness"],
+        "machine": elf["machine"],
+        "type": elf["type"],
+        "pt_interp_count": 0,
+        "dt_needed_count": 0,
+        "native_runtime": "no-pt-interp-zero-dt-needed.v1",
     }
 
 
@@ -995,6 +933,8 @@ def validate_selected_linker(cc: dict[str, Any], linker: dict[str, Any]) -> dict
 def validate_clean_monitor(
     receipt_path: Path,
     receipt_descriptor: int,
+    ready_path: Path,
+    ready_descriptor: int,
     events_path: Path,
     events_descriptor: int,
     expected_root: str,
@@ -1004,7 +944,7 @@ def validate_clean_monitor(
         receipt_descriptor, receipt_path, f"{label} monitor receipt"
     )
     if (
-        monitor.get("schema") != "euf-viper.t1-mutation-monitor-receipt.v2"
+        monitor.get("schema") != "euf-viper.t1-mutation-monitor-receipt.v3"
         or monitor.get("control") != "parent-owned-pipe-eof.v1"
         or not isinstance(monitor.get("monitor_pid"), int)
         or monitor.get("monitor_pid", 0) <= 1
@@ -1018,6 +958,24 @@ def validate_clean_monitor(
         die(f"{label} mutation monitor did not close cleanly")
     if monitor.get("snapshot") != expected_root:
         die(f"{label} monitor and inventory root identities differ")
+    ready, ready_content = validate_monitor_ready(
+        ready_descriptor,
+        ready_path,
+        expected_snapshot=Path(expected_root),
+        expected_monitor_pid=monitor["monitor_pid"],
+        expected_parent_pid=monitor["parent_pid"],
+    )
+    ready_binding = monitor.get("ready")
+    if (
+        not isinstance(ready_binding, dict)
+        or set(ready_binding) != {"path", "sha256", "bytes"}
+        or ready_binding["path"] != str(ready_path)
+        or ready_binding["sha256"] != sha256(ready_content)
+        or ready_binding["bytes"] != len(ready_content)
+        or ready["watched_directories"] != monitor.get("watched_directories")
+        or ready["watch_mask"] != monitor.get("watch_mask")
+    ):
+        die(f"{label} mutation monitor readiness binding differs")
     events = monitor.get("events")
     if not isinstance(events, dict) or set(events) != {"path", "sha256", "bytes"}:
         die(f"{label} mutation monitor event binding is malformed")
@@ -1062,6 +1020,8 @@ def receipt_command(args: argparse.Namespace) -> None:
     monitor, monitor_content = validate_clean_monitor(
         args.monitor_receipt,
         args.monitor_receipt_fd,
+        args.monitor_ready,
+        args.monitor_ready_fd,
         args.monitor_events,
         args.monitor_events_fd,
         pre.get("snapshot"),
@@ -1074,6 +1034,8 @@ def receipt_command(args: argparse.Namespace) -> None:
     dependency_monitor, dependency_monitor_content = validate_clean_monitor(
         args.dependency_monitor_receipt,
         args.dependency_monitor_receipt_fd,
+        args.dependency_monitor_ready,
+        args.dependency_monitor_ready_fd,
         args.dependency_monitor_events,
         args.dependency_monitor_events_fd,
         dependency_pre.get("root"),
@@ -1106,9 +1068,9 @@ def receipt_command(args: argparse.Namespace) -> None:
         die("Python executable hash mismatch")
     python_binding["version"] = os.environ["EUF_VIPER_PYTHON_VERSION"]
     binary, binary_content = inherited_executable_binding(args.binary_fd, args.binary)
-    elf_provenance = attest_linux_elf(args.binary, binary_content, binary)
+    static_elf = attest_static_linux_elf(args.binary, binary_content, binary)
     payload = {
-        "schema": "euf-viper.t1-guarded-release-build.v2",
+        "schema": "euf-viper.t1-guarded-release-build.v3",
         "status": "clean",
         "revision": valid_revision(args.revision),
         "source_snapshot": pre["snapshot"],
@@ -1143,13 +1105,12 @@ def receipt_command(args: argparse.Namespace) -> None:
             "payload": dependency_monitor,
         },
         "binary": binary,
-        "linux_elf": elf_provenance,
+        "static_elf": static_elf,
         "linker_selection": linker_selection,
         "python": python_binding,
         "tools": tools,
-        "libc": linked_libc_identity(elf_provenance),
         "build": {
-            "allocator": "system-libc",
+            "allocator": "rust-system-allocator-static-runtime",
             "backend": "auto",
             "cargo_home": str(cargo_home),
             "cargo_profile": "release",
@@ -1157,8 +1118,12 @@ def receipt_command(args: argparse.Namespace) -> None:
             "features": ["finite-symmetry"],
             "fetch_cargo_home": str(fetch_cargo_home),
             "locked": True,
+            "native_linkage": "crt-static-no-interpreter-no-needed.v1",
             "offline": True,
-            "rustflags": f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd",
+            "rustflags": (
+                f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
+                "-C target-feature=+crt-static"
+            ),
             "target_dir": str(target_dir),
             "vendor_dir": str(vendor_dir),
         },
@@ -1193,6 +1158,12 @@ def parser() -> argparse.ArgumentParser:
     monitor.add_argument("--events-fd", type=int, required=True)
     monitor.add_argument("--receipt", type=Path, required=True)
     monitor.add_argument("--receipt-fd", type=int, required=True)
+    verify_ready = commands.add_parser("verify-ready")
+    verify_ready.add_argument("--ready", type=Path, required=True)
+    verify_ready.add_argument("--ready-fd", type=int, required=True)
+    verify_ready.add_argument("--expected-snapshot", type=Path, required=True)
+    verify_ready.add_argument("--expected-monitor-pid", type=int, required=True)
+    verify_ready.add_argument("--expected-parent-pid", type=int, required=True)
     receipt = commands.add_parser("receipt")
     receipt.add_argument("--revision", required=True)
     receipt.add_argument("--pre-inventory", type=Path, required=True)
@@ -1201,6 +1172,8 @@ def parser() -> argparse.ArgumentParser:
     receipt.add_argument("--post-inventory-fd", type=int, required=True)
     receipt.add_argument("--monitor-receipt", type=Path, required=True)
     receipt.add_argument("--monitor-receipt-fd", type=int, required=True)
+    receipt.add_argument("--monitor-ready", type=Path, required=True)
+    receipt.add_argument("--monitor-ready-fd", type=int, required=True)
     receipt.add_argument("--monitor-events", type=Path, required=True)
     receipt.add_argument("--monitor-events-fd", type=int, required=True)
     receipt.add_argument("--dependency-pre-inventory", type=Path, required=True)
@@ -1209,6 +1182,8 @@ def parser() -> argparse.ArgumentParser:
     receipt.add_argument("--dependency-post-inventory-fd", type=int, required=True)
     receipt.add_argument("--dependency-monitor-receipt", type=Path, required=True)
     receipt.add_argument("--dependency-monitor-receipt-fd", type=int, required=True)
+    receipt.add_argument("--dependency-monitor-ready", type=Path, required=True)
+    receipt.add_argument("--dependency-monitor-ready-fd", type=int, required=True)
     receipt.add_argument("--dependency-monitor-events", type=Path, required=True)
     receipt.add_argument("--dependency-monitor-events-fd", type=int, required=True)
     receipt.add_argument("--binary", type=Path, required=True)
@@ -1230,6 +1205,8 @@ def main() -> int:
         external_tree_inventory_command(args)
     elif args.command == "monitor":
         monitor_command(args)
+    elif args.command == "verify-ready":
+        verify_ready_command(args)
     elif args.command == "receipt":
         receipt_command(args)
     else:

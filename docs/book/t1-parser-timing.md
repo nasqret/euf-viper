@@ -71,7 +71,7 @@ population is fixed and cannot be empty.
 
 The performance tests are conjunctive with semantic tests:
 
-- exact `source_count=7503`, 128 deterministic shards, `max_parallel=32`, one
+- exact `source_count=7503`, 128 deterministic shards, `max_parallel=1`, one
   warmup, five measured rounds, two-second timeout, and
   `tree,stream,stream,tree` order are immutable; 128 is not a repetition count;
 - every observation completes, so both phases have exactly 7,503 common rows;
@@ -100,8 +100,8 @@ remote preflight rehashes all 7,503 manifest paths and source files. Prepare
 rejects tracked, untracked, ignored, hidden-index, Cargo-config,
 Python-shadow, compiler-wrapper, and ambient-selector influences. Every Slurm
 wrapper starts in an absolute `--chdir` root and validates its canonical path,
-exact HEAD, origin ref, and common-helper Git blob before sourcing any worktree
-file. Root, revision, ref, mode, and bound hashes are positional job arguments,
+exact HEAD, origin ref, and common-helper Git blob before sourcing that helper
+through its already-open descriptor. Root, revision, ref, mode, and bound hashes are positional job arguments,
 not ambient environment selectors. `SLURM_SUBMIT_DIR` is never used. Prepare
 extracts a private exact-revision
 source snapshot and starts a recursive Linux mutation monitor
@@ -109,33 +109,39 @@ before the pre-build all-blob inventory, and keeps Cargo homes, dependencies,
 and target outside the watched tree. Under a sanitized environment, Cargo first
 materializes the locked registry dependency set into a fresh versioned vendor
 tree. That tree receives exact pre/post file, mode, size, and SHA-256 inventory
-receipts, and a second recursive monitor is ready before its pre-build
+receipts, and a second recursive monitor publishes canonical, nonempty,
+PID/root-bound readiness only after all watches are installed and before its pre-build
 inventory. The release compile then runs from `/` with a separate fresh Cargo
 home, `--locked --offline`, an explicit vendor source replacement, and no
 network. Any source or dependency create, write, attribute, move, or delete
 event rejects the build even if bytes are restored before the repeated
-post-build inventory. Monitor shutdown is EOF on a parent-owned pipe opened
+post-build inventory. Readiness is a canonical, nonempty artifact bound to the
+monitor PID, parent PID, watched root, watch count, and mask after watch setup.
+Monitor shutdown is EOF on a parent-owned pipe opened
 through a mode-`0600` FIFO and then unlinked; creating a sentinel pathname cannot
 end it. A watchdog proves both monitor processes remain non-zombie children for
 the entire compiler lifetime, and every non-owner child closes the control and
-evidence descriptors before execution. Inventories, event logs, monitor receipts, the
-build receipt, and the built executable remain open by descriptor across
-monitor closure, so receipt construction and the first execution do not reopen
-post-monitor pathnames.
+evidence descriptors before execution. Both readiness artifacts, inventories,
+event logs, monitor receipts, the build receipt, and the built executable remain
+open by descriptor across monitor closure. The guard and timing harness were
+also opened and Git-blob checked before monitoring; post-monitor execution uses
+their `/proc/self/fd` names, so replacing their checkout pathnames cannot select
+new code.
 
 The guarded build receipt binds Python, Cargo, Rust, the native C compiler,
 the exact linker selected by that driver, archiver, allocator/backend, linker
-flags, and final release bytes. On Linux it parses the ELF64 identity without
-`ldd`, binds `PT_INTERP`, recursively resolves every `DT_NEEDED` edge, hashes the
-complete native object closure, and derives libc from that closure. Linux
-observations execute the same descriptor whose bytes were attested. WMI placement
+flags, and final release bytes. The release is compiled with `+crt-static` and
+is rejected unless independent ELF inspections prove zero `PT_INTERP` and zero
+`DT_NEEDED`; the campaign makes no hand-written dynamic-loader-closure claim.
+Linux observations execute the same descriptor whose bytes were attested. WMI placement
 is fixed to `cpu_idle` and `c1n1`, one non-SMT physical core and Slurm-local NUMA
-memory placement per task. Full mode additionally requests an exclusive node and
-runs the shard step with `--cpu-freq=high:UserSpace`; the worker must prove a
+memory placement per task. Full mode serializes all 128 array elements with
+`0-127%1`; each element requests the sole allowed node exclusively and runs the
+shard step with `--cpu-freq=high:UserSpace`. The worker must prove a
 whole-node CPU allocation, singleton affinity, a propagated Slurm frequency
 request, and fixed userspace governor bounds or fail before recording timing evidence. The
-bounded canary schedules only shard 0, never submits the complete audit, and is
-explicitly nonpromotable.
+bounded canary schedules only shard 0 and never submits the complete audit.
+Both modes are permanently nonpromotable research evidence.
 
 All JSON is duplicate-key rejecting and finite. A value such as `1e999` is
 rejected after parsing even though its syntax is standard JSON. Generated
@@ -149,9 +155,9 @@ task. Hosted Linux CI reproduces the monitored exact locked release,
 executes the real Rust ELF through the descriptor harness, and runs default and
 all-feature Rust runtime matrices.
 
-No WMI measurement belongs to this implementation commit. The first campaign is
-unconditionally research-only and nonpromotable. Noncompliant or canary evidence
+No WMI measurement belongs to this implementation commit. Every campaign is
+unconditionally research-only and permanently nonpromotable. Noncompliant or canary evidence
 cannot acquire a complete audit, and the audit schema still requires
 `promotable=false`. A pass
-would justify a controlled replication, not production routing and not a claim
+would justify a separately reviewed experiment, not production routing and not a claim
 against Z3, Yices2, or cvc5.

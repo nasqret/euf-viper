@@ -28,7 +28,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, NamedTuple
 
 
-CONTRACT_SCHEMA = "euf-viper.typed-parser-timing-contract.v2"
+CONTRACT_SCHEMA = "euf-viper.typed-parser-timing-contract.v3"
 PREPARE_SCHEMA = "euf-viper.typed-parser-timing-prepare.v2"
 WORK_SCHEMA = "euf-viper.typed-parser-timing-work.v2"
 BINARY_OBSERVATION_SCHEMA = "euf-viper.typed-parser-timing-observation.v1"
@@ -38,17 +38,17 @@ RECORD_SCHEMA = "euf-viper.typed-parser-timing-record.v2"
 SHARD_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-receipt.v1"
 SHARD_SET_RECEIPT_SCHEMA = "euf-viper.typed-parser-timing-shard-set-receipt.v1"
 HASH_CHAIN_SCHEMA = "euf-viper.sha256-record-chain.v1"
-BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v2"
+BUILD_RECEIPT_SCHEMA = "euf-viper.t1-guarded-release-build.v3"
 AUDIT_SCHEMA = "euf-viper.typed-parser-timing-audit.v2"
 BYTE_BINDING = "single-open-descriptor-buffer-replay.v1"
-EXECUTABLE_BINDING = "inherited-descriptor.v1"
+EXECUTABLE_BINDING = "inherited-descriptor-static-elf.v1"
 PRIVATE_COPY_BINDING = "private-byte-copy.v1"
 PROCESS_ISOLATION = "fresh-process-per-observation.v1"
 ABBA_ORDER = ("tree", "stream", "stream", "tree")
 PHASES = ("parse", "end_to_end")
 LOCKED_SOURCE_COUNT = 7503
 LOCKED_SHARDS = 128
-LOCKED_MAX_PARALLEL = 32
+LOCKED_MAX_PARALLEL = 1
 LOCKED_WARMUP_ROUNDS = 1
 LOCKED_MEASURED_ROUNDS = 5
 LOCKED_TIMEOUT_SECONDS = 2
@@ -325,7 +325,7 @@ class OpenedExecutable(NamedTuple):
     binding: dict[str, Any]
     fingerprint: FileFingerprint
     cleanup_directory: Path | None
-    linux_elf: dict[str, Any] | None
+    static_elf: dict[str, Any] | None
 
 
 class Execution(NamedTuple):
@@ -583,6 +583,87 @@ def executable_binding_contract() -> str:
     return EXECUTABLE_BINDING if sys.platform.startswith("linux") else PRIVATE_COPY_BINDING
 
 
+def inspect_static_linux_elf(content: bytes, *, digest: str) -> dict[str, Any]:
+    if not sys.platform.startswith("linux"):
+        raise CampaignError("static guarded release verification requires Linux")
+    if len(content) < 64 or content[:4] != b"\x7fELF":
+        raise CampaignError("guarded release is not an ELF image")
+    identity = content[:16]
+    if identity[4:7] != b"\x02\x01\x01":
+        raise CampaignError("guarded release is not little-endian ELF64 version 1")
+    (
+        elf_type,
+        machine,
+        version,
+        _entry,
+        program_offset,
+        _section_offset,
+        _flags,
+        header_size,
+        program_entry_size,
+        program_count,
+        _section_entry_size,
+        _section_count,
+        _section_names,
+    ) = struct.unpack_from("<HHIQQQIHHHHHH", content, 16)
+    if (
+        elf_type not in {2, 3}
+        or machine not in {62, 183}
+        or version != 1
+        or header_size != 64
+        or program_entry_size != 56
+        or program_count < 1
+        or program_count > 4096
+        or program_offset + program_entry_size * program_count > len(content)
+    ):
+        raise CampaignError("guarded release ELF identity or program table is unsupported")
+    interpreter_count = 0
+    dynamic_segments: list[tuple[int, int]] = []
+    for index in range(program_count):
+        segment_type, _segment_flags, offset, _vaddr, _paddr, file_size, memory_size, _align = (
+            struct.unpack_from("<IIQQQQQQ", content, program_offset + index * program_entry_size)
+        )
+        if file_size > memory_size or offset + file_size > len(content):
+            raise CampaignError("guarded release ELF has an invalid program segment")
+        if segment_type == 3:
+            interpreter_count += 1
+        elif segment_type == 2:
+            dynamic_segments.append((offset, file_size))
+    if interpreter_count != 0:
+        raise CampaignError("guarded release must not contain PT_INTERP")
+    if len(dynamic_segments) > 1:
+        raise CampaignError("guarded release has multiple PT_DYNAMIC segments")
+    needed_count = 0
+    if dynamic_segments:
+        offset, size = dynamic_segments[0]
+        if size % 16:
+            raise CampaignError("guarded release has a misaligned PT_DYNAMIC segment")
+        terminated = False
+        for entry in range(offset, offset + size, 16):
+            tag, _value = struct.unpack_from("<qQ", content, entry)
+            if tag == 0:
+                terminated = True
+                break
+            if tag == 1:
+                needed_count += 1
+        if not terminated:
+            raise CampaignError("guarded release has an unterminated PT_DYNAMIC segment")
+    if needed_count:
+        raise CampaignError("guarded release must not contain DT_NEEDED entries")
+    return {
+        "schema": "euf-viper.t1-static-linux-elf.v1",
+        "binary_sha256": digest,
+        "binary_bytes": len(content),
+        "class": "ELF64",
+        "endianness": "little",
+        "machine": {62: "x86_64", 183: "aarch64"}[machine],
+        "type": {2: "executable", 3: "shared-or-pie"}[elf_type],
+        "pt_interp_count": 0,
+        "dt_needed_count": 0,
+        "native_runtime": "no-pt-interp-zero-dt-needed.v1",
+    }
+
+
 def private_execution_copy(descriptor: int, size: int, digest: str) -> tuple[str, Path]:
     directory = Path(tempfile.mkdtemp(prefix="euf-viper-t1-exec-"))
     execution_path = directory / "euf-viper"
@@ -618,7 +699,7 @@ def open_verified_executable(
     expected: dict[str, Any] | None = None,
     *,
     inherited_descriptor: int | None = None,
-    require_linux_elf: bool = False,
+    require_static_linux_elf: bool = False,
 ) -> Iterator[OpenedExecutable]:
     canonical = path.resolve(strict=True)
     if inherited_descriptor is None:
@@ -648,23 +729,11 @@ def open_verified_executable(
             raise CampaignError("timing binary is not a regular executable")
         content = read_descriptor(descriptor, before.size)
         digest = sha256_bytes(content)
-        linux_elf = None
-        if require_linux_elf:
-            if not sys.platform.startswith("linux"):
-                raise CampaignError("guarded release ELF verification requires Linux")
-            if len(content) < 64 or content[:4] != b"\x7fELF":
-                raise CampaignError("guarded release is not an ELF image")
-            if content[4:7] != b"\x02\x01\x01":
-                raise CampaignError("guarded release is not little-endian ELF64 version 1")
-            elf_type, machine, version = struct.unpack_from("<HHI", content, 16)
-            if elf_type not in {2, 3} or machine not in {62, 183} or version != 1:
-                raise CampaignError("guarded release ELF identity is unsupported")
-            linux_elf = {
-                "class": "ELF64",
-                "endianness": "little",
-                "machine": {62: "x86_64", 183: "aarch64"}[machine],
-                "type": {2: "executable", 3: "shared-or-pie"}[elf_type],
-            }
+        static_elf = (
+            inspect_static_linux_elf(content, digest=digest)
+            if require_static_linux_elf
+            else None
+        )
         if file_fingerprint(descriptor) != before:
             raise CampaignError("timing binary changed while hashed")
         binding = {
@@ -691,7 +760,7 @@ def open_verified_executable(
             binding,
             before,
             cleanup_directory,
-            linux_elf,
+            static_elf,
         )
         yield opened
         assert_executable_unchanged(opened)
@@ -1057,6 +1126,7 @@ def validate_clean_mutation_monitor(
                 "watched_directories",
                 "watch_mask",
                 "event_count",
+                "ready",
                 "events",
                 "status",
             }
@@ -1064,7 +1134,7 @@ def validate_clean_mutation_monitor(
         where=f"{where}.payload",
     )
     if (
-        monitor["schema"] != "euf-viper.t1-mutation-monitor-receipt.v2"
+        monitor["schema"] != "euf-viper.t1-mutation-monitor-receipt.v3"
         or monitor["control"] != "parent-owned-pipe-eof.v1"
         or require_integer(monitor["monitor_pid"], where=f"{where}.monitor_pid", minimum=2)
         < 2
@@ -1085,6 +1155,49 @@ def validate_clean_mutation_monitor(
         < 1
     ):
         raise CampaignError(f"{where}: mutation monitor is not clean and root-bound")
+    ready = require_exact_keys(
+        monitor["ready"],
+        frozenset({"path", "sha256", "bytes"}),
+        where=f"{where}.ready",
+    )
+    ready_path = Path(require_string(ready["path"], where=f"{where}.ready.path"))
+    if not ready_path.is_absolute():
+        raise CampaignError(f"{where}: mutation readiness path is not absolute")
+    expected_ready_sha = require_sha256(
+        ready["sha256"], where=f"{where}.ready.sha256"
+    )
+    expected_ready_bytes = require_integer(
+        ready["bytes"], where=f"{where}.ready.bytes", minimum=1
+    )
+    if verify_paths:
+        ready_artifact = open_regular_artifact(ready_path)
+        if stat.S_IMODE(ready_path.stat().st_mode) != 0o400:
+            raise CampaignError(f"{where}: mutation readiness is not sealed mode 0400")
+        try:
+            ready_payload = strict_json(
+                ready_artifact.content.decode("ascii"), where=f"{where}.ready"
+            )
+        except UnicodeDecodeError as error:
+            raise CampaignError(f"{where}: mutation readiness is not ASCII") from error
+        expected_ready = {
+            "schema": "euf-viper.t1-mutation-monitor-ready.v3",
+            "control": monitor["control"],
+            "monitor_pid": monitor["monitor_pid"],
+            "parent_pid": monitor["parent_pid"],
+            "snapshot": monitor["snapshot"],
+            "watch_setup_complete": True,
+            "watched_directories": monitor["watched_directories"],
+            "watch_mask": monitor["watch_mask"],
+        }
+        if (
+            ready_artifact.sha256 != expected_ready_sha
+            or len(ready_artifact.content) != expected_ready_bytes
+            or canonical_bytes(ready_payload) != ready_artifact.content
+            or ready_payload != expected_ready
+        ):
+            raise CampaignError(f"{where}: mutation readiness binding is invalid")
+    elif expected_ready_bytes < 1:
+        raise CampaignError(f"{where}: descriptor-sealed readiness evidence is empty")
     events = require_exact_keys(
         monitor["events"],
         frozenset({"path", "sha256", "bytes"}),
@@ -1114,12 +1227,8 @@ def validate_clean_mutation_monitor(
     return monitor
 
 
-def validate_linux_elf_provenance(
-    value: Any,
-    *,
-    binary: dict[str, Any],
-    where: str,
-    verify_runtime_paths: bool,
+def validate_static_elf_attestation(
+    value: Any, *, binary: dict[str, Any], where: str
 ) -> dict[str, Any]:
     value = require_exact_keys(
         value,
@@ -1127,153 +1236,33 @@ def validate_linux_elf_provenance(
             {
                 "schema",
                 "binary_sha256",
-                "closure_sha256",
-                "default_search",
-                "edges",
-                "interpreter",
-                "objects",
+                "binary_bytes",
+                "class",
+                "endianness",
+                "machine",
+                "type",
+                "pt_interp_count",
+                "dt_needed_count",
+                "native_runtime",
             }
         ),
         where=where,
     )
-    if value["schema"] != "euf-viper.t1-linux-elf-provenance.v1":
-        raise CampaignError(f"{where}: Linux ELF provenance schema drifted")
-    if value["binary_sha256"] != binary["sha256"]:
-        raise CampaignError(f"{where}: ELF root differs from the attested binary")
-    require_sha256(value["closure_sha256"], where=f"{where}.closure_sha256")
-    if not isinstance(value["default_search"], list) or not value["default_search"]:
-        raise CampaignError(f"{where}: ELF default search path is empty")
-    search_paths: list[str] = []
-    for index, item in enumerate(value["default_search"]):
-        path = require_string(item, where=f"{where}.default_search[{index}]")
-        if not Path(path).is_absolute() or path in search_paths:
-            raise CampaignError(f"{where}: ELF default search path is malformed")
-        search_paths.append(path)
-    interpreter = require_exact_keys(
-        value["interpreter"],
-        frozenset({"bytes", "path", "requested", "sha256"}),
-        where=f"{where}.interpreter",
-    )
-    interpreter_path = require_string(
-        interpreter["path"], where=f"{where}.interpreter.path"
-    )
-    requested_interpreter = require_string(
-        interpreter["requested"], where=f"{where}.interpreter.requested"
-    )
-    if not Path(interpreter_path).is_absolute() or not Path(requested_interpreter).is_absolute():
-        raise CampaignError(f"{where}: ELF interpreter paths must be absolute")
-    require_sha256(interpreter["sha256"], where=f"{where}.interpreter.sha256")
-    require_integer(interpreter["bytes"], where=f"{where}.interpreter.bytes", minimum=1)
-
-    if not isinstance(value["objects"], list) or len(value["objects"]) < 2:
-        raise CampaignError(f"{where}: native runtime closure is incomplete")
-    objects: dict[str, dict[str, Any]] = {}
-    root_objects = 0
-    interpreter_objects = 0
-    for index, item in enumerate(value["objects"]):
-        item_where = f"{where}.objects[{index}]"
-        item = require_exact_keys(
-            item,
-            frozenset({"bytes", "elf", "path", "role", "sha256"}),
-            where=item_where,
-        )
-        path = require_string(item["path"], where=f"{item_where}.path")
-        if not Path(path).is_absolute() or path in objects:
-            raise CampaignError(f"{item_where}: native object path is invalid or duplicated")
-        require_sha256(item["sha256"], where=f"{item_where}.sha256")
-        require_integer(item["bytes"], where=f"{item_where}.bytes", minimum=1)
-        if item["role"] not in {"binary", "interpreter", "dependency"}:
-            raise CampaignError(f"{item_where}: native object role is invalid")
-        elf = require_exact_keys(
-            item["elf"],
-            frozenset(
-                {
-                    "abi_version",
-                    "class",
-                    "endianness",
-                    "interpreter",
-                    "machine",
-                    "needed",
-                    "osabi",
-                    "rpath",
-                    "runpath",
-                    "soname",
-                    "type",
-                }
-            ),
-            where=f"{item_where}.elf",
-        )
-        if (
-            elf["class"] != "ELF64"
-            or elf["endianness"] != "little"
-            or elf["machine"] not in {"x86_64", "aarch64"}
-            or elf["type"] not in {"executable", "shared-or-pie"}
-        ):
-            raise CampaignError(f"{item_where}: unsupported ELF identity")
-        require_integer(elf["abi_version"], where=f"{item_where}.elf.abi_version")
-        require_integer(elf["osabi"], where=f"{item_where}.elf.osabi")
-        for field in ("needed", "rpath", "runpath"):
-            if not isinstance(elf[field], list):
-                raise CampaignError(f"{item_where}.elf.{field} must be a list")
-            for entry in elf[field]:
-                require_string(entry, where=f"{item_where}.elf.{field}")
-        for field in ("interpreter", "soname"):
-            if elf[field] is not None:
-                require_string(elf[field], where=f"{item_where}.elf.{field}")
-        root_objects += item["role"] == "binary"
-        interpreter_objects += item["role"] == "interpreter"
-        objects[path] = item
-        if verify_runtime_paths and item["role"] != "binary":
-            artifact = open_regular_artifact(
-                Path(path), executable=item["role"] == "interpreter"
-            )
-            if artifact.sha256 != item["sha256"] or len(artifact.content) != item["bytes"]:
-                raise CampaignError(f"{item_where}: native runtime object changed")
-    if root_objects != 1 or interpreter_objects != 1:
-        raise CampaignError(f"{where}: ELF closure roles are incomplete or duplicated")
-    root = next(item for item in objects.values() if item["role"] == "binary")
-    if {key: root[key] for key in ("path", "sha256", "bytes")} != {
-        key: binary[key] for key in ("path", "sha256", "bytes")
-    }:
-        raise CampaignError(f"{where}: ELF root object binding mismatch")
-    interpreter_object = objects.get(interpreter_path)
     if (
-        interpreter_object is None
-        or interpreter_object["role"] != "interpreter"
-        or interpreter_object["sha256"] != interpreter["sha256"]
-        or interpreter_object["bytes"] != interpreter["bytes"]
-        or root["elf"]["interpreter"] != requested_interpreter
+        value["schema"] != "euf-viper.t1-static-linux-elf.v1"
+        or value["binary_sha256"] != binary["sha256"]
+        or value["binary_bytes"] != binary["bytes"]
+        or value["class"] != "ELF64"
+        or value["endianness"] != "little"
+        or value["machine"] not in {"x86_64", "aarch64"}
+        or value["type"] not in {"executable", "shared-or-pie"}
+        or value["pt_interp_count"] != 0
+        or value["dt_needed_count"] != 0
+        or value["native_runtime"] != "no-pt-interp-zero-dt-needed.v1"
     ):
-        raise CampaignError(f"{where}: ELF interpreter binding mismatch")
-
-    if not isinstance(value["edges"], list):
-        raise CampaignError(f"{where}: ELF dependency edges must be a list")
-    observed_edges: set[tuple[str, str, str]] = set()
-    for index, edge in enumerate(value["edges"]):
-        edge = require_exact_keys(
-            edge,
-            frozenset({"needed", "resolved", "source"}),
-            where=f"{where}.edges[{index}]",
+        raise CampaignError(
+            f"{where}: release is not a bound static ELF without PT_INTERP or DT_NEEDED"
         )
-        source = require_string(edge["source"], where=f"{where}.edges[{index}].source")
-        needed = require_string(edge["needed"], where=f"{where}.edges[{index}].needed")
-        resolved = require_string(
-            edge["resolved"], where=f"{where}.edges[{index}].resolved"
-        )
-        coordinate = (source, needed, resolved)
-        if source not in objects or resolved not in objects or coordinate in observed_edges:
-            raise CampaignError(f"{where}: ELF dependency edge is dangling or duplicated")
-        observed_edges.add(coordinate)
-    expected_dependencies = {
-        (path, needed)
-        for path, item in objects.items()
-        for needed in item["elf"]["needed"]
-    }
-    if {(source, needed) for source, needed, _ in observed_edges} != expected_dependencies:
-        raise CampaignError(f"{where}: recursive DT_NEEDED closure is incomplete")
-    closure = {"edges": value["edges"], "objects": value["objects"]}
-    if sha256_bytes(canonical_bytes(closure)) != value["closure_sha256"]:
-        raise CampaignError(f"{where}: native runtime closure digest mismatch")
     return value
 
 
@@ -1285,7 +1274,6 @@ def validate_build_receipt(
     python_identity: dict[str, Any],
     build_tools: dict[str, Any],
     where: str,
-    verify_linux_runtime: bool = False,
     verify_embedded_paths: bool = True,
 ) -> dict[str, Any]:
     try:
@@ -1307,11 +1295,10 @@ def validate_build_receipt(
                 "dependency_post_inventory",
                 "dependency_mutation_monitor",
                 "binary",
-                "linux_elf",
+                "static_elf",
                 "linker_selection",
                 "python",
                 "tools",
-                "libc",
                 "build",
             }
         ),
@@ -1419,11 +1406,10 @@ def validate_build_receipt(
         key: binary[key] for key in ("path", "sha256", "bytes")
     }:
         raise CampaignError(f"{where}: release binary identity mismatch")
-    validate_linux_elf_provenance(
-        value["linux_elf"],
+    validate_static_elf_attestation(
+        value["static_elf"],
         binary=build_binary,
-        where=f"{where}.linux_elf",
-        verify_runtime_paths=verify_linux_runtime,
+        where=f"{where}.static_elf",
     )
     build_python = require_exact_keys(
         value["python"],
@@ -1456,26 +1442,6 @@ def validate_build_receipt(
         "resolved_sha256": build_tools["ld"]["sha256"],
     }:
         raise CampaignError(f"{where}: selected linker is not the pinned linker")
-    libc = require_exact_keys(
-        value["libc"],
-        frozenset({"path", "sha256", "bytes", "name", "version"}),
-        where=f"{where}.libc",
-    )
-    if not Path(require_string(libc["path"], where=f"{where}.libc.path")).is_absolute():
-        raise CampaignError(f"{where}: libc path is not absolute")
-    require_sha256(libc["sha256"], where=f"{where}.libc.sha256")
-    require_integer(libc["bytes"], where=f"{where}.libc.bytes", minimum=1)
-    require_string(libc["name"], where=f"{where}.libc.name")
-    require_string(libc["version"], where=f"{where}.libc.version")
-    libc_objects = [
-        item
-        for item in value["linux_elf"]["objects"]
-        if (item["elf"]["soname"] or Path(item["path"]).name).startswith("libc.so")
-    ]
-    if len(libc_objects) != 1 or any(
-        libc[key] != libc_objects[0][key] for key in ("path", "sha256", "bytes")
-    ):
-        raise CampaignError(f"{where}: libc is not bound to the native runtime closure")
     build = require_exact_keys(
         value["build"],
         frozenset(
@@ -1488,6 +1454,7 @@ def validate_build_receipt(
                 "features",
                 "fetch_cargo_home",
                 "locked",
+                "native_linkage",
                 "offline",
                 "rustflags",
                 "target_dir",
@@ -1497,12 +1464,13 @@ def validate_build_receipt(
         where=f"{where}.build",
     )
     if (
-        build["allocator"] != "system-libc"
+        build["allocator"] != "rust-system-allocator-static-runtime"
         or build["backend"] != "auto"
         or build["cargo_profile"] != "release"
         or build["dependency_mode"] != "locked-vendor-offline-v1"
         or build["features"] != ["finite-symmetry"]
         or build["locked"] is not True
+        or build["native_linkage"] != "crt-static-no-interpreter-no-needed.v1"
         or build["offline"] is not True
         or not Path(build["cargo_home"]).is_absolute()
         or not Path(build["fetch_cargo_home"]).is_absolute()
@@ -1539,7 +1507,8 @@ def validate_build_receipt(
     if vendor_dir != dependency_root / "vendor":
         raise CampaignError(f"{where}: offline vendor directory is not dependency-bound")
     expected_rustflags = (
-        f"-C linker={build_tools['cc']['path']} -C link-arg=-fuse-ld=bfd"
+        f"-C linker={build_tools['cc']['path']} -C link-arg=-fuse-ld=bfd "
+        "-C target-feature=+crt-static"
     )
     if build["rustflags"] != expected_rustflags:
         raise CampaignError(f"{where}: linker flags drifted")
@@ -1761,7 +1730,7 @@ def validate_worker(value: Any, *, where: str) -> None:
         if type(value[key]) is not bool:
             raise CampaignError(f"{where}.{key} must be Boolean")
     expected_placement = {
-        "full": "slurm-exclusive-core-local-high-userspace.v1",
+        "full": "slurm-serial-exclusive-core-local-high-userspace.v1",
         "canary": "bounded-canary-uncontrolled.v1",
     }
     if (
@@ -2034,14 +2003,14 @@ def bind_worker(
         "physical_cores_on_node": physical_cores,
         "submission_mode": submission_mode,
         "placement_contract": (
-            "slurm-exclusive-core-local-high-userspace.v1"
+            "slurm-serial-exclusive-core-local-high-userspace.v1"
             if submission_mode == "full"
             else "bounded-canary-uncontrolled.v1"
         ),
         "governor_control": fixed_frequency,
         "exclusive_control": exclusive,
         "libc": loaded_libc_identity(),
-        "allocator": "system-libc",
+        "allocator": "rust-system-allocator-static-runtime",
         "backend": "auto",
     }
     if require_linux_affinity:
@@ -2131,6 +2100,7 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
                 "byte_binding",
                 "executable_binding_linux",
                 "measured_rounds",
+                "native_runtime",
                 "order",
                 "per_observation_timeout_seconds",
                 "phases",
@@ -2149,6 +2119,7 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
         "binary_command": "research-parser-timing",
         "byte_binding": BYTE_BINDING,
         "executable_binding_linux": EXECUTABLE_BINDING,
+        "native_runtime": "no-pt-interp-zero-dt-needed.v1",
         "order": list(ABBA_ORDER),
         "phases": list(PHASES),
         "process_isolation": PROCESS_ISOLATION,
@@ -2264,14 +2235,14 @@ def validate_contract(value: Any, *, where: str = "contract") -> dict[str, Any]:
         "allowed_hostnames": ["c1n1.cluster.wmi.amu.edu.pl"],
         "canary_shards": 1,
         "core_binding": "slurm-cpu-bind-cores-singleton.v1",
-        "exclusive_allocation": "slurm-exclusive-node-runtime-verified.v1",
+        "exclusive_allocation": "serial-slurm-exclusive-node-runtime-verified.v1",
         "exclusive_control_required_for_promotion": True,
         "frequency_control": "slurm-srun-high-userspace-runtime-verified.v1",
         "governor_control_required_for_promotion": True,
         "max_parallel": LOCKED_MAX_PARALLEL,
         "memory_binding": "slurm-mem-bind-local.v1",
         "partition": "cpu_idle",
-        "promotion_eligibility": "research-only-first-campaign",
+        "promotion_eligibility": "permanently-nonpromotable-research-only",
         "slurm_nodelist": "c1n1",
         "threads_per_core": 1,
     }
@@ -3435,7 +3406,7 @@ def verify_build_receipt_command(args: argparse.Namespace) -> None:
     with open_verified_executable(
         args.binary,
         inherited_descriptor=args.binary_fd,
-        require_linux_elf=True,
+        require_static_linux_elf=True,
     ) as executable:
         value = validate_build_receipt(
             artifact,
@@ -3444,9 +3415,10 @@ def verify_build_receipt_command(args: argparse.Namespace) -> None:
             python_identity=python_identity,
             build_tools=build_tools,
             where="guarded release build receipt",
-            verify_linux_runtime=True,
             verify_embedded_paths=args.build_receipt_fd is None,
         )
+        if executable.static_elf != value["static_elf"]:
+            raise CampaignError("guarded release static ELF attestation differs from bytes")
     summary = {
         "schema": "euf-viper.t1-guarded-release-build-verification.v1",
         "revision": revision,
@@ -3541,18 +3513,19 @@ def prepare_campaign(args: argparse.Namespace) -> None:
     with open_verified_executable(
         args.binary,
         inherited_descriptor=args.binary_fd,
-        require_linux_elf=True,
+        require_static_linux_elf=True,
     ) as executable:
-        validate_build_receipt(
+        build_value = validate_build_receipt(
             build_receipt,
             revision=revision,
             binary=executable.binding,
             python_identity=python_identity,
             build_tools=build_tools,
             where="guarded release build receipt",
-            verify_linux_runtime=True,
             verify_embedded_paths=args.build_receipt_fd is None,
         )
+        if executable.static_elf != build_value["static_elf"]:
+            raise CampaignError("guarded release static ELF attestation differs from bytes")
         semantic_attestations = collect_semantic_attestations(
             executable,
             preflight_source.content,
@@ -3660,7 +3633,6 @@ def load_prepared(
         python_identity=prepare["python"],
         build_tools=prepare["build_tools"],
         where="prepared build receipt",
-        verify_linux_runtime=True,
     )
     accepted_receipt = verify_file_binding(
         prepare["accepted_parity_receipt"], where="prepared accepted parity receipt"
@@ -3778,7 +3750,7 @@ def run_shard(args: argparse.Namespace) -> None:
     with open_verified_executable(
         Path(prepared.metadata["binary"]["path"]),
         expected=prepared.metadata["binary"],
-        require_linux_elf=True,
+        require_static_linux_elf=True,
     ) as executable:
         for work in prepared.workset:
             if work["sequence"] % shard_count != args.shard:
@@ -4087,7 +4059,7 @@ def audit_campaign(args: argparse.Namespace) -> bool:
     with open_verified_executable(
         Path(prepare["binary"]["path"]),
         expected=prepare["binary"],
-        require_linux_elf=True,
+        require_static_linux_elf=True,
     ):
         pass
     shard_count = prepare["shard_count"]
@@ -4137,8 +4109,6 @@ def audit_campaign(args: argparse.Namespace) -> bool:
     require_homogeneous_workers(shard_workers.values())
     build_receipt, _ = load_object(Path(prepare["build_receipt"]["path"]))
     for worker in shard_workers.values():
-        if worker["libc"] != build_receipt["libc"]:
-            raise CampaignError("timing worker libc differs from the linked build identity")
         if (
             worker["allocator"] != build_receipt["build"]["allocator"]
             or worker["backend"] != build_receipt["build"]["backend"]

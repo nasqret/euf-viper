@@ -33,8 +33,9 @@ The machine contract is
 - order `tree, stream, stream, tree` for every source and round;
 - one warmup and five measured rounds;
 - a fresh process and two-second timeout for every observation;
-- exact `source_count=7503`, 128 deterministic shards, at most 32 concurrent
-  shards, and no timing-repetition dimension or contract-dimension override;
+- exact `source_count=7503`, 128 deterministic shards, a serial
+  `0-127%1` full schedule, and no timing-repetition dimension or
+  contract-dimension override;
 - accepted parity manifest SHA-256
   `32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4`
   and the hash-bound local parity decision receipt plus every frozen artifact
@@ -139,8 +140,8 @@ receipts therefore differ from the anchored shard set and reject.
 The WMI wrappers independently verify:
 
 - an absolute Slurm `--chdir` root whose canonical path, exact 40-hex HEAD,
-  published origin ref, and common-helper Git blob are checked before any
-  worktree file is sourced; root/ref/mode/hash bindings are positional job
+  published origin ref, and common-helper Git blob are checked before the
+  helper is sourced through its open descriptor; root/ref/mode/hash bindings are positional job
   arguments and `SLURM_SUBMIT_DIR` is ignored;
 - a fresh unique checkout with a clean index and no tracked, untracked, or
   ignored state, hidden index flags, Cargo configuration, Python path injection,
@@ -148,7 +149,8 @@ The WMI wrappers independently verify:
   campaign parent/tag, dependency, and path-selection `EUF_VIPER_*` variables
   are rejected rather than used;
 - a private `git archive` snapshot of the exact revision, with Cargo home and
-  target outside it; a recursive inotify monitor is ready before the pre-build
+  target outside it; a recursive inotify monitor publishes parsed, nonempty,
+  PID/root-bound readiness after every watch is installed and before the pre-build
   all-blob inventory and rejects every create, write, attribute, move, or delete
   event through the repeated post-build inventory; shutdown is parent-owned pipe
   EOF after the FIFO pathname is unlinked, and a watchdog proves both monitor
@@ -167,12 +169,13 @@ The WMI wrappers independently verify:
 - direct Cargo, Rust compiler, C compiler, linker, and archiver identities,
   including canonical path, bytes, SHA-256, and version; the C driver's
   `-fuse-ld=bfd` selection must resolve to that linker, and the receipt also
-  binds allocator/backend, linker flags, and final release bytes; Linux evidence
-  parses ELF64 identity and `PT_INTERP`, recursively resolves and hashes every
-  `DT_NEEDED` object, and derives libc from that native closure without `ldd`;
-- descriptor-retained source/dependency inventories, event logs, monitor
-  receipts, build receipt, and binary close the post-monitor pathname-reopen
-  interval; the first real execution consumes the attested binary descriptor;
+  binds allocator/backend, linker flags, and final release bytes; the release
+  uses `+crt-static` and independent ELF inspections reject any `PT_INTERP` or
+  `DT_NEEDED` instead of claiming a reconstructed loader closure;
+- descriptor-retained guard and harness scripts, readiness artifacts,
+  source/dependency inventories, event logs, monitor receipts, build receipt,
+  and binary close the post-monitor pathname-reopen interval; the first real
+  execution consumes the attested binary descriptor;
 - canonical Python path, bytes, SHA-256, and version; and
 - fixed contract, accepted-manifest, parity-receipt, and clean-checkout receipt
   hashes. Before any `sbatch`, the remote preflight verifies the accepted
@@ -180,7 +183,8 @@ The WMI wrappers independently verify:
 
 The Slurm submission additionally fixes `cpu_idle`, node `c1n1`, singleton
 physical-core affinity, one hardware thread per core, and `--mem-bind=local`.
-`--full` requests an exclusive node and runs each shard step with
+`--full` serializes the 128 array elements, requests the sole allowed node
+exclusively for each element, and runs each shard step with
 `--cpu-freq=high:UserSpace`; runtime evidence must prove whole-node allocation,
 singleton affinity, propagation of that checked-in request, and fixed userspace
 bounds. `--canary`
@@ -202,10 +206,10 @@ harness, and runs default plus all-feature Rust runtime matrices on Linux.
   long-timeout superiority over another solver.
 - Process startup is outside the Rust internal clock but maximum RSS includes
   the full process. The fixed node, physical-core binding, recorded CPU model,
-  microcode, NUMA, governor, turbo/frequency, libc, allocator, and ABBA pairing
+  microcode, NUMA, governor, turbo/frequency, harness libc, allocator, and ABBA pairing
   expose rather than erase residual noise. Current-frequency values may vary.
-- The first campaign is unconditionally `research-only-first-campaign` and
-  nonpromotable. Full mode rejects missing exclusive or fixed-frequency control
+- Every campaign is unconditionally `permanently-nonpromotable-research-only`.
+  Full mode rejects missing exclusive or fixed-frequency control
   before recording shard evidence; bounded canaries cannot produce a complete
   audit. Missing CPU, microcode, governor, turbo, or frequency-state identity is
   rejected rather than treated as an unenforced control.

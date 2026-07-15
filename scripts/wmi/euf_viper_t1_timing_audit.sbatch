@@ -46,11 +46,13 @@ COMMON_PATH="$T1_JOB_ROOT/$COMMON_RELATIVE"
 COMMON_ENTRY="$(t1_bootstrap_git ls-tree "$EXPECTED_REVISION" -- "$COMMON_RELATIVE")"
 [ "${COMMON_ENTRY%% *}" = 100755 ] || { echo "T1 common helper mode mismatch" >&2; exit 2; }
 COMMON_BLOB="$(printf '%s\n' "$COMMON_ENTRY" | /usr/bin/awk '{print $3}')"
-[ "$(t1_bootstrap_git hash-object --no-filters -- "$COMMON_PATH")" = "$COMMON_BLOB" ] || {
+exec 18<"$COMMON_PATH"
+[ "$(t1_bootstrap_git hash-object --no-filters -- /proc/self/fd/18)" = "$COMMON_BLOB" ] || {
   echo "T1 common helper blob mismatch" >&2
   exit 2
 }
-source "$COMMON_PATH"
+source /proc/self/fd/18
+exec 18<&-
 t1_reject_ambient_influence
 cd "$T1_JOB_ROOT"
 export LANG=C LC_ALL=C TZ=UTC OMP_NUM_THREADS=1 RAYON_NUM_THREADS=1
@@ -69,7 +71,28 @@ t1_verify_pinned_tool Rustc EUF_VIPER_RUSTC EUF_VIPER_RUSTC_SHA256 EUF_VIPER_RUS
 t1_verify_pinned_tool CC EUF_VIPER_CC EUF_VIPER_CC_SHA256 EUF_VIPER_CC_VERSION
 t1_verify_pinned_tool LD EUF_VIPER_LD EUF_VIPER_LD_SHA256 EUF_VIPER_LD_VERSION
 t1_verify_pinned_tool AR EUF_VIPER_AR EUF_VIPER_AR_SHA256 EUF_VIPER_AR_VERSION
-"$EUF_VIPER_PYTHON" -I -B "$HARNESS" audit \
+HARNESS_ENTRY="$(t1_git ls-tree "$EXPECTED_REVISION" -- scripts/bench/typed_parser_timing.py)"
+[ "${HARNESS_ENTRY%% *}" = 100755 ] || { echo "timing harness mode mismatch" >&2; exit 2; }
+HARNESS_BLOB="$(printf '%s\n' "$HARNESS_ENTRY" | awk '{print $3}')"
+/bin/bash -c '
+  set -euo pipefail
+  harness=$1
+  harness_blob=$2
+  python=$3
+  python_sha256=$4
+  shift 4
+  exec 18<"$harness" 19<"$python"
+  [ "$(git -C "$(dirname "$(dirname "$(dirname "$harness")")")" hash-object --no-filters -- /proc/self/fd/18)" = "$harness_blob" ] || {
+    echo "opened timing harness differs from the immutable revision" >&2
+    exit 2
+  }
+  [ "$(sha256sum /proc/self/fd/19 | awk "{print \$1}")" = "$python_sha256" ] || {
+    echo "opened Python descriptor hash mismatch" >&2
+    exit 2
+  }
+  exec /proc/self/fd/19 -I -B /proc/self/fd/18 "$@"
+' t1-bound-audit "$HARNESS" "$HARNESS_BLOB" \
+  "$EUF_VIPER_PYTHON" "$EUF_VIPER_PYTHON_SHA256" audit \
   --root "$CAMPAIGN_ROOT" \
   --revision "$EXPECTED_REVISION" \
   --expected-checkout-receipt-sha256 "$EXPECTED_RECEIPT_SHA256" \
