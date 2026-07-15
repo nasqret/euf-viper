@@ -741,6 +741,168 @@ class ManifestAndTamperTests(unittest.TestCase):
         with self.assertRaisesRegex(QFUF.IndependentQfufError, "base clauses"):
             QFUF.validate_euf_lemma(mutable_clause, self.equalities)
 
+    def test_assertion_snapshot_is_detached_cycle_safe_and_shape_checked(self) -> None:
+        fields = {
+            name: getattr(self.problem, name)
+            for name in self.problem.__dataclass_fields__
+        }
+        leaf = QFUF.BoolExpr("const", (True,))
+        root = leaf
+        for _ in range(28):
+            root = QFUF.BoolExpr("and", (root, root))
+        fields["assertions"] = (root,)
+        shared_dag = QFUF.EncodedProblem(**fields)
+        snapshot = QFUF._validate_problem(shared_dag)
+        self.assertIsNot(snapshot.assertions, shared_dag.assertions)
+        self.assertIsNot(snapshot.assertions[0], root)
+        self.assertIs(
+            snapshot.assertions[0].arguments[0],
+            snapshot.assertions[0].arguments[1],
+        )
+        object.__setattr__(root, "op", "or")
+        self.assertEqual(snapshot.assertions[0].op, "and")
+
+        cycle = QFUF.BoolExpr("not", ())
+        object.__setattr__(cycle, "arguments", (cycle,))
+        fields["assertions"] = (cycle,)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "cycle"):
+            QFUF.validate_euf_lemma(
+                QFUF.EncodedProblem(**fields), self.equalities
+            )
+
+        malformed = (
+            QFUF.BoolExpr("unknown", ()),
+            QFUF.BoolExpr("not", ()),
+            QFUF.BoolExpr("const", (True, False)),
+            QFUF.BoolExpr("atom", (True,)),
+            QFUF.BoolExpr("atom", (QFUF._AtomKey("unknown"),)),
+            QFUF.BoolExpr("and", (True,)),
+        )
+        for assertion in malformed:
+            with self.subTest(assertion=assertion):
+                fields["assertions"] = (assertion,)
+                with self.assertRaises(QFUF.IndependentQfufError):
+                    QFUF.validate_euf_lemma(
+                        QFUF.EncodedProblem(**fields), self.equalities
+                    )
+
+    def test_public_validators_reject_integer_subclasses(self) -> None:
+        premise, consequence = self.equalities
+
+        class ExecutableInt(int):
+            def __abs__(self) -> int:
+                return premise
+
+        literal = ExecutableInt(-999)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "invalid literal"):
+            QFUF.validate_euf_lemma(self.problem, (literal, consequence))
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "invalid literal"):
+            QFUF.validate_unsat_dimacs(
+                self.problem,
+                self.problem.variable_count,
+                (*self.problem.clauses, (literal, consequence)),
+            )
+
+        assignment = find_base_assignment(self.problem, require_model=True)
+        self.assertIsNotNone(assignment)
+        assignment[0] = ExecutableInt(999)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "not a nonzero integer"):
+            QFUF.validate_total_assignment(self.problem, assignment)
+
+    def test_atom_shapes_reject_metadata_for_the_wrong_kind(self) -> None:
+        fields = {
+            name: getattr(self.problem, name)
+            for name in self.problem.__dataclass_fields__
+        }
+        equality_index = next(
+            index
+            for index, atom in enumerate(self.problem.atoms)
+            if atom.kind == "equality"
+        )
+        equality = self.problem.atoms[equality_index]
+        atoms = list(self.problem.atoms)
+        atoms[equality_index] = QFUF.Atom(
+            equality.variable,
+            equality.kind,
+            equality.left,
+            equality.right,
+            self.problem.true_term,
+        )
+        fields["atoms"] = tuple(atoms)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "BoolTerm metadata"):
+            QFUF.validate_euf_lemma(
+                QFUF.EncodedProblem(**fields), self.equalities
+            )
+
+        bool_problem = QFUF.parse_and_encode(
+            query("(declare-const p Bool)\n(assert p)")
+        )
+        bool_fields = {
+            name: getattr(bool_problem, name)
+            for name in bool_problem.__dataclass_fields__
+        }
+        bool_index = next(
+            index
+            for index, atom in enumerate(bool_problem.atoms)
+            if atom.kind == "bool_term"
+        )
+        bool_atom = bool_problem.atoms[bool_index]
+        bool_atoms = list(bool_problem.atoms)
+        bool_atoms[bool_index] = QFUF.Atom(
+            bool_atom.variable,
+            bool_atom.kind,
+            bool_problem.true_term,
+            None,
+            bool_atom.term,
+        )
+        bool_fields["atoms"] = tuple(bool_atoms)
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "equality metadata"):
+            QFUF.validate_total_assignment(
+                QFUF.EncodedProblem(**bool_fields),
+                find_base_assignment(bool_problem),
+            )
+
+    def test_equality_conflict_skips_unneeded_congruence_closure(self) -> None:
+        triangle = QFUF.parse_and_encode(
+            query(
+                """
+                (declare-sort U 0)
+                (declare-const a U)
+                (declare-const b U)
+                (declare-const c U)
+                (assert (or (= a b) (= b c) (= a c)))
+                """
+            )
+        )
+        equalities = {}
+        for atom in triangle.atoms:
+            if atom.kind != "equality":
+                continue
+            names = frozenset(
+                triangle.functions[triangle.terms[term].function].name
+                for term in (atom.left, atom.right)
+            )
+            equalities[names] = atom.variable
+        lemma = (
+            -equalities[frozenset(("a", "b"))],
+            -equalities[frozenset(("b", "c"))],
+            equalities[frozenset(("a", "c"))],
+        )
+        with mock.patch.object(
+            QFUF,
+            "_close_congruence",
+            side_effect=AssertionError("closure should be skipped"),
+        ) as close_congruence:
+            QFUF.validate_euf_lemma(triangle, lemma)
+        close_congruence.assert_not_called()
+
+        premise, consequence = self.equalities
+        with mock.patch.object(
+            QFUF, "_close_congruence", wraps=QFUF._close_congruence
+        ) as close_congruence:
+            QFUF.validate_euf_lemma(self.problem, (-premise, consequence))
+        self.assertEqual(close_congruence.call_count, 1)
+
     def test_dimacs_parser_is_strict_and_supports_split_clauses(self) -> None:
         variables, clauses = QFUF.parse_dimacs(
             "c comment\np cnf 3 2\n1 -2\n3 0\n0\n"
