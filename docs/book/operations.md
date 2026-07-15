@@ -138,13 +138,30 @@ T5 is Linux-only and remains disabled until hosted Linux CI and independent
 review pass. Submission creates a unique remote namespace and an explicitly
 pending receipt; it does not make a performance or implementation decision.
 
+The full local integration gate is opt-in because it needs the extracted
+external corpus and Slurm client binaries. On Linux, from a clean committed
+checkout, run:
+
+```bash
+EUF_VIPER_T5_E2E_CORPUS=/absolute/path/to/benchmarks/smtlib-2025 \
+  python3 -B -m unittest -v tests.test_t5_linux_end_to_end
+```
+
+Once the corpus variable is supplied, a missing `/usr/bin/scontrol`,
+`/usr/bin/sacct`, exact 7,503-row manifest, procfs semantic, `O_TMPFILE`, mount
+inventory, or runtime identity is a failure, not a skip.
+
 ```bash
 scripts/wmi/submit_component_quotient_census.sh
 ```
 
-Publication requires unprivileged `O_TMPFILE` in the result filesystem and
-`linkat(AT_EMPTY_PATH)`. There is no fallback. After the SLURM job finishes, run
-the consumer on WMI with the exact pending receipt and revision checkout:
+Publication requires unprivileged `O_TMPFILE` in the result filesystem and a
+verified procfs `/proc/self/fd/<fd>` symlink linked with
+`linkat(AT_SYMLINK_FOLLOW)`. It fails closed if procfs, those symlink semantics,
+or the filesystem primitive is unavailable. The bundle records all Linux
+capability sets; success does not imply that `CAP_DAC_READ_SEARCH` was present.
+After the SLURM job finishes, run the consumer on WMI with the exact pending
+receipt and revision checkout:
 
 ```bash
 python3 -I -B -S scripts/bench/verify_component_quotient_publication.py \
@@ -156,6 +173,8 @@ Do not consume `.current` directly. Authority requires scheduler status
 `COMPLETED 0:0`, successful consumer exit, fresh no-follow archive and marker
 rehashes, exact revision-blob checks, and independent reconstruction from the
 captured source members. The consumer also reconstructs complete record and
-aggregate bytes, not only promotion fields. Stale attempt files and immutable
-orphans are expected after failures and must not be deleted by campaign
-wrappers.
+aggregate bytes, not only promotion fields. Its receipt binds the original
+`sbatch --parsable` job/cluster pair and the root `sacct` SLUID, cluster, submit
+time, job name, user, workdir, state, and exit code. Stale attempt files and
+immutable orphans are expected after failures and must not be deleted by
+campaign wrappers.

@@ -221,6 +221,8 @@ class CampaignLock:
     raw_bytes: bytes
     sha256: str
     campaign_id: str
+    manifest_relative_path: str
+    manifest_sha256: str
     expected_sources: int
     portable_source_set_sha256: str
     decoder_oracle_sha256: str
@@ -483,12 +485,19 @@ def load_campaign_lock_bytes(
         raw["corpus"],
         {
             "manifest",
+            "manifest_sha256",
             "expected_sources",
             "portable_source_set_sha256",
             "families",
         },
         "corpus",
     )
+    manifest_relative_path = corpus["manifest"]
+    manifest_sha256 = corpus["manifest_sha256"]
+    if manifest_relative_path != fixed_contract.MANIFEST_RELATIVE_PATH:
+        raise CensusError("corpus manifest path differs from the fixed T5 campaign path")
+    if manifest_sha256 != fixed_contract.MANIFEST_SHA256:
+        raise CensusError("corpus manifest SHA-256 differs from the fixed T5 campaign")
     expected_sources = _positive_int(corpus["expected_sources"], "expected_sources")
     portable_source_set_sha256 = corpus["portable_source_set_sha256"]
     if not _is_lower_sha256(portable_source_set_sha256):
@@ -705,6 +714,8 @@ def load_campaign_lock_bytes(
         raw_bytes=raw_bytes,
         sha256=sha256_bytes(raw_bytes),
         campaign_id=campaign_id,
+        manifest_relative_path=manifest_relative_path,
+        manifest_sha256=manifest_sha256,
         expected_sources=expected_sources,
         portable_source_set_sha256=portable_source_set_sha256,
         decoder_oracle_sha256=DECODER_ORACLE_FROZEN_SHA256,
@@ -4038,6 +4049,7 @@ def run_census(
     if require_exact_contract:
         try:
             fixed_contract.require_exact_lock_bytes(Path(lock_path).read_bytes())
+            fixed_contract.require_campaign_manifest_path(repository_root, manifest_path)
         except (OSError, fixed_contract.ContractError) as error:
             raise CensusError(str(error)) from error
     lock = load_campaign_lock(lock_path)
@@ -4059,10 +4071,11 @@ def run_census(
         manifest_path, repository_root, lock.expected_sources
     )
     manifest_sha256 = sha256_bytes(manifest_bytes)
-    if require_exact_contract and manifest_sha256 != fixed_contract.MANIFEST_SHA256:
-        raise CensusError(
-            "input manifest differs from the fixed tracked T5 revision blob"
-        )
+    if require_exact_contract:
+        try:
+            fixed_contract.require_campaign_manifest_bytes(manifest_bytes)
+        except fixed_contract.ContractError as error:
+            raise CensusError(str(error)) from error
     portable_source_set_sha256 = sha256_bytes(portable_bytes)
     if portable_source_set_sha256 != lock.portable_source_set_sha256:
         raise CensusError(

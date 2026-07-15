@@ -7,6 +7,7 @@
   "parser_api": "scripts.cert.independent_qfuf.parse_and_encode",
   "corpus": {
     "manifest": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+    "manifest_sha256": "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4",
     "expected_sources": 7503,
     "portable_source_set_sha256": "d8997c621fbd58034e55bef1e6636ea0f0a28bc63bb6391be39e9195c6f44653",
     "families": {

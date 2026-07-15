@@ -1013,12 +1013,49 @@
   origin commit `e930abf2a7fe0e89efbb6a4d73540ef2fe266175`. The fresh clone
   passed `git fsck --full` before reconstruction. Only the new commit created
   from this snapshot can establish source provenance.
-- The recovered code intentionally has no `/proc/self/fd` or named-path
-  publication fallback. Linux man-pages require `CAP_DAC_READ_SEARCH` for
-  `linkat(AT_EMPTY_PATH)`, so hosted CI must prove the exact execution policy;
-  a capability-free `EPERM` is a correct fail-closed result, not Linux GO.
+- The initial recovered code intentionally had no `/proc/self/fd` or named-path
+  publication fallback. That reviewed `AT_EMPTY_PATH` requirement was later
+  found impossible for an ordinary capability-free process and is superseded
+  by the repair entry below; it was never Linux GO.
 - No branch was pushed, no WMI job was submitted, and no Linux result is
   inferred from the macOS test skips.
+
+## 2026-07-15: T5 reviewed-commit repair
+
+- Repair starts from exact reviewed commit
+  `0ad84317b5cf714785e6129d8403772c813e7758`. The recovered lineage above and
+  the `6249393` non-evidence ruling are unchanged.
+- The campaign now selects the external
+  `benchmarks/smtlib-2025/qf_uf_manifest.jsonl`: exactly 7,503 rows at SHA-256
+  `32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4`.
+  The tracked 3,521-row official manifest remains separately bound at
+  `ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6`
+  and is an explicit anti-substitution case, not the T5 input.
+- Capability-free publication now pins `/proc/self/fd`, verifies procfs and
+  descriptor-symlink inode semantics, and links the unnamed inode with
+  `AT_SYMLINK_FOLLOW`. Metadata records every inheritable, permitted,
+  effective, bounding, and ambient capability bit/name. Post-fsync checks bind
+  the final path, inode, one-link count, mode, length, and two fresh digests.
+- The pending and final receipts preserve full `job;cluster` submission
+  identity. The consumer binds the root `sacct` row's SLUID, cluster, submit
+  time, job name, user, workdir, state, and exit code. A held job is cancelled
+  if pending-receipt creation or release fails.
+- The source audit now uses a separate SMT-LIB scanner/parser and parallel-array
+  representation. Its frozen semantic projection oracle exhausts 75 small
+  graphs, 255 functionality assignments, 326 restricted-growth assignments,
+  and primitive gate truth tables at SHA-256
+  `4d6cdda1f86a619a95fbf7fa4a4ce0148eebc1153b9ae790c265914a9458edf3`.
+- Runtime evidence binds Python, aggregate stdlib trees, mapped shared
+  libraries, kernel/OS/libc, mount/statfs identities, Slurm versions, and
+  cluster. An opt-in Linux end-to-end test performs prepare, all-7,503 analyze,
+  independent verification, finalization, and unmocked semantic consumption.
+- Hosted diagnostic `29385400195` passed the real `O_TMPFILE` procfs-link test
+  but ended with one failure and one error caused by test expectations: inode
+  drift correctly preceded digest drift, and a deliberately replaced empty
+  receipt was decoded during setup. Both regressions now accept only the
+  earliest fail-closed result and never parse invalid replacement bytes.
+- No branch was pushed and no WMI job was submitted. Linux GO remains pending
+  a hosted rerun plus the real-corpus end-to-end prerequisites.
 
 ## Next Entry Template
 

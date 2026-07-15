@@ -5,9 +5,11 @@ Date: 2026-07-14
 Status: source-only opportunity census repaired after the sixth independent
 review. The code now has an independent source-to-decision verifier, Linux-only
 unnamed-inode publication, a content-bearing marker, and a post-job consumer.
-Bounded macOS tests pass, but Linux CI has not yet established GO. No WMI
-decision run was submitted. This is not a production solver route, a timing
-experiment, or evidence that T5 should be implemented.
+The current repair starts from exact reviewed commit
+`0ad84317b5cf714785e6129d8403772c813e7758`. Bounded macOS tests pass, but a
+post-repair Linux rerun and the real-corpus end-to-end gate have not yet
+established GO. No WMI decision run was submitted. This is not a production
+solver route, a timing experiment, or evidence that T5 should be implemented.
 
 ## Recovery Provenance
 
@@ -131,8 +133,9 @@ The campaign lock fixes:
   observed non-nullary applications;
 - the exact frozen bounded exhaustive decoder-oracle receipt for every source;
 - a separate decision verifier that does not import or call the analyzer. It
-  reparses every captured source, rebuilds typed components and equality
-  completion with separate data structures, independently counts both
+  reparses every captured source with its own scanner, S-expression parser,
+  and parallel-array representation, rebuilds typed components as hypergraph
+  reachability and equality completion as a byte-matrix elimination, independently counts both
   projections, reconstructs every component, symbol, decoder, ratio, record,
   canonical chain, target, aggregate, provenance hash, family population,
   percentile, median, control, validity, and authorization field, and requires
@@ -142,21 +145,31 @@ The campaign lock fixes:
   records, and a synthetic 7,503-record population with the exact QG and Goel
   cardinalities. The independent bounded decoder oracle examines 255 record
   assignments and has frozen receipt SHA-256
-  `d869fe2de073014dcef83160535318c976897d1da946590e19f0912bc658d4f5`.
+  `d869fe2de073014dcef83160535318c976897d1da946590e19f0912bc658d4f5`;
+- a separate frozen projection oracle that derives expected connectivity by
+  immutable block coalescing, equality completion by unordered edge sets,
+  functionality by pairwise truth semantics versus sorted adjacency, and
+  primitive CNF gates by truth table. It checks 75 graphs, 255 function-record
+  assignments, 326 restricted-growth assignments, and 40 gate assignments at
+  SHA-256
+  `4d6cdda1f86a619a95fbf7fa4a4ce0148eebc1153b9ae790c265914a9458edf3`.
 
 The portable source-set digest hashes only relative path, byte count, and
 source SHA-256. Host-specific absolute manifest paths therefore do not make
 the local and WMI source identities appear different.
 
-The run consumes the tracked 7,503-row manifest
-`benchmarks/smtcomp-2025/qf_uf_manifest.jsonl`, fixed at SHA-256
-`ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6`.
-Only the SMT-LIB payload directory is supplied by the shared corpus mount; every
-payload is reopened without following its final path component and checked
-against the tracked byte count and SHA-256 before it enters the archive.
+The run consumes the external 7,503-row manifest
+`benchmarks/smtlib-2025/qf_uf_manifest.jsonl`, fixed at SHA-256
+`32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4`.
+The tracked official manifest at
+`benchmarks/smtcomp-2025/qf_uf_manifest.jsonl` has exactly 3,521 rows and
+SHA-256 `ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6`;
+path, digest, and cardinality guards reject it as a T5 input. Every payload is
+reopened without following its final path component and checked against the
+external manifest's byte count and SHA-256 before it enters the archive.
 
 The independent verifier emits
-`euf-viper.component-quotient-independent-decision.v1`. It is decisive only
+`euf-viper.component-quotient-independent-decision.v2`. It is decisive only
 after exact full-artifact reconstruction and binds all source, manifest,
 record, target, aggregate, provenance, gate, and oracle hashes. Any cap,
 unsupported construct, field mismatch, missing captured source, or incomplete
@@ -187,24 +200,23 @@ cannot share or clean a checkout. Neither wrapper, finalizer, analyzer, nor
 consumer removes a stage, archive, marker, receipt, or bundle by pathname.
 Partial attempt files and immutable orphans may leak and remain non-authoritative.
 
-On Linux, the finalizer creates the archive with `O_TMPFILE` in the opened result
-directory. The inode has link count zero while it is written, file-fsynced,
-chmoded `0444`, file-fsynced again, hashed, and descriptor-checked. One
-`linkat(fd, "", dirfd, final, AT_EMPTY_PATH)` atomically gives that exact inode
-its only name. The final inode must have link count one. There is no named
-staging alias, `/proc/self/fd` fallback, immediately-unlinked pathname fallback,
-replacement inode, or pathname publication fallback. Unsupported kernels or
-filesystems fail closed. Immediately after linking, the finalizer opens and
-proves a same-inode read-only descriptor, closes the writable `O_TMPFILE`
-descriptor, and only then exposes the linked boundary to subsequent checks.
+On Linux, the finalizer creates the archive with `O_TMPFILE` in the opened
+result directory. The inode has link count zero while it is written,
+file-fsynced, chmoded `0444`, file-fsynced again, hashed, and
+descriptor-checked. Before publication it pins `/proc/self/fd`, proves that
+the directory is procfs, and proves that the selected fd entry is a symlink
+whose followed target is the unnamed source inode. It then calls
+`linkat(procfd, fd_name, dirfd, final, AT_SYMLINK_FOLLOW)`, the documented
+capability-free publication method. Unsupported procfs semantics, kernels, or
+filesystems fail closed. There is no named staging alias, immediately-unlinked
+pathname fallback, replacement inode, or overwrite path.
 
-Linux requires `CAP_DAC_READ_SEARCH` to use `linkat(AT_EMPTY_PATH)`. The
-[Linux `open(2)` documentation](https://man7.org/linux/man-pages/man2/open.2.html)
-recommends `/proc/self/fd` plus `AT_SYMLINK_FOLLOW` when that capability is
-absent, but this preregistered contract deliberately forbids that pathname
-fallback. Therefore capability-free hosted CI is expected to fail with `EPERM`
-unless the publication policy is explicitly revised. Such a failure is a
-source-gate result, not permission to claim Linux GO or submit WMI.
+The runtime receipt records UID/GID and every inheritable, permitted,
+effective, bounding, and ambient capability bit and name, including the exact
+effective state of `CAP_DAC_READ_SEARCH`. Publication success is never used to
+infer that capability. After directory and file fsync, the publisher rechecks
+the final path, inode, mode, size, one-link count, and digest twice before the
+descriptor can authorize a marker or receipt.
 
 The archive contains the exact source bytes used by the decision verifier, not
 only their manifest hashes. The finalizer fsyncs the result directory, reopens
@@ -220,14 +232,25 @@ and bundle metadata. Marker publication is no-replace, descriptor-bound,
 file/directory-fsynced, and freshly reverified. An fsync or race failure may
 leave a visible immutable orphan; no code attempts unsafe rollback.
 
-A marker is never completion by itself. The post-job consumer first requires a
-unique root `sacct` row with `COMPLETED` and `0:0`, then reopens the bound result
+A marker is never completion by itself. The pending receipt retains the full
+`sbatch --parsable` `job;cluster` identity. The post-job consumer first requires
+a unique root `sacct` row and binds its SLUID, cluster, submit time, job name,
+user, workdir, state `COMPLETED`, and exit code `0:0`, then reopens the bound result
 directory, marker, and archive with no-follow semantics, repeats all inode,
 link, mode, content, nonce, namespace, revision, exact-blob, member, and digest
 checks, rebuilds the independent decision from archived source bytes, and emits
 a no-replace final receipt containing both the fresh archive and marker digests.
 That receipt remains explicitly non-authoritative without successful consumer
 exit, so an fsync-failure orphan cannot self-certify.
+
+The bundle also binds the Python executable, aggregate stdlib tree hashes,
+every mapped shared-library digest, kernel/OS/libc identity, os-release digest,
+repository/manifest/namespace/result mount and statfs properties, and
+`scontrol`/`sacct` versions plus Slurm cluster. A held job remains protected by
+an EXIT/signal cancellation trap until both the pending receipt and release
+succeed. An opt-in Linux integration test clones the exact commit, mounts the
+real 7,503-source corpus, and executes prepare, analyze, independent verify,
+finalize, and consumer with the real semantic verifier.
 
 ## Preregistered Decision
 

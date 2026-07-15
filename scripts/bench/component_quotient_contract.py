@@ -15,12 +15,19 @@ from typing import Final
 ROOT: Final = Path(__file__).resolve().parents[2]
 LOCK_RELATIVE_PATH: Final = "campaigns/component-quotient-ram-census-v1.json"
 LOCK_SHA256: Final = (
-    "1b313a912e2de8e202aeb2f9b3f50033ffdc65687940565d7a8f192b6ff5bf82"
+    "7958892d3bf45abbf7d40f31b75c5cdf07a6aec13c66442278685b0ad4eddc24"
 )
-MANIFEST_RELATIVE_PATH: Final = "benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
+MANIFEST_RELATIVE_PATH: Final = "benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
 MANIFEST_SHA256: Final = (
+    "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
+)
+OFFICIAL_MANIFEST_RELATIVE_PATH: Final = (
+    "benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
+)
+OFFICIAL_MANIFEST_SHA256: Final = (
     "ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6"
 )
+OFFICIAL_MANIFEST_SOURCES: Final = 3521
 PORTABLE_SOURCE_SET_SHA256: Final = (
     "d8997c621fbd58034e55bef1e6636ea0f0a28bc63bb6391be39e9195c6f44653"
 )
@@ -40,28 +47,30 @@ RAM_PERCENTILE: Final = 95
 VARIABLE_MAXIMUM_RATIO: Final = (5, 4)
 VARIABLE_PERCENTILE: Final = 95
 
-MARKER_SCHEMA: Final = "euf-viper.component-quotient-publication-marker.v1"
-SUBMISSION_SCHEMA: Final = "euf-viper.component-quotient-ram-wmi-submission.v5"
+MARKER_SCHEMA: Final = "euf-viper.component-quotient-publication-marker.v2"
+SUBMISSION_SCHEMA: Final = "euf-viper.component-quotient-ram-wmi-submission.v6"
 FINAL_RECEIPT_SCHEMA: Final = (
-    "euf-viper.component-quotient-ram-final-consumer-receipt.v1"
+    "euf-viper.component-quotient-ram-final-consumer-receipt.v2"
 )
 INDEPENDENT_RECEIPT_SCHEMA: Final = (
-    "euf-viper.component-quotient-independent-decision.v1"
+    "euf-viper.component-quotient-independent-decision.v2"
 )
 BUNDLE_METADATA_SCHEMA: Final = (
-    "euf-viper.component-quotient-ram-wmi-immutable-bundle.v3"
+    "euf-viper.component-quotient-ram-wmi-immutable-bundle.v4"
 )
 
 RUNTIME_PROJECT_FILES: Final = (
     ".github/workflows/campaign-contract.yml",
     LOCK_RELATIVE_PATH,
-    MANIFEST_RELATIVE_PATH,
+    OFFICIAL_MANIFEST_RELATIVE_PATH,
     "scripts/bench/build_family_manifest.py",
     "scripts/bench/census_component_quotient_ram.py",
     "scripts/bench/component_quotient_contract.py",
     "scripts/bench/finalize_component_quotient_ram_metadata.py",
     "scripts/bench/independent_component_quotient_verifier.py",
+    "scripts/bench/t5_independent_smtlib.py",
     "scripts/bench/t5_linux_publication.py",
+    "scripts/bench/t5_runtime_environment.py",
     "scripts/bench/verify_component_quotient_publication.py",
     "scripts/bench/verify_component_quotient_ram_bundle.py",
     "scripts/cert/independent_qfuf.py",
@@ -126,6 +135,8 @@ def require_exact_lock_bytes(payload: bytes) -> dict[str, object]:
         raise ContractError("T5 campaign lock must be a JSON object")
     fixed_values: tuple[tuple[tuple[str, ...], object], ...] = (
         (("corpus", "expected_sources"), EXPECTED_SOURCES),
+        (("corpus", "manifest"), MANIFEST_RELATIVE_PATH),
+        (("corpus", "manifest_sha256"), MANIFEST_SHA256),
         (("corpus", "families", "goel", "expected_population"), 773),
         (("corpus", "families", "qg", "expected_population"), 6396),
         (("corpus", "portable_source_set_sha256"), PORTABLE_SOURCE_SET_SHA256),
@@ -178,6 +189,67 @@ def require_lower_sha256(value: str, context: str) -> str:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise ContractError(f"{context} must be a lowercase SHA-256")
     return value
+
+
+def require_campaign_manifest_path(repository_root: Path, manifest_path: Path) -> Path:
+    root = Path(os.path.abspath(repository_root))
+    selected = Path(os.path.abspath(manifest_path))
+    expected = root / MANIFEST_RELATIVE_PATH
+    official = root / OFFICIAL_MANIFEST_RELATIVE_PATH
+    if selected == official:
+        raise ContractError(
+            "T5 selected the tracked 3,521-row official manifest instead of the "
+            "external 7,503-row campaign manifest"
+        )
+    if selected != expected:
+        raise ContractError(
+            f"T5 manifest path drift: expected {expected}, got {selected}"
+        )
+    return selected
+
+
+def require_campaign_manifest_bytes(payload: bytes) -> tuple[dict[str, object], ...]:
+    digest = sha256_bytes(payload)
+    if digest == OFFICIAL_MANIFEST_SHA256:
+        raise ContractError(
+            "T5 manifest bytes are the tracked 3,521-row official manifest"
+        )
+    if digest != MANIFEST_SHA256:
+        raise ContractError(
+            f"T5 external manifest SHA-256 drift: expected {MANIFEST_SHA256}, got {digest}"
+        )
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ContractError(f"T5 external manifest is not UTF-8: {error}") from error
+    if not text.endswith("\n"):
+        raise ContractError("T5 external manifest must end with one record newline")
+    lines = text.splitlines()
+    if len(lines) == OFFICIAL_MANIFEST_SOURCES:
+        raise ContractError(
+            "T5 external manifest silently became the 3,521-row official selection"
+        )
+    if len(lines) != EXPECTED_SOURCES:
+        raise ContractError(
+            f"T5 external manifest cardinality drift: expected {EXPECTED_SOURCES}, "
+            f"got {len(lines)}"
+        )
+    rows: list[dict[str, object]] = []
+    for index, line in enumerate(lines):
+        if not line:
+            raise ContractError(f"T5 external manifest line {index + 1} is blank")
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise ContractError(
+                f"T5 external manifest line {index + 1} is malformed: {error}"
+            ) from error
+        if type(row) is not dict or row.get("id") != index:
+            raise ContractError(
+                f"T5 external manifest line {index + 1} has a noncanonical id"
+            )
+        rows.append(row)
+    return tuple(rows)
 
 
 def namespace_identity_sha256(
@@ -345,6 +417,4 @@ def verify_runtime_revision_blobs(
         }
     if bindings[LOCK_RELATIVE_PATH]["sha256"] != LOCK_SHA256:
         raise ContractError("revision lock blob differs from fixed T5 contract")
-    if bindings[MANIFEST_RELATIVE_PATH]["sha256"] != MANIFEST_SHA256:
-        raise ContractError("revision manifest blob differs from fixed T5 contract")
     return bindings

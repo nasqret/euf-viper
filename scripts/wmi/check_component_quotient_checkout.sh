@@ -97,7 +97,9 @@ PROJECT_RUNTIME_FILES=(
   scripts/bench/component_quotient_contract.py
   scripts/bench/finalize_component_quotient_ram_metadata.py
   scripts/bench/independent_component_quotient_verifier.py
+  scripts/bench/t5_independent_smtlib.py
   scripts/bench/t5_linux_publication.py
+  scripts/bench/t5_runtime_environment.py
   scripts/bench/verify_component_quotient_publication.py
   scripts/bench/verify_component_quotient_ram_bundle.py
   scripts/cert/independent_qfuf.py
@@ -150,7 +152,7 @@ else
   LOCK_SHA256="$(shasum -a 256 -- campaigns/component-quotient-ram-census-v1.json)"
 fi
 LOCK_SHA256="${LOCK_SHA256%% *}"
-if [ "$LOCK_SHA256" != 1b313a912e2de8e202aeb2f9b3f50033ffdc65687940565d7a8f192b6ff5bf82 ]; then
+if [ "$LOCK_SHA256" != 7958892d3bf45abbf7d40f31b75c5cdf07a6aec13c66442278685b0ad4eddc24 ]; then
   echo "T5 campaign lock differs from the preregistered contract" >&2
   exit 2
 fi
@@ -161,7 +163,10 @@ else
   MANIFEST_SHA256="$(shasum -a 256 -- benchmarks/smtcomp-2025/qf_uf_manifest.jsonl)"
 fi
 MANIFEST_SHA256="${MANIFEST_SHA256%% *}"
-if [ "$MANIFEST_SHA256" != ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6 ]; then
-  echo "T5 manifest differs from the preregistered revision blob" >&2
+OFFICIAL_ROWS="$(wc -l < benchmarks/smtcomp-2025/qf_uf_manifest.jsonl)"
+OFFICIAL_ROWS="${OFFICIAL_ROWS//[[:space:]]/}"
+if [ "$MANIFEST_SHA256" != ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6 ] || \
+   [ "$OFFICIAL_ROWS" != 3521 ]; then
+  echo "tracked official manifest no longer has its bound 3,521-row identity" >&2
   exit 2
 fi

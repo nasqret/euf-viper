@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 from scripts.bench import component_quotient_contract as contract  # noqa: E402
 from scripts.bench import independent_component_quotient_verifier as independent  # noqa: E402
 from scripts.bench import t5_linux_publication as publication  # noqa: E402
+from scripts.bench import t5_runtime_environment as runtime_environment  # noqa: E402
 
 
 class BundlePublicationError(ValueError):
@@ -203,6 +204,11 @@ def publish_verified_bundle(
     verification_log_path: Path,
     revision: str,
     job_id: int,
+    sbatch_parsable: str,
+    slurm_cluster: str,
+    job_name: str,
+    job_user: str,
+    workdir: Path,
     python_realpath: Path,
     python_version: str,
     python_sha256: str,
@@ -226,8 +232,16 @@ def publish_verified_bundle(
     except contract.ContractError as error:
         raise BundlePublicationError(str(error)) from error
     if expected_manifest_sha256 != contract.MANIFEST_SHA256:
-        raise BundlePublicationError("manifest digest differs from the fixed revision blob")
+        raise BundlePublicationError("manifest digest differs from the fixed external campaign")
     _require_identity(job_id, "job id")
+    try:
+        contract.require_safe_token(slurm_cluster, "Slurm cluster")
+        contract.require_safe_token(job_name, "Slurm job name")
+        contract.require_safe_token(job_user, "Slurm job user")
+    except contract.ContractError as error:
+        raise BundlePublicationError(str(error)) from error
+    if sbatch_parsable != f"{job_id};{slurm_cluster}":
+        raise BundlePublicationError("sbatch --parsable job/cluster identity drift")
     expected_namespace = (
         _require_identity(namespace_device, "namespace device"),
         _require_identity(namespace_inode, "namespace inode"),
@@ -252,8 +266,10 @@ def publish_verified_bundle(
         )
     if Path(os.path.abspath(lock_path)) != repository_root / contract.LOCK_RELATIVE_PATH:
         raise BundlePublicationError("campaign lock path is not the fixed revision path")
-    if Path(os.path.abspath(manifest_path)) != repository_root / contract.MANIFEST_RELATIVE_PATH:
-        raise BundlePublicationError("manifest path is not the fixed corpus path")
+    try:
+        contract.require_campaign_manifest_path(repository_root, manifest_path)
+    except contract.ContractError as error:
+        raise BundlePublicationError(str(error)) from error
     if final_bundle.name != expected_bundle_name or current_marker.name != expected_marker_name:
         raise BundlePublicationError("archive or marker name violates the fixed contract")
     if (
@@ -261,6 +277,8 @@ def publish_verified_bundle(
         or current_marker.parent != final_bundle.parent
     ):
         raise BundlePublicationError("publication paths leave the bound result namespace")
+    if Path(os.path.abspath(workdir)) != namespace_root:
+        raise BundlePublicationError("Slurm workdir differs from the bound result namespace")
     try:
         recomputed_namespace_id = contract.namespace_identity_sha256(
             namespace_path=str(namespace_root),
@@ -298,6 +316,36 @@ def publish_verified_bundle(
         python_identity = _capture_python_identity(
             python_realpath, python_version, python_sha256
         )
+        manifest_bytes = _read_regular(manifest_path, "external campaign manifest")
+        try:
+            contract.require_campaign_manifest_bytes(manifest_bytes)
+        except contract.ContractError as error:
+            raise BundlePublicationError(str(error)) from error
+        slurm_identity: dict[str, object] = {
+            "sbatch_parsable": sbatch_parsable,
+            "job_id": job_id,
+            "cluster": slurm_cluster,
+            "job_name": job_name,
+            "user": job_user,
+            "workdir": str(namespace_root),
+        }
+        try:
+            environment = runtime_environment.capture_runtime_environment(
+                repository_root=repository_root,
+                manifest_path=manifest_path,
+                namespace_root=namespace_root,
+                results_path=namespace_root / "results",
+                python_realpath=python_realpath,
+                python_version=python_version,
+                python_sha256=python_sha256,
+                slurm=slurm_identity,
+            )
+            runtime_environment.validate_runtime_environment(environment)
+        except runtime_environment.RuntimeEnvironmentError as error:
+            raise BundlePublicationError(str(error)) from error
+        environment_sha256 = hashlib.sha256(
+            contract.canonical_json_bytes(environment)
+        ).hexdigest()
         snapshot = independent.capture_snapshot(
             repository_root=repository_root,
             lock_path=lock_path,
@@ -327,15 +375,18 @@ def publish_verified_bundle(
             "authoritative_without_scheduler_status": False,
             "revision": revision,
             "job_id": job_id,
+            "slurm": slurm_identity,
             "attempt_id": attempt_id,
             "submission_nonce": submission_nonce,
             "remote_namespace": namespace_json,
             "python": python_identity,
+            "runtime_environment": environment,
             "contract": {
                 "lock_sha256": contract.LOCK_SHA256,
                 "manifest_sha256": expected_manifest_sha256,
                 "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
                 "runtime_revision_blobs_sha256": runtime_bindings_sha256,
+                "runtime_environment_sha256": environment_sha256,
             },
             "independent_verification": fresh_receipt,
         }
@@ -404,6 +455,7 @@ def publish_verified_bundle(
             },
             "revision": revision,
             "job_id": job_id,
+            "slurm": slurm_identity,
             "attempt_id": attempt_id,
             "submission_nonce": submission_nonce,
             "remote_namespace": namespace_json,
@@ -537,6 +589,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verification-log", type=Path, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--job-id", type=int, required=True)
+    parser.add_argument("--sbatch-parsable", required=True)
+    parser.add_argument("--slurm-cluster", required=True)
+    parser.add_argument("--job-name", required=True)
+    parser.add_argument("--job-user", required=True)
+    parser.add_argument("--workdir", type=Path, required=True)
     parser.add_argument("--python-realpath", type=Path, required=True)
     parser.add_argument("--python-version", required=True)
     parser.add_argument("--python-sha256", required=True)
@@ -569,6 +626,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             verification_log_path=args.verification_log,
             revision=args.revision,
             job_id=args.job_id,
+            sbatch_parsable=args.sbatch_parsable,
+            slurm_cluster=args.slurm_cluster,
+            job_name=args.job_name,
+            job_user=args.job_user,
+            workdir=args.workdir,
             python_realpath=args.python_realpath,
             python_version=args.python_version,
             python_sha256=args.python_sha256,

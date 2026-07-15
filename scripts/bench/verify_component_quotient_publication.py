@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import secrets
 import stat
 import subprocess
@@ -23,6 +24,7 @@ if str(ROOT) not in sys.path:
 from scripts.bench import component_quotient_contract as contract  # noqa: E402
 from scripts.bench import independent_component_quotient_verifier as independent  # noqa: E402
 from scripts.bench import t5_linux_publication as publication  # noqa: E402
+from scripts.bench import t5_runtime_environment as runtime_environment  # noqa: E402
 
 
 class ConsumerVerificationError(ValueError):
@@ -32,11 +34,21 @@ class ConsumerVerificationError(ValueError):
 MAX_ARCHIVE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 48 * 1024 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = contract.EXPECTED_SOURCES + len(contract.RUNTIME_PROJECT_FILES) + 32
+SACCT_FORMAT = (
+    "JobIDRaw%64,SLUID%256,Cluster%128,Submit%32,JobName%128,User%128,"
+    "WorkDir%4096,State%64,ExitCode%32"
+)
 
 
 @dataclass(frozen=True)
 class SchedulerEvidence:
     job_id: int
+    sluid: str
+    cluster: str
+    submit_time: str
+    job_name: str
+    user: str
+    workdir: str
     state: str
     exit_code: str
 
@@ -44,6 +56,12 @@ class SchedulerEvidence:
         return {
             "source": "sacct-root-allocation",
             "job_id": self.job_id,
+            "sluid": self.sluid,
+            "cluster": self.cluster,
+            "submit_time": self.submit_time,
+            "job_name": self.job_name,
+            "user": self.user,
+            "workdir": self.workdir,
             "state": self.state,
             "exit_code": self.exit_code,
             "successful": self.state == "COMPLETED" and self.exit_code == "0:0",
@@ -60,9 +78,52 @@ def _safe_environment() -> dict[str, str]:
     }
 
 
-def query_successful_job(job_id: int) -> SchedulerEvidence:
+def _require_scheduler_evidence(
+    evidence: SchedulerEvidence, *, job_id: int, cluster: str
+) -> SchedulerEvidence:
+    if type(evidence) is not SchedulerEvidence or type(evidence.job_id) is not int:
+        raise ConsumerVerificationError("scheduler evidence type drift")
+    strings = (
+        evidence.sluid,
+        evidence.cluster,
+        evidence.submit_time,
+        evidence.job_name,
+        evidence.user,
+        evidence.workdir,
+        evidence.state,
+        evidence.exit_code,
+    )
+    if any(
+        type(value) is not str
+        or not value
+        or len(value) > 4096
+        or any(character in value for character in "\x00\r\n|")
+        for value in strings
+    ):
+        raise ConsumerVerificationError("scheduler provenance row is malformed")
+    try:
+        contract.require_safe_token(evidence.cluster, "scheduler evidence cluster")
+        contract.require_safe_token(evidence.job_name, "scheduler evidence job name")
+        contract.require_safe_token(evidence.user, "scheduler evidence user")
+    except contract.ContractError as error:
+        raise ConsumerVerificationError(str(error)) from error
+    if (
+        evidence.job_id != job_id
+        or evidence.cluster != cluster
+        or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}", evidence.submit_time)
+        or not os.path.isabs(evidence.workdir)
+    ):
+        raise ConsumerVerificationError("scheduler provenance binding drift")
+    return evidence
+
+
+def query_successful_job(job_id: int, cluster: str) -> SchedulerEvidence:
     if type(job_id) is not int or job_id < 1:
         raise ConsumerVerificationError("scheduler job id must be positive")
+    try:
+        contract.require_safe_token(cluster, "scheduler cluster")
+    except contract.ContractError as error:
+        raise ConsumerVerificationError(str(error)) from error
     try:
         completed = subprocess.run(
             [
@@ -70,9 +131,11 @@ def query_successful_job(job_id: int) -> SchedulerEvidence:
                 "-n",
                 "-P",
                 "-X",
+                "--clusters",
+                cluster,
                 "-j",
                 str(job_id),
-                "--format=JobIDRaw,State,ExitCode",
+                f"--format={SACCT_FORMAT}",
             ],
             env=_safe_environment(),
             check=True,
@@ -84,11 +147,15 @@ def query_successful_job(job_id: int) -> SchedulerEvidence:
     rows = []
     for line in completed.stdout.splitlines():
         fields = line.strip().split("|")
-        if len(fields) >= 3 and fields[0] == str(job_id):
-            rows.append((fields[1].split()[0], fields[2]))
+        if len(fields) == 10 and fields[-1] == "":
+            fields.pop()
+        if len(fields) == 9 and fields[0] == str(job_id):
+            rows.append(fields[1:])
     if len(rows) != 1:
         raise ConsumerVerificationError("scheduler returned no unique root-allocation row")
-    evidence = SchedulerEvidence(job_id, *rows[0])
+    evidence = _require_scheduler_evidence(
+        SchedulerEvidence(job_id, *rows[0]), job_id=job_id, cluster=cluster
+    )
     if evidence.state != "COMPLETED" or evidence.exit_code != "0:0":
         raise ConsumerVerificationError(
             f"job did not complete successfully: {evidence.state} {evidence.exit_code}"
@@ -157,6 +224,7 @@ def read_pending_submission(path: Path) -> dict[str, object]:
         "submission_nonce",
         "dependency",
         "job_id",
+        "scheduler_submission",
         "expected_marker_name",
         "contract",
         "python",
@@ -190,6 +258,7 @@ def read_pending_submission(path: Path) -> dict[str, object]:
     fixed = receipt["contract"]
     if type(fixed) is not dict or set(fixed) != {
         "expected_sources",
+        "manifest_relative_path",
         "lock_sha256",
         "manifest_sha256",
         "portable_source_set_sha256",
@@ -201,11 +270,41 @@ def read_pending_submission(path: Path) -> dict[str, object]:
     contract.require_lower_sha256(manifest_digest, "manifest digest")
     if fixed != {
         "expected_sources": contract.EXPECTED_SOURCES,
+        "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
         "lock_sha256": contract.LOCK_SHA256,
         "manifest_sha256": contract.MANIFEST_SHA256,
         "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
     }:
-        raise ConsumerVerificationError("submission manifest is not the fixed revision blob")
+        raise ConsumerVerificationError("submission manifest is not the fixed external campaign")
+    namespace_binding = receipt["remote_namespace"]
+    if type(namespace_binding) is not dict:
+        raise ConsumerVerificationError("submission namespace binding is malformed")
+    scheduler_submission = receipt["scheduler_submission"]
+    if type(scheduler_submission) is not dict or set(scheduler_submission) != {
+        "sbatch_parsable",
+        "job_id",
+        "cluster",
+        "job_name",
+        "user",
+        "workdir",
+    }:
+        raise ConsumerVerificationError("submission scheduler identity field set drift")
+    for field in ("sbatch_parsable", "cluster", "job_name", "user", "workdir"):
+        if type(scheduler_submission[field]) is not str:
+            raise ConsumerVerificationError("submission scheduler identity type drift")
+    cluster = scheduler_submission["cluster"]
+    job_name = scheduler_submission["job_name"]
+    user = scheduler_submission["user"]
+    assert type(cluster) is str and type(job_name) is str and type(user) is str
+    contract.require_safe_token(cluster, "submission Slurm cluster")
+    contract.require_safe_token(job_name, "submission Slurm job name")
+    contract.require_safe_token(user, "submission Slurm user")
+    if (
+        scheduler_submission["job_id"] != job_id
+        or scheduler_submission["sbatch_parsable"] != f"{job_id};{cluster}"
+        or scheduler_submission["workdir"] != namespace_binding.get("path")
+    ):
+        raise ConsumerVerificationError("submission scheduler identity binding drift")
     dependency = receipt["dependency"]
     if dependency is not None and (type(dependency) is not int or dependency < 1):
         raise ConsumerVerificationError("submission dependency is malformed")
@@ -341,8 +440,10 @@ def _verify_archive_semantics(
     expected_attempt_id: str,
     expected_nonce: str,
     expected_runtime_sha256: str,
+    expected_environment_sha256: str,
     expected_metadata_sha256: str,
     expected_python: dict[str, object],
+    expected_slurm: dict[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
     required = {
         "inputs/campaign-lock.json",
@@ -373,10 +474,12 @@ def _verify_archive_semantics(
             "authoritative_without_scheduler_status",
             "revision",
             "job_id",
+            "slurm",
             "attempt_id",
             "submission_nonce",
             "remote_namespace",
             "python",
+            "runtime_environment",
             "contract",
             "independent_verification",
             "members",
@@ -390,6 +493,7 @@ def _verify_archive_semantics(
         or metadata["authoritative_without_scheduler_status"] is not False
         or metadata["revision"] != revision
         or metadata["job_id"] != expected_job_id
+        or metadata["slurm"] != expected_slurm
         or metadata["attempt_id"] != expected_attempt_id
         or metadata["submission_nonce"] != expected_nonce
         or metadata["remote_namespace"] != expected_namespace
@@ -400,9 +504,24 @@ def _verify_archive_semantics(
             "manifest_sha256": expected_manifest_sha256,
             "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
             "runtime_revision_blobs_sha256": expected_runtime_sha256,
+            "runtime_environment_sha256": expected_environment_sha256,
         }
     ):
         raise ConsumerVerificationError("bundle metadata binding drift")
+    environment = metadata["runtime_environment"]
+    try:
+        runtime_environment.validate_runtime_environment(environment)
+    except runtime_environment.RuntimeEnvironmentError as error:
+        raise ConsumerVerificationError(str(error)) from error
+    metadata_contract = metadata["contract"]
+    assert type(metadata_contract) is dict
+    environment_digest = hashlib.sha256(
+        contract.canonical_json_bytes(environment)
+    ).hexdigest()
+    if metadata_contract.get("runtime_environment_sha256") != environment_digest:
+        raise ConsumerVerificationError("runtime environment digest differs from metadata")
+    if environment_digest != expected_environment_sha256:
+        raise ConsumerVerificationError("runtime environment digest differs from marker")
     stored_hashes = metadata["members"]
     if type(stored_hashes) is not dict or set(stored_hashes) != set(members) - {"metadata.json"}:
         raise ConsumerVerificationError("bundle member inventory drift")
@@ -483,7 +602,7 @@ def verify_publication(
     repository_root: Path,
     final_receipt_name: str | None = None,
     consumer_attempt_id: str | None = None,
-    scheduler_query: Callable[[int], SchedulerEvidence] = query_successful_job,
+    scheduler_query: Callable[[int, str], SchedulerEvidence] = query_successful_job,
     boundary_hook: Callable[[str], None] | None = None,
 ) -> publication.PublishedFile:
     if not sys.platform.startswith("linux"):
@@ -512,8 +631,24 @@ def verify_publication(
         raise ConsumerVerificationError(str(error)) from error
     job_id = receipt["job_id"]
     assert type(job_id) is int
-    evidence = scheduler_query(job_id)
-    if evidence.job_id != job_id or evidence.state != "COMPLETED" or evidence.exit_code != "0:0":
+    scheduler_submission = receipt["scheduler_submission"]
+    assert type(scheduler_submission) is dict
+    cluster = scheduler_submission["cluster"]
+    assert type(cluster) is str
+    evidence = _require_scheduler_evidence(
+        scheduler_query(job_id, cluster), job_id=job_id, cluster=cluster
+    )
+    if (
+        evidence.job_id != job_id
+        or evidence.cluster != cluster
+        or evidence.job_name != scheduler_submission["job_name"]
+        or evidence.user != scheduler_submission["user"]
+        or evidence.workdir != scheduler_submission["workdir"]
+        or evidence.state != "COMPLETED"
+        or evidence.exit_code != "0:0"
+        or not evidence.sluid
+        or not evidence.submit_time
+    ):
         raise ConsumerVerificationError("scheduler callback did not prove successful root job")
     namespace = receipt["remote_namespace"]
     if type(namespace) is not dict:
@@ -589,6 +724,7 @@ def verify_publication(
                 "final_archive",
                 "revision",
                 "job_id",
+                "slurm",
                 "attempt_id",
                 "submission_nonce",
                 "remote_namespace",
@@ -606,6 +742,7 @@ def verify_publication(
             or marker["authoritative_without_successful_job_status"] is not False
             or marker["revision"] != receipt["revision"]
             or marker["job_id"] != job_id
+            or marker["slurm"] != scheduler_submission
             or marker["attempt_id"] != receipt["attempt_id"]
             or marker["submission_nonce"] != receipt["submission_nonce"]
             or marker["remote_namespace"] != namespace
@@ -619,6 +756,11 @@ def verify_publication(
                 )
                 if type(marker["contract"]) is dict
                 else None,
+                "runtime_environment_sha256": marker["contract"].get(
+                    "runtime_environment_sha256"
+                )
+                if type(marker["contract"]) is dict
+                else None,
             }
         ):
             raise ConsumerVerificationError("canonical marker binding drift")
@@ -629,6 +771,12 @@ def verify_publication(
         runtime_sha256 = contract.require_lower_sha256(
             marker_contract["runtime_revision_blobs_sha256"],
             "runtime inventory digest",
+        )
+        if type(marker_contract["runtime_environment_sha256"]) is not str:
+            raise ConsumerVerificationError("runtime environment digest type drift")
+        environment_sha256 = contract.require_lower_sha256(
+            marker_contract["runtime_environment_sha256"],
+            "runtime environment digest",
         )
         if type(marker["bundle_metadata_sha256"]) is not str:
             raise ConsumerVerificationError("bundle metadata digest type drift")
@@ -696,8 +844,10 @@ def verify_publication(
             expected_attempt_id=str(marker["attempt_id"]),
             expected_nonce=str(receipt["submission_nonce"]),
             expected_runtime_sha256=runtime_sha256,
+            expected_environment_sha256=environment_sha256,
             expected_metadata_sha256=metadata_sha256,
             expected_python=receipt["python"],  # type: ignore[arg-type]
+            expected_slurm=scheduler_submission,
         )
         if marker["independent_receipt_sha256"] != decision["receipt_sha256"]:
             raise ConsumerVerificationError("marker independent receipt binding drift")
@@ -723,6 +873,7 @@ def verify_publication(
             "decisive": True,
             "authoritative_without_successful_consumer_exit": False,
             "scheduler": evidence.to_json(),
+            "scheduler_submission": scheduler_submission,
             "revision": receipt["revision"],
             "job_id": job_id,
             "attempt_id": marker["attempt_id"],

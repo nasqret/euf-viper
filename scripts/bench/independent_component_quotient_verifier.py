@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import heapq
+import itertools
 import json
 import math
 import os
@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.bench import component_quotient_contract as contract  # noqa: E402
-from scripts.cert import independent_qfuf as qfuf  # noqa: E402
+from scripts.bench import t5_independent_smtlib as audit_smtlib  # noqa: E402
 
 
 RECORD_SCHEMA = "euf-viper.component-quotient-ram-source-projection.v1"
@@ -38,9 +38,16 @@ AGGREGATE_SCHEMA = "euf-viper.component-quotient-ram-census-summary.v1"
 TARGET_SCHEMA = "euf-viper.component-quotient-ram-target.v1"
 INTERPRETATION = "structural_projection_only_no_solver_invocation_no_timing_claim"
 PARSER_API = "scripts.cert.independent_qfuf.parse_and_encode"
+AUDIT_PARSER_API = "scripts.bench.t5_independent_smtlib.parse_qfuf_for_audit"
 DECODER_ORACLE_SCHEMA = "euf-viper.component-quotient-decoder-oracle.v1"
 DECODER_ORACLE_SHA256 = (
     "7562fb7e9953604bd61a68689466e617013bb798bc2657d0c8522e488262af89"
+)
+PROJECTION_ORACLE_SCHEMA = (
+    "euf-viper.component-quotient-independent-projection-oracle.v1"
+)
+PROJECTION_ORACLE_SHA256 = (
+    "4d6cdda1f86a619a95fbf7fa4a4ce0148eebc1153b9ae790c265914a9458edf3"
 )
 PPM = 1_000_000
 COUNT_FIELDS = (
@@ -255,45 +262,13 @@ def _bitonic_comparators(records: int) -> int:
     return records * logarithm * (logarithm + 1) // 4
 
 
-class DisjointSets:
-    def __init__(self, problem: qfuf.EncodedProblem) -> None:
-        self.problem = problem
-        self.parent = list(range(len(problem.terms)))
-        self.rank = [0] * len(problem.terms)
-
-    def representative(self, item: int) -> int:
-        trail: list[int] = []
-        while self.parent[item] != item:
-            trail.append(item)
-            item = self.parent[item]
-        for member in trail:
-            self.parent[member] = item
-        return item
-
-    def merge(self, left: int, right: int) -> None:
-        if self.problem.terms[left].sort != self.problem.terms[right].sort:
-            raise IndependentVerificationError("component merge crossed sorts")
-        left = self.representative(left)
-        right = self.representative(right)
-        if left == right:
-            return
-        if self.rank[left] < self.rank[right]:
-            left, right = right, left
-        self.parent[right] = left
-        if self.rank[left] == self.rank[right]:
-            self.rank[left] += 1
-
-    def merge_many(self, members: Sequence[int]) -> None:
-        unique = sorted(set(members))
-        for member in unique[1:]:
-            self.merge(unique[0], member)
-
-
-def _application_groups(problem: qfuf.EncodedProblem) -> dict[int, tuple[int, ...]]:
+def _application_groups(
+    problem: audit_smtlib.AuditProblem,
+) -> dict[int, tuple[int, ...]]:
     groups: dict[int, list[int]] = defaultdict(list)
-    for term in problem.terms:
-        if term.args:
-            groups[term.function].append(term.id)
+    for term_id, arguments in enumerate(problem.term_arguments):
+        if arguments:
+            groups[problem.term_functions[term_id]].append(term_id)
     return {key: tuple(sorted(value)) for key, value in sorted(groups.items())}
 
 
@@ -307,31 +282,27 @@ def _analyzer_oracle_reference() -> dict[str, object]:
 
 
 def _components(
-    problem: qfuf.EncodedProblem,
+    problem: audit_smtlib.AuditProblem,
     groups: Mapping[int, Sequence[int]],
 ) -> tuple[list[tuple[int, int, tuple[int, ...], int]], dict[int, tuple[int, int]]]:
-    sets = DisjointSets(problem)
-    for atom in problem.atoms:
-        if atom.kind == "equality":
-            if atom.left is None or atom.right is None:
-                raise IndependentVerificationError("incomplete equality atom")
-            sets.merge(atom.left, atom.right)
+    hyperedges: list[tuple[int, ...]] = []
+    for left, right in problem.equality_pairs:
+        hyperedges.append((left, right))
     for function_id, applications in groups.items():
-        function = problem.functions[function_id]
-        if function.result_sort != qfuf.BOOL_SORT:
-            sets.merge_many(applications)
-        for position, sort_id in enumerate(function.arg_sorts):
-            if sort_id != qfuf.BOOL_SORT:
-                sets.merge_many(
-                    [problem.terms[term].args[position] for term in applications]
+        function = problem.signatures[function_id]
+        if function.result_sort != audit_smtlib.BOOL_SORT:
+            hyperedges.append(tuple(applications))
+        for position, sort_id in enumerate(function.argument_sorts):
+            if sort_id != audit_smtlib.BOOL_SORT:
+                hyperedges.append(
+                    tuple(
+                        problem.term_arguments[term][position]
+                        for term in applications
+                    )
                 )
-    grouped: dict[int, list[int]] = defaultdict(list)
-    for term in problem.terms:
-        if term.sort != qfuf.BOOL_SORT:
-            grouped[sets.representative(term.id)].append(term.id)
+    grouped = _hypergraph_components(problem.term_sorts, hyperedges)
     ordered = sorted(
-        (problem.terms[members[0]].sort, tuple(sorted(members)))
-        for members in grouped.values()
+        (problem.term_sorts[members[0]], members) for members in grouped
     )
     components: list[tuple[int, int, tuple[int, ...], int]] = []
     channels: dict[int, tuple[int, int]] = {}
@@ -341,22 +312,62 @@ def _components(
         components.append((component_id, sort_id, members, width))
         for member in members:
             channels[member] = (component_id, width)
-    expected = {term.id for term in problem.terms if term.sort != qfuf.BOOL_SORT}
+    expected = {
+        term
+        for term, sort_id in enumerate(problem.term_sorts)
+        if sort_id != audit_smtlib.BOOL_SORT
+    }
     if set(channels) != expected:
         raise IndependentVerificationError("independent component coverage failed")
     return components, channels
 
 
+def _hypergraph_components(
+    term_sorts: Sequence[int], hyperedges: Sequence[Sequence[int]]
+) -> list[tuple[int, ...]]:
+    """Compute non-Boolean connected components by hypergraph reachability."""
+
+    neighbors = [set((term,)) for term in range(len(term_sorts))]
+    for members in hyperedges:
+        unique = tuple(sorted(set(members)))
+        if not unique:
+            continue
+        if any(not 0 <= term < len(term_sorts) for term in unique):
+            raise IndependentVerificationError("component hyperedge is out of range")
+        if len({term_sorts[term] for term in unique}) > 1:
+            raise IndependentVerificationError("component hyperedge crossed sorts")
+        for term in unique:
+            neighbors[term].update(unique)
+    grouped: list[tuple[int, ...]] = []
+    unseen = {
+        term
+        for term, sort_id in enumerate(term_sorts)
+        if sort_id != audit_smtlib.BOOL_SORT
+    }
+    while unseen:
+        frontier = [min(unseen)]
+        reached: set[int] = set()
+        while frontier:
+            term = frontier.pop()
+            if term in reached:
+                continue
+            reached.add(term)
+            frontier.extend(sorted(neighbors[term] - reached, reverse=True))
+        unseen.difference_update(reached)
+        grouped.append(tuple(sorted(reached)))
+    return grouped
+
+
 class EqualityProjection:
     def __init__(self, term_count: int) -> None:
-        self.neighbors = [set() for _ in range(term_count)]
+        self.matrix = [bytearray(term_count) for _ in range(term_count)]
         self.edges = 0
 
     def connect(self, left: int, right: int) -> bool:
-        if left == right or right in self.neighbors[left]:
+        if left == right or self.matrix[left][right]:
             return False
-        self.neighbors[left].add(right)
-        self.neighbors[right].add(left)
+        self.matrix[left][right] = 1
+        self.matrix[right][left] = 1
         self.edges += 1
         _checked(self.edges, "max_equality_edges")
         return True
@@ -368,35 +379,33 @@ class EqualityProjection:
                 self.connect(left, right)
 
     def complete(self) -> tuple[int, int, int]:
-        active = {vertex for vertex, neighbors in enumerate(self.neighbors) if neighbors}
-        degree = {vertex: len(self.neighbors[vertex]) for vertex in active}
-        queue = [(degree[vertex], vertex) for vertex in active]
-        heapq.heapify(queue)
+        active = {
+            vertex for vertex, row in enumerate(self.matrix) if any(row)
+        }
         fill = 0
         triangles = 0
         eliminated = 0
-        while queue:
-            queued_degree, vertex = heapq.heappop(queue)
-            if vertex not in active or degree[vertex] != queued_degree:
-                continue
-            adjacent = sorted(self.neighbors[vertex] & active)
+        while active:
+            vertex = min(
+                active,
+                key=lambda candidate: (
+                    sum(self.matrix[candidate][other] for other in active),
+                    candidate,
+                ),
+            )
+            adjacent = sorted(
+                other for other in active if self.matrix[vertex][other]
+            )
             for index, left in enumerate(adjacent):
                 for right in adjacent[index + 1 :]:
                     if self.connect(left, right):
                         fill += 1
                         _checked(fill, "max_fill_edges")
-                        degree[left] += 1
-                        degree[right] += 1
-                        heapq.heappush(queue, (degree[left], left))
-                        heapq.heappush(queue, (degree[right], right))
             triangles += _choose2(len(adjacent))
             if triangles > CAPS["max_projected_count"]:
                 raise IndependentCap("triangle count cap exceeded")
             active.remove(vertex)
             eliminated += 1
-            for neighbor in adjacent:
-                degree[neighbor] -= 1
-                heapq.heappush(queue, (degree[neighbor], neighbor))
         return fill, triangles, eliminated
 
 
@@ -410,24 +419,20 @@ def _sum_counts(categories: Mapping[str, CountVector]) -> CountVector:
     return total
 
 
-def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
-    term_count = len(problem.terms)
-    function_count = len(problem.functions)
+def independent_projection(problem: audit_smtlib.AuditProblem) -> dict[str, object]:
+    term_count = problem.term_count
+    function_count = len(problem.signatures)
     _checked(term_count, "max_terms")
     _checked(function_count, "max_symbols")
     groups = _application_groups(problem)
     applications = sum(len(group) for group in groups.values())
     _checked(applications, "max_applications")
     argument_slots = sum(
-        len(problem.terms[term_id].args)
+        len(problem.term_arguments[term_id])
         for group in groups.values()
         for term_id in group
     )
-    bool_variables = {
-        atom.term: atom.variable
-        for atom in problem.atoms
-        if atom.kind == "bool_term" and atom.term is not None
-    }
+    bool_variables = set(problem.boolean_carriers)
     components, channels = _components(problem, groups)
     component_rows: list[dict[str, object]] = []
     quotient_bits = 0
@@ -443,7 +448,7 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
             {
                 "id": component_id,
                 "sort": {
-                    "id": sort_row.id,
+                    "id": sort_id,
                     "name": sort_row.name,
                     "quoted": sort_row.quoted,
                 },
@@ -457,8 +462,7 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         )
 
     def channel(term_id: int) -> tuple[str, int, int | None]:
-        term = problem.terms[term_id]
-        if term.sort == qfuf.BOOL_SORT:
+        if problem.term_sorts[term_id] == audit_smtlib.BOOL_SORT:
             if term_id not in bool_variables:
                 raise IndependentVerificationError("Boolean term lacks atom channel")
             return "boolean", 1, None
@@ -468,16 +472,12 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
     graph = EqualityProjection(term_count)
     reflexive: set[int] = set()
     equality_atoms = 0
-    for atom in problem.atoms:
-        if atom.kind != "equality":
-            continue
+    for left, right in problem.equality_pairs:
         equality_atoms += 1
-        if atom.left is None or atom.right is None:
-            raise IndependentVerificationError("incomplete equality atom")
-        if atom.left == atom.right:
-            reflexive.add(atom.left)
+        if left == right:
+            reflexive.add(left)
         else:
-            graph.connect(atom.left, atom.right)
+            graph.connect(left, right)
     initial_edges = graph.edges
 
     ackermann_pairs = 0
@@ -492,7 +492,7 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
     needs_sorter_constant = False
     symbol_rows: list[dict[str, object]] = []
     for function_id, term_ids in groups.items():
-        function = problem.functions[function_id]
+        function = problem.signatures[function_id]
         count = len(term_ids)
         maximum_symbol_applications = max(maximum_symbol_applications, count)
         pairs = _choose2(count)
@@ -501,8 +501,8 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         argument_widths: list[int] = []
         argument_rows: list[dict[str, object]] = []
         differing_total = 0
-        for position, sort_id in enumerate(function.arg_sorts):
-            values = [problem.terms[term_id].args[position] for term_id in term_ids]
+        for position, sort_id in enumerate(function.argument_sorts):
+            values = [problem.term_arguments[term_id][position] for term_id in term_ids]
             frequencies = Counter(values)
             differing = pairs - sum(
                 _choose2(frequency) for frequency in frequencies.values()
@@ -531,7 +531,7 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         result_channel, result_width, result_component_id = next(
             iter(result_channels)
         )
-        if function.result_sort == qfuf.BOOL_SORT:
+        if function.result_sort == audit_smtlib.BOOL_SORT:
             symbol_ackermann_clauses = 2 * pairs
             symbol_ackermann_literals = 4 * pairs + 2 * differing_total
         else:
@@ -571,13 +571,13 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         symbol_rows.append(
             {
                 "function": {
-                    "id": function.id,
+                    "id": function_id,
                     "name": function.name,
                     "quoted": function.quoted,
                     "internal": function.internal,
                 },
                 "signature": {
-                    "argument_sorts": list(function.arg_sorts),
+                    "argument_sorts": list(function.argument_sorts),
                     "result_sort": function.result_sort,
                 },
                 "applications": count,
@@ -627,21 +627,18 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         ),
     }
     equality_links = ZERO
-    for atom in problem.atoms:
-        if atom.kind != "equality":
-            continue
-        assert atom.left is not None and atom.right is not None
-        if atom.left == atom.right:
+    for left, right in problem.equality_pairs:
+        if left == right:
             equality_links += UNIT
-        elif problem.terms[atom.left].sort == qfuf.BOOL_SORT:
-            channel(atom.left)
-            channel(atom.right)
+        elif problem.term_sorts[left] == audit_smtlib.BOOL_SORT:
+            channel(left)
+            channel(right)
             equality_links += XNOR2 + CountVector(
                 clauses=2, literal_slots=4, watch_entries=4
             )
         else:
-            left_component, width = channels[atom.left]
-            right_component, _ = channels[atom.right]
+            left_component, width = channels[left]
+            right_component, _ = channels[right]
             if left_component != right_component:
                 raise IndependentVerificationError("equality component mismatch")
             equality_links += _equality_link(width)
@@ -665,19 +662,18 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
     relevant_boolean: set[int] = set()
     for term_ids in groups.values():
         for term_id in term_ids:
-            term = problem.terms[term_id]
-            if term.sort == qfuf.BOOL_SORT:
+            if problem.term_sorts[term_id] == audit_smtlib.BOOL_SORT:
                 relevant_boolean.add(term_id)
             relevant_boolean.update(
                 argument
-                for argument in term.args
-                if problem.terms[argument].sort == qfuf.BOOL_SORT
+                for argument in problem.term_arguments[term_id]
+                if problem.term_sorts[argument] == audit_smtlib.BOOL_SORT
             )
     if not relevant_boolean.issubset(bool_variables):
         raise IndependentVerificationError("decoder Boolean channel is incomplete")
     decoder_counts = {
         "assignment_bits_read": quotient_bits + len(bool_variables),
-        "term_codes_materialized": len(problem.terms),
+        "term_codes_materialized": problem.term_count,
         "equality_atoms_checked": equality_atoms,
         "argument_code_lookups": argument_slots,
         "result_code_lookups": applications,
@@ -701,9 +697,11 @@ def independent_projection(problem: qfuf.EncodedProblem) -> dict[str, object]:
         "function_declarations": function_count,
         "terms": term_count,
         "non_boolean_terms": sum(
-            term.sort != qfuf.BOOL_SORT for term in problem.terms
+            sort_id != audit_smtlib.BOOL_SORT for sort_id in problem.term_sorts
         ),
-        "boolean_terms": sum(term.sort == qfuf.BOOL_SORT for term in problem.terms),
+        "boolean_terms": sum(
+            sort_id == audit_smtlib.BOOL_SORT for sort_id in problem.term_sorts
+        ),
         "applications": applications,
         "application_symbols": len(groups),
         "maximum_symbol_applications": maximum_symbol_applications,
@@ -851,6 +849,259 @@ def run_independent_decoder_oracle() -> dict[str, object]:
         "counts": counts,
     }
     payload["sha256"] = sha256_bytes(contract.canonical_json_bytes(payload))
+    return payload
+
+
+def _merged_partition(
+    size: int, hyperedges: Sequence[Sequence[int]]
+) -> tuple[tuple[int, ...], ...]:
+    """Reference connectivity using immutable block coalescing."""
+
+    blocks = [frozenset((vertex,)) for vertex in range(size)]
+    for hyperedge in hyperedges:
+        members = frozenset(hyperedge)
+        touched = [block for block in blocks if block & members]
+        untouched = [block for block in blocks if not block & members]
+        if touched:
+            blocks = untouched + [frozenset().union(*touched)]
+    return tuple(sorted(tuple(sorted(block)) for block in blocks))
+
+
+def _elimination_reference(
+    size: int, initial_edges: Sequence[tuple[int, int]]
+) -> tuple[int, int, int, int]:
+    """Reference min-degree elimination over immutable unordered edge pairs."""
+
+    edges = {tuple(sorted(edge)) for edge in initial_edges if edge[0] != edge[1]}
+    active = {vertex for edge in edges for vertex in edge}
+    fill = 0
+    triangles = 0
+    eliminated = 0
+    while active:
+        neighborhoods = {
+            vertex: tuple(
+                sorted(
+                    other
+                    for other in active
+                    if other != vertex
+                    and tuple(sorted((vertex, other))) in edges
+                )
+            )
+            for vertex in active
+        }
+        vertex = min(active, key=lambda item: (len(neighborhoods[item]), item))
+        adjacent = neighborhoods[vertex]
+        missing = {
+            tuple(sorted((left, right)))
+            for index, left in enumerate(adjacent)
+            for right in adjacent[index + 1 :]
+            if tuple(sorted((left, right))) not in edges
+        }
+        edges.update(missing)
+        fill += len(missing)
+        triangles += _choose2(len(adjacent))
+        active.remove(vertex)
+        eliminated += 1
+    return fill, triangles, eliminated, len(edges)
+
+
+def _clauses_accept(
+    clauses: Sequence[Sequence[tuple[int, bool]]], assignment: Sequence[bool]
+) -> bool:
+    return all(
+        any(assignment[variable] == positive for variable, positive in clause)
+        for clause in clauses
+    )
+
+
+def run_independent_projection_oracle() -> dict[str, object]:
+    """Exhaustively check the audit derivation on finite semantic models."""
+
+    graph_cases = 0
+    fill_edges = 0
+    elimination_triangles = 0
+    eliminated_vertices = 0
+    for size in range(1, 5):
+        possible = [
+            (left, right)
+            for left in range(size)
+            for right in range(left + 1, size)
+        ]
+        for mask in range(1 << len(possible)):
+            selected = [
+                edge for bit, edge in enumerate(possible) if mask & (1 << bit)
+            ]
+            graph_cases += 1
+            derived_components = tuple(
+                sorted(_hypergraph_components([1] * size, selected))
+            )
+            if derived_components != _merged_partition(size, selected):
+                raise IndependentVerificationError(
+                    "projection oracle component closure mismatch"
+                )
+            graph = EqualityProjection(size)
+            for left, right in selected:
+                graph.connect(left, right)
+            observed = (*graph.complete(), graph.edges)
+            expected = _elimination_reference(size, selected)
+            if observed != expected:
+                raise IndependentVerificationError(
+                    "projection oracle equality completion mismatch"
+                )
+            fill_edges += observed[0]
+            elimination_triangles += observed[1]
+            eliminated_vertices += observed[2]
+
+    functionality_cases = 0
+    functional_cases = 0
+    nonfunctional_cases = 0
+    padding_records = 0
+    for size in range(1, 5):
+        partitions = _restricted_growth_assignments(size)
+        padded_size = _next_power_two(size)
+        for keys in partitions:
+            for values in partitions:
+                functionality_cases += 1
+                semantic = all(
+                    keys[left] != keys[right] or values[left] == values[right]
+                    for left in range(size)
+                    for right in range(left + 1, size)
+                )
+                records = [(True, key, value) for key, value in zip(keys, values)]
+                records.extend((False, 0, 0) for _ in range(padded_size - size))
+                records.sort(key=lambda row: (row[0], row[1], row[2]))
+                adjacent = all(
+                    not (
+                        left[0]
+                        and right[0]
+                        and left[1] == right[1]
+                        and left[2] != right[2]
+                    )
+                    for left, right in zip(records, records[1:])
+                )
+                if adjacent != semantic:
+                    raise IndependentVerificationError(
+                        "projection oracle sorted-adjacency semantics mismatch"
+                    )
+                padding_records += padded_size - size
+                if semantic:
+                    functional_cases += 1
+                else:
+                    nonfunctional_cases += 1
+
+    restricted_growth_cases = 0
+    restricted_growth_valid = 0
+    bell_numbers = {1: 1, 2: 2, 3: 5, 4: 15}
+    for size, expected_valid in bell_numbers.items():
+        width = _component_width(size)
+        valid_for_size = 0
+        for codes in itertools.product(range(1 << width), repeat=size):
+            restricted_growth_cases += 1
+            valid = codes[0] == 0 and all(
+                codes[index] <= 1 + max(codes[:index])
+                for index in range(1, size)
+            )
+            if valid:
+                valid_for_size += 1
+                restricted_growth_valid += 1
+        if valid_for_size != expected_valid:
+            raise IndependentVerificationError(
+                "projection oracle restricted-growth semantics mismatch"
+            )
+
+    gate_templates = {
+        "and2": (
+            (
+                ((0, False), (1, False), (2, True)),
+                ((0, True), (2, False)),
+                ((1, True), (2, False)),
+            ),
+            lambda values: values[0] and values[1],
+            AND2,
+        ),
+        "xor2": (
+            (
+                ((0, True), (1, True), (2, False)),
+                ((0, False), (1, False), (2, False)),
+                ((0, True), (1, False), (2, True)),
+                ((0, False), (1, True), (2, True)),
+            ),
+            lambda values: values[0] != values[1],
+            XOR2,
+        ),
+        "xnor2": (
+            (
+                ((0, True), (1, True), (2, True)),
+                ((0, False), (1, False), (2, True)),
+                ((0, True), (1, False), (2, False)),
+                ((0, False), (1, True), (2, False)),
+            ),
+            lambda values: values[0] == values[1],
+            XNOR2,
+        ),
+        "mux2": (
+            (
+                ((0, True), (1, False), (3, True)),
+                ((0, True), (1, True), (3, False)),
+                ((0, False), (2, False), (3, True)),
+                ((0, False), (2, True), (3, False)),
+            ),
+            lambda values: values[2] if values[0] else values[1],
+            MUX2,
+        ),
+    }
+    gate_assignments = 0
+    for name, (clauses, operation, expected_counts) in gate_templates.items():
+        variable_count = max(variable for clause in clauses for variable, _ in clause) + 1
+        observed_counts = CountVector(
+            variables=1,
+            clauses=len(clauses),
+            literal_slots=sum(len(clause) for clause in clauses),
+            watch_entries=2 * len(clauses),
+        )
+        if observed_counts != expected_counts:
+            raise IndependentVerificationError(
+                f"projection oracle {name} count-vector mismatch"
+            )
+        for assignment in itertools.product((False, True), repeat=variable_count):
+            gate_assignments += 1
+            expected_output = bool(operation(assignment))
+            if _clauses_accept(clauses, assignment) != (
+                assignment[-1] == expected_output
+            ):
+                raise IndependentVerificationError(
+                    f"projection oracle {name} truth-table mismatch"
+                )
+
+    payload: dict[str, object] = {
+        "schema": PROJECTION_ORACLE_SCHEMA,
+        "passed": True,
+        "bounds": {
+            "maximum_graph_vertices": 4,
+            "maximum_function_records": 4,
+            "maximum_component_terms": 4,
+            "gate_templates": sorted(gate_templates),
+        },
+        "counts": {
+            "graph_cases": graph_cases,
+            "fill_edges": fill_edges,
+            "elimination_triangles": elimination_triangles,
+            "eliminated_vertices": eliminated_vertices,
+            "functionality_cases": functionality_cases,
+            "functional_cases": functional_cases,
+            "nonfunctional_cases": nonfunctional_cases,
+            "padding_records": padding_records,
+            "restricted_growth_cases": restricted_growth_cases,
+            "restricted_growth_valid": restricted_growth_valid,
+            "gate_assignments": gate_assignments,
+        },
+    }
+    oracle_sha256 = sha256_bytes(contract.canonical_json_bytes(payload))
+    if oracle_sha256 != PROJECTION_ORACLE_SHA256:
+        raise IndependentVerificationError(
+            "independent projection-oracle evidence digest drift"
+        )
+    payload["sha256"] = oracle_sha256
     return payload
 
 
@@ -1014,10 +1265,13 @@ def capture_snapshot(
     repository_root = Path(os.path.abspath(repository_root))
     lock_bytes = _read_regular_no_follow(lock_path, "campaign lock")
     contract.require_exact_lock_bytes(lock_bytes)
+    contract.require_campaign_manifest_path(repository_root, manifest_path)
     manifest_bytes = _read_regular_no_follow(manifest_path, "manifest")
     manifest_sha256 = sha256_bytes(manifest_bytes)
     if expected_manifest_sha256 is not None and manifest_sha256 != expected_manifest_sha256:
         raise IndependentVerificationError("manifest SHA-256 differs from submission binding")
+    if expected_manifest_sha256 == contract.MANIFEST_SHA256:
+        contract.require_campaign_manifest_bytes(manifest_bytes)
 
     def load_source(
         row: dict[str, object], relative_path: str
@@ -1076,6 +1330,8 @@ def snapshot_from_bytes(
         raise IndependentVerificationError(
             "archived manifest SHA-256 differs from submission binding"
         )
+    if expected_manifest_sha256 == contract.MANIFEST_SHA256:
+        contract.require_campaign_manifest_bytes(manifest_bytes)
     consumed: set[str] = set()
 
     def load_source(
@@ -1366,9 +1622,9 @@ def _require_record_projection(
         raise IndependentCap("source byte cap exceeded")
     try:
         text = source.source_bytes.decode("utf-8")
-        problem = qfuf.parse_and_encode(text)
+        problem = audit_smtlib.parse_qfuf_for_audit(text)
         projection = independent_projection(problem)
-    except (UnicodeDecodeError, qfuf.IndependentQfufError) as error:
+    except (UnicodeDecodeError, audit_smtlib.AuditParseError) as error:
         raise IndependentVerificationError(
             f"independent parser rejected {source.relative_path}: {error}"
         ) from error
@@ -1491,6 +1747,10 @@ def verify_snapshot(snapshot: IndependentSnapshot) -> dict[str, object]:
         snapshot.repository_root / "scripts/bench/census_component_quotient_ram.py",
         "analyzer revision blob",
     )
+    audit_parser_bytes = _read_regular_no_follow(
+        snapshot.repository_root / "scripts/bench/t5_independent_smtlib.py",
+        "independent audit parser revision blob",
+    )
     parser_sha256 = sha256_bytes(parser_bytes)
     taxonomy_builder_sha256 = sha256_bytes(taxonomy_bytes)
     stored_records = strict_jsonl(snapshot.records_bytes, "records")
@@ -1550,6 +1810,7 @@ def verify_snapshot(snapshot: IndependentSnapshot) -> dict[str, object]:
     )
     if stored_targets != targets or snapshot.targets_bytes != expected_target_bytes:
         raise IndependentVerificationError("target manifest differs from source recomputation")
+    projection_oracle = run_independent_projection_oracle()
     gates = _independent_gates(verified_records)
     aggregate = strict_json(snapshot.aggregate_bytes, "aggregate")
     aggregate_counts = {
@@ -1607,9 +1868,15 @@ def verify_snapshot(snapshot: IndependentSnapshot) -> dict[str, object]:
         "sources": len(verified_records),
         "targets": len(targets),
         "independent_decoder_oracle": oracle,
+        "independent_projection_oracle": projection_oracle,
+        "independent_parser": {
+            "api": AUDIT_PARSER_API,
+            "sha256": sha256_bytes(audit_parser_bytes),
+        },
         "hashes": {
             **expected_hashes,
             "aggregate_json_sha256": sha256_bytes(snapshot.aggregate_bytes),
+            "independent_audit_parser_sha256": sha256_bytes(audit_parser_bytes),
             "independent_gates_sha256": sha256_bytes(
                 contract.canonical_json_bytes(gates)
             ),

@@ -14,8 +14,54 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-AT_EMPTY_PATH = 0x1000
+AT_SYMLINK_FOLLOW = 0x400
+PROC_SUPER_MAGIC = 0x9FA0
+PROC_SELF_FD = "/proc/self/fd"
 READ_CHUNK = 1024 * 1024
+
+CAPABILITY_NAMES = (
+    "CAP_CHOWN",
+    "CAP_DAC_OVERRIDE",
+    "CAP_DAC_READ_SEARCH",
+    "CAP_FOWNER",
+    "CAP_FSETID",
+    "CAP_KILL",
+    "CAP_SETGID",
+    "CAP_SETUID",
+    "CAP_SETPCAP",
+    "CAP_LINUX_IMMUTABLE",
+    "CAP_NET_BIND_SERVICE",
+    "CAP_NET_BROADCAST",
+    "CAP_NET_ADMIN",
+    "CAP_NET_RAW",
+    "CAP_IPC_LOCK",
+    "CAP_IPC_OWNER",
+    "CAP_SYS_MODULE",
+    "CAP_SYS_RAWIO",
+    "CAP_SYS_CHROOT",
+    "CAP_SYS_PTRACE",
+    "CAP_SYS_PACCT",
+    "CAP_SYS_ADMIN",
+    "CAP_SYS_BOOT",
+    "CAP_SYS_NICE",
+    "CAP_SYS_RESOURCE",
+    "CAP_SYS_TIME",
+    "CAP_SYS_TTY_CONFIG",
+    "CAP_MKNOD",
+    "CAP_LEASE",
+    "CAP_AUDIT_WRITE",
+    "CAP_AUDIT_CONTROL",
+    "CAP_SETFCAP",
+    "CAP_MAC_OVERRIDE",
+    "CAP_MAC_ADMIN",
+    "CAP_SYSLOG",
+    "CAP_WAKE_ALARM",
+    "CAP_BLOCK_SUSPEND",
+    "CAP_AUDIT_READ",
+    "CAP_PERFMON",
+    "CAP_BPF",
+    "CAP_CHECKPOINT_RESTORE",
+)
 
 
 class PublicationError(ValueError):
@@ -63,6 +109,209 @@ def write_all(descriptor: int, payload: bytes) -> None:
 
 def fsync_directory(descriptor: int) -> None:
     os.fsync(descriptor)
+
+
+class _StatFs(ctypes.Structure):
+    _fields_ = (
+        ("f_type", ctypes.c_long),
+        ("f_bsize", ctypes.c_long),
+        ("f_blocks", ctypes.c_ulong),
+        ("f_bfree", ctypes.c_ulong),
+        ("f_bavail", ctypes.c_ulong),
+        ("f_files", ctypes.c_ulong),
+        ("f_ffree", ctypes.c_ulong),
+        ("f_fsid", ctypes.c_int * 2),
+        ("f_namelen", ctypes.c_long),
+        ("f_frsize", ctypes.c_long),
+        ("f_flags", ctypes.c_long),
+        ("f_spare", ctypes.c_long * 4),
+    )
+
+
+def statfs_properties(descriptor: int) -> dict[str, int]:
+    libc = ctypes.CDLL(None, use_errno=True)
+    fstatfs = libc.fstatfs
+    fstatfs.argtypes = (ctypes.c_int, ctypes.POINTER(_StatFs))
+    fstatfs.restype = ctypes.c_int
+    value = _StatFs()
+    if fstatfs(descriptor, ctypes.byref(value)) != 0:
+        error = ctypes.get_errno()
+        raise PublicationError(f"cannot inspect filesystem type: {os.strerror(error)}")
+    return {
+        "type": int(value.f_type),
+        "block_size": int(value.f_bsize),
+        "name_length": int(value.f_namelen),
+        "fragment_size": int(value.f_frsize),
+        "flags": int(value.f_flags),
+    }
+
+
+def _read_proc_text(path: str, maximum_bytes: int) -> str:
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise PublicationError(f"cannot open Linux process metadata {path}: {error}") from error
+    try:
+        payload = read_fd(descriptor, maximum_bytes=maximum_bytes)
+    finally:
+        os.close(descriptor)
+    try:
+        return payload.decode("ascii")
+    except UnicodeDecodeError as error:
+        raise PublicationError(f"Linux process metadata is not ASCII: {path}") from error
+
+
+def linux_capability_inventory() -> dict[str, object]:
+    if not sys.platform.startswith("linux"):
+        raise PublicationError("Linux capability inventory requires Linux procfs")
+    status = _read_proc_text("/proc/self/status", 1024 * 1024)
+    values: dict[str, str] = {}
+    for line in status.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            values[key] = value.strip()
+    fields = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+    if any(field not in values for field in fields):
+        raise PublicationError("/proc/self/status lacks a complete capability inventory")
+    try:
+        numeric = {field: int(values[field], 16) for field in fields}
+        last_cap = int(_read_proc_text("/proc/sys/kernel/cap_last_cap", 128).strip())
+    except ValueError as error:
+        raise PublicationError("Linux capability metadata is malformed") from error
+    if not 0 <= last_cap < 4096:
+        raise PublicationError("Linux cap_last_cap is outside its supported bound")
+
+    def names(bits: int) -> list[str]:
+        return [
+            CAPABILITY_NAMES[index]
+            if index < len(CAPABILITY_NAMES)
+            else f"CAP_{index}"
+            for index in range(last_cap + 1)
+            if bits & (1 << index)
+        ]
+
+    inventory = {
+        "uid": os.getuid(),
+        "effective_uid": os.geteuid(),
+        "gid": os.getgid(),
+        "effective_gid": os.getegid(),
+        "last_capability": last_cap,
+        "sets": {
+            field: {
+                "hex": f"{numeric[field]:016x}",
+                "names": names(numeric[field]),
+            }
+            for field in fields
+        },
+        "cap_dac_read_search_effective": bool(numeric["CapEff"] & (1 << 2)),
+    }
+    validate_linux_capability_inventory(inventory)
+    return inventory
+
+
+def validate_linux_capability_inventory(value: object) -> dict[str, object]:
+    required = {
+        "uid",
+        "effective_uid",
+        "gid",
+        "effective_gid",
+        "last_capability",
+        "sets",
+        "cap_dac_read_search_effective",
+    }
+    if type(value) is not dict or set(value) != required:
+        raise PublicationError("Linux capability inventory field set drift")
+    for field in ("uid", "effective_uid", "gid", "effective_gid"):
+        if type(value[field]) is not int or value[field] < 0:
+            raise PublicationError("Linux capability identity is malformed")
+    last_capability = value["last_capability"]
+    if type(last_capability) is not int or not 0 <= last_capability < 4096:
+        raise PublicationError("Linux last-capability value is malformed")
+    sets = value["sets"]
+    set_names = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+    if type(sets) is not dict or set(sets) != set(set_names):
+        raise PublicationError("Linux capability sets are incomplete")
+    numeric: dict[str, int] = {}
+    for set_name in set_names:
+        row = sets[set_name]
+        if type(row) is not dict or set(row) != {"hex", "names"}:
+            raise PublicationError("Linux capability-set record is malformed")
+        hexadecimal = row["hex"]
+        names = row["names"]
+        if (
+            type(hexadecimal) is not str
+            or len(hexadecimal) < 16
+            or any(character not in "0123456789abcdef" for character in hexadecimal)
+            or type(names) is not list
+            or any(type(name) is not str for name in names)
+        ):
+            raise PublicationError("Linux capability-set value is malformed")
+        bits = int(hexadecimal, 16)
+        if bits >> (last_capability + 1):
+            raise PublicationError("Linux capability set exceeds cap_last_cap")
+        expected_names = [
+            CAPABILITY_NAMES[index]
+            if index < len(CAPABILITY_NAMES)
+            else f"CAP_{index}"
+            for index in range(last_capability + 1)
+            if bits & (1 << index)
+        ]
+        if names != expected_names:
+            raise PublicationError("Linux capability names differ from their bit set")
+        numeric[set_name] = bits
+    expected_dac = bool(numeric["CapEff"] & (1 << 2))
+    if value["cap_dac_read_search_effective"] is not expected_dac:
+        raise PublicationError("CAP_DAC_READ_SEARCH effective flag drift")
+    return value
+
+
+def _verified_proc_fd_directory(
+    source_descriptor: int,
+) -> tuple[int, dict[str, object]]:
+    if not sys.platform.startswith("linux"):
+        raise PublicationError("T5 publication requires Linux procfs")
+    flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        proc_descriptor = os.open(PROC_SELF_FD, flags)
+    except OSError as error:
+        raise PublicationError(f"cannot pin {PROC_SELF_FD}: {error}") from error
+    try:
+        properties = statfs_properties(proc_descriptor)
+        if properties["type"] != PROC_SUPER_MAGIC:
+            raise PublicationError(f"{PROC_SELF_FD} is not a procfs descriptor directory")
+        source_stat = os.fstat(source_descriptor)
+        descriptor_name = str(source_descriptor)
+        link_stat = os.stat(
+            descriptor_name, dir_fd=proc_descriptor, follow_symlinks=False
+        )
+        target_stat = os.stat(
+            descriptor_name, dir_fd=proc_descriptor, follow_symlinks=True
+        )
+        if not stat.S_ISLNK(link_stat.st_mode) or not _same_inode(source_stat, target_stat):
+            raise PublicationError(
+                "/proc/self/fd does not expose the expected descriptor symlink semantics"
+            )
+        target = os.readlink(descriptor_name, dir_fd=proc_descriptor)
+        if not target or "\x00" in target:
+            raise PublicationError("/proc/self/fd descriptor target is malformed")
+        return proc_descriptor, {
+            "method": "proc_self_fd_linkat_at_symlink_follow",
+            "proc_self_fd": PROC_SELF_FD,
+            "procfs": properties,
+            "descriptor_symlink_verified": True,
+            "capabilities": linux_capability_inventory(),
+        }
+    except BaseException:
+        os.close(proc_descriptor)
+        raise
+
+
+def capture_publication_environment(probe_descriptor: int) -> dict[str, object]:
+    proc_descriptor, evidence = _verified_proc_fd_directory(probe_descriptor)
+    os.close(proc_descriptor)
+    return evidence
 
 
 def open_unnamed_linkable_file(directory_descriptor: int) -> int:
@@ -127,9 +376,11 @@ def prepare_unnamed_bytes(
 
 
 def _call_linkat(
-    source_descriptor: int,
+    source_directory_descriptor: int,
+    source_name: bytes,
     destination_directory_descriptor: int,
     destination_name: str,
+    flags: int,
 ) -> int:
     libc = ctypes.CDLL(None, use_errno=True)
     linkat = libc.linkat
@@ -143,11 +394,11 @@ def _call_linkat(
     linkat.restype = ctypes.c_int
     if (
         linkat(
-            source_descriptor,
-            b"",
+            source_directory_descriptor,
+            source_name,
             destination_directory_descriptor,
             os.fsencode(destination_name),
-            AT_EMPTY_PATH,
+            flags,
         )
         == 0
     ):
@@ -164,20 +415,24 @@ def link_unnamed_inode_no_replace(
     before = os.fstat(source_descriptor)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 0:
         raise PublicationError("publication source must be one unnamed regular inode")
-    error = _call_linkat(source_descriptor, directory_descriptor, destination_name)
+    proc_descriptor, _ = _verified_proc_fd_directory(source_descriptor)
+    try:
+        error = _call_linkat(
+            proc_descriptor,
+            os.fsencode(str(source_descriptor)),
+            directory_descriptor,
+            destination_name,
+            AT_SYMLINK_FOLLOW,
+        )
+    finally:
+        os.close(proc_descriptor)
     if error == errno.EEXIST:
         raise PublicationError(
             f"publication destination already exists: {destination_name}"
         )
-    if error == errno.EPERM:
-        raise PublicationError(
-            "cannot link O_TMPFILE descriptor with AT_EMPTY_PATH: permission denied; "
-            "Linux requires CAP_DAC_READ_SEARCH and this campaign forbids the "
-            "/proc/self/fd pathname fallback"
-        )
     if error:
         raise PublicationError(
-            "cannot link O_TMPFILE descriptor with AT_EMPTY_PATH: "
+            "cannot link O_TMPFILE through verified /proc/self/fd semantics: "
             f"{os.strerror(error)}"
         )
     after = os.fstat(source_descriptor)
@@ -260,15 +515,50 @@ def verify_named_file(
             raise PublicationError("published inode must have exactly one link")
         if stat.S_IMODE(descriptor_stat.st_mode) != 0o444:
             raise PublicationError("published inode mode must be 0444")
-        digest = sha256_fd(descriptor)
-        if digest != expected_sha256:
-            raise PublicationError("published inode SHA-256 mismatch")
+        os.fsync(descriptor)
+        after_fsync = os.fstat(descriptor)
+        named_after_fsync = os.stat(
+            name, dir_fd=directory_descriptor, follow_symlinks=False
+        )
+        if (
+            not _same_inode(descriptor_stat, after_fsync)
+            or not _same_inode(after_fsync, named_after_fsync)
+            or after_fsync.st_nlink != 1
+            or stat.S_IMODE(after_fsync.st_mode) != 0o444
+            or after_fsync.st_size != descriptor_stat.st_size
+        ):
+            raise PublicationError("published inode or final path changed after fsync")
+        first_digest = sha256_fd(descriptor)
+        if first_digest != expected_sha256:
+            raise PublicationError("published inode SHA-256 mismatch after fsync")
         if expected_payload is not None and read_fd(
             descriptor, maximum_bytes=len(expected_payload)
         ) != expected_payload:
-            raise PublicationError("published inode content mismatch")
-        os.fsync(descriptor)
-        return descriptor_stat
+            raise PublicationError("published inode content mismatch after fsync")
+        final_stat = os.fstat(descriptor)
+        final_named = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+        final_digest = sha256_fd(descriptor)
+        terminal_stat = os.fstat(descriptor)
+        terminal_named = os.stat(
+            name, dir_fd=directory_descriptor, follow_symlinks=False
+        )
+        if (
+            not _same_inode(after_fsync, final_stat)
+            or not _same_inode(final_stat, final_named)
+            or not _same_inode(final_stat, terminal_stat)
+            or not _same_inode(terminal_stat, terminal_named)
+            or final_stat.st_nlink != 1
+            or terminal_stat.st_nlink != 1
+            or final_stat.st_size != after_fsync.st_size
+            or terminal_stat.st_size != final_stat.st_size
+            or final_digest != expected_sha256
+            or expected_descriptor is not None
+            and not _same_inode(terminal_stat, os.fstat(expected_descriptor))
+        ):
+            raise PublicationError(
+                "published inode, digest, link count, or final path changed after fsync"
+            )
+        return terminal_stat
     except OSError as error:
         raise PublicationError(f"cannot fsync published inode: {error}") from error
     finally:

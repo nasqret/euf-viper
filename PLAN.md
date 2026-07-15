@@ -257,12 +257,14 @@ independent evidence checks, and a frozen family holdout.
 - [x] Implement the fixed source projection, separate source-to-decision
   verifier, captured-source archive, hermetic provenance guard, unnamed-inode
   Linux publisher, immutable content marker, and scheduler-gated consumer.
-- [ ] Obtain real Linux CI GO for unprivileged `O_TMPFILE` plus
-  `linkat(AT_EMPTY_PATH)`, all race/fsync regressions, and the exact clean
-  post-test checkout guard. Linux documents `CAP_DAC_READ_SEARCH` as required
-  for `AT_EMPTY_PATH`; because this contract forbids the `/proc/self/fd`
-  fallback, an ordinary capability-free runner must fail closed. macOS skips
-  and a capability-bearing run are not unprivileged GO.
+- [ ] Obtain real Linux CI GO for capability-free `O_TMPFILE` publication via
+  verified procfs `/proc/self/fd/<fd>` plus `linkat(AT_SYMLINK_FOLLOW)`, all
+  race/fsync regressions, the exact capability inventory, and the clean
+  post-test checkout guard. Diagnostic hosted run `29385400195` reached all 88
+  Linux tests and passed the real publication primitive, but one stale
+  earliest-failure assertion and one test-setup JSON decode failed; it is not
+  GO. Presence or absence of `CAP_DAC_READ_SEARCH` must be recorded, never
+  inferred from publication success.
 - [ ] Project class-code, sorting-network, clause, watch, and decoder cost over
   all 7,503 files only after review and Linux GO; no WMI run is currently
   authorized or submitted.

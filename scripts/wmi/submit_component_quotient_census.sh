@@ -196,9 +196,14 @@ if [ ! -e benchmarks/smtlib-2025 ]; then
   fi
   ln -s -- "$shared_corpus" benchmarks/smtlib-2025
 fi
-manifest="$work/benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
+manifest="$work/benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
 if [ ! -s "$manifest" ]; then
-  echo "fixed QF_UF manifest is absent" >&2
+  echo "external 7,503-row QF_UF manifest is absent" >&2
+  exit 2
+fi
+if [ "$(readlink -f -- "$manifest")" != \
+     "$(readlink -f -- "$shared_corpus/qf_uf_manifest.jsonl")" ]; then
+  echo "selected T5 manifest is not the bound external smtlib-2025 manifest" >&2
   exit 2
 fi
 submission_nonce="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')"
@@ -212,6 +217,13 @@ namespace_id="$(
 namespace_id="${namespace_id%% *}"
 manifest_sha256="$(sha256sum -- "$manifest")"
 manifest_sha256="${manifest_sha256%% *}"
+manifest_rows="$(wc -l < "$manifest")"
+manifest_rows="${manifest_rows//[[:space:]]/}"
+if [ "$manifest_sha256" != 32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4 ] || \
+   [ "$manifest_rows" = 3521 ] || [ "$manifest_rows" != 7503 ]; then
+  echo "external T5 manifest SHA/cardinality binding failed" >&2
+  exit 2
+fi
 if [[ "$requested_python" == */* ]]; then
   python_candidate="$requested_python"
 else
@@ -267,8 +279,8 @@ for digest in "$SUBMISSION_NONCE" "$NAMESPACE_ID" "$MANIFEST_SHA256" "$REMOTE_PY
     exit 2
   fi
 done
-if [ "$MANIFEST_SHA256" != ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6 ]; then
-  echo "remote manifest differs from the fixed revision blob" >&2
+if [ "$MANIFEST_SHA256" != 32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4 ]; then
+  echo "remote manifest differs from the fixed external T5 campaign" >&2
   exit 2
 fi
 for identity in "$NAMESPACE_DEVICE" "$NAMESPACE_INODE" "$RESULTS_DEVICE" "$RESULTS_INODE"; do
@@ -320,6 +332,16 @@ shared_corpus="${14}"
 python_realpath="${15}"
 python_version="${16}"
 python_sha256="${17}"
+job_name="euf-cqram-census"
+job_user="$(id -un)"
+cluster="$(
+  env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+    scontrol show config | awk '$1 == "ClusterName" && $2 == "=" { print $3 }'
+)"
+if [[ ! "$cluster" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "Slurm ClusterName is malformed: $cluster" >&2
+  exit 2
+fi
 args=(--parsable --hold)
 if [ -n "$dependency" ]; then
   args+=(--dependency="afterok:$dependency")
@@ -338,14 +360,44 @@ export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_SHARED_CORPUS=$shared_corpus"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_REALPATH=$python_realpath"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_VERSION=$python_version"
 export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_SHA256=$python_sha256"
+export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_SLURM_CLUSTER=$cluster"
+export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_JOB_NAME=$job_name"
+export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_JOB_USER=$job_user"
+export_list+=",EUF_VIPER_COMPONENT_QUOTIENT_WORKDIR=$work"
 submission="$(
   env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
     sbatch "${args[@]}" --export="$export_list" \
     scripts/wmi/euf_viper_component_quotient_census.sbatch
 )"
 job_id="${submission%%;*}"
-if [[ ! "$job_id" =~ ^[1-9][0-9]*$ ]]; then
-  echo "invalid census job id: $submission" >&2
+held_job=0
+released=0
+cancel_held_job() {
+  local status="$?"
+  trap - EXIT
+  if [ "$held_job" -eq 1 ] && [ "$released" -eq 0 ]; then
+    if ! env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
+      scancel --clusters="$cluster" "$job_id"; then
+      echo "failed to cancel held job $job_id on cluster $cluster" >&2
+    fi
+  fi
+  exit "$status"
+}
+if [[ "$job_id" =~ ^[1-9][0-9]*$ ]]; then
+  held_job=1
+  trap cancel_held_job EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+fi
+if [[ ! "$submission" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]]; then
+  echo "invalid full census job/cluster identity: $submission" >&2
+  exit 2
+fi
+job_id="${BASH_REMATCH[1]}"
+submitted_cluster="${BASH_REMATCH[2]}"
+if [ "$submitted_cluster" != "$cluster" ]; then
+  echo "sbatch --parsable cluster differs from Slurm ClusterName" >&2
   exit 2
 fi
 pending_path="$work/results/component-quotient-census-submission-${attempt_id}-${job_id}.json"
@@ -355,7 +407,8 @@ payload="$(
     "$pending_path" "$revision" "$published_ref" "$remote_host" "$work" \
     "$attempt_id" "$submission_nonce" "$namespace_id" \
     "$namespace_device" "$namespace_inode" "$results_device" "$results_inode" \
-    "$manifest_sha256" "$dependency" "$job_id" \
+    "$manifest_sha256" "$dependency" "$job_id" "$submission" "$cluster" \
+    "$job_name" "$job_user" \
     "$python_realpath" "$python_version" "$python_sha256" <<'PY'
 import hashlib
 import json
@@ -378,13 +431,17 @@ import sys
     manifest_sha256,
     dependency,
     job_id,
+    sbatch_parsable,
+    cluster,
+    job_name,
+    job_user,
     python_realpath,
     python_version,
     python_sha256,
 ) = sys.argv[1:]
 job = int(job_id)
 value = {
-    "schema": "euf-viper.component-quotient-ram-wmi-submission.v5",
+    "schema": "euf-viper.component-quotient-ram-wmi-submission.v6",
     "status": "submitted_pending_nondecisive",
     "decisive": False,
     "authoritative": False,
@@ -404,10 +461,19 @@ value = {
     "submission_nonce": submission_nonce,
     "dependency": int(dependency) if dependency else None,
     "job_id": job,
+    "scheduler_submission": {
+        "sbatch_parsable": sbatch_parsable,
+        "job_id": job,
+        "cluster": cluster,
+        "job_name": job_name,
+        "user": job_user,
+        "workdir": namespace_path,
+    },
     "expected_marker_name": f"component-quotient-census-{job}.current",
     "contract": {
         "expected_sources": 7503,
-        "lock_sha256": "1b313a912e2de8e202aeb2f9b3f50033ffdc65687940565d7a8f192b6ff5bf82",
+        "manifest_relative_path": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+        "lock_sha256": "7958892d3bf45abbf7d40f31b75c5cdf07a6aec13c66442278685b0ad4eddc24",
         "manifest_sha256": manifest_sha256,
         "portable_source_set_sha256": "d8997c621fbd58034e55bef1e6636ea0f0a28bc63bb6391be39e9195c6f44653",
     },
@@ -443,18 +509,23 @@ sys.stdout.buffer.write(data)
 PY
 )"
 env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
-  scontrol --quiet release "$job_id"
-printf '%s\n%s\n' "$job_id" "$payload"
+  scontrol --clusters="$cluster" --quiet release "$job_id"
+released=1
+trap - EXIT HUP INT TERM
+printf '%s\n%s\n' "$submission" "$payload"
 REMOTE_SUBMIT_ATTEMPT
 )"
 
-JOB_ID="${SUBMISSION_RAW%%$'\n'*}"
+SBATCH_PARSABLE="${SUBMISSION_RAW%%$'\n'*}"
 PENDING_JSON="${SUBMISSION_RAW#*$'\n'}"
-if [[ ! "$JOB_ID" =~ ^[1-9][0-9]*$ ]] || [ -z "$PENDING_JSON" ] || \
+if [[ ! "$SBATCH_PARSABLE" =~ ^([1-9][0-9]*)\;([A-Za-z0-9_.-]+)$ ]] || \
+   [ -z "$PENDING_JSON" ] || \
    [[ "$PENDING_JSON" == *$'\n'* ]]; then
   echo "remote submission/receipt response is malformed" >&2
   exit 2
 fi
+JOB_ID="${BASH_REMATCH[1]}"
+SLURM_CLUSTER="${BASH_REMATCH[2]}"
 
 mkdir -p "$ROOT/results"
 RECEIPT_PATH="$ROOT/results/component-quotient-census-submission-${REMOTE_ATTEMPT_ID}-${JOB_ID}.json"
@@ -497,7 +568,7 @@ finally:
 ' "$RECEIPT_PATH" "$PENDING_JSON"
 
 printf '%s\n' "$PENDING_JSON"
-printf 'job_id=%s remote_pending_receipt=%s local_pending_receipt=%s\n' \
-  "$JOB_ID" \
+printf 'sbatch_parsable=%s job_id=%s cluster=%s remote_pending_receipt=%s local_pending_receipt=%s\n' \
+  "$SBATCH_PARSABLE" "$JOB_ID" "$SLURM_CLUSTER" \
   "$REMOTE_WORK/results/component-quotient-census-submission-${REMOTE_ATTEMPT_ID}-${JOB_ID}.json" \
   "$RECEIPT_PATH"

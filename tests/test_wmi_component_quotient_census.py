@@ -23,6 +23,7 @@ from scripts.bench import census_component_quotient_ram as census
 from scripts.bench import component_quotient_contract as contract
 from scripts.bench import independent_component_quotient_verifier as independent
 from scripts.bench import t5_linux_publication as publication
+from scripts.bench import t5_runtime_environment as runtime_environment
 from scripts.bench import verify_component_quotient_publication as consumer
 
 
@@ -65,17 +66,20 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
-    def test_publication_is_unnamed_descriptor_only_and_has_no_cleanup(self) -> None:
+    def test_publication_uses_verified_capability_free_procfs_and_has_no_cleanup(self) -> None:
         primitive = (ROOT / "scripts/bench/t5_linux_publication.py").read_text()
         finalizer_text = FINALIZER.read_text()
         consumer_text = CONSUMER.read_text()
         analyzer_text = (ROOT / "scripts/bench/census_component_quotient_ram.py").read_text()
         self.assertIn("os.O_TMPFILE", primitive)
-        self.assertIn("AT_EMPTY_PATH", primitive)
-        self.assertIn('linkat(source_descriptor', primitive)
+        self.assertIn("AT_SYMLINK_FOLLOW", primitive)
+        self.assertIn('PROC_SELF_FD = "/proc/self/fd"', primitive)
+        self.assertIn("descriptor_symlink_verified", primitive)
+        self.assertIn("linux_capability_inventory", primitive)
+        self.assertIn("proc_self_fd_linkat_at_symlink_follow", primitive)
         self.assertIn("reopen_linked_inode_read_only", primitive)
-        self.assertNotIn("AT_SYMLINK_FOLLOW", primitive)
-        self.assertNotIn('f"/proc/self/fd/', primitive)
+        self.assertNotIn("AT_EMPTY_PATH", primitive)
+        self.assertNotIn("CAP_DAC_READ_SEARCH is required", primitive)
         self.assertNotIn("os.unlink", primitive)
         self.assertNotIn("os.replace", primitive)
         self.assertNotIn("os.symlink", finalizer_text)
@@ -83,24 +87,40 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         self.assertNotIn("os.replace", finalizer_text)
         self.assertNotIn("os.unlink", consumer_text)
         self.assertNotIn("os.replace", consumer_text)
+        self.assertIn("environment_digest != expected_environment_sha256", consumer_text)
         self.assertNotIn("_atomic_write", analyzer_text)
         self.assertNotIn("os.replace", analyzer_text)
 
-    def test_at_empty_path_permission_failure_has_no_proc_fallback(self) -> None:
+    def test_verified_procfs_link_failure_is_fatal_without_named_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "unnamed"
             descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
             os.unlink(path)
             directory = os.open(temporary, os.O_RDONLY | os.O_CLOEXEC)
+            proc_directory = os.dup(directory)
             try:
-                with mock.patch.object(publication, "_call_linkat", return_value=errno.EPERM):
+                with (
+                    mock.patch.object(
+                        publication,
+                        "_verified_proc_fd_directory",
+                        return_value=(proc_directory, {"descriptor_symlink_verified": True}),
+                    ),
+                    mock.patch.object(publication, "_call_linkat", return_value=errno.EPERM) as linked,
+                ):
                     with self.assertRaisesRegex(
                         publication.PublicationError,
-                        "requires CAP_DAC_READ_SEARCH.*forbids the /proc/self/fd",
+                        "cannot link O_TMPFILE through verified /proc/self/fd semantics",
                     ):
                         publication.link_unnamed_inode_no_replace(
                             descriptor, directory, "final.tar"
                         )
+                linked.assert_called_once_with(
+                    proc_directory,
+                    os.fsencode(str(descriptor)),
+                    directory,
+                    "final.tar",
+                    publication.AT_SYMLINK_FOLLOW,
+                )
                 self.assertEqual(os.fstat(descriptor).st_nlink, 0)
                 self.assertEqual(list(Path(temporary).iterdir()), [])
             finally:
@@ -134,7 +154,15 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         self.assertIn("submission_nonce", text)
         self.assertIn("namespace_id", text)
         self.assertIn("--hold", text)
-        self.assertIn("scontrol --quiet release", text)
+        self.assertIn('scontrol --clusters="$cluster" --quiet release', text)
+        self.assertIn("cancel_held_job", text)
+        self.assertIn('scancel --clusters="$cluster" "$job_id"', text)
+        self.assertIn("trap cancel_held_job EXIT", text)
+        self.assertIn("trap 'exit 129' HUP", text)
+        self.assertLess(text.index("trap cancel_held_job EXIT"), text.index("pending_path="))
+        self.assertLess(text.index("trap cancel_held_job EXIT"), text.index("scontrol --clusters="))
+        self.assertLess(text.index("scontrol --clusters="), text.index("released=1"))
+        self.assertIn('printf \'%s\\n%s\\n\' "$submission" "$payload"', text)
         self.assertNotIn("git clean", text)
         self.assertNotIn("git reset", text)
         self.assertNotRegex(text, r"(?m)^\s*rm(?:\s|$)")
@@ -196,6 +224,7 @@ class ComponentQuotientStaticContractTests(unittest.TestCase):
         text = WORKFLOW.read_text()
         self.assertIn("tests.test_wmi_component_quotient_census", text)
         self.assertIn("tests.test_census_component_quotient_ram", text)
+        self.assertIn("tests.test_t5_linux_end_to_end", text)
         self.assertIn("check_component_quotient_checkout.sh", text)
         self.assertIn("bash -n", text)
         self.assertIn('PYTHONDONTWRITEBYTECODE: "1"', text)
@@ -209,6 +238,29 @@ class FixedLockTests(unittest.TestCase):
         self.assertEqual(value["selector"]["minimum_max_symbol_applications"], 32)
         self.assertEqual(value["gates"]["broadness"]["minimum_generator_lineages"], 8)
         self.assertEqual(value["gates"]["ram_control"]["percentile"], 95)
+        self.assertEqual(value["corpus"]["manifest"], contract.MANIFEST_RELATIVE_PATH)
+        self.assertEqual(value["corpus"]["manifest_sha256"], contract.MANIFEST_SHA256)
+        self.assertEqual(value["corpus"]["expected_sources"], 7503)
+
+    def test_external_7503_manifest_cannot_silently_become_tracked_official_3521(self) -> None:
+        official_path = ROOT / contract.OFFICIAL_MANIFEST_RELATIVE_PATH
+        official_bytes = official_path.read_bytes()
+        self.assertEqual(digest(official_bytes), contract.OFFICIAL_MANIFEST_SHA256)
+        self.assertEqual(len(official_bytes.splitlines()), contract.OFFICIAL_MANIFEST_SOURCES)
+        self.assertNotEqual(contract.MANIFEST_RELATIVE_PATH, contract.OFFICIAL_MANIFEST_RELATIVE_PATH)
+        self.assertNotEqual(contract.MANIFEST_SHA256, contract.OFFICIAL_MANIFEST_SHA256)
+        with self.assertRaisesRegex(contract.ContractError, "tracked 3,521-row official"):
+            contract.require_campaign_manifest_path(ROOT, official_path)
+        with self.assertRaisesRegex(contract.ContractError, "tracked 3,521-row official"):
+            contract.require_campaign_manifest_bytes(official_bytes)
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", contract.MANIFEST_RELATIVE_PATH],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(tracked.returncode, 0)
 
     def test_every_lock_mutation_is_rejected_before_semantic_use(self) -> None:
         original = json.loads(LOCK.read_text(encoding="ascii"))
@@ -289,7 +341,7 @@ class IndependentSemanticDifferentialTests(unittest.TestCase):
 
     def assert_same_projection(self, source: str) -> None:
         analyzer_problem = census.qfuf.parse_and_encode(source)
-        independent_problem = independent.qfuf.parse_and_encode(source)
+        independent_problem = independent.audit_smtlib.parse_qfuf_for_audit(source)
         analyzer_projection = census.project_problem(
             analyzer_problem, self.lock.caps, self.oracle
         )
@@ -315,6 +367,34 @@ class IndependentSemanticDifferentialTests(unittest.TestCase):
             "minimum_max_symbol_applications": 32,
         }
         self.assertEqual(independent_projection["selector"], expected_selector)
+
+    def test_independent_parser_and_projection_oracle_are_separate_and_frozen(self) -> None:
+        verifier_text = (
+            ROOT / "scripts/bench/independent_component_quotient_verifier.py"
+        ).read_text(encoding="utf-8")
+        parser_text = (ROOT / "scripts/bench/t5_independent_smtlib.py").read_text(
+            encoding="utf-8"
+        )
+        parser_imports = {
+            node.module
+            for node in ast.walk(ast.parse(parser_text))
+            if isinstance(node, ast.ImportFrom)
+        } | {
+            alias.name
+            for node in ast.walk(ast.parse(parser_text))
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        self.assertNotIn("scripts.cert.independent_qfuf", parser_imports)
+        self.assertNotIn("UnionFind", verifier_text)
+        receipt = independent.run_independent_projection_oracle()
+        self.assertTrue(receipt["passed"])
+        self.assertEqual(
+            receipt["sha256"], independent.PROJECTION_ORACLE_SHA256
+        )
+        self.assertEqual(receipt["counts"]["graph_cases"], 75)
+        self.assertEqual(receipt["counts"]["functionality_cases"], 255)
+        self.assertEqual(receipt["counts"]["restricted_growth_cases"], 326)
 
     def test_exhaustive_small_equality_graphs_match_analyzer(self) -> None:
         cases = 0
@@ -368,6 +448,39 @@ class IndependentSemanticDifferentialTests(unittest.TestCase):
             (declare-const b U)
             (assert (or (p a) (not (p b))))
             (assert (= (p a) (p b)))
+            """,
+            """
+            (set-info :source "audit fixture")
+            (declare-sort U 0)
+            (declare-fun p (U) Bool)
+            (declare-fun h (Bool) U)
+            (declare-const a U)
+            (declare-const b U)
+            (assert (! (= (h (and (p a) (not (p b)))) a) :named bool_data))
+            """,
+            """
+            (declare-sort U 0)
+            (declare-fun p (U) Bool)
+            (declare-fun f (U) U)
+            (declare-const a U)
+            (declare-const b U)
+            (define-fun choose ((x U) (y U)) U (ite (p x) x y))
+            (assert (= (f (choose a b)) (f (ite (p b) b a))))
+            """,
+            """
+            (declare-sort |U quoted| 0)
+            (declare-const |a quoted| |U quoted|)
+            (declare-const b |U quoted|)
+            (declare-const c |U quoted|)
+            (assert (let ((x |a quoted|) (y b))
+              (and (= x y c) (not (distinct x y c)))))
+            """,
+            """
+            (declare-sort U 0)
+            (declare-fun p (U) Bool)
+            (declare-const a U)
+            (declare-const b U)
+            (assert (=> (xor (p a) (p b)) (ite (p a) (p b) true)))
             """,
         )
         for body in cases:
@@ -817,7 +930,7 @@ class CheckoutGuardBehaviorTests(unittest.TestCase):
         targets = (
             "scripts/bench/independent_component_quotient_verifier.py",
             contract.LOCK_RELATIVE_PATH,
-            contract.MANIFEST_RELATIVE_PATH,
+            contract.OFFICIAL_MANIFEST_RELATIVE_PATH,
         )
         for target in targets:
             with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
@@ -884,6 +997,184 @@ class CheckoutGuardBehaviorTests(unittest.TestCase):
 
 
 class PublicationPlatformTests(unittest.TestCase):
+    @staticmethod
+    def capability_inventory(effective: int) -> dict[str, object]:
+        def row(bits: int) -> dict[str, object]:
+            names = []
+            for index in range(41):
+                if not bits & (1 << index):
+                    continue
+                names.append(
+                    publication.CAPABILITY_NAMES[index]
+                    if index < len(publication.CAPABILITY_NAMES)
+                    else f"CAP_{index}"
+                )
+            return {"hex": f"{bits:016x}", "names": names}
+
+        return {
+            "uid": 1000,
+            "effective_uid": 1000,
+            "gid": 1000,
+            "effective_gid": 1000,
+            "last_capability": 40,
+            "sets": {
+                "CapInh": row(0),
+                "CapPrm": row(effective),
+                "CapEff": row(effective),
+                "CapBnd": row(effective),
+                "CapAmb": row(0),
+            },
+            "cap_dac_read_search_effective": bool(effective & (1 << 2)),
+        }
+
+    def test_exact_capability_inventory_accepts_both_effective_cap_states(self) -> None:
+        without_capability = self.capability_inventory(0)
+        with_capability = self.capability_inventory(1 << 2)
+        self.assertIs(
+            publication.validate_linux_capability_inventory(without_capability),
+            without_capability,
+        )
+        self.assertIs(
+            publication.validate_linux_capability_inventory(with_capability),
+            with_capability,
+        )
+        self.assertFalse(without_capability["cap_dac_read_search_effective"])
+        self.assertTrue(with_capability["cap_dac_read_search_effective"])
+
+    def test_runtime_environment_requires_every_bound_identity_class(self) -> None:
+        mount = {
+            "canonical_path": "/runtime",
+            "mount_id": 1,
+            "parent_mount_id": 0,
+            "major_minor": "8:1",
+            "root": "/",
+            "mount_point": "/",
+            "mount_options": ["rw"],
+            "optional_fields": [],
+            "filesystem_type": "ext4",
+            "mount_source": "/dev/root",
+            "super_options": ["rw"],
+        }
+        filesystem = {
+            "path": "/runtime",
+            "device": 1,
+            "inode": 2,
+            "mode": "0755",
+            "statfs": {
+                "type": 0xEF53,
+                "block_size": 4096,
+                "name_length": 255,
+                "fragment_size": 4096,
+                "flags": 0,
+            },
+            "mount": mount,
+        }
+        value = {
+            "schema": runtime_environment.RUNTIME_ENVIRONMENT_SCHEMA,
+            "python": {
+                "realpath": "/usr/bin/python3",
+                "version": "3.12.0",
+                "sha256": "1" * 64,
+                "bytes": 100,
+                "implementation": "CPython",
+                "compiler": "GCC",
+                "abi": "cpython-312-x86_64-linux-gnu",
+                "multiarch": "x86_64-linux-gnu",
+                "stdlib": [
+                    {
+                        "path": "/usr/lib/python3.12",
+                        "files": 1,
+                        "symlinks": 0,
+                        "bytes": 10,
+                        "tree_sha256": "2" * 64,
+                    }
+                ],
+                "mapped_shared_libraries": [
+                    {"path": "/usr/lib/libc.so.6", "bytes": 10, "sha256": "3" * 64}
+                ],
+            },
+            "operating_system": {
+                "system": "Linux",
+                "node": "runner",
+                "release": "6.8.0",
+                "version": "#1",
+                "machine": "x86_64",
+                "libc": {"name": "glibc", "version": "2.39"},
+                "os_release": {
+                    "path": "/etc/os-release",
+                    "resolved_path": "/usr/lib/os-release",
+                    "symlink_target": "../usr/lib/os-release",
+                    "bytes": 10,
+                    "sha256": "4" * 64,
+                },
+            },
+            "filesystems": {
+                name: copy.deepcopy(filesystem)
+                for name in ("repository", "manifest", "namespace", "results")
+            },
+            "publication": {
+                "method": "proc_self_fd_linkat_at_symlink_follow",
+                "proc_self_fd": "/proc/self/fd",
+                "procfs": {
+                    "type": publication.PROC_SUPER_MAGIC,
+                    "block_size": 4096,
+                    "name_length": 255,
+                    "fragment_size": 4096,
+                    "flags": 0,
+                },
+                "descriptor_symlink_verified": True,
+                "capabilities": self.capability_inventory(0),
+            },
+            "slurm": {
+                "sbatch_parsable": "123;wmicluster",
+                "job_id": 123,
+                "cluster": "wmicluster",
+                "job_name": "euf-cqram-census",
+                "user": "tester",
+                "workdir": "/runtime",
+                "scontrol_version": "slurm 25.05.1",
+                "sacct_version": "slurm 25.05.1",
+            },
+        }
+        self.assertIs(runtime_environment.validate_runtime_environment(value), value)
+        for mutation, message in (
+            (("python", "mapped_shared_libraries"), "Python field set"),
+            (("operating_system", "libc"), "operating-system field set"),
+            (("filesystems", "manifest"), "filesystem binding set"),
+            (("publication", "capabilities"), "publication environment"),
+            (("slurm", "sacct_version"), "Slurm field set"),
+        ):
+            with self.subTest(mutation=mutation):
+                changed = copy.deepcopy(value)
+                del changed[mutation[0]][mutation[1]]
+                with self.assertRaisesRegex(
+                    runtime_environment.RuntimeEnvironmentError, message
+                ):
+                    runtime_environment.validate_runtime_environment(changed)
+
+    def test_sacct_root_row_binds_full_scheduler_identity(self) -> None:
+        output = (
+            "81234|wmicluster:81234|wmicluster|2026-07-15T12:00:00|"
+            "euf-cqram-census|t5-user|/remote/work|COMPLETED|0:0|\n"
+        )
+        completed = subprocess.CompletedProcess(["sacct"], 0, stdout=output, stderr="")
+        with mock.patch.object(consumer.subprocess, "run", return_value=completed) as run:
+            evidence = consumer.query_successful_job(81234, "wmicluster")
+        self.assertEqual(evidence.sluid, "wmicluster:81234")
+        self.assertEqual(evidence.cluster, "wmicluster")
+        self.assertEqual(evidence.submit_time, "2026-07-15T12:00:00")
+        self.assertEqual(evidence.job_name, "euf-cqram-census")
+        self.assertEqual(evidence.user, "t5-user")
+        self.assertEqual(evidence.workdir, "/remote/work")
+        self.assertEqual(evidence.state, "COMPLETED")
+        self.assertEqual(evidence.exit_code, "0:0")
+        command = run.call_args.args[0]
+        self.assertIn("--clusters", command)
+        self.assertIn("wmicluster", command)
+        self.assertIn("SLUID", command[-1])
+        self.assertIn("Submit", command[-1])
+        self.assertIn("WorkDir%4096", command[-1])
+
     def test_pending_receipt_is_immutable_fixed_and_explicitly_nondecisive(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -909,9 +1200,18 @@ class PublicationPlatformTests(unittest.TestCase):
                 "submission_nonce": "c" * 64,
                 "dependency": None,
                 "job_id": 123,
+                "scheduler_submission": {
+                    "sbatch_parsable": "123;wmicluster",
+                    "job_id": 123,
+                    "cluster": "wmicluster",
+                    "job_name": "euf-cqram-census",
+                    "user": "tester",
+                    "workdir": "/remote/attempt",
+                },
                 "expected_marker_name": "component-quotient-census-123.current",
                 "contract": {
                     "expected_sources": contract.EXPECTED_SOURCES,
+                    "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
                     "lock_sha256": contract.LOCK_SHA256,
                     "manifest_sha256": contract.MANIFEST_SHA256,
                     "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
@@ -988,6 +1288,23 @@ class LinuxPublicationContractTests(unittest.TestCase):
             try:
                 descriptor, expected, unlinked = publication.prepare_unnamed_bytes(
                     directory, b"authoritative bytes"
+                )
+                environment = publication.capture_publication_environment(descriptor)
+                self.assertEqual(
+                    environment["method"],
+                    "proc_self_fd_linkat_at_symlink_follow",
+                )
+                self.assertTrue(environment["descriptor_symlink_verified"])
+                capabilities = publication.validate_linux_capability_inventory(
+                    environment["capabilities"]
+                )
+                self.assertIn(
+                    capabilities["cap_dac_read_search_effective"],
+                    (False, True),
+                )
+                self.assertEqual(
+                    set(capabilities["sets"]),
+                    {"CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"},
                 )
                 self.assertEqual(unlinked.st_nlink, 0)
                 self.assertEqual(list(root.iterdir()), [])
@@ -1159,6 +1476,9 @@ class ConsumerFixture:
         self.results = self.namespace / "results"
         self.results.mkdir(parents=True)
         self.job_id = 81234
+        self.cluster = "wmicluster"
+        self.job_name = "euf-cqram-census"
+        self.job_user = "t5-user"
         self.attempt_id = "component-quotient-abcdef123456-attempt.A1B2C3D4"
         self.nonce = "1" * 64
         namespace_stat = self.namespace.stat()
@@ -1186,6 +1506,31 @@ class ConsumerFixture:
         self.archive_path = self.results / self.archive_name
         self.marker_path = self.results / self.marker_name
         self._publish_fixture()
+
+    def _scheduler_submission(self) -> dict[str, object]:
+        return {
+            "sbatch_parsable": f"{self.job_id};{self.cluster}",
+            "job_id": self.job_id,
+            "cluster": self.cluster,
+            "job_name": self.job_name,
+            "user": self.job_user,
+            "workdir": str(self.namespace),
+        }
+
+    def scheduler_evidence(
+        self, state: str = "COMPLETED", exit_code: str = "0:0"
+    ) -> consumer.SchedulerEvidence:
+        return consumer.SchedulerEvidence(
+            self.job_id,
+            f"{self.cluster}:{self.job_id}",
+            self.cluster,
+            "2026-07-15T12:00:00",
+            self.job_name,
+            self.job_user,
+            str(self.namespace),
+            state,
+            exit_code,
+        )
 
     @staticmethod
     def _tar_bytes(name: str, payload: bytes) -> bytes:
@@ -1244,6 +1589,7 @@ class ConsumerFixture:
             },
             "revision": "a" * 40,
             "job_id": self.job_id,
+            "slurm": self._scheduler_submission(),
             "attempt_id": self.attempt_id,
             "submission_nonce": self.nonce,
             "remote_namespace": self._namespace_json(),
@@ -1252,6 +1598,7 @@ class ConsumerFixture:
                 "manifest_sha256": self.manifest_sha256,
                 "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
                 "runtime_revision_blobs_sha256": self.runtime_sha256,
+                "runtime_environment_sha256": "7" * 64,
             },
             "independent_receipt_sha256": self.decision_sha256,
             "bundle_metadata_sha256": self.metadata_sha256,
@@ -1270,9 +1617,11 @@ class ConsumerFixture:
             "submission_nonce": self.nonce,
             "dependency": None,
             "job_id": self.job_id,
+            "scheduler_submission": self._scheduler_submission(),
             "expected_marker_name": self.marker_name,
             "contract": {
                 "expected_sources": contract.EXPECTED_SOURCES,
+                "manifest_relative_path": contract.MANIFEST_RELATIVE_PATH,
                 "lock_sha256": contract.LOCK_SHA256,
                 "manifest_sha256": self.manifest_sha256,
                 "portable_source_set_sha256": contract.PORTABLE_SOURCE_SET_SHA256,
@@ -1294,7 +1643,7 @@ class ConsumerFixture:
         hook=None,
         consumer_attempt_id: str | None = None,
     ) -> publication.PublishedFile:
-        evidence = scheduler or consumer.SchedulerEvidence(self.job_id, "COMPLETED", "0:0")
+        evidence = scheduler or self.scheduler_evidence()
         decision = {
             "schema": contract.INDEPENDENT_RECEIPT_SCHEMA,
             "decisive": True,
@@ -1312,7 +1661,7 @@ class ConsumerFixture:
             return consumer.verify_publication(
                 submission_receipt=self.pending_path,
                 repository_root=ROOT,
-                scheduler_query=lambda job_id: evidence,
+                scheduler_query=lambda job_id, cluster: evidence,
                 boundary_hook=hook,
                 consumer_attempt_id=consumer_attempt_id,
             )
@@ -1332,6 +1681,9 @@ class LinuxConsumerRevalidationTests(unittest.TestCase):
             self.assertTrue(receipt["decisive"])
             self.assertFalse(receipt["authoritative_without_successful_consumer_exit"])
             self.assertEqual(receipt["submission_nonce"], fixture.nonce)
+            self.assertEqual(receipt["scheduler_submission"], fixture._scheduler_submission())
+            self.assertEqual(receipt["scheduler"]["sluid"], f"wmicluster:{fixture.job_id}")
+            self.assertEqual(receipt["scheduler"]["submit_time"], "2026-07-15T12:00:00")
             self.assertEqual(
                 receipt["publication"]["archive"]["sha256"],
                 digest(fixture.archive_path.read_bytes()),
@@ -1349,7 +1701,7 @@ class LinuxConsumerRevalidationTests(unittest.TestCase):
     def test_marker_alone_never_overrides_failed_scheduler_status(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = ConsumerFixture(Path(temporary))
-            failed = consumer.SchedulerEvidence(fixture.job_id, "FAILED", "1:0")
+            failed = fixture.scheduler_evidence("FAILED", "1:0")
             with self.assertRaisesRegex(
                 consumer.ConsumerVerificationError, "did not prove successful root job"
             ):
@@ -1369,7 +1721,8 @@ class LinuxConsumerRevalidationTests(unittest.TestCase):
                 os.fsync(handle.fileno())
             fixture.archive_path.chmod(0o444)
             with self.assertRaisesRegex(
-                consumer.ConsumerVerificationError, "fresh archive digest differs"
+                consumer.ConsumerVerificationError,
+                r"fresh archive (?:inode|digest) differs from marker",
             ):
                 fixture.verify()
 
@@ -1459,8 +1812,14 @@ class LinuxConsumerRevalidationTests(unittest.TestCase):
                 self.assertLessEqual(len(receipt_paths), 1)
                 if receipt_paths:
                     receipt_path = receipt_paths[0]
-                    stale = json.loads(receipt_path.read_text(encoding="ascii"))
-                    self.assertFalse(stale["authoritative_without_successful_consumer_exit"])
+                    try:
+                        stale = json.loads(receipt_path.read_text(encoding="ascii"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        self.assertEqual(boundary, "receipt_verified")
+                    else:
+                        self.assertFalse(
+                            stale["authoritative_without_successful_consumer_exit"]
+                        )
 
 
 if __name__ == "__main__":

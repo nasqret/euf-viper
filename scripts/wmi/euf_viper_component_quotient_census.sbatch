@@ -35,6 +35,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 JOB_ID="${SLURM_JOB_ID:-}"
+SLURM_CLUSTER_BINDING="${EUF_VIPER_COMPONENT_QUOTIENT_SLURM_CLUSTER:-}"
+SBATCH_PARSABLE="$JOB_ID;$SLURM_CLUSTER_BINDING"
+JOB_NAME_BINDING="${EUF_VIPER_COMPONENT_QUOTIENT_JOB_NAME:-}"
+JOB_USER_BINDING="${EUF_VIPER_COMPONENT_QUOTIENT_JOB_USER:-}"
+WORKDIR_BINDING="${EUF_VIPER_COMPONENT_QUOTIENT_WORKDIR:-}"
 EXPECTED_REVISION="${EUF_VIPER_EXPECTED_REVISION:-}"
 ATTEMPT_ID="${EUF_VIPER_COMPONENT_QUOTIENT_ATTEMPT_ID:-}"
 SUBMISSION_NONCE="${EUF_VIPER_COMPONENT_QUOTIENT_SUBMISSION_NONCE:-}"
@@ -50,11 +55,31 @@ PYTHON_SHA256="${EUF_VIPER_COMPONENT_QUOTIENT_PYTHON_SHA256:-}"
 SHARED_CORPUS="${EUF_VIPER_COMPONENT_QUOTIENT_SHARED_CORPUS:-}"
 
 if [ "$(uname -s)" != Linux ]; then
-  echo "component quotient census requires real Linux O_TMPFILE/linkat" >&2
+  echo "component quotient census requires Linux O_TMPFILE and procfs linkat" >&2
   exit 2
 fi
 if [[ ! "$JOB_ID" =~ ^[1-9][0-9]*$ ]]; then
   echo "SLURM_JOB_ID must be a positive integer" >&2
+  exit 2
+fi
+if [[ ! "$SLURM_CLUSTER_BINDING" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [ "$SBATCH_PARSABLE" != "$JOB_ID;$SLURM_CLUSTER_BINDING" ]; then
+  echo "full sbatch --parsable job/cluster identity is malformed" >&2
+  exit 2
+fi
+if [[ ! "$JOB_NAME_BINDING" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ ! "$JOB_USER_BINDING" =~ ^[A-Za-z0-9_.-]+$ ]] || \
+   [[ "$WORKDIR_BINDING" != /* ]]; then
+  echo "bound Slurm name, user, or workdir is malformed" >&2
+  exit 2
+fi
+if [ "${SLURM_CLUSTER_NAME:-}" != "$SLURM_CLUSTER_BINDING" ] || \
+   [ "${SLURM_JOB_NAME:-}" != "$JOB_NAME_BINDING" ]; then
+  echo "runtime Slurm cluster or job name differs from submission" >&2
+  exit 2
+fi
+if [ -n "${SLURM_JOB_USER:-}" ] && [ "$SLURM_JOB_USER" != "$JOB_USER_BINDING" ]; then
+  echo "runtime Slurm user differs from submission" >&2
   exit 2
 fi
 if [[ ! "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
@@ -90,6 +115,10 @@ SUBMIT_DIR="$(readlink -f -- "${SLURM_SUBMIT_DIR:-$PWD}")"
 RESULTS="$SUBMIT_DIR/results"
 if [ ! -d "$RESULTS" ]; then
   echo "bound result directory must preexist" >&2
+  exit 2
+fi
+if [ "$SUBMIT_DIR" != "$WORKDIR_BINDING" ]; then
+  echo "runtime Slurm workdir differs from submission" >&2
   exit 2
 fi
 read -r ACTUAL_NAMESPACE_DEVICE ACTUAL_NAMESPACE_INODE < <(stat -c '%d %i' -- "$SUBMIT_DIR")
@@ -159,10 +188,16 @@ fi
 if [ ! -e "$PWD/benchmarks/smtlib-2025" ] && [ -s "$SHARED_CORPUS/qf_uf_manifest.jsonl" ]; then
   ln -s -- "$SHARED_CORPUS" "$PWD/benchmarks/smtlib-2025"
 fi
-MANIFEST="$PWD/benchmarks/smtcomp-2025/qf_uf_manifest.jsonl"
+MANIFEST="$PWD/benchmarks/smtlib-2025/qf_uf_manifest.jsonl"
 LOCK="$PWD/campaigns/component-quotient-ram-census-v1.json"
 if [ ! -s "$MANIFEST" ] || [ ! -s "$LOCK" ]; then
   echo "fixed manifest or campaign lock is absent" >&2
+  exit 2
+fi
+ACTUAL_MANIFEST_REALPATH="$(readlink -f -- "$MANIFEST")"
+EXPECTED_MANIFEST_REALPATH="$(readlink -f -- "$SHARED_CORPUS/qf_uf_manifest.jsonl")"
+if [ "$ACTUAL_MANIFEST_REALPATH" != "$EXPECTED_MANIFEST_REALPATH" ]; then
+  echo "campaign manifest is not the bound external smtlib-2025 manifest" >&2
   exit 2
 fi
 ACTUAL_MANIFEST_SHA256="$(sha256sum -- "$MANIFEST")"
@@ -171,8 +206,14 @@ if [ "$ACTUAL_MANIFEST_SHA256" != "$MANIFEST_SHA256" ]; then
   echo "manifest digest differs from the submission receipt" >&2
   exit 2
 fi
-if [ "$MANIFEST_SHA256" != ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6 ]; then
-  echo "manifest digest differs from the fixed revision blob" >&2
+if [ "$MANIFEST_SHA256" != 32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4 ]; then
+  echo "manifest digest differs from the fixed external T5 campaign" >&2
+  exit 2
+fi
+MANIFEST_ROWS="$(wc -l < "$MANIFEST")"
+MANIFEST_ROWS="${MANIFEST_ROWS//[[:space:]]/}"
+if [ "$MANIFEST_ROWS" = 3521 ] || [ "$MANIFEST_ROWS" != 7503 ]; then
+  echo "T5 requires exactly 7,503 external manifest rows, never the 3,521 official rows" >&2
   exit 2
 fi
 
@@ -208,6 +249,9 @@ verify_runtime_identity finalizer
 exec env -i \
   PATH=/usr/bin:/bin HOME=/nonexistent LANG=C LC_ALL=C TZ=UTC \
   OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1 \
+  SLURM_JOB_ID="$JOB_ID" SLURM_CLUSTER_NAME="$SLURM_CLUSTER_BINDING" \
+  SLURM_JOB_NAME="$JOB_NAME_BINDING" SLURM_JOB_USER="$JOB_USER_BINDING" \
+  SLURM_SUBMIT_DIR="$WORKDIR_BINDING" \
   "$PYTHON_REALPATH" -I -B -S scripts/bench/finalize_component_quotient_ram_metadata.py \
   --final-bundle "$FINAL_BUNDLE" \
   --current-marker "$CURRENT_MARKER" \
@@ -231,6 +275,11 @@ exec env -i \
   --verification-log "$STAGE/verification.txt" \
   --revision "$EXPECTED_REVISION" \
   --job-id "$JOB_ID" \
+  --sbatch-parsable "$SBATCH_PARSABLE" \
+  --slurm-cluster "$SLURM_CLUSTER_BINDING" \
+  --job-name "$JOB_NAME_BINDING" \
+  --job-user "$JOB_USER_BINDING" \
+  --workdir "$WORKDIR_BINDING" \
   --python-realpath "$PYTHON_REALPATH" \
   --python-version "$PYTHON_VERSION" \
   --python-sha256 "$PYTHON_SHA256"
