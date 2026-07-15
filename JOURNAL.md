@@ -1251,6 +1251,33 @@
 
 ## Next Entry Template
 
+### 2026-07-15: production-evidence v4 independent-review repair
+
+- Scope: standalone clone at exact `cd62e3c9f4bbdb9644cb06db400d91971883b6e6`;
+  no main edit, push, WMI submission, or corpus execution.
+- Replaced build-marker authorization with a canonical external receipt and
+  caller-supplied digest bound to running executable bytes, source identity,
+  feature set, toolchain, and closure. Added explicit environment-string
+  forgery denial coverage.
+- Hardened the independent CLI baseline to full
+  `f8d9205e8a18e3496d236fb9b94ed181add93e80`, an allowlisted environment,
+  effective `RUSTC` invocation records, and compiler/tool/log byte checks.
+- Build closure now uses discovery and production traces with separate targets
+  and Cargo homes, sealed read-only external inputs, external-directory checks,
+  copied sysroot consistency, and Python loaded-file/memory-map records.
+- Runtime closure now binds the `ldd` resolver/interpreter, reruns loader
+  resolution, and reprobes Python entrypoints and imported stdlib/extension
+  bytes. Build publication is attempt-private and atomic as one directory.
+- Incorporated hosted run `29389748725` regressions: restored `_require_hash`,
+  tolerated intentionally minimal summary plans, sealed path-bound solver/source
+  bytes, and preserved pathname arguments for ordinary resume campaigns.
+- Local validation completed with explicit Rust `1.96.0`: six feature matrices,
+  48 isolated Python modules (424 tests), all Python and shell syntax checks,
+  YAML parsing, a warning-fatal Jupyter Book build, `git diff --check`, and
+  `git fsck --full`. Linux namespace, sealed-memfd, `strace`, and `/proc` attack
+  paths remain platform-gated and require fresh diagnostic hosted execution;
+  no acceptance, merge, WMI, or corpus authorization is recorded by this entry.
+
 - Benchmark corpus:
 - Solver revisions:
 - Command:

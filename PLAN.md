@@ -530,6 +530,24 @@ fallback can be an operational portfolio but never a standalone victory.
 
 ## Immediate Queue
 
+Production-evidence v4 repair is a local prerequisite, not campaign authority:
+
+- [x] Replace self-declared build strings as authority with an external
+  digest-bound sealed-build receipt tied to actual executable bytes, source
+  revision/tree, exact features, toolchain, and build closure.
+- [x] Pin the full ordinary-CLI baseline revision and force/record the supplied
+  compiler under an allowlisted Cargo environment.
+- [x] Add two-pass traced build closure, sealed external files, directory
+  lookup controls, copy-consistency checks, runtime loader re-resolution, and
+  imported Python/stdlib byte binding.
+- [x] Publish the complete build directory atomically and test rollback after
+  second-binary and manifest publication failures.
+- [x] Pin hosted action commits and Python patch; classify hosted identity as
+  diagnostic and non-attesting.
+- [x] Complete local Python/Rust/book/shell/YAML/fsck/diff validation and commit
+  the standalone repair clone. Linux namespace tests remain mandatory hosted or
+  WMI prerequisites; this repair does not authorize submission or merge.
+
 1. Preserve corrected zero-error range census `146071` as a final T4 rejection:
    7,503 rows, zero parse errors, zero eligible sources, and exactly zero
    value-cell savings against the 30% threshold. Do not implement Hall/PB.

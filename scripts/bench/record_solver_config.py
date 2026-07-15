@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -149,6 +150,99 @@ def require_viper_evidence_features(feature_report: Path) -> frozenset[str]:
     return features
 
 
+def require_sealed_build_receipt(
+    receipt_path: Path,
+    viper: Path,
+    feature_report: Path,
+    features: frozenset[str],
+) -> tuple[Path, str]:
+    receipt = receipt_path.resolve(strict=True)
+    try:
+        raw = receipt.read_bytes()
+        value = strict_json_loads(raw.decode("utf-8"), "sealed build receipt")
+    except (OSError, UnicodeError, StrictArtifactError) as error:
+        raise SolverConfigError(f"cannot read sealed build receipt: {error}") from error
+    if canonical_json_bytes(value) != raw:
+        raise SolverConfigError("sealed build receipt is not canonical JSON")
+    expected_keys = {
+        "artifacts",
+        "build",
+        "schema",
+        "sealed_build_manifest_sha256",
+        "source",
+        "status",
+    }
+    if type(value) is not dict or set(value) != expected_keys:
+        raise SolverConfigError("sealed build receipt does not bind this solver build")
+    artifacts = value["artifacts"]
+    build = value["build"]
+    source = value["source"]
+    if (
+        value["schema"] != "euf-viper.sealed-build-receipt.v2"
+        or value["status"] != "accepted"
+        or type(artifacts) is not dict
+        or set(artifacts) != {"euf-viper", "euf-viper-build-features"}
+        or type(build) is not dict
+        or set(build)
+        != {"execution_closure_sha256", "features", "profile", "target", "toolchain"}
+        or type(source) is not dict
+        or set(source) != {"dirty", "revision", "snapshot_manifest_sha256", "tree"}
+        or source["dirty"] is not False
+        or build["features"] != sorted(features)
+        or build["profile"] != "release"
+        or type(build["target"]) is not str
+        or "linux" not in build["target"]
+        or type(build["toolchain"]) is not dict
+        or set(build["toolchain"]) != {"cargo", "rustc"}
+        or any(
+            type(item) is not str or not item for item in build["toolchain"].values()
+        )
+    ):
+        raise SolverConfigError("sealed build receipt does not bind this solver build")
+
+    def valid_hash(item: object) -> bool:
+        return (
+            type(item) is str
+            and len(item) == 64
+            and all(character in "0123456789abcdef" for character in item)
+        )
+
+    def valid_object_id(item: object) -> bool:
+        return (
+            type(item) is str
+            and len(item) in {40, 64}
+            and all(character in "0123456789abcdef" for character in item)
+        )
+
+    if (
+        not valid_hash(value["sealed_build_manifest_sha256"])
+        or not valid_hash(build["execution_closure_sha256"])
+        or not valid_hash(source["snapshot_manifest_sha256"])
+        or not valid_object_id(source["revision"])
+        or not valid_object_id(source["tree"])
+    ):
+        raise SolverConfigError("sealed build receipt contains a malformed binding")
+    expected_artifacts = {
+        "euf-viper": viper,
+        "euf-viper-build-features": feature_report,
+    }
+    for name, path in expected_artifacts.items():
+        record = artifacts[name]
+        metadata = path.stat()
+        if (
+            type(record) is not dict
+            or set(record) != {"bytes", "mode", "sha256"}
+            or record["bytes"] != metadata.st_size
+            or record["mode"] != f"{stat.S_IMODE(metadata.st_mode):04o}"
+            or record["mode"] != "0500"
+            or record["sha256"] != sha256_file(path)
+        ):
+            raise SolverConfigError(
+                f"sealed build receipt does not bind {name} bytes and mode"
+            )
+    return receipt, hashlib.sha256(raw).hexdigest()
+
+
 def result_token(output: str) -> str | None:
     for line in output.splitlines():
         token = line.strip()
@@ -243,6 +337,7 @@ def make_records(
     opensmt: Path,
     viper_version: str,
     viper_feature_report: Path,
+    viper_sealed_build_receipt: Path,
 ) -> list[dict[str, Any]]:
     paths = {
         "euf-viper": executable(viper, "euf-viper"),
@@ -251,7 +346,13 @@ def make_records(
         "yices2": executable(yices2, "yices2"),
         "opensmt": executable(opensmt, "opensmt"),
     }
-    require_viper_evidence_features(viper_feature_report)
+    features = require_viper_evidence_features(viper_feature_report)
+    sealed_receipt, sealed_receipt_sha256 = require_sealed_build_receipt(
+        viper_sealed_build_receipt,
+        paths["euf-viper"],
+        viper_feature_report.resolve(strict=True),
+        features,
+    )
     definitions = [
         {
             "id": "euf-viper",
@@ -264,6 +365,10 @@ def make_records(
                 "schema": "euf-viper.production-evidence.v4",
                 "argv_flag": "--evidence-out",
                 "accepted_decisive_statuses": ["sat"],
+            },
+            "environment": {
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(sealed_receipt),
+                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": sealed_receipt_sha256,
             },
             "version_argv": ["--version"],
             "version_output_contains": "euf-viper",
@@ -355,6 +460,7 @@ def main() -> int:
     parser.add_argument("--campaign", type=Path, required=True)
     parser.add_argument("--viper", type=Path, required=True)
     parser.add_argument("--viper-feature-report", type=Path, required=True)
+    parser.add_argument("--viper-sealed-build-receipt", type=Path, required=True)
     parser.add_argument("--viper-version", required=True)
     parser.add_argument("--z3", type=Path, required=True)
     parser.add_argument("--cvc5", type=Path, required=True)
@@ -376,6 +482,7 @@ def main() -> int:
             opensmt=args.opensmt,
             viper_version=args.viper_version,
             viper_feature_report=args.viper_feature_report,
+            viper_sealed_build_receipt=args.viper_sealed_build_receipt,
         )
         if args.smoke_instance:
             if not args.smoke_instance.is_file():

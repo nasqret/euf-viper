@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import ctypes
 import errno
 import fcntl
@@ -11,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -22,9 +24,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-SCHEMA = "euf-viper.sealed-linux-build.v1"
+SCHEMA = "euf-viper.sealed-linux-build.v2"
 SOURCE_SCHEMA = "euf-viper.sealed-source-snapshot.v1"
-CLOSURE_SCHEMA = "euf-viper.build-execution-closure.v1"
+CLOSURE_SCHEMA = "euf-viper.build-execution-closure.v2"
+RECEIPT_SCHEMA = "euf-viper.sealed-build-receipt.v2"
 HEX_REVISION = frozenset("0123456789abcdef")
 MS_RDONLY = 1
 MS_NOSUID = 2
@@ -33,6 +36,7 @@ MS_REMOUNT = 32
 MS_BIND = 4096
 MS_REC = 16384
 MS_PRIVATE = 1 << 18
+RENAME_NOREPLACE = 1
 PR_SET_DUMPABLE = 4
 F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
 F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
@@ -466,6 +470,26 @@ def inventory_tree(root: Path, category: str) -> list[dict[str, Any]]:
     return records
 
 
+def inventory_identity(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: value for key, value in record.items() if key != "category"}
+        for record in records
+    ]
+
+
+def copy_tree_verified(source: Path, destination: Path, category: str) -> list[dict[str, Any]]:
+    before = inventory_tree(source, category)
+    shutil.copytree(source, destination, symlinks=True)
+    validate_internal_symlinks(destination)
+    after = inventory_tree(source, category)
+    copied = inventory_tree(destination, category)
+    if inventory_identity(before) != inventory_identity(after):
+        raise SealedBuildError(f"{category} changed while it was copied")
+    if inventory_identity(before) != inventory_identity(copied):
+        raise SealedBuildError(f"copied {category} differs byte-for-byte from its source")
+    return copied
+
+
 def ldd_paths(ldd: Path, executable: Path, environment: dict[str, str]) -> list[Path]:
     output = require_success(
         stable_command(ldd, [str(executable)], environment=environment),
@@ -538,6 +562,244 @@ def native_closure(
                 break
             queue.append(("dynamic_library", dependency, copied_dependency))
     return [records[key] for key in sorted(records)]
+
+
+TRACE_ANNOTATION = re.compile(r"<(/(?:\\.|[^>])*)>")
+TRACE_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _trace_string(raw: str) -> str:
+    try:
+        value = ast.literal_eval(raw)
+    except (SyntaxError, ValueError) as error:
+        raise SealedBuildError(f"cannot decode strace pathname {raw!r}") from error
+    if type(value) is not str:
+        raise SealedBuildError("strace pathname did not decode to text")
+    return value.removesuffix(" (deleted)")
+
+
+def normalize_virtual_path(raw: str) -> str:
+    value = re.sub(r"^/proc/[0-9]+", "/proc/$PID", raw)
+    value = re.sub(r"^/proc/(?:self|\$PID)/fd/[0-9]+", "/proc/self/fd/$FD", value)
+    value = re.sub(r"^/dev/fd/[0-9]+", "/dev/fd/$FD", value)
+    return value
+
+
+def traced_paths(trace: Path) -> tuple[set[Path], set[Path], set[str], set[str]]:
+    content, _ = stable_read(trace, "build access trace")
+    try:
+        text = content.decode("utf-8", "strict")
+    except UnicodeError as error:
+        raise SealedBuildError("build access trace is not UTF-8") from error
+    paths: set[Path] = set()
+    directories: set[Path] = set()
+    virtual: set[str] = set()
+    missing: set[str] = set()
+    for line in text.splitlines():
+        failed = " = -1 " in line
+        candidates: set[str] = set()
+        for match in TRACE_ANNOTATION.finditer(line):
+            candidates.add(match.group(1).removesuffix(" (deleted)"))
+        for match in TRACE_QUOTED.finditer(line):
+            value = _trace_string(match.group(0))
+            candidates.add(value)
+        for raw in candidates:
+            if failed:
+                missing.add(
+                    normalize_virtual_path(raw)
+                    if raw.startswith(("/proc/", "/sys/", "/dev/"))
+                    else raw
+                )
+                continue
+            if not raw.startswith("/"):
+                continue
+            if raw.startswith(("/proc/", "/sys/", "/dev/")):
+                virtual.add(normalize_virtual_path(raw))
+                continue
+            path = Path(raw)
+            try:
+                metadata = path.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            if stat.S_ISREG(metadata.st_mode):
+                paths.add(path.resolve(strict=True))
+            elif stat.S_ISDIR(metadata.st_mode):
+                directories.add(path.resolve(strict=True))
+    return paths, directories, virtual, missing
+
+
+def directory_record(path: Path) -> dict[str, Any]:
+    require_unreplaceable_external_path(path)
+    before = path.stat()
+    entries: list[dict[str, str]] = []
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for name in sorted(os.listdir(descriptor)):
+            metadata = os.stat(
+                name, dir_fd=descriptor, follow_symlinks=False
+            )
+            kind = (
+                "file"
+                if stat.S_ISREG(metadata.st_mode)
+                else "directory"
+                if stat.S_ISDIR(metadata.st_mode)
+                else "symlink"
+                if stat.S_ISLNK(metadata.st_mode)
+                else "other"
+            )
+            item = {"kind": kind, "name": name}
+            if kind == "symlink":
+                item["target"] = os.readlink(name, dir_fd=descriptor)
+            entries.append(item)
+    finally:
+        os.close(descriptor)
+    after = path.stat()
+    if fingerprint(before) != fingerprint(after):
+        raise SealedBuildError(f"external build directory changed during inventory: {path}")
+    return {
+        "entries_sha256": sha256_bytes(canonical_bytes(entries)),
+        "path": str(path),
+    }
+
+
+def path_below(path: Path, roots: Iterable[Path]) -> bool:
+    for root in roots:
+        try:
+            path.relative_to(root)
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def trace_build(
+    strace: Path,
+    cargo: Path,
+    arguments: list[str],
+    *,
+    cwd: Path,
+    environment: dict[str, str],
+    trace: Path,
+    label: str,
+) -> None:
+    completed = subprocess.run(
+        [
+            str(strace),
+            "-f",
+            "-qq",
+            "-yy",
+            "-s",
+            "4096",
+            "-o",
+            str(trace),
+            "-e",
+            "trace=%file,getdents64",
+            "--",
+            str(cargo),
+            *arguments,
+        ],
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        check=False,
+    )
+    require_success(completed, label)
+    if not trace.is_file() or trace.stat().st_size == 0:
+        raise SealedBuildError(f"{label} did not produce a file-access trace")
+
+
+def python_runtime_snapshot(ldd: Path, environment: dict[str, str]) -> dict[str, Any]:
+    paths: set[Path] = {Path(sys.executable).resolve(strict=True), Path(__file__).resolve(strict=True)}
+    frozen: set[str] = set()
+    for name, module in sorted(sys.modules.items()):
+        origin = getattr(module, "__file__", None)
+        cached = getattr(module, "__cached__", None)
+        found = False
+        for raw in (origin, cached):
+            if not isinstance(raw, str) or not raw:
+                continue
+            try:
+                path = Path(raw).resolve(strict=True)
+            except (FileNotFoundError, RuntimeError):
+                continue
+            if path.is_file():
+                paths.add(path)
+                found = True
+        if not found:
+            spec = getattr(module, "__spec__", None)
+            module_origin = getattr(spec, "origin", None)
+            if module_origin in {"built-in", "frozen"}:
+                frozen.add(name)
+    for dependency in ldd_paths(ldd, Path(sys.executable).resolve(strict=True), environment):
+        paths.add(dependency)
+    try:
+        maps = Path("/proc/self/maps").read_bytes()
+    except OSError as error:
+        raise SealedBuildError(f"cannot inspect Python process memory map: {error}") from error
+    for raw_line in maps.decode("utf-8", "strict").splitlines():
+        fields = raw_line.split(maxsplit=5)
+        if len(fields) != 6 or not fields[5].startswith("/"):
+            continue
+        raw_path = fields[5].removesuffix(" (deleted)")
+        try:
+            mapped = Path(raw_path).resolve(strict=True)
+        except (FileNotFoundError, NotADirectoryError, RuntimeError):
+            continue
+        if mapped.is_file():
+            paths.add(mapped)
+    return {
+        "files": [
+            {
+                "bytes": metadata.st_size,
+                "path": str(path),
+                "sha256": sha256_bytes(content),
+            }
+            for path in sorted(paths)
+            for content, metadata in [stable_read(path, "Python runtime input")]
+        ],
+        "frozen_or_builtin_modules": sorted(frozen),
+        "implementation": sys.implementation.name,
+        "version": sys.version,
+    }
+
+
+def seal_and_mount_file(path: Path) -> tuple[int, dict[str, Any]]:
+    content, metadata = stable_read(path, "discovered build input")
+    descriptor = os.memfd_create(
+        f"euf-viper-build-input-{path.name}",
+        os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING,
+    )
+    try:
+        offset = 0
+        while offset < len(content):
+            offset += os.write(descriptor, content[offset:])
+        os.fchmod(descriptor, stat.S_IMODE(metadata.st_mode))
+        os.fsync(descriptor)
+        fcntl.fcntl(descriptor, F_ADD_SEALS, REQUIRED_SEALS)
+        if fcntl.fcntl(descriptor, F_GET_SEALS) & REQUIRED_SEALS != REQUIRED_SEALS:
+            raise SealedBuildError(f"build input memfd was not sealed: {path}")
+        mount(f"/proc/self/fd/{descriptor}", path, None, MS_BIND, None)
+        mount(
+            None,
+            path,
+            None,
+            MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV,
+            None,
+        )
+        mounted, mounted_metadata = stable_read(path, "mounted build input")
+        if mounted != content or stat.S_IMODE(mounted_metadata.st_mode) != stat.S_IMODE(
+            metadata.st_mode
+        ):
+            raise SealedBuildError(f"sealed build input mount differs: {path}")
+        return descriptor, {
+            "bytes": metadata.st_size,
+            "mode": f"{stat.S_IMODE(metadata.st_mode):04o}",
+            "path": str(path),
+            "sha256": sha256_bytes(content),
+        }
+    except BaseException:
+        os.close(descriptor)
+        raise
 
 
 def compiler_subtools(
@@ -644,6 +906,72 @@ def publish_bytes(parent_fd: int, name: str, content: bytes, mode: int) -> dict[
             os.close(descriptor)
 
 
+def publish_build_set(
+    parent_fd: int, payloads: list[tuple[str, bytes, int]]
+) -> dict[str, dict[str, Any]]:
+    if os.listdir(parent_fd):
+        raise SealedBuildError("attempt-private publication directory is not empty")
+    names = [name for name, _, _ in payloads]
+    if len(set(names)) != len(names):
+        raise SealedBuildError("transactional publication contains duplicate names")
+    records: dict[str, dict[str, Any]] = {}
+    try:
+        for name, content, mode in payloads:
+            records[name] = publish_bytes(parent_fd, name, content, mode)
+        return records
+    except BaseException:
+        for name in reversed(names):
+            try:
+                os.unlink(name, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+        os.fsync(parent_fd)
+        raise
+
+
+def rename_noreplace(source: Path, destination: Path) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is None:
+        raise SealedBuildError("transactional publication requires renameat2(RENAME_NOREPLACE)")
+    result = renameat2(
+        ctypes.c_int(-100),
+        os.fsencode(source),
+        ctypes.c_int(-100),
+        os.fsencode(destination),
+        ctypes.c_uint(RENAME_NOREPLACE),
+    )
+    if result != 0:
+        error = ctypes.get_errno()
+        raise SealedBuildError(
+            f"cannot atomically publish sealed build set: {os.strerror(error)}"
+        )
+
+
+def rollback_bound_publication(bound_fd: int, path: Path) -> None:
+    try:
+        reopened = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return
+    try:
+        bound = os.fstat(bound_fd)
+        current = os.fstat(reopened)
+        if (bound.st_dev, bound.st_ino) != (current.st_dev, current.st_ino):
+            return
+        for name in tuple(os.listdir(bound_fd)):
+            try:
+                os.unlink(name, dir_fd=bound_fd)
+            except FileNotFoundError:
+                pass
+        os.fsync(bound_fd)
+    finally:
+        os.close(reopened)
+    try:
+        os.rmdir(path)
+    except FileNotFoundError:
+        pass
+
+
 def inside_build(args: argparse.Namespace) -> int:
     require_linux()
     set_nondumpable()
@@ -667,8 +995,9 @@ def inside_build(args: argparse.Namespace) -> int:
         revision=args.revision,
         tree=args.tree,
     )
-    shutil.copytree(Path(args.sysroot), toolchain, symlinks=True)
-    validate_internal_symlinks(toolchain)
+    copied_toolchain = copy_tree_verified(
+        Path(args.sysroot), toolchain, "rust_toolchain"
+    )
 
     native_tools = {
         name: Path(path) for name, path in json.loads(args.native_tools).items()
@@ -676,6 +1005,7 @@ def inside_build(args: argparse.Namespace) -> int:
     environment = {"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"}
     discovered = compiler_subtools(native_tools["cc"], "cc", environment)
     discovered.update(compiler_subtools(native_tools["cxx"], "cxx", environment))
+    strace = Path(args.strace).resolve(strict=True)
     copied_cargo = (toolchain / "bin" / "cargo").resolve(strict=True)
     copied_rustc = (toolchain / "bin" / "rustc").resolve(strict=True)
     for path in (copied_cargo, copied_rustc):
@@ -683,84 +1013,259 @@ def inside_build(args: argparse.Namespace) -> int:
             path.relative_to(toolchain.resolve(strict=True))
         except ValueError as error:
             raise SealedBuildError("Rust compiler executable escaped the copied toolchain") from error
-    closure_tools = {
-        **{name: (path, False) for name, path in native_tools.items()},
-        **{name: (path, False) for name, path in discovered.items()},
-        "cargo": (copied_cargo, True),
-        "rustc": (copied_rustc, True),
-    }
-    closure = {
-        "schema": CLOSURE_SCHEMA,
-        "native": native_closure(
-            closure_tools,
-            Path(args.ldd),
-            environment,
-            copied_roots=(toolchain.resolve(strict=True),),
-        ),
-        "rust_toolchain": inventory_tree(toolchain, "rust_toolchain"),
-    }
-    closure_bytes = canonical_bytes(closure)
-    closure_sha256 = sha256_bytes(closure_bytes)
-    (inputs / "build-execution-closure.json").write_bytes(closure_bytes)
-
-    mount(str(inputs), inputs, None, MS_BIND | MS_REC, None)
-    mount(None, inputs, None, MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV, None)
-    verify_read_only(inputs)
+    declared_bin = inputs / "native-bin"
+    declared_bin.mkdir(mode=0o700)
+    declared_tools = {**native_tools, **discovered}
+    declared_names: dict[str, Path] = {}
+    for path in declared_tools.values():
+        name = path.name
+        previous = declared_names.get(name)
+        if previous is not None and previous != path:
+            raise SealedBuildError(f"native tool basename collision for {name}")
+        declared_names[name] = path
+    for name, path in sorted(declared_names.items()):
+        (declared_bin / name).symlink_to(path)
+    for read_only in (source, toolchain, declared_bin):
+        mount(str(read_only), read_only, None, MS_BIND | MS_REC, None)
+        mount(
+            None,
+            read_only,
+            None,
+            MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV,
+            None,
+        )
+        verify_read_only(read_only)
 
     home = workspace / "home"
-    cargo_home = workspace / "cargo-home"
+    discovery_cargo_home = workspace / "cargo-home-discovery"
+    cargo_home = workspace / "cargo-home-production"
+    discovery_target = workspace / "target-discovery"
     target = workspace / "target"
-    for path in (home, cargo_home, target):
+    temporary = workspace / "tmp"
+    for path in (
+        home,
+        discovery_cargo_home,
+        cargo_home,
+        discovery_target,
+        target,
+        temporary,
+    ):
         path.mkdir(mode=0o700)
-    build_environment = {
+    base_build_environment = {
         "AR": str(native_tools["ar"]),
         "CC": str(native_tools["cc"]),
         "CXX": str(native_tools["cxx"]),
-        "CARGO_HOME": str(cargo_home),
-        "CARGO_TARGET_DIR": str(target),
-        "EUF_VIPER_BUILD_CONTEXT": "sealed-linux-production-evidence-v4",
-        "EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256": closure_sha256,
         "EUF_VIPER_SEALED_GIT_REVISION": args.revision,
         "EUF_VIPER_SEALED_SOURCE_MANIFEST_SHA256": args.source_manifest_sha256,
         "EUF_VIPER_SEALED_SOURCE_TREE": args.tree,
         "HOME": str(home),
         "LANG": "C",
         "LC_ALL": "C",
-        "PATH": f"{toolchain / 'bin'}:/usr/bin:/bin",
+        "PATH": f"{toolchain / 'bin'}:{declared_bin}",
         "RANLIB": str(native_tools["ranlib"]),
         "RUSTC": str(copied_rustc),
-        "TMPDIR": str(workspace / "tmp"),
+        "TMPDIR": str(temporary),
         "TZ": "UTC",
     }
-    Path(build_environment["TMPDIR"]).mkdir(mode=0o700)
-    completed = subprocess.run(
-        [
-            str(copied_cargo),
-            "build",
-            "--locked",
-            "--offline",
-            "--release",
-            "--features",
-            args.features,
-        ],
+    cargo_arguments = [
+        "build",
+        "--locked",
+        "--offline",
+        "--release",
+        "--features",
+        args.features,
+    ]
+    discovery_environment = {
+        **base_build_environment,
+        "CARGO_HOME": str(discovery_cargo_home),
+        "CARGO_TARGET_DIR": str(discovery_target),
+        "EUF_VIPER_BUILD_CONTEXT": "sealed-linux-input-discovery-v2",
+        "EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256": "0" * 64,
+    }
+    discovery_trace = workspace / "discovery.strace"
+    trace_build(
+        strace,
+        copied_cargo,
+        cargo_arguments,
         cwd=source,
-        env=build_environment,
-        capture_output=True,
-        check=False,
+        environment=discovery_environment,
+        trace=discovery_trace,
+        label="sealed build input discovery",
     )
-    require_success(completed, "sealed cargo build")
+    (
+        discovery_paths,
+        discovery_directories,
+        discovery_virtual,
+        discovery_missing,
+    ) = traced_paths(discovery_trace)
+    python_runtime = python_runtime_snapshot(Path(args.ldd), environment)
+    external_paths = {
+        path
+        for path in discovery_paths
+        if not path_below(path, (workspace.resolve(strict=True),))
+    }
+    external_paths.update(
+        Path(record["path"]) for record in python_runtime["files"]
+    )
+    external_paths.update(path.resolve(strict=True) for path in declared_tools.values())
+    external_paths.update(
+        ldd_paths(Path(args.ldd), strace, environment)
+    )
+    external_paths.update({Path(args.ldd).resolve(strict=True), strace})
+    workspace_root = workspace.resolve(strict=True)
+    external_directories = {
+        path
+        for path in discovery_directories
+        if not path_below(path, (workspace_root,))
+    }
+    sealed_descriptors: list[int] = []
+    native_inputs: list[dict[str, Any]] = []
+    directory_inputs: list[dict[str, Any]] = []
+    try:
+        for path in sorted(external_directories, key=lambda item: (len(item.parts), str(item))):
+            directory_inputs.append(directory_record(path))
+            mount(str(path), path, None, MS_BIND, None)
+            mount(
+                None,
+                path,
+                None,
+                MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV,
+                None,
+            )
+        for path in sorted(external_paths):
+            descriptor, record = seal_and_mount_file(path)
+            sealed_descriptors.append(descriptor)
+            native_inputs.append(record)
+        if python_runtime_snapshot(Path(args.ldd), environment) != python_runtime:
+            raise SealedBuildError("Python runtime changed while build inputs were sealed")
+        closure = {
+            "access_discovery": {
+                "missing_paths": sorted(discovery_missing),
+                "sha256": sha256_bytes(stable_read(discovery_trace, "discovery trace")[0]),
+                "virtual_paths": sorted(discovery_virtual),
+            },
+            "external_directories": directory_inputs,
+            "external_inputs": native_inputs,
+            "policy": "two-pass-strace-sealed-memfd-v1",
+            "python_runtime": python_runtime,
+            "rust_toolchain": copied_toolchain,
+            "schema": CLOSURE_SCHEMA,
+        }
+        closure_bytes = canonical_bytes(closure)
+        closure_sha256 = sha256_bytes(closure_bytes)
+        (inputs / "build-execution-closure.json").write_bytes(closure_bytes)
+        mount(str(inputs), inputs, None, MS_BIND | MS_REC, None)
+        mount(
+            None,
+            inputs,
+            None,
+            MS_BIND | MS_REMOUNT | MS_RDONLY | MS_NOSUID | MS_NODEV,
+            None,
+        )
+        verify_read_only(inputs)
+
+        build_environment = {
+            **base_build_environment,
+            "CARGO_HOME": str(cargo_home),
+            "CARGO_TARGET_DIR": str(target),
+            "EUF_VIPER_BUILD_CONTEXT": "sealed-linux-production-evidence-v5",
+            "EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256": closure_sha256,
+        }
+        actual_trace = workspace / "actual.strace"
+        trace_build(
+            strace,
+            copied_cargo,
+            cargo_arguments,
+            cwd=source,
+            environment=build_environment,
+            trace=actual_trace,
+            label="sealed cargo build",
+        )
+        actual_paths, actual_directories, actual_virtual, actual_missing = traced_paths(
+            actual_trace
+        )
+        unexpected = sorted(
+            path
+            for path in actual_paths
+            if not path_below(path, (workspace.resolve(strict=True),))
+            and path not in external_paths
+        )
+        if unexpected:
+            raise SealedBuildError(
+                "actual build accessed inputs absent from discovery: "
+                + ", ".join(str(path) for path in unexpected[:8])
+            )
+        unexpected_directories = sorted(
+            path
+            for path in actual_directories
+            if not path_below(path, (workspace_root,))
+            and path not in external_directories
+        )
+        if unexpected_directories:
+            raise SealedBuildError(
+                "actual build accessed directories absent from discovery: "
+                + ", ".join(str(path) for path in unexpected_directories[:8])
+            )
+        unexpected_missing = sorted(actual_missing - discovery_missing)
+        if unexpected_missing:
+            raise SealedBuildError(
+                "actual build attempted absent paths missing from discovery: "
+                + ", ".join(unexpected_missing[:8])
+            )
+        unexpected_virtual = sorted(actual_virtual - discovery_virtual)
+        if unexpected_virtual:
+            raise SealedBuildError(
+                "actual build accessed virtual paths absent from discovery: "
+                + ", ".join(unexpected_virtual[:8])
+            )
+        for record in native_inputs:
+            content, metadata = stable_read(
+                Path(record["path"]), "sealed build input after compilation"
+            )
+            if (
+                metadata.st_size != record["bytes"]
+                or sha256_bytes(content) != record["sha256"]
+            ):
+                raise SealedBuildError(
+                    f"sealed build input drifted: {record['path']}"
+                )
+        for expected in directory_inputs:
+            if directory_record(Path(expected["path"])) != expected:
+                raise SealedBuildError(
+                    f"sealed build directory drifted: {expected['path']}"
+                )
+        if python_runtime_snapshot(Path(args.ldd), environment) != python_runtime:
+            raise SealedBuildError("Python runtime changed during the sealed build")
+        execution_verification = {
+            "actual_trace_sha256": sha256_bytes(
+                stable_read(actual_trace, "actual build trace")[0]
+            ),
+            "external_directory_count": len(directory_inputs),
+            "external_input_count": len(native_inputs),
+            "status": "accepted",
+            "unexpected_external_inputs": [],
+            "virtual_paths": sorted(actual_virtual),
+        }
+    finally:
+        for descriptor in sealed_descriptors:
+            os.close(descriptor)
 
     binary_paths = {
         "euf-viper": target / "release" / "euf-viper",
         "euf-viper-build-features": target / "release" / "euf-viper-build-features",
     }
+    binary_contents: dict[str, bytes] = {}
     artifacts: dict[str, dict[str, Any]] = {}
-    output_fd = args.output_fd
     for name, path in binary_paths.items():
         content, metadata = stable_read(path, f"built artifact {name}")
         if not os.access(path, os.X_OK):
             raise SealedBuildError(f"built artifact is not executable: {path}")
-        artifacts[name] = publish_bytes(output_fd, name, content, 0o500)
+        binary_contents[name] = content
+        artifacts[name] = {
+            "bytes": metadata.st_size,
+            "name": name,
+            "sha256": sha256_bytes(content),
+        }
 
     payload = {
         "schema": SCHEMA,
@@ -768,13 +1273,25 @@ def inside_build(args: argparse.Namespace) -> int:
         "artifacts": artifacts,
         "build_execution_closure": closure,
         "build_execution_closure_sha256": closure_sha256,
+        "build_execution_verification": execution_verification,
         "revision": args.revision,
         "source_snapshot": source_manifest,
         "source_snapshot_manifest_sha256": args.source_manifest_sha256,
         "source_tree": args.tree,
         "toolchain": args.toolchain,
     }
-    publish_bytes(output_fd, "sealed-build-manifest.json", canonical_bytes(payload), 0o400)
+    publish_build_set(
+        args.output_fd,
+        [
+            ("euf-viper", binary_contents["euf-viper"], 0o500),
+            (
+                "euf-viper-build-features",
+                binary_contents["euf-viper-build-features"],
+                0o500,
+            ),
+            ("sealed-build-manifest.json", canonical_bytes(payload), 0o400),
+        ],
+    )
     return 0
 
 
@@ -861,6 +1378,7 @@ def verify_published_build(
     tree: str,
     source_manifest_sha256: str,
     toolchain: dict[str, str],
+    receipt_sha256: str | None = None,
 ) -> dict[str, Any]:
     rebound_directory = os.open(
         artifact_dir,
@@ -888,6 +1406,8 @@ def verify_published_build(
             "euf-viper-build-features",
             "sealed-build-manifest.json",
         }
+        if receipt_sha256 is not None:
+            expected_names.add("sealed-build-receipt.json")
         if set(os.listdir(bound_directory)) != expected_names:
             raise SealedBuildError("artifact directory contains an unbound entry")
         manifest_raw, manifest_metadata = stable_read_at(
@@ -911,6 +1431,8 @@ def verify_published_build(
             raise SealedBuildError("sealed build returned invalid JSON") from error
         if canonical_bytes(manifest) != manifest_raw:
             raise SealedBuildError("sealed build manifest is not canonical JSON")
+        if stat.S_IMODE(manifest_metadata.st_mode) != 0o400:
+            raise SealedBuildError("sealed build manifest mode differs")
         if (
             manifest.get("schema") != SCHEMA
             or manifest.get("status") != "built"
@@ -931,6 +1453,27 @@ def verify_published_build(
             != manifest.get("build_execution_closure_sha256")
         ):
             raise SealedBuildError("sealed build execution closure binding is invalid")
+        verification = manifest.get("build_execution_verification")
+        if (
+            type(verification) is not dict
+            or set(verification)
+            != {
+                "actual_trace_sha256",
+                "external_directory_count",
+                "external_input_count",
+                "status",
+                "unexpected_external_inputs",
+                "virtual_paths",
+            }
+            or verification.get("status") != "accepted"
+            or verification.get("unexpected_external_inputs") != []
+            or type(verification.get("external_input_count")) is not int
+            or verification["external_input_count"]
+            != len(closure.get("external_inputs", []))
+            or verification["external_directory_count"]
+            != len(closure.get("external_directories", []))
+        ):
+            raise SealedBuildError("sealed build execution verification is invalid")
         verified_files: dict[str, tuple[bytes, tuple[int, ...]]] = {
             "sealed-build-manifest.json": (
                 manifest_raw,
@@ -951,6 +1494,7 @@ def verify_published_build(
             }
             if (
                 record != expected
+                or stat.S_IMODE(metadata.st_mode) != 0o500
                 or fingerprint(metadata) != fingerprint(reopened_metadata)
                 or content != reopened_content
             ):
@@ -987,25 +1531,167 @@ def verify_published_build(
                     )
         finally:
             os.close(final_directory)
-        return {
+        result = {
             "artifacts": manifest["artifacts"],
             "manifest": str(artifact_dir / "sealed-build-manifest.json"),
             "manifest_sha256": sha256_bytes(manifest_raw),
             "source_snapshot_manifest_sha256": source_manifest_sha256,
             "status": "built",
         }
+        if receipt_sha256 is not None:
+            receipt_raw, receipt_metadata = stable_read_at(
+                bound_directory,
+                "sealed-build-receipt.json",
+                "external sealed build receipt",
+            )
+            reopened_receipt, reopened_receipt_metadata = stable_read_at(
+                rebound_directory,
+                "sealed-build-receipt.json",
+                "reopened external sealed build receipt",
+            )
+            if sha256_bytes(receipt_raw) != receipt_sha256:
+                raise SealedBuildError("external sealed build receipt SHA-256 differs")
+            if stat.S_IMODE(receipt_metadata.st_mode) != 0o400:
+                raise SealedBuildError("external sealed build receipt mode differs")
+            if (
+                receipt_raw != reopened_receipt
+                or fingerprint(receipt_metadata)
+                != fingerprint(reopened_receipt_metadata)
+            ):
+                raise SealedBuildError("external sealed build receipt changed across reopen")
+            try:
+                receipt = json.loads(receipt_raw)
+            except (UnicodeError, json.JSONDecodeError) as error:
+                raise SealedBuildError("external sealed build receipt is invalid JSON") from error
+            if canonical_bytes(receipt) != receipt_raw:
+                raise SealedBuildError("external sealed build receipt is not canonical")
+            if receipt != create_external_receipt(bound_directory):
+                raise SealedBuildError("external sealed build receipt binding differs")
+            os.fsync(bound_directory)
+            final_receipt_directory = os.open(
+                artifact_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            try:
+                final_receipt, final_receipt_metadata = stable_read_at(
+                    final_receipt_directory,
+                    "sealed-build-receipt.json",
+                    "final external sealed build receipt",
+                )
+                if (
+                    final_receipt != receipt_raw
+                    or fingerprint(final_receipt_metadata)
+                    != fingerprint(receipt_metadata)
+                ):
+                    raise SealedBuildError(
+                        "external sealed build receipt changed during final sync"
+                    )
+            finally:
+                os.close(final_receipt_directory)
+            result["receipt"] = str(artifact_dir / "sealed-build-receipt.json")
+            result["receipt_sha256"] = receipt_sha256
+        return result
     finally:
         os.close(rebound_directory)
+
+
+def execute_published(parent_fd: int, name: str) -> bytes:
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    try:
+        completed = subprocess.run(
+            [f"/proc/self/fd/{descriptor}"],
+            capture_output=True,
+            check=False,
+            env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+    return require_success(completed, f"published executable {name}")
+
+
+def create_external_receipt(parent_fd: int) -> dict[str, Any]:
+    manifest_raw, _ = stable_read_at(
+        parent_fd, "sealed-build-manifest.json", "sealed build manifest"
+    )
+    try:
+        manifest = json.loads(manifest_raw)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise SealedBuildError("sealed build manifest is invalid JSON") from error
+    if canonical_bytes(manifest) != manifest_raw:
+        raise SealedBuildError("sealed build manifest is not canonical JSON")
+    feature_output = execute_published(parent_fd, "euf-viper-build-features").decode(
+        "ascii", "strict"
+    ).strip()
+    features = feature_output.split(",") if feature_output else []
+    if (
+        not features
+        or features != sorted(set(features))
+        or "production-evidence" not in features
+    ):
+        raise SealedBuildError("feature-report executable returned an invalid feature set")
+    rustc = manifest.get("toolchain", {}).get("rustc", "")
+    target = next(
+        (
+            line.partition(":")[2].strip()
+            for line in rustc.splitlines()
+            if line.startswith("host:")
+        ),
+        None,
+    )
+    if not target or "linux" not in target:
+        raise SealedBuildError("sealed toolchain does not identify a Linux target")
+    artifacts: dict[str, dict[str, Any]] = {}
+    for name in ("euf-viper", "euf-viper-build-features"):
+        content, metadata = stable_read_at(parent_fd, name, f"receipt artifact {name}")
+        if stat.S_IMODE(metadata.st_mode) != 0o500:
+            raise SealedBuildError(f"sealed artifact mode differs before receipt: {name}")
+        record = manifest.get("artifacts", {}).get(name)
+        expected = {
+            "bytes": metadata.st_size,
+            "name": name,
+            "sha256": sha256_bytes(content),
+        }
+        if record != expected:
+            raise SealedBuildError(f"sealed artifact changed before receipt: {name}")
+        artifacts[name] = {
+            "bytes": metadata.st_size,
+            "mode": "0500",
+            "sha256": expected["sha256"],
+        }
+    return {
+        "artifacts": artifacts,
+        "build": {
+            "execution_closure_sha256": manifest["build_execution_closure_sha256"],
+            "features": features,
+            "profile": "release",
+            "target": target,
+            "toolchain": manifest["toolchain"],
+        },
+        "schema": RECEIPT_SCHEMA,
+        "sealed_build_manifest_sha256": sha256_bytes(manifest_raw),
+        "source": {
+            "dirty": False,
+            "revision": manifest["revision"],
+            "snapshot_manifest_sha256": manifest[
+                "source_snapshot_manifest_sha256"
+            ],
+            "tree": manifest["source_tree"],
+        },
+        "status": "accepted",
+    }
 
 
 def outer_build(args: argparse.Namespace) -> int:
     require_linux()
     repository = args.repository.resolve(strict=True)
     artifact_dir = args.artifact_dir.absolute()
-    artifact_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    artifact_dir = require_private_directory(artifact_dir, "artifact directory")
-    if any(artifact_dir.iterdir()):
-        raise SealedBuildError("sealed build requires an empty artifact directory")
+    artifact_parent = artifact_dir.parent
+    artifact_parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    artifact_parent = require_private_directory(
+        artifact_parent, "artifact publication parent"
+    )
+    if os.path.lexists(artifact_dir):
+        raise SealedBuildError("sealed build destination must not exist")
 
     tools = {
         "git": checked_executable(args.git, "git"),
@@ -1017,6 +1703,7 @@ def outer_build(args: argparse.Namespace) -> int:
         "cxx": checked_executable(args.cxx, "cxx"),
         "ar": checked_executable(args.ar, "ar"),
         "ranlib": checked_executable(args.ranlib, "ranlib"),
+        "strace": checked_executable(args.strace, "strace"),
     }
     environment = {
         "CARGO_HOME": str(args.cargo_home.resolve()),
@@ -1068,12 +1755,19 @@ def outer_build(args: argparse.Namespace) -> int:
         records.sort(key=lambda item: item[0])
         bundle_fd, _, source_manifest_sha256 = sealed_bundle(records, args.revision, tree)
 
-        output_fd = os.open(artifact_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        attempt = Path(
+            tempfile.mkdtemp(
+                prefix=f".{artifact_dir.name}.attempt-", dir=artifact_parent
+            )
+        )
+        output_fd = os.open(attempt, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         script_fd = os.open(Path(__file__).resolve(), os.O_RDONLY | os.O_NOFOLLOW)
         python_path = checked_executable(Path(sys.executable), "Python")
         python_fd = os.open(python_path, os.O_RDONLY | os.O_NOFOLLOW)
         unshare_fd = os.open(tools["unshare"], os.O_RDONLY | os.O_NOFOLLOW)
         workspace = staging_parent / f"namespace-{os.getpid()}"
+        published_final = False
+        publication_complete = False
         try:
             native = {name: str(tools[name]) for name in ("cc", "cxx", "ar", "ranlib")}
             set_nondumpable()
@@ -1100,6 +1794,8 @@ def outer_build(args: argparse.Namespace) -> int:
                 str(sysroot),
                 "--ldd",
                 str(tools["ldd"]),
+                "--strace",
+                str(tools["strace"]),
                 "--native-tools",
                 json.dumps(native, sort_keys=True, separators=(",", ":")),
                 "--revision",
@@ -1127,6 +1823,37 @@ def outer_build(args: argparse.Namespace) -> int:
                 env={"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
             )
             require_success(completed, "sealed Linux namespace build")
+            verify_published_build(
+                output_fd,
+                attempt,
+                revision=args.revision,
+                tree=tree,
+                source_manifest_sha256=source_manifest_sha256,
+                toolchain=toolchain,
+            )
+            receipt_bytes = canonical_bytes(create_external_receipt(output_fd))
+            receipt_sha256 = sha256_bytes(receipt_bytes)
+            publish_bytes(
+                output_fd, "sealed-build-receipt.json", receipt_bytes, 0o400
+            )
+            verify_published_build(
+                output_fd,
+                attempt,
+                revision=args.revision,
+                tree=tree,
+                source_manifest_sha256=source_manifest_sha256,
+                toolchain=toolchain,
+                receipt_sha256=receipt_sha256,
+            )
+            rename_noreplace(attempt, artifact_dir)
+            published_final = True
+            parent_fd = os.open(
+                artifact_parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
             summary = verify_published_build(
                 output_fd,
                 artifact_dir,
@@ -1134,12 +1861,18 @@ def outer_build(args: argparse.Namespace) -> int:
                 tree=tree,
                 source_manifest_sha256=source_manifest_sha256,
                 toolchain=toolchain,
+                receipt_sha256=receipt_sha256,
             )
+            publication_complete = True
         finally:
+            if published_final and not publication_complete:
+                rollback_bound_publication(output_fd, artifact_dir)
             for descriptor in (bundle_fd, output_fd, script_fd, python_fd, unshare_fd):
                 os.close(descriptor)
             if workspace.exists():
                 workspace.rmdir()
+            if attempt.exists():
+                shutil.rmtree(attempt)
 
     print(canonical_bytes(summary).decode("utf-8"), end="")
     return 0
@@ -1245,6 +1978,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--cxx", type=Path, required=True)
     build.add_argument("--ar", type=Path, required=True)
     build.add_argument("--ranlib", type=Path, required=True)
+    build.add_argument("--strace", type=Path, required=True)
     build.add_argument(
         "--features", default="certificates,production-evidence"
     )
@@ -1254,6 +1988,7 @@ def parser() -> argparse.ArgumentParser:
     inside.add_argument("--workspace", required=True)
     inside.add_argument("--sysroot", required=True)
     inside.add_argument("--ldd", required=True)
+    inside.add_argument("--strace", required=True)
     inside.add_argument("--native-tools", required=True)
     inside.add_argument("--revision", required=True)
     inside.add_argument("--tree", required=True)

@@ -44,7 +44,11 @@ EVIDENCE_SOLVER = textwrap.dedent(
 
     source = Path(sys.argv[1])
     output = Path(sys.argv[sys.argv.index("--evidence-out") + 1])
-    controls = {{"EUF_VIPER_RUN_NONCE", "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"}}
+    controls = {{
+        "EUF_VIPER_RUN_NONCE",
+        "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+        "EUF_VIPER_SEALED_BUILD_RECEIPT",
+    }}
     config = {{
         key: value
         for key, value in os.environ.items()
@@ -68,8 +72,8 @@ EVIDENCE_SOLVER = textwrap.dedent(
     ).encode("utf-8")
     build = {{
         "features": ["production-evidence"],
-        "target": "test-target",
-        "profile": "test",
+        "target": "x86_64-unknown-linux-gnu",
+        "profile": "release",
         "rustc": "rustc test",
         "cargo": "cargo test",
         "source_manifest_sha256": "0" * 64,
@@ -96,6 +100,14 @@ EVIDENCE_SOLVER = textwrap.dedent(
             "config_sha256": hashlib.sha256(canonical(config)).hexdigest(),
             "build": build,
             "build_sha256": hashlib.sha256(canonical(build)).hexdigest(),
+            "sealed_build": {{
+                "receipt": json.loads(
+                    Path(os.environ["EUF_VIPER_SEALED_BUILD_RECEIPT"]).read_bytes()
+                ),
+                "receipt_sha256": os.environ[
+                    "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
+                ],
+            }},
         }},
         "backend_cnf": {{
             "format": "dimacs-literal-arrays",
@@ -194,6 +206,46 @@ class LockedProductionEvidenceTests(unittest.TestCase):
         }
         candidate["environment"].update(candidate_environment or {})
         candidate["environment"]["REPOSITORY_REVISION"] = payload["repository"]["commit"]
+        receipt = {
+            "artifacts": {
+                "euf-viper": {
+                    "bytes": Path(candidate["binary"]).stat().st_size,
+                    "mode": "0500",
+                    "sha256": candidate["sha256"],
+                },
+                "euf-viper-build-features": {
+                    "bytes": Path(candidate["binary"]).stat().st_size,
+                    "mode": "0500",
+                    "sha256": candidate["sha256"],
+                },
+            },
+            "build": {
+                "execution_closure_sha256": "2" * 64,
+                "features": ["production-evidence"],
+                "profile": "release",
+                "target": "x86_64-unknown-linux-gnu",
+                "toolchain": {"cargo": "cargo test", "rustc": "rustc test"},
+            },
+            "schema": "euf-viper.sealed-build-receipt.v2",
+            "sealed_build_manifest_sha256": "3" * 64,
+            "source": {
+                "dirty": False,
+                "revision": payload["repository"]["commit"],
+                "snapshot_manifest_sha256": "1" * 64,
+                "tree": "4" * 40,
+            },
+            "status": "accepted",
+        }
+        receipt_path = self.root / "sealed-build-receipt.json"
+        receipt_path.write_bytes(canonical_bytes(receipt))
+        candidate["environment"].update(
+            {
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(receipt_path.resolve()),
+                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": sha256_file(
+                    receipt_path
+                ),
+            }
+        )
         fixture.solver_config.write_bytes(
             canonical_bytes({"schema_version": 1, "solvers": payload["solvers"]})
         )

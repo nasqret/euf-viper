@@ -70,7 +70,18 @@ PLACEHOLDERS = {"binary", "instance", "budget_s"}
 EVIDENCE_SCHEMA = "euf-viper.production-evidence.v4"
 RUN_NONCE_ENV = "EUF_VIPER_RUN_NONCE"
 TRUSTED_EXECUTABLE_SHA256_ENV = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
-EVIDENCE_CONTROL_ENV = {RUN_NONCE_ENV, TRUSTED_EXECUTABLE_SHA256_ENV}
+EVIDENCE_CONTROL_ENV = {
+    RUN_NONCE_ENV,
+    TRUSTED_EXECUTABLE_SHA256_ENV,
+    "EUF_VIPER_SEALED_BUILD_RECEIPT",
+}
+F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
+F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
+F_SEAL_SEAL = getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+F_SEAL_SHRINK = getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+F_SEAL_GROW = getattr(fcntl, "F_SEAL_GROW", 0x0004)
+F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+REQUIRED_MEMFD_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
 
 TOP_LEVEL_KEYS = {
     "schema_version",
@@ -235,6 +246,7 @@ PRODUCTION_EVIDENCE_KEYS = {
     "solver_config_sha256",
     "solver_runtime_config_sha256",
     "solver_build_sha256",
+    "sealed_build_receipt_sha256",
     "run_nonce",
     "status",
     "backend_status",
@@ -1179,15 +1191,49 @@ def _open_verified_descriptor(path: Path, expected_sha256: str, context: str) ->
             raise CampaignError(
                 f"{context} descriptor SHA-256 mismatch: expected {expected_sha256}, got {actual}"
             )
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        return descriptor
+        if not hasattr(os, "memfd_create") or not hasattr(os, "MFD_ALLOW_SEALING"):
+            raise CampaignError(
+                f"{context} binding requires Linux memfd sealing"
+            )
+        snapshot = os.memfd_create(
+            f"euf-viper-{path.name}", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING
+        )
+        try:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            while True:
+                block = os.read(descriptor, 1024 * 1024)
+                if not block:
+                    break
+                offset = 0
+                while offset < len(block):
+                    offset += os.write(snapshot, block[offset:])
+            os.fchmod(snapshot, stat.S_IMODE(after.st_mode))
+            os.fsync(snapshot)
+            fcntl.fcntl(snapshot, F_ADD_SEALS, REQUIRED_MEMFD_SEALS)
+            if fcntl.fcntl(snapshot, F_GET_SEALS) & REQUIRED_MEMFD_SEALS != REQUIRED_MEMFD_SEALS:
+                raise CampaignError(f"{context} snapshot did not retain required seals")
+            os.lseek(snapshot, 0, os.SEEK_SET)
+            os.close(descriptor)
+            return snapshot
+        except BaseException:
+            os.close(snapshot)
+            raise
     except BaseException:
         os.close(descriptor)
         raise
 
 
 def _bound_job_command(job: Job) -> tuple[list[str], tuple[int, ...], dict[str, str]]:
-    if not _descriptor_execution_available(required="evidence" in job.solver):
+    required = "evidence" in job.solver or os.environ.get(
+        "EUF_VIPER_DESCRIPTOR_EXECUTION"
+    ) == "required"
+    if not required:
+        return list(job.argv), (), {
+            "mechanism": "platform_pathname",
+            "solver_sha256": job.solver["sha256"],
+            "source_sha256": job.instance["sha256"],
+        }
+    if not _descriptor_execution_available(required=True):
         return list(job.argv), (), {
             "mechanism": "platform_pathname",
             "solver_sha256": job.solver["sha256"],
@@ -1695,6 +1741,9 @@ def _production_evidence_binding(
         "solver_config_sha256": sha256_bytes(canonical_bytes(job.solver)),
         "solver_runtime_config_sha256": checked["solver_config_sha256"],
         "solver_build_sha256": checked["solver_build_sha256"],
+        "sealed_build_receipt_sha256": checked[
+            "sealed_build_receipt_sha256"
+        ],
         "run_nonce": checked["run_nonce"],
         "status": status,
         "backend_status": backend_status,
@@ -1906,6 +1955,10 @@ def _validate_recorded_production_evidence(
         f"{context}.solver_runtime_config_sha256",
     )
     require_hash(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    require_hash(
+        binding["sealed_build_receipt_sha256"],
+        f"{context}.sealed_build_receipt_sha256",
+    )
     require_hash(binding["run_nonce"], f"{context}.run_nonce")
     if binding["source_sha256"] != job.instance["sha256"]:
         raise CampaignError(f"{context} source hash differs from the job")
@@ -1915,6 +1968,10 @@ def _validate_recorded_production_evidence(
         raise CampaignError(f"{context} solver config hash differs from the job")
     if binding["solver_executable_sha256"] != job.solver["sha256"]:
         raise CampaignError(f"{context} executable hash differs from the job")
+    if binding["sealed_build_receipt_sha256"] != job.environment.get(
+        "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
+    ):
+        raise CampaignError(f"{context} sealed build receipt differs from the job")
     contract = job.solver["evidence"]
     if binding["schema"] != contract["schema"]:
         raise CampaignError(f"{context} schema differs from the job")
@@ -1941,6 +1998,9 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
     invocation = require_int(record["invocation"], "journal run invocation", minimum=0)
     if invocation not in invocations:
         raise CampaignError("journal run references an unknown invocation")
+    descriptor_required = "evidence" in job.solver or os.environ.get(
+        "EUF_VIPER_DESCRIPTOR_EXECUTION"
+    ) == "required"
     expected_static = {
         "sequence": job.sequence,
         "key": job.key,
@@ -1959,7 +2019,9 @@ def validate_run_record(record: dict[str, Any], job: Job, invocations: set[int])
         "descriptor_binding": {
             "mechanism": (
                 "linux_procfd"
-                if sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir()
+                if descriptor_required
+                and sys.platform.startswith("linux")
+                and Path("/proc/self/fd").is_dir()
                 else "platform_pathname"
             ),
             "solver_sha256": job.solver["sha256"],

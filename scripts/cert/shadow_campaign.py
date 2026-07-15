@@ -116,6 +116,7 @@ PRODUCTION_EVIDENCE_BINDING_KEYS = {
     "solver_config_sha256",
     "solver_runtime_config_sha256",
     "solver_build_sha256",
+    "sealed_build_receipt_sha256",
     "run_nonce",
     "status",
     "backend_status",
@@ -132,6 +133,7 @@ PRODUCTION_EVIDENCE_VALIDATION_KEYS = {
     "solver_executable_sha256",
     "solver_config_sha256",
     "solver_build_sha256",
+    "sealed_build_receipt_sha256",
     "terms",
     "atoms",
     "assignment_variables",
@@ -234,6 +236,13 @@ def canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _require_hash(value: object, context: str) -> str:
+    if not _is_sha256(value):
+        raise ShadowError(f"{context} must be a lowercase SHA-256")
+    assert isinstance(value, str)
+    return value
+
+
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -258,6 +267,7 @@ def _expected_runtime_config(environment: Mapping[str, str]) -> dict[str, str]:
     controls = {
         "EUF_VIPER_RUN_NONCE",
         "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+        "EUF_VIPER_SEALED_BUILD_RECEIPT",
     }
     config = {
         key: value
@@ -540,6 +550,8 @@ def derive_work_records(
                     != binding["solver_executable_sha256"]
                     or validation["solver_build_sha256"]
                     != binding["solver_build_sha256"]
+                    or validation["sealed_build_receipt_sha256"]
+                    != binding["sealed_build_receipt_sha256"]
                 ):
                     raise ShadowError(
                         "production evidence journal binding drift for "
@@ -749,6 +761,7 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 "solver_runtime_config_sha256",
                 "solver_executable_sha256",
                 "solver_build_sha256",
+                "sealed_build_receipt_sha256",
                 "run_nonce",
             ):
                 if not _is_sha256(binding[field]):
@@ -786,6 +799,9 @@ def validate_work_record(work: object, context: str = "work record") -> dict[str
                 "solver_executable_sha256": binding["solver_executable_sha256"],
                 "solver_config_sha256": binding["solver_runtime_config_sha256"],
                 "solver_build_sha256": binding["solver_build_sha256"],
+                "sealed_build_receipt_sha256": binding[
+                    "sealed_build_receipt_sha256"
+                ],
             }
             for field, expected in expected_validation.items():
                 if validation[field] != expected:
@@ -2067,7 +2083,7 @@ def build_summary(
         "parent_raw_sha256": plan["parent_raw_sha256"],
         "plan_sha256": plan["record_sha256"],
         "solver": plan["solver"],
-        "python": plan["python"],
+        "python": plan.get("python"),
         "checker": plan["checker"],
         "independent_parser": plan["independent_parser"],
         "drat_trim": plan["drat_trim"],

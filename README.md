@@ -61,7 +61,10 @@ it is not compiled by the default Cargo features. Build with
 the sealed Linux builder and `--features production-evidence` to use it. An
 ordinary Cargo build fails closed if evidence is requested. The mode forces deterministic
 canonical routes, and sidecars bind the assignment and ground model produced by
-that exact solve. Congruence-closure SAT and UNSAT, all other UNSAT routes, and
+that exact solve. Acceptance also requires an externally captured sealed-build
+receipt digest binding the running executable bytes, source revision/tree,
+feature set, toolchain, and traced build closure; `build.rs` strings are
+diagnostic only. Congruence-closure SAT and UNSAT, all other UNSAT routes, and
 unsupported routes remain nondecisive `unsupported` evidence. The independent
 checker validates supported SAT evidence directly against the source. A later
 `certify` rerun is separate evidence and is not treated as evidence for the
@@ -72,6 +75,7 @@ coverage, or change the ordinary off-mode solve contract. See
 When the exact `--evidence-out` flag is absent, argument handling and byte-level
 stdout, stderr, and exit status are compared against an independently checked
 out and pinned-toolchain build of baseline `f8d9205`,
+whose full revision is `f8d9205e8a18e3496d236fb9b94ed181add93e80`,
 including legacy unknown and extra solve arguments. Evidence-specific strict
 argument parsing applies only to invocations containing that flag. The ordinary
 help text is therefore unchanged; evidence mode is documented separately here.
@@ -85,6 +89,10 @@ mode-0700 attempt root and checkout, an explicit environment allowlist, and
 source/runtime/receipt hashes; reused revision directories and `--export=ALL`
 are forbidden. Preparation is submitted alone; arrays are a separate command
 that requires an externally captured exact preparation-receipt SHA-256.
+The final binary/features/manifest/receipt directory is atomically published;
+runtime verification reruns loader resolution and binds imported Python and
+stdlib bytes. GitHub-hosted CI pins action commits and records runner identity
+fields, but remains diagnostic and non-attesting without an immutable image ID.
 Ordinary solves do not allocate evidence transcripts,
 duplicate backend clause streams, retain DPLL models, or perform canonical
 evidence sorting.

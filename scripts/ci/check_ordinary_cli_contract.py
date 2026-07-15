@@ -7,17 +7,42 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
 
-BASELINE_REVISION = "f8d9205"
+BASELINE_REVISION = "f8d9205e8a18e3496d236fb9b94ed181add93e80"
+BASELINE_REVISION_SHORT = "f8d9205"
 PINNED_TOOLCHAIN = "1.96.0"
 HEX_DIGITS = frozenset("0123456789abcdef")
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def effective_rustc_invocations(build_log: bytes, rustc: Path) -> int:
+    expected = str(rustc)
+    count = 0
+    for raw_line in build_log.decode("utf-8", "strict").splitlines():
+        marker = "Running `"
+        if marker not in raw_line or not raw_line.endswith("`"):
+            continue
+        command = shlex.split(raw_line.split(marker, 1)[1][:-1])
+        rustc_tokens = [
+            token
+            for token in command
+            if token == expected or Path(token).name in {"rustc", "rustc.exe"}
+        ]
+        if any(token != expected for token in rustc_tokens):
+            raise SystemExit(
+                "baseline build log records a compiler other than supplied RUSTC"
+            )
+        count += rustc_tokens.count(expected)
+    if count == 0:
+        raise SystemExit("baseline build log records no supplied RUSTC invocation")
+    return count
 
 
 def execute(
@@ -61,21 +86,25 @@ def verify_baseline_receipt(receipt: Path, binary: Path) -> dict[str, object]:
         "checkout",
         "cargo_lock_sha256",
         "toolchain",
+        "effective_compiler",
+        "build_environment",
+        "build_log",
+        "build_tools",
         "executable",
     }
     if type(value) is not dict or set(value) != expected_keys:
         raise SystemExit("baseline build receipt keys differ")
     if (
-        value["schema"] != "euf-viper.cli-baseline-build.v1"
+        value["schema"] != "euf-viper.cli-baseline-build.v2"
         or value["status"] != "built"
     ):
         raise SystemExit("baseline build receipt schema mismatch")
     revision = value["revision"]
     tree = value["tree"]
     if (
-        value["revision_short"] != BASELINE_REVISION
+        value["revision_short"] != BASELINE_REVISION_SHORT
         or type(revision) is not str
-        or not revision.startswith(BASELINE_REVISION)
+        or revision != BASELINE_REVISION
         or len(revision) not in {40, 64}
         or any(character not in HEX_DIGITS for character in revision)
         or type(tree) is not str
@@ -95,6 +124,78 @@ def verify_baseline_receipt(receipt: Path, binary: Path) -> dict[str, object]:
         or f"release: {PINNED_TOOLCHAIN}" not in str(toolchain["rustc"])
     ):
         raise SystemExit("baseline toolchain differs from the pinned release")
+    compiler = value["effective_compiler"]
+    if (
+        type(compiler) is not dict
+        or set(compiler) != {"path", "sha256", "verbose_invocations", "version"}
+        or compiler["version"] != toolchain["rustc"]
+        or type(compiler["path"]) is not str
+        or type(compiler["sha256"]) is not str
+        or len(compiler["sha256"]) != 64
+        or type(compiler["verbose_invocations"]) is not int
+        or compiler["verbose_invocations"] < 1
+    ):
+        raise SystemExit("baseline effective compiler binding is malformed")
+    compiler_path = Path(compiler["path"]).resolve(strict=True)
+    if sha256(compiler_path) != compiler["sha256"]:
+        raise SystemExit("baseline effective compiler bytes drifted")
+    build_environment = value["build_environment"]
+    expected_environment_keys = {
+        "CARGO_HOME",
+        "CARGO_INCREMENTAL",
+        "CARGO_TARGET_DIR",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_SYSTEM",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "RUSTC",
+        "TMPDIR",
+        "TZ",
+    }
+    if (
+        type(build_environment) is not dict
+        or set(build_environment) != expected_environment_keys
+        or build_environment.get("RUSTC") != compiler["path"]
+        or any(
+            key in build_environment
+            for key in (
+                "RUSTC_WRAPPER",
+                "RUSTC_WORKSPACE_WRAPPER",
+                "RUSTFLAGS",
+                "CARGO_ENCODED_RUSTFLAGS",
+            )
+        )
+    ):
+        raise SystemExit("baseline build environment did not force a clean RUSTC")
+    build_log = value["build_log"]
+    if type(build_log) is not dict or set(build_log) != {"bytes", "path", "sha256"}:
+        raise SystemExit("baseline verbose build log binding is malformed")
+    build_log_path = Path(str(build_log["path"])).resolve(strict=True)
+    build_log_bytes = build_log_path.read_bytes()
+    if (
+        build_log.get("bytes") != len(build_log_bytes)
+        or build_log.get("sha256")
+        != hashlib.sha256(build_log_bytes).hexdigest()
+    ):
+        raise SystemExit("baseline verbose build log bytes drifted")
+    if effective_rustc_invocations(build_log_bytes, compiler_path) != compiler[
+        "verbose_invocations"
+    ]:
+        raise SystemExit("baseline effective compiler invocation count differs")
+    tools = value["build_tools"]
+    if type(tools) is not dict or set(tools) != {"cargo", "git", "rustc"}:
+        raise SystemExit("baseline build tool set differs")
+    for name, item in tools.items():
+        if type(item) is not dict or set(item) != {"path", "sha256"}:
+            raise SystemExit(f"baseline build tool {name} binding is malformed")
+        tool_path = Path(str(item["path"])).resolve(strict=True)
+        if item["sha256"] != sha256(tool_path):
+            raise SystemExit(f"baseline build tool {name} bytes drifted")
+    if tools["rustc"] != {"path": compiler["path"], "sha256": compiler["sha256"]}:
+        raise SystemExit("baseline build tool and effective compiler disagree")
     executable = value["executable"]
     if not isinstance(executable, dict) or set(executable) != {"bytes", "path", "sha256"}:
         raise SystemExit("baseline receipt lacks an executable binding")

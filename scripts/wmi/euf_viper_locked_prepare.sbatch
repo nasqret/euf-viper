@@ -64,6 +64,7 @@ fields = [
     tools["ldd"]["realpath"], tools["unshare"]["realpath"],
     tools["cc"]["realpath"], tools["cxx"]["realpath"], tools["ar"]["realpath"],
     tools["ranlib"]["realpath"], tools["rustc"]["realpath"], tools["find"]["realpath"],
+    tools["strace"]["realpath"],
     value["sealed_build_helper_sha256"], value["execution_closure_helper_sha256"],
 ]
 if any("\t" in item or "\n" in item for item in fields):
@@ -73,7 +74,7 @@ print("\t".join(fields))
 IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_HOME CARGO_TARGET_DIR \
   PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME BASH_BIN CARGO_BIN GIT_BIN \
   CHMOD_BIN ENV_BIN MKDIR_BIN LDD_BIN UNSHARE_BIN CC_BIN CXX_BIN AR_BIN \
-  RANLIB_BIN RUSTC_BIN FIND_BIN SEALED_BUILD_HELPER_SHA256 \
+  RANLIB_BIN RUSTC_BIN FIND_BIN STRACE_BIN SEALED_BUILD_HELPER_SHA256 \
   EXECUTION_CLOSURE_HELPER_SHA256 \
   <<<"$EXECUTION_FIELDS"
 
@@ -118,7 +119,7 @@ python_clean scripts/bench/validate_campaign_spec.py \
   --out "$RUN_ROOT/validated-campaign.json"
 
 SEALED_ARTIFACT_DIR="$ATTEMPT_ROOT/build/sealed-release"
-"$MKDIR_BIN" -p "$SEALED_ARTIFACT_DIR" "$ATTEMPT_ROOT/build/sealed-staging"
+"$MKDIR_BIN" -p "$ATTEMPT_ROOT/build" "$ATTEMPT_ROOT/build/sealed-staging"
 python_clean "$SEALED_BUILD_HELPER" build \
   --repository "$CHECKOUT" \
   --revision "$EXPECTED_REVISION" \
@@ -136,10 +137,12 @@ python_clean "$SEALED_BUILD_HELPER" build \
   --cxx "$CXX_BIN" \
   --ar "$AR_BIN" \
   --ranlib "$RANLIB_BIN" \
+  --strace "$STRACE_BIN" \
   >"$RUN_ROOT/sealed-build-summary.json"
 VIPER_BINARY="$SEALED_ARTIFACT_DIR/euf-viper"
 VIPER_FEATURE_REPORT="$SEALED_ARTIFACT_DIR/euf-viper-build-features"
 SEALED_BUILD_MANIFEST="$SEALED_ARTIFACT_DIR/sealed-build-manifest.json"
+SEALED_BUILD_RECEIPT="$SEALED_ARTIFACT_DIR/sealed-build-receipt.json"
 if [ ! -x "$VIPER_FEATURE_REPORT" ]; then
   echo "locked build omitted the production-evidence feature report" >&2
   exit 2
@@ -191,6 +194,7 @@ python_clean scripts/bench/record_solver_config.py \
   --campaign campaigns/best-overall-qf-uf-2026-07.json \
   --viper "$VIPER_BINARY" \
   --viper-feature-report "$VIPER_FEATURE_REPORT" \
+  --viper-sealed-build-receipt "$SEALED_BUILD_RECEIPT" \
   --viper-version "$VIPER_VERSION" \
   --z3 "$SOLVER_ROOT/bin/z3" \
   --cvc5 "$SOLVER_ROOT/bin/cvc5" \
@@ -209,6 +213,7 @@ fi
 EXECUTION_CLOSURE_MANIFEST="$RUN_ROOT/execution-closure.json"
 python_clean "$EXECUTION_CLOSURE_HELPER" create \
   --ldd "$LDD_BIN" \
+  --python-executable-name python \
   --executable "euf-viper=$VIPER_BINARY" \
   --executable "feature-report=$VIPER_FEATURE_REPORT" \
   --executable "python=$PYTHON_BIN" \
@@ -220,6 +225,14 @@ python_clean "$EXECUTION_CLOSURE_HELPER" create \
   --artifact "independent-parser=$CHECKOUT/scripts/cert/independent_qfuf.py" \
   --artifact "libz3=$Z3_LIBZ3" \
   --artifact "sealed-build=$SEALED_BUILD_MANIFEST" \
+  --artifact "sealed-build-receipt=$SEALED_BUILD_RECEIPT" \
+  --python-script "provenance-helper=$PROVENANCE_HELPER" \
+  --python-script "execution-closure-helper=$EXECUTION_CLOSURE_HELPER" \
+  --python-script "bind-campaign-cpu=$CHECKOUT/scripts/bench/bind_campaign_cpu.py" \
+  --python-script "run-locked-campaign=$CHECKOUT/scripts/bench/run_locked_campaign.py" \
+  --python-script "analyze-campaign=$CHECKOUT/scripts/bench/analyze_campaign.py" \
+  --python-script "production-checker=$CHECKOUT/scripts/cert/check_production_evidence.py" \
+  --python-script "independent-parser=$CHECKOUT/scripts/cert/independent_qfuf.py" \
   --out "$EXECUTION_CLOSURE_MANIFEST" \
   >"$RUN_ROOT/execution-closure-summary.json"
 
@@ -278,7 +291,7 @@ python_clean - "$RUN_ROOT/prepare.json" "$VERIFIED_PROVENANCE" \
   "$RUN_ROOT" "$CORPUS_ROOT" "$FULL_MANIFEST" "$OFFICIAL_MANIFEST" \
   "$VIPER_BINARY" "$VIPER_BUILD_FEATURES" "$VIPER_FEATURE_REPORT" "$SLURM_JOB_ID" \
   "${SLURM_SUBMIT_DIR:-}" "$SHARDS" "$SEALED_BUILD_MANIFEST" \
-  "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
+  "$SEALED_BUILD_RECEIPT" "$EXECUTION_CLOSURE_MANIFEST" <<'PY'
 import hashlib
 import json
 import os
@@ -290,7 +303,8 @@ from pathlib import Path
 (
     raw_out, raw_provenance, raw_root, raw_corpus, raw_full_manifest,
     raw_official_manifest, raw_viper, build_features, raw_feature_report, job_id,
-    submit_directory, shards, raw_sealed_build, raw_execution_closure,
+    submit_directory, shards, raw_sealed_build, raw_sealed_receipt,
+    raw_execution_closure,
 ) = sys.argv[1:]
 out = Path(raw_out)
 root = Path(raw_root).resolve(strict=True)
@@ -328,6 +342,7 @@ for name in (
 solver_config = json.loads((root / "solver-config.json").read_text(encoding="utf-8"))
 sealed_build_path = Path(raw_sealed_build).resolve(strict=True)
 sealed_build = json.loads(sealed_build_path.read_text(encoding="utf-8"))
+sealed_receipt_path = Path(raw_sealed_receipt).resolve(strict=True)
 execution_closure_path = Path(raw_execution_closure).resolve(strict=True)
 payload = {
     "schema": "euf-viper.locked-p0-preparation.v3",
@@ -366,6 +381,8 @@ payload = {
         "sha256": digest(sealed_build_path),
         "source_snapshot_manifest_sha256": sealed_build["source_snapshot_manifest_sha256"],
         "build_execution_closure_sha256": sealed_build["build_execution_closure_sha256"],
+        "receipt_path": str(sealed_receipt_path),
+        "receipt_sha256": digest(sealed_receipt_path),
     },
     "execution_closure": {
         "path": str(execution_closure_path),

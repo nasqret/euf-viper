@@ -7,7 +7,11 @@ available only through the explicit `production-evidence` Cargo feature and is
 not enabled by the default Cargo features or by the existing `certificates`
 feature. With `--evidence-out` absent, the ordinary parser, solver configuration,
 routes, result, and output contract remain unchanged. This is checked by
-independently checking out and building `f8d9205` with the pinned toolchain,
+independently checking out and building
+`f8d9205e8a18e3496d236fb9b94ed181add93e80` with the pinned toolchain and an
+allowlisted environment. The supplied absolute `RUSTC` is forced, ambient
+wrappers, flags, Cargo configuration, home, and cache controls are removed, and
+the effective compiler bytes plus verbose invocations are recorded and checked,
 then comparing byte-exact stdout, stderr, and exit status for no arguments,
 help, unknown and
 extra legacy arguments, file and stdin parsing, successful solves, parse errors,
@@ -44,10 +48,11 @@ after the read. Checkers apply the same rule to source and sidecar bytes.
 For SAT, the sidecar binds:
 
 - source bytes and SHA-256;
-- compile-time Git revision and dirty state;
-- the trusted executable SHA-256 and a build hash over the feature set, target,
-  profile, Rust and Cargo toolchains, selected source manifest, sealed full
-  source snapshot manifest, and build execution closure;
+- source revision, tree, and clean snapshot state from an externally captured
+  sealed-build receipt;
+- the trusted running-executable SHA-256 and byte count, plus the receipt digest
+  binding the complete binary set, feature set, target, release profile, Rust
+  and Cargo toolchains, sealed source snapshot, and build execution closure;
 - a caller-generated 256-bit run nonce;
 - selected backend and every result-affecting `EUF_VIPER_*` runtime setting;
 - resolved root-CNF and evidence-mode options plus a canonical configuration
@@ -73,7 +78,13 @@ It also verifies typed classes, Boolean values, ground function consistency,
 every source assertion, and the exact status/backend-status pairs `sat/sat`,
 `unsupported/sat`, `unsupported/unsupported`, and `unsupported/unsat`.
 
-Decisive evidence is rejected unless it came from the sealed Linux builder. An
+Decisive evidence is rejected unless it carries an externally captured,
+digest-bound `euf-viper.sealed-build-receipt.v2`. Values embedded by `build.rs`
+are diagnostics only: revision, dirty, manifest, and closure environment strings
+cannot authorize evidence. The emitter compares diagnostic feature, target, and
+profile markers with the receipt to detect a mixed build, but authority comes
+from the external receipt, its caller-supplied digest, and the receipt's binding
+to the actual running executable bytes. An
 ordinary Cargo build, including a Linux build with the feature enabled, can run
 off-mode and fail-closed tests but cannot emit evidence. A decisive
 check also requires an independently trusted executable SHA-256; the value
@@ -84,10 +95,10 @@ evidence or a result:
 ```bash
 TOOLCHAIN=1.96.0
 ATTEMPT="/tmp/euf-viper-sealed-$UID"
-install -d -m 0700 "$ATTEMPT" "$ATTEMPT/home"
+install -d -m 0700 "$ATTEMPT" "$ATTEMPT/home" "$ATTEMPT/publish"
 python3 -B scripts/wmi/sealed_linux_build.py build \
   --repository . --revision "$(git rev-parse HEAD)" \
-  --artifact-dir target/sealed-release \
+  --artifact-dir "$ATTEMPT/publish/release" \
   --staging-root "$ATTEMPT/sealed-staging" \
   --cargo-home "$HOME/.cargo" --rustup-home "$HOME/.rustup" \
   --home "$ATTEMPT/home" \
@@ -96,15 +107,20 @@ python3 -B scripts/wmi/sealed_linux_build.py build \
   --rustc "$(rustup which --toolchain "$TOOLCHAIN" rustc)" \
   --unshare "$(command -v unshare)" --ldd "$(command -v ldd)" \
   --cc "$(command -v cc)" --cxx "$(command -v c++)" \
-  --ar "$(command -v ar)" --ranlib "$(command -v ranlib)"
+  --ar "$(command -v ar)" --ranlib "$(command -v ranlib)" \
+  --strace "$(command -v strace)"
 export EUF_VIPER_RUN_NONCE="$(openssl rand -hex 32)"
 export EUF_VIPER_TRUSTED_EXECUTABLE_SHA256="$(sha256sum \
-  target/sealed-release/euf-viper | awk '{print $1}')"
-target/sealed-release/euf-viper solve input.smt2 \
+  "$ATTEMPT/publish/release/euf-viper" | awk '{print $1}')"
+export EUF_VIPER_SEALED_BUILD_RECEIPT="$ATTEMPT/publish/release/sealed-build-receipt.json"
+export EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256="$(sha256sum \
+  "$EUF_VIPER_SEALED_BUILD_RECEIPT" | awk '{print $1}')"
+"$ATTEMPT/publish/release/euf-viper" solve input.smt2 \
   --evidence-out results/input.production-evidence.json
 python3 scripts/cert/check_production_evidence.py \
   results/input.production-evidence.json --source input.smt2 --status sat \
-  --executable-sha256 "$EUF_VIPER_TRUSTED_EXECUTABLE_SHA256"
+  --executable-sha256 "$EUF_VIPER_TRUSTED_EXECUTABLE_SHA256" \
+  --sealed-build-receipt-sha256 "$EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
 ```
 
 The builder requires Linux `/proc/self/fd`, sealed `memfd_create`, a working
@@ -112,12 +128,19 @@ unprivileged user and mount namespace, private mount propagation, tmpfs, and a
 read-only recursive bind remount. It disables same-UID process inspection,
 extracts the exact Git archive plus the `cargo vendor --locked` registry into
 an attempt-private tmpfs, copies and inventories the pinned Rust sysroot,
-verifies every source byte and mode, and remounts all inputs read-only before
-Cargo or a native compiler runs. Rust/Cargo, compiler/linker/archive tools,
-dynamic loaders, shared libraries, and the full vendored registry are hashed.
-External native tool paths whose file or parent directory is writable by the
-build UID are rejected. Failure of any namespace, seal, mount, read-only, or
-path-stability primitive aborts the build; there is no pathname-only fallback.
+verifies copy consistency, and remounts source/toolchain inputs read-only. A
+discovery build under `strace` records successful file accesses and directory
+lookups, including compiler specs, start objects, archives, linker scripts,
+headers, plugins, and build-script tools. Every external regular input and the
+running Python interpreter, imported module, and mapped-library set is copied to
+a sealed memfd and bind-mounted read-only. Every external directory lookup must
+be non-replaceable and is remounted read-only. A fresh target and Cargo home then
+perform the production build under a second trace. Any undiscovered file or
+directory access, copy drift, Python drift, or post-build digest drift aborts.
+The two executables, manifest, and external receipt are assembled in an
+attempt-private directory and exposed only by one
+`renameat2(RENAME_NOREPLACE)` directory publication; every failure rolls back
+the full set. There is no pathname-only or partial-publication fallback.
 
 ## Locked campaigns
 
@@ -210,13 +233,23 @@ fatal.
 On Linux, the timed solver, SMT source, certificate solver, Python interpreter,
 checker source, independent parser, generated certificate manifest, and
 generated DIMACS/proof pair, and optional `drat-trim` executable are opened and
-hash-checked once, then executed or read through inherited `/proc/self/fd`
+hash-checked once, copied to write-sealed memfds, then executed or read through
+inherited `/proc/self/fd`
 descriptors. The checker preserves the bound DIMACS, proof, and `drat-trim`
 descriptors when spawning `drat-trim`. Production execution fails closed on
-platforms without this primitive. Preparation separately inventories and
-rehashes every runtime executable, its loader and shared-library closure, the
-checker sources, the sealed build manifest, and Z3's exact `libz3`; sealed
-artifact hashes must match the prepared solver and feature-report bindings.
+platforms without this primitive. Preparation separately inventories every
+runtime executable, the exact `ldd` resolver and script interpreter, shared
+libraries, checker sources, both sealed-build records, and Z3's exact `libz3`.
+It probes all campaign Python entrypoints under the bound interpreter with
+`-B -I -S`, recording imported source, bytecode, extension, and stdlib bytes.
+Every shard and audit reruns actual loader resolution and the Python import probe
+before work; path, output, module, or byte drift fails closed.
+
+The GitHub-hosted workflow is diagnostic, not attesting. Actions are pinned to
+full commits, Python is pinned to a patch release, and the workflow records its
+advertised image fields, OS release, kernel, Python bytes, and Rust versions.
+Those fields do not establish an immutable hosted-runner identity, so hosted CI
+cannot authorize production evidence or WMI submission.
 
 `scripts/cert/recover_hash_journal.py SOURCE OUTPUT` performs that separate
 forensic recovery. It verifies every complete canonical hash frame and appends a

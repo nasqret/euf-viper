@@ -394,9 +394,13 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             PROVENANCE.canonical_bytes(source_snapshot)
         ).hexdigest()
         build_closure = {
-            "schema": "euf-viper.build-execution-closure.v1",
-            "native": [],
+            "access_discovery": {"sha256": "6" * 64, "virtual_paths": []},
+            "external_directories": [],
+            "external_inputs": [],
+            "policy": "two-pass-strace-sealed-memfd-v1",
+            "python_runtime": {"files": [], "frozen_or_builtin_modules": []},
             "rust_toolchain": [],
+            "schema": "euf-viper.build-execution-closure.v2",
         }
         build_closure_sha256 = hashlib.sha256(
             PROVENANCE.canonical_bytes(build_closure)
@@ -411,7 +415,7 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         sealed_manifest.write_bytes(
             PROVENANCE.canonical_bytes(
                 {
-                    "schema": "euf-viper.sealed-linux-build.v1",
+                    "schema": "euf-viper.sealed-linux-build.v2",
                     "status": "built",
                     "artifacts": {
                         "euf-viper": sealed_artifact,
@@ -426,7 +430,60 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                     "source_snapshot": source_snapshot,
                     "source_snapshot_manifest_sha256": source_snapshot_sha256,
                     "build_execution_closure_sha256": build_closure_sha256,
+                    "build_execution_verification": {
+                        "actual_trace_sha256": "7" * 64,
+                        "external_directory_count": 0,
+                        "external_input_count": 0,
+                        "status": "accepted",
+                        "unexpected_external_inputs": [],
+                        "virtual_paths": [],
+                    },
                     "toolchain": {"cargo": "cargo fixture", "rustc": "rustc fixture"},
+                }
+            )
+        )
+        sealed_receipt = run_root / "sealed-build-receipt.json"
+        sealed_receipt.write_bytes(
+            PROVENANCE.canonical_bytes(
+                {
+                    "artifacts": {
+                        "euf-viper": {
+                            "bytes": closure_member["bytes"],
+                            "mode": "0500",
+                            "sha256": closure_member["sha256"],
+                        },
+                        "euf-viper-build-features": {
+                            "bytes": closure_member["bytes"],
+                            "mode": "0500",
+                            "sha256": closure_member["sha256"],
+                        },
+                    },
+                    "build": {
+                        "execution_closure_sha256": build_closure_sha256,
+                        "features": [
+                            "certificates",
+                            "default",
+                            "finite-symmetry",
+                            "production-evidence",
+                        ],
+                        "profile": "release",
+                        "target": "x86_64-unknown-linux-gnu",
+                        "toolchain": {
+                            "cargo": "cargo fixture",
+                            "rustc": "rustc fixture",
+                        },
+                    },
+                    "schema": "euf-viper.sealed-build-receipt.v2",
+                    "sealed_build_manifest_sha256": hashlib.sha256(
+                        sealed_manifest.read_bytes()
+                    ).hexdigest(),
+                    "source": {
+                        "dirty": False,
+                        "revision": provenance["revision"],
+                        "snapshot_manifest_sha256": source_snapshot_sha256,
+                        "tree": provenance["source_tree"],
+                    },
+                    "status": "accepted",
                 }
             )
         )
@@ -453,20 +510,41 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
             }
 
         execution_closure = run_root / "execution-closure.json"
+        python_probe = {
+            "builtin_or_frozen_modules": [],
+            "files": [],
+            "implementation": "cpython",
+            "modules": [],
+            "scripts": {
+                "fixture": {
+                    "bytes": closure_member["bytes"],
+                    "category": "python_script",
+                    "name": "fixture",
+                    "path": closure_member["realpath"],
+                    "sha256": closure_member["sha256"],
+                }
+            },
+            "version": "fixture",
+        }
         execution_closure.write_bytes(
             PROVENANCE.canonical_bytes(
                 {
-                    "schema": "euf-viper.linux-execution-closure.v1",
+                    "schema": "euf-viper.linux-execution-closure.v2",
                     "artifacts": {
                         name: closure_artifact(
                             name,
-                            sealed_manifest if name == "sealed-build" else fake_tool,
+                            sealed_manifest
+                            if name == "sealed-build"
+                            else sealed_receipt
+                            if name == "sealed-build-receipt"
+                            else fake_tool,
                         )
                         for name in (
                             "checker",
                             "independent-parser",
                             "libz3",
                             "sealed-build",
+                            "sealed-build-receipt",
                         )
                     },
                     "executables": {
@@ -489,6 +567,25 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                             "sha256": closure_member["sha256"],
                         }
                     ],
+                    "python_runtime": {
+                        "executable_name": "python",
+                        "probe": python_probe,
+                        "probe_sha256": hashlib.sha256(
+                            PROVENANCE.canonical_bytes(python_probe)
+                        ).hexdigest(),
+                    },
+                    "resolver": {
+                        "interpreter": None,
+                        "interpreter_dynamic_dependencies": [],
+                        "interpreter_ldd_sha256": None,
+                        "program": {
+                            "bytes": closure_member["bytes"],
+                            "category": "loader_resolver",
+                            "name": "ldd",
+                            "path": closure_member["realpath"],
+                            "sha256": closure_member["sha256"],
+                        },
+                    },
                     "virtual_libraries": [],
                 }
             )
@@ -522,6 +619,10 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
                 "sha256": hashlib.sha256(sealed_manifest.read_bytes()).hexdigest(),
                 "source_snapshot_manifest_sha256": source_snapshot_sha256,
                 "build_execution_closure_sha256": build_closure_sha256,
+                "receipt_path": str(sealed_receipt),
+                "receipt_sha256": hashlib.sha256(
+                    sealed_receipt.read_bytes()
+                ).hexdigest(),
             },
             "execution_closure": {
                 "path": str(execution_closure),
@@ -559,6 +660,28 @@ class WmiHermeticProvenanceTests(unittest.TestCase):
         receipt_args.expected_sha256 = receipt_sha256
         accepted = PROVENANCE.verify_preparation_receipt(receipt_args)
         self.assertEqual(accepted["status"], "accepted")
+
+        original_sealed_receipt = sealed_receipt.read_bytes()
+        forged_sealed_receipt = json.loads(original_sealed_receipt)
+        forged_sealed_receipt["build"]["toolchain"]["cargo"] = "forged cargo"
+        sealed_receipt.write_bytes(
+            PROVENANCE.canonical_bytes(forged_sealed_receipt)
+        )
+        payload["sealed_build"]["receipt_sha256"] = hashlib.sha256(
+            sealed_receipt.read_bytes()
+        ).hexdigest()
+        receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
+        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        with self.assertRaisesRegex(
+            PROVENANCE.ProvenanceError, "receipt binding mismatch"
+        ):
+            PROVENANCE.verify_preparation_receipt(receipt_args)
+        sealed_receipt.write_bytes(original_sealed_receipt)
+        payload["sealed_build"]["receipt_sha256"] = hashlib.sha256(
+            original_sealed_receipt
+        ).hexdigest()
+        receipt.write_bytes(PROVENANCE.canonical_bytes(payload))
+        receipt_args.expected_sha256 = hashlib.sha256(receipt.read_bytes()).hexdigest()
 
         original_artifact = run_root / "taxonomy/full.jsonl"
         original_artifact.write_text("tampered\n", encoding="ascii")

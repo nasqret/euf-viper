@@ -65,6 +65,65 @@ DYNAMIC_SAT_SOURCE = (ROOT / "tests" / "fixtures" / "production_dynamic_sat.smt2
 TEMPORARY_DIRECTORY = "/private/tmp" if sys.platform == "darwin" else None
 
 
+class SealedReceiptCheckerSchemaTests(unittest.TestCase):
+    def test_checker_rejects_a_forged_toolchain_key(self) -> None:
+        executable_sha256 = "4" * 64
+        revision = "5" * 40
+        receipt = {
+            "artifacts": {
+                "euf-viper": {
+                    "bytes": 1,
+                    "mode": "0500",
+                    "sha256": executable_sha256,
+                },
+                "euf-viper-build-features": {
+                    "bytes": 1,
+                    "mode": "0500",
+                    "sha256": "6" * 64,
+                },
+            },
+            "build": {
+                "execution_closure_sha256": "2" * 64,
+                "features": ["production-evidence"],
+                "profile": "release",
+                "target": "x86_64-unknown-linux-gnu",
+                "toolchain": {"compiler": "forged"},
+            },
+            "schema": "euf-viper.sealed-build-receipt.v2",
+            "sealed_build_manifest_sha256": "3" * 64,
+            "source": {
+                "dirty": False,
+                "revision": revision,
+                "snapshot_manifest_sha256": "1" * 64,
+                "tree": "7" * 40,
+            },
+            "status": "accepted",
+        }
+        receipt_sha256 = hashlib.sha256(
+            CHECKER.canonical_bytes(receipt)
+        ).hexdigest()
+        with self.assertRaisesRegex(
+            CHECKER.ProductionEvidenceError, "toolchain is incomplete"
+        ):
+            CHECKER._validate_sealed_build_receipt(
+                {
+                    "receipt": receipt,
+                    "receipt_sha256": receipt_sha256,
+                },
+                expected_receipt_sha256=receipt_sha256,
+                executable_sha256=executable_sha256,
+                revision=revision,
+                dirty=False,
+                diagnostic_build={
+                    "execution_closure_sha256": "2" * 64,
+                    "features": ["production-evidence"],
+                    "profile": "release",
+                    "sealed_source_manifest_sha256": "1" * 64,
+                    "target": "x86_64-unknown-linux-gnu",
+                },
+            )
+
+
 @unittest.skipUnless(sys.platform.startswith("linux"), "sealed evidence runtime is Linux-only")
 class ProductionEvidenceTests(unittest.TestCase):
     @classmethod
@@ -106,8 +165,10 @@ class ProductionEvidenceTests(unittest.TestCase):
         completed = subprocess.run(
             [
                 "cargo",
+                "+1.96.0",
                 "build",
                 "--quiet",
+                "--release",
                 "--no-default-features",
                 "--features",
                 "production-evidence",
@@ -118,7 +179,7 @@ class ProductionEvidenceTests(unittest.TestCase):
             check=False,
             env={
                 **os.environ,
-                "CARGO_TARGET_DIR": str(ROOT / "target"),
+                "CARGO_TARGET_DIR": str(Path(cls.clean_build.name) / "target"),
                 "EUF_VIPER_BUILD_CONTEXT": "clean-production-evidence-test",
                 "EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256": "2" * 64,
                 "EUF_VIPER_SEALED_GIT_REVISION": subprocess.run(
@@ -140,9 +201,91 @@ class ProductionEvidenceTests(unittest.TestCase):
         )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr)
-        cls.binary = ROOT / "target" / "debug" / "euf-viper"
-        cls.feature_report = ROOT / "target" / "debug" / "euf-viper-build-features"
+        cls.binary = Path(cls.clean_build.name) / "target" / "release" / "euf-viper"
+        cls.feature_report = (
+            Path(cls.clean_build.name)
+            / "target"
+            / "release"
+            / "euf-viper-build-features"
+        )
+        cls.binary.chmod(0o500)
+        cls.feature_report.chmod(0o500)
         cls.binary_sha256 = hashlib.sha256(cls.binary.read_bytes()).hexdigest()
+        cls.feature_report_sha256 = hashlib.sha256(
+            cls.feature_report.read_bytes()
+        ).hexdigest()
+        features = subprocess.run(
+            [str(cls.feature_report)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip().split(",")
+        rustc = subprocess.run(
+            ["rustc", "+1.96.0", "-Vv"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        cargo = subprocess.run(
+            ["cargo", "+1.96.0", "-V"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        target = next(
+            line.partition(":")[2].strip()
+            for line in rustc.splitlines()
+            if line.startswith("host:")
+        )
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cls.clean_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        tree = subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"],
+            cwd=cls.clean_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        receipt = {
+            "artifacts": {
+                "euf-viper": {
+                    "bytes": cls.binary.stat().st_size,
+                    "mode": "0500",
+                    "sha256": cls.binary_sha256,
+                },
+                "euf-viper-build-features": {
+                    "bytes": cls.feature_report.stat().st_size,
+                    "mode": "0500",
+                    "sha256": cls.feature_report_sha256,
+                },
+            },
+            "build": {
+                "execution_closure_sha256": "2" * 64,
+                "features": features,
+                "profile": "release",
+                "target": target,
+                "toolchain": {"cargo": cargo, "rustc": rustc},
+            },
+            "schema": "euf-viper.sealed-build-receipt.v2",
+            "sealed_build_manifest_sha256": "3" * 64,
+            "source": {
+                "dirty": False,
+                "revision": revision,
+                "snapshot_manifest_sha256": "1" * 64,
+                "tree": tree,
+            },
+            "status": "accepted",
+        }
+        cls.sealed_receipt = Path(cls.clean_build.name) / "sealed-build-receipt.json"
+        cls.sealed_receipt.write_bytes(CHECKER.canonical_bytes(receipt))
+        cls.sealed_receipt_sha256 = hashlib.sha256(
+            cls.sealed_receipt.read_bytes()
+        ).hexdigest()
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -171,6 +314,8 @@ class ProductionEvidenceTests(unittest.TestCase):
             **os.environ,
             "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
             "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+            "EUF_VIPER_SEALED_BUILD_RECEIPT": str(self.sealed_receipt),
+            "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": self.sealed_receipt_sha256,
             **(environment or {}),
         }
         completed = subprocess.run(
@@ -212,6 +357,8 @@ class ProductionEvidenceTests(unittest.TestCase):
                 str(self.binary),
                 "--viper-feature-report",
                 str(self.feature_report),
+                "--viper-sealed-build-receipt",
+                str(self.sealed_receipt),
                 "--viper-version",
                 "clean-production-evidence-test",
                 "--z3",
@@ -249,9 +396,58 @@ class ProductionEvidenceTests(unittest.TestCase):
             evidence,
             source,
             expected_executable_sha256=self.binary_sha256,
+            expected_sealed_build_receipt_sha256=self.sealed_receipt_sha256,
             allow_dirty=True,
             **kwargs,
         )
+
+    def test_build_environment_strings_alone_cannot_authorize_evidence(self) -> None:
+        source = self.root / "forged-markers.smt2"
+        evidence = self.root / "forged-markers.evidence.json"
+        source.write_text(SAT_SOURCE, encoding="utf-8")
+        environment = {
+            **os.environ,
+            "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
+            "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+        }
+        completed = subprocess.run(
+            [
+                str(self.binary),
+                "solve",
+                str(source),
+                "--evidence-out",
+                str(evidence),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(completed.stdout, "")
+        self.assertFalse(evidence.exists())
+        self.assertIn("EUF_VIPER_SEALED_BUILD_RECEIPT", completed.stderr)
+
+    def test_sealed_receipt_requires_the_exact_toolchain_set(self) -> None:
+        receipt = json.loads(self.sealed_receipt.read_text(encoding="utf-8"))
+        receipt["build"]["toolchain"] = {"compiler": "forged"}
+        forged_receipt = self.root / "forged-toolchain-receipt.json"
+        forged_receipt.write_bytes(CHECKER.canonical_bytes(receipt))
+        completed, _, evidence = self.solve(
+            SAT_SOURCE,
+            "forged-toolchain",
+            environment={
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(forged_receipt),
+                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": hashlib.sha256(
+                    forged_receipt.read_bytes()
+                ).hexdigest(),
+            },
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(completed.stdout, "")
+        self.assertFalse(evidence.exists())
+        self.assertIn("incomplete toolchain binding", completed.stderr)
 
     @staticmethod
     def rewrite(evidence: Path, payload: dict[str, object]) -> None:

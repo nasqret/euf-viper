@@ -226,6 +226,7 @@ PRODUCTION_EVIDENCE_KEYS = {
     "solver_config_sha256",
     "solver_runtime_config_sha256",
     "solver_build_sha256",
+    "sealed_build_receipt_sha256",
     "run_nonce",
     "status",
     "backend_status",
@@ -1904,6 +1905,7 @@ def _expected_runtime_config(environment: Mapping[str, str]) -> dict[str, str]:
     controls = {
         "EUF_VIPER_RUN_NONCE",
         "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256",
+        "EUF_VIPER_SEALED_BUILD_RECEIPT",
     }
     config = {
         key: value
@@ -1982,6 +1984,10 @@ def _validate_locked_production_evidence(
     if binding["solver_executable_sha256"] != solver["sha256"]:
         raise CampaignInputError([f"{context}: evidence executable hash differs from lock"])
     _require_hash_value(binding["solver_build_sha256"], f"{context}.solver_build_sha256")
+    _require_hash_value(
+        binding["sealed_build_receipt_sha256"],
+        f"{context}.sealed_build_receipt_sha256",
+    )
     _require_hash_value(binding["run_nonce"], f"{context}.run_nonce")
     if (binding["status"], binding["backend_status"]) not in {
         ("sat", "sat"),
@@ -2027,6 +2033,9 @@ def _validate_locked_production_evidence(
         "solver_executable_sha256": binding["solver_executable_sha256"],
         "solver_config_sha256": binding["solver_runtime_config_sha256"],
         "solver_build_sha256": binding["solver_build_sha256"],
+        "sealed_build_receipt_sha256": binding[
+            "sealed_build_receipt_sha256"
+        ],
     }
     for field, expected_value in checked_bindings.items():
         if checked.get(field) != expected_value:

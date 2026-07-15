@@ -162,6 +162,7 @@ env -i HOME="$ORIGINAL_HOME" LANG=C LC_ALL=C PATH="$BOOTSTRAP_PATH" \
   --tool "unshare=$(tool unshare)" \
   --tool "sbatch=$SBATCH_BIN" \
   --tool "sha256sum=$(tool sha256sum)" \
+  --tool "strace=$(tool strace)" \
   --tool "tar=$(tool tar)" \
   --tool "unzip=$(tool unzip)" \
   --execution-env "CARGO_HOME=$CARGO_HOME" \

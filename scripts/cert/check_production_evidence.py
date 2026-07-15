@@ -44,6 +44,8 @@ from strict_artifacts import (  # noqa: E402
 
 SCHEMA: Final = "euf-viper.production-evidence.v4"
 CONTRACT: Final = "deterministic-cnf-transcript-v1"
+SEALED_BUILD_RECEIPT_SCHEMA: Final = "euf-viper.sealed-build-receipt.v2"
+SEALED_BUILD_RECEIPT_SHA256_ENV: Final = "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256"
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 INDEPENDENT_INTERNAL = re.compile(r"@independent_(.+)_[0-9]+\Z")
 
@@ -788,6 +790,135 @@ def _validate_build(value: object, expected_hash: object) -> str:
     return actual
 
 
+def _validate_sealed_build_receipt(
+    value: object,
+    *,
+    expected_receipt_sha256: str | None,
+    executable_sha256: str,
+    revision: str,
+    dirty: bool,
+    diagnostic_build: Mapping[str, Any],
+) -> str:
+    binding = _exact(value, {"receipt", "receipt_sha256"}, "solver.sealed_build")
+    receipt = _exact(
+        binding["receipt"],
+        {
+            "artifacts",
+            "build",
+            "schema",
+            "sealed_build_manifest_sha256",
+            "source",
+            "status",
+        },
+        "solver.sealed_build.receipt",
+    )
+    actual_receipt_sha256 = hashlib.sha256(canonical_bytes(receipt)).hexdigest()
+    receipt_sha256 = _hash(
+        binding["receipt_sha256"], "solver.sealed_build.receipt_sha256"
+    )
+    if receipt_sha256 != actual_receipt_sha256:
+        raise ProductionEvidenceError("sealed build receipt SHA-256 mismatch")
+    if expected_receipt_sha256 is None:
+        raise ProductionEvidenceError(
+            "externally bound sealed build receipt SHA-256 is required"
+        )
+    if _hash(expected_receipt_sha256, "expected sealed build receipt SHA-256") != receipt_sha256:
+        raise ProductionEvidenceError("external sealed build receipt binding differs")
+    if (
+        receipt["schema"] != SEALED_BUILD_RECEIPT_SCHEMA
+        or receipt["status"] != "accepted"
+    ):
+        raise ProductionEvidenceError("sealed build receipt schema/status differs")
+
+    source = _exact(
+        receipt["source"],
+        {"dirty", "revision", "snapshot_manifest_sha256", "tree"},
+        "solver.sealed_build.receipt.source",
+    )
+    if type(source["dirty"]) is not bool or source["dirty"]:
+        raise ProductionEvidenceError("sealed build receipt source must be clean")
+    if source["revision"] != revision or source["dirty"] != dirty:
+        raise ProductionEvidenceError("sealed build receipt source identity differs")
+    if not isinstance(source["revision"], str) or not re.fullmatch(
+        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source["revision"]
+    ):
+        raise ProductionEvidenceError("sealed build receipt revision is malformed")
+    if not isinstance(source["tree"], str) or not re.fullmatch(
+        r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source["tree"]
+    ):
+        raise ProductionEvidenceError("sealed build receipt tree is malformed")
+    _hash(
+        source["snapshot_manifest_sha256"],
+        "solver.sealed_build.receipt.source.snapshot_manifest_sha256",
+    )
+    _hash(
+        receipt["sealed_build_manifest_sha256"],
+        "solver.sealed_build.receipt.sealed_build_manifest_sha256",
+    )
+
+    build = _exact(
+        receipt["build"],
+        {"execution_closure_sha256", "features", "profile", "target", "toolchain"},
+        "solver.sealed_build.receipt.build",
+    )
+    features = build["features"]
+    if (
+        type(features) is not list
+        or features != sorted(set(features))
+        or any(type(feature) is not str or not feature for feature in features)
+        or "production-evidence" not in features
+    ):
+        raise ProductionEvidenceError("sealed build receipt features are invalid")
+    if build["profile"] != "release" or "linux" not in _string(
+        build["target"], "solver.sealed_build.receipt.build.target"
+    ):
+        raise ProductionEvidenceError("sealed build receipt is not a Linux release")
+    toolchain = build["toolchain"]
+    if (
+        type(toolchain) is not dict
+        or set(toolchain) != {"cargo", "rustc"}
+        or any(type(key) is not str or type(item) is not str or not item for key, item in toolchain.items())
+    ):
+        raise ProductionEvidenceError("sealed build receipt toolchain is incomplete")
+    _hash(
+        build["execution_closure_sha256"],
+        "solver.sealed_build.receipt.build.execution_closure_sha256",
+    )
+    if (
+        build["features"] != diagnostic_build["features"]
+        or build["target"] != diagnostic_build["target"]
+        or build["profile"] != diagnostic_build["profile"]
+        or build["execution_closure_sha256"]
+        != diagnostic_build["execution_closure_sha256"]
+        or source["snapshot_manifest_sha256"]
+        != diagnostic_build["sealed_source_manifest_sha256"]
+    ):
+        raise ProductionEvidenceError(
+            "external sealed build receipt disagrees with diagnostic build fields"
+        )
+
+    artifacts = receipt["artifacts"]
+    if type(artifacts) is not dict or set(artifacts) != {
+        "euf-viper",
+        "euf-viper-build-features",
+    }:
+        raise ProductionEvidenceError("sealed build receipt artifact set differs")
+    for name, raw_record in artifacts.items():
+        record = _exact(
+            raw_record,
+            {"bytes", "mode", "sha256"},
+            f"solver.sealed_build.receipt.artifacts.{name}",
+        )
+        if _integer(record["bytes"], f"sealed artifact {name}.bytes") <= 0:
+            raise ProductionEvidenceError("sealed build receipt artifact is empty")
+        if record["mode"] != "0500":
+            raise ProductionEvidenceError("sealed build receipt artifact mode differs")
+        _hash(record["sha256"], f"sealed artifact {name}.sha256")
+    if artifacts["euf-viper"]["sha256"] != executable_sha256:
+        raise ProductionEvidenceError("sealed build receipt executable hash differs")
+    return receipt_sha256
+
+
 def validate_production_evidence(
     evidence_path: Path,
     source_path: Path,
@@ -799,6 +930,7 @@ def validate_production_evidence(
     expected_runtime_config: Mapping[str, str] | None = None,
     expected_evidence_sha256: str | None = None,
     expected_run_nonce: str | None = None,
+    expected_sealed_build_receipt_sha256: str | None = None,
     allow_dirty: bool = False,
 ) -> dict[str, Any]:
     evidence_path, evidence_bytes = _read_regular_nofollow(evidence_path, "evidence")
@@ -866,6 +998,7 @@ def validate_production_evidence(
             "config_sha256",
             "build",
             "build_sha256",
+            "sealed_build",
         },
         "solver",
     )
@@ -910,6 +1043,35 @@ def validate_production_evidence(
         if config.get(key) not in {"0", "1"}:
             raise ProductionEvidenceError(f"solver config has invalid {key}")
     build_hash = _validate_build(solver["build"], solver["build_sha256"])
+    runtime_receipt_sha256 = config.get(SEALED_BUILD_RECEIPT_SHA256_ENV)
+    if expected_runtime_config is not None:
+        expected_from_runtime = expected_runtime_config.get(
+            SEALED_BUILD_RECEIPT_SHA256_ENV
+        )
+        if expected_from_runtime is None:
+            raise ProductionEvidenceError(
+                "locked runtime config lacks the sealed build receipt digest"
+            )
+        if (
+            expected_sealed_build_receipt_sha256 is not None
+            and expected_sealed_build_receipt_sha256 != expected_from_runtime
+        ):
+            raise ProductionEvidenceError(
+                "sealed build receipt bindings disagree across trust boundaries"
+            )
+        expected_sealed_build_receipt_sha256 = expected_from_runtime
+    if runtime_receipt_sha256 != expected_sealed_build_receipt_sha256:
+        raise ProductionEvidenceError(
+            "solver runtime config does not bind the expected sealed build receipt"
+        )
+    sealed_build_receipt_sha256 = _validate_sealed_build_receipt(
+        solver["sealed_build"],
+        expected_receipt_sha256=expected_sealed_build_receipt_sha256,
+        executable_sha256=executable_sha256,
+        revision=revision,
+        dirty=solver["dirty"],
+        diagnostic_build=solver["build"],
+    )
 
     limitations = payload["limitations"]
     if isinstance(limitations, (str, bytes)) or not isinstance(limitations, Sequence) or any(
@@ -934,6 +1096,7 @@ def validate_production_evidence(
             "solver_executable_sha256": executable_sha256,
             "solver_config_sha256": solver["config_sha256"],
             "solver_build_sha256": build_hash,
+            "sealed_build_receipt_sha256": sealed_build_receipt_sha256,
         }
     if solver["dirty"] and not allow_dirty:
         raise ProductionEvidenceError("decisive evidence was emitted by a dirty build")
@@ -997,6 +1160,7 @@ def validate_production_evidence(
         "solver_executable_sha256": executable_sha256,
         "solver_config_sha256": solver["config_sha256"],
         "solver_build_sha256": build_hash,
+        "sealed_build_receipt_sha256": sealed_build_receipt_sha256,
         "terms": len(terms),
         "atoms": len(model["atoms"]),
         "assignment_variables": var_count,
@@ -1015,6 +1179,7 @@ def main() -> int:
     parser.add_argument("--executable-sha256")
     parser.add_argument("--evidence-sha256")
     parser.add_argument("--run-nonce")
+    parser.add_argument("--sealed-build-receipt-sha256")
     parser.add_argument("--allow-dirty", action="store_true")
     args = parser.parse_args()
     try:
@@ -1027,6 +1192,7 @@ def main() -> int:
             expected_executable_sha256=args.executable_sha256,
             expected_evidence_sha256=args.evidence_sha256,
             expected_run_nonce=args.run_nonce,
+            expected_sealed_build_receipt_sha256=args.sealed_build_receipt_sha256,
             allow_dirty=args.allow_dirty,
         )
     except (OSError, ProductionEvidenceError) as error:

@@ -1,3 +1,5 @@
+#[cfg(all(unix, feature = "production-evidence"))]
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 #[cfg(all(unix, feature = "production-evidence"))]
@@ -34,6 +36,15 @@ fn temporary_directory(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!("euf-viper-{label}-{}-{nonce}", std::process::id()));
     std::fs::create_dir(&path).expect("temporary test directory should be creatable");
     path
+}
+
+#[cfg(all(unix, feature = "production-evidence"))]
+fn sha256(path: &Path) -> String {
+    let bytes = std::fs::read(path).expect("bound artifact should be readable");
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[test]
@@ -126,7 +137,7 @@ fn evidence_mode_fails_closed_for_an_ordinary_unsealed_cargo_build() {
     ]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("sealed Linux build"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("EUF_VIPER_SEALED_BUILD_RECEIPT"));
     assert!(!output_path.exists());
 }
 
@@ -150,6 +161,62 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
     std::fs::set_permissions(&comparator, permissions)
         .expect("fake comparator should be executable");
     let output_path = root.join("solver-config.json");
+    let receipt_path = root.join("sealed-build-receipt.json");
+    let binary_path = Path::new(binary());
+    let feature_path = Path::new(feature_report_binary());
+    for path in [binary_path, feature_path] {
+        let mut permissions = path
+            .metadata()
+            .expect("sealed artifact metadata should exist")
+            .permissions();
+        permissions.set_mode(0o500);
+        std::fs::set_permissions(path, permissions)
+            .expect("sealed artifact mode should be enforceable");
+    }
+    let feature_output = Command::new(feature_report_binary())
+        .output()
+        .expect("feature report should run");
+    assert!(feature_output.status.success());
+    let features = String::from_utf8(feature_output.stdout)
+        .expect("feature report should be UTF-8")
+        .trim()
+        .split(',')
+        .filter(|feature| !feature.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let receipt = serde_json::json!({
+        "artifacts": {
+            "euf-viper": {
+                "bytes": binary_path.metadata().expect("binary metadata").len(),
+                "mode": "0500",
+                "sha256": sha256(binary_path),
+            },
+            "euf-viper-build-features": {
+                "bytes": feature_path.metadata().expect("feature metadata").len(),
+                "mode": "0500",
+                "sha256": sha256(feature_path),
+            },
+        },
+        "build": {
+            "execution_closure_sha256": "2".repeat(64),
+            "features": features,
+            "profile": "release",
+            "target": "x86_64-unknown-linux-gnu",
+            "toolchain": {"cargo": "test", "rustc": "test"},
+        },
+        "schema": "euf-viper.sealed-build-receipt.v2",
+        "sealed_build_manifest_sha256": "3".repeat(64),
+        "source": {
+            "dirty": false,
+            "revision": "4".repeat(40),
+            "snapshot_manifest_sha256": "1".repeat(64),
+            "tree": "5".repeat(40),
+        },
+        "status": "accepted",
+    });
+    let mut receipt_bytes = serde_json::to_vec(&receipt).expect("receipt serialization");
+    receipt_bytes.push(b'\n');
+    std::fs::write(&receipt_path, receipt_bytes).expect("receipt should be writable");
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let completed = Command::new("python3")
         .arg(repository.join("scripts/bench/record_solver_config.py"))
@@ -158,6 +225,8 @@ fn recorder_checks_the_real_compiled_viper_feature_contract() {
         .args(["--viper", binary(), "--viper-version", "real-test-build"])
         .arg("--viper-feature-report")
         .arg(feature_report_binary())
+        .arg("--viper-sealed-build-receipt")
+        .arg(&receipt_path)
         .arg("--z3")
         .arg(&comparator)
         .arg("--cvc5")

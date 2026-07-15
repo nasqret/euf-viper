@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "campaign-contract.yml"
 SMOKE = ROOT / "scripts" / "ci" / "release_evidence_smoke.py"
 CLI_CONTRACT = ROOT / "scripts" / "ci" / "check_ordinary_cli_contract.py"
+CLI_BASELINE = ROOT / "scripts" / "ci" / "build_cli_baseline.py"
+CLI_CONTRACT_SPEC = importlib.util.spec_from_file_location(
+    "check_ordinary_cli_contract_test", CLI_CONTRACT
+)
+assert CLI_CONTRACT_SPEC is not None and CLI_CONTRACT_SPEC.loader is not None
+CLI_CONTRACT_MODULE = importlib.util.module_from_spec(CLI_CONTRACT_SPEC)
+CLI_CONTRACT_SPEC.loader.exec_module(CLI_CONTRACT_MODULE)
 
 
 class ReleaseEvidenceWorkflowTests(unittest.TestCase):
@@ -57,7 +65,9 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertIn("f8d9205", text)
         self.assertIn("--baseline-binary", text)
         self.assertIn("--baseline-receipt", text)
-        self.assertIn("cli-baseline-build.v1", text)
+        self.assertIn("cli-baseline-build.v2", text)
+        self.assertIn("f8d9205e8a18e3496d236fb9b94ed181add93e80", text)
+        self.assertIn("effective_compiler", text)
         self.assertIn("completed.stdout", text)
         self.assertIn("completed.stderr", text)
         self.assertNotIn("BASE_USAGE", text)
@@ -70,6 +80,52 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "missing file",
         ):
             self.assertIn(case, text)
+
+    def test_hosted_dependencies_are_pinned_and_non_attesting(self) -> None:
+        text = WORKFLOW.read_text(encoding="ascii")
+        self.assertIn(
+            "actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8",
+            text,
+        )
+        self.assertIn(
+            "actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c",
+            text,
+        )
+        self.assertIn('python-version: "3.12.11"', text)
+        self.assertIn("diagnostic", text)
+        self.assertIn("not production attestation", text)
+        self.assertNotIn("ubuntu-latest", text)
+
+    def test_cli_baseline_forces_effective_compiler_and_sanitizes_ambient_controls(self) -> None:
+        text = CLI_BASELINE.read_text(encoding="ascii")
+        self.assertIn(
+            'REVISION = "f8d9205e8a18e3496d236fb9b94ed181add93e80"',
+            text,
+        )
+        self.assertIn('"RUSTC": str(rustc_path)', text)
+        self.assertIn("effective_rustc_invocations", text)
+        self.assertIn("verbose_invocations", text)
+        self.assertNotIn("**os.environ", text)
+        for control in (
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "RUSTFLAGS",
+            "CARGO_ENCODED_RUSTFLAGS",
+        ):
+            self.assertIn(control, text)
+
+    def test_cli_checker_reparses_the_bound_effective_compiler_log(self) -> None:
+        rustc = Path("/bound/toolchain/bin/rustc")
+        build_log = b"Running `/bound/toolchain/bin/rustc --crate-name baseline`\n"
+        self.assertEqual(
+            CLI_CONTRACT_MODULE.effective_rustc_invocations(build_log, rustc),
+            1,
+        )
+        with self.assertRaisesRegex(SystemExit, "other than supplied RUSTC"):
+            CLI_CONTRACT_MODULE.effective_rustc_invocations(
+                b"Running `/attacker/bin/rustc --crate-name baseline`\n",
+                rustc,
+            )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import tempfile
@@ -38,13 +39,47 @@ class RecordSolverConfigTests(unittest.TestCase):
             "esac\n",
             encoding="utf-8",
         )
-        self.binary.chmod(0o755)
+        self.binary.chmod(0o500)
         self.feature_report = self.root / "euf-viper-build-features"
         self.feature_report.write_text(
             "#!/bin/sh\necho 'certificates,production-evidence'\n",
             encoding="ascii",
         )
-        self.feature_report.chmod(0o755)
+        self.feature_report.chmod(0o500)
+        self.sealed_receipt = self.root / "sealed-build-receipt.json"
+        receipt = {
+            "artifacts": {
+                "euf-viper": {
+                    "bytes": self.binary.stat().st_size,
+                    "mode": "0500",
+                    "sha256": hashlib.sha256(self.binary.read_bytes()).hexdigest(),
+                },
+                "euf-viper-build-features": {
+                    "bytes": self.feature_report.stat().st_size,
+                    "mode": "0500",
+                    "sha256": hashlib.sha256(
+                        self.feature_report.read_bytes()
+                    ).hexdigest(),
+                },
+            },
+            "build": {
+                "execution_closure_sha256": "2" * 64,
+                "features": ["certificates", "production-evidence"],
+                "profile": "release",
+                "target": "x86_64-unknown-linux-gnu",
+                "toolchain": {"cargo": "test", "rustc": "test"},
+            },
+            "schema": "euf-viper.sealed-build-receipt.v2",
+            "sealed_build_manifest_sha256": "3" * 64,
+            "source": {
+                "dirty": False,
+                "revision": "4" * 40,
+                "snapshot_manifest_sha256": "1" * 64,
+                "tree": "5" * 40,
+            },
+            "status": "accepted",
+        }
+        self.sealed_receipt.write_bytes(RECORDER.canonical_json_bytes(receipt))
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -60,6 +95,7 @@ class RecordSolverConfigTests(unittest.TestCase):
             opensmt=self.binary,
             viper_version="test-build",
             viper_feature_report=self.feature_report,
+            viper_sealed_build_receipt=self.sealed_receipt,
         )
 
         self.assertEqual(len(records), 6)
@@ -92,6 +128,7 @@ class RecordSolverConfigTests(unittest.TestCase):
                 opensmt=self.binary,
                 viper_version="test-build",
                 viper_feature_report=self.feature_report,
+                viper_sealed_build_receipt=self.sealed_receipt,
             )
 
     def test_campaign_must_have_exact_comparator_set(self) -> None:
@@ -116,15 +153,40 @@ class RecordSolverConfigTests(unittest.TestCase):
             RECORDER.smoke_solver(record, smoke, "unsat")
 
     def test_feature_probe_rejects_a_binary_without_evidence(self) -> None:
+        self.feature_report.chmod(0o700)
         self.feature_report.write_text(
             "#!/bin/sh\necho 'certificates,finite-symmetry'\n",
             encoding="ascii",
         )
+        self.feature_report.chmod(0o500)
         with self.assertRaisesRegex(
             RECORDER.SolverConfigError,
             "lacks required locked evidence features: production-evidence",
         ):
             RECORDER.require_viper_evidence_features(self.feature_report)
+
+    def test_receipt_must_bind_the_feature_report_executable_bytes(self) -> None:
+        self.feature_report.chmod(0o700)
+        self.feature_report.write_text(
+            "#!/bin/sh\necho 'certificates,production-evidence'\n# changed\n",
+            encoding="ascii",
+        )
+        self.feature_report.chmod(0o500)
+        with self.assertRaisesRegex(
+            RECORDER.SolverConfigError,
+            "does not bind euf-viper-build-features bytes and mode",
+        ):
+            RECORDER.make_records(
+                versions=RECORDER.load_versions(CAMPAIGN),
+                viper=self.binary,
+                z3=self.binary,
+                cvc5=self.binary,
+                yices2=self.binary,
+                opensmt=self.binary,
+                viper_version="test-build",
+                viper_feature_report=self.feature_report,
+                viper_sealed_build_receipt=self.sealed_receipt,
+            )
 
     def test_configuration_publication_is_immutable_and_no_follow(self) -> None:
         existing = self.root / "existing.json"

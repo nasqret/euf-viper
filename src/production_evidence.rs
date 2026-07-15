@@ -2,17 +2,24 @@ use super::{
     BoolAtomKey, Problem, ProductionSatWitness, ProductionTranscriptEvent, RootCnfOptions,
     SolveReport, SolveResult,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
+#[cfg(target_os = "linux")]
+use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::io::Read;
 use std::path::Path;
 
 pub(crate) const SCHEMA: &str = "euf-viper.production-evidence.v4";
 
 const RUN_NONCE_ENV: &str = "EUF_VIPER_RUN_NONCE";
 const TRUSTED_EXECUTABLE_SHA256_ENV: &str = "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256";
+const SEALED_BUILD_RECEIPT_ENV: &str = "EUF_VIPER_SEALED_BUILD_RECEIPT";
+const SEALED_BUILD_RECEIPT_SHA256_ENV: &str = "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256";
+const SEALED_BUILD_RECEIPT_SCHEMA: &str = "euf-viper.sealed-build-receipt.v2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EvidenceDisposition {
@@ -30,7 +37,7 @@ struct EvidenceSource {
 #[derive(Serialize)]
 struct EvidenceSolver {
     package_version: &'static str,
-    revision: &'static str,
+    revision: String,
     dirty: bool,
     executable_sha256: String,
     backend: String,
@@ -38,6 +45,51 @@ struct EvidenceSolver {
     config_sha256: String,
     build: EvidenceBuild,
     build_sha256: String,
+    sealed_build: EvidenceSealedBuild,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SealedArtifact {
+    bytes: u64,
+    mode: String,
+    sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SealedSource {
+    dirty: bool,
+    revision: String,
+    snapshot_manifest_sha256: String,
+    tree: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SealedBuild {
+    execution_closure_sha256: String,
+    features: Vec<String>,
+    profile: String,
+    target: String,
+    toolchain: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SealedBuildReceipt {
+    artifacts: BTreeMap<String, SealedArtifact>,
+    build: SealedBuild,
+    schema: String,
+    sealed_build_manifest_sha256: String,
+    source: SealedSource,
+    status: String,
+}
+
+#[derive(Serialize)]
+struct EvidenceSealedBuild {
+    receipt: SealedBuildReceipt,
+    receipt_sha256: String,
 }
 
 #[derive(Serialize)]
@@ -201,51 +253,190 @@ fn required_sha256_environment(name: &str) -> Result<String, String> {
     Ok(value)
 }
 
-fn trusted_executable_sha256() -> Result<String, String> {
+#[cfg(target_os = "linux")]
+fn running_executable() -> Result<(String, u64), String> {
+    {
+        let mut executable = File::open("/proc/self/exe")
+            .map_err(|error| format!("failed to open running production executable: {error}"))?;
+        let before = executable
+            .metadata()
+            .map_err(|error| format!("failed to inspect production executable: {error}"))?;
+        let mut content = Vec::new();
+        executable
+            .read_to_end(&mut content)
+            .map_err(|error| format!("failed to read running production executable: {error}"))?;
+        let after = executable
+            .metadata()
+            .map_err(|error| format!("failed to re-inspect production executable: {error}"))?;
+        if before.len() != after.len() || content.len() as u64 != after.len() {
+            return Err("running production executable changed while it was hashed".to_owned());
+        }
+        Ok((sha256_hex(&content), after.len()))
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn running_executable() -> Result<(String, u64), String> {
+    Err("production evidence requires Linux /proc/self/exe".to_owned())
+}
+
+fn trusted_executable() -> Result<(String, u64), String> {
     let trusted = required_sha256_environment(TRUSTED_EXECUTABLE_SHA256_ENV)?;
-    let executable = env::current_exe()
-        .map_err(|error| format!("failed to locate production executable: {error}"))?;
-    let actual = sha256_hex(&crate::nofollow_io::read_regular(&executable)?);
+    let (actual, bytes) = running_executable()?;
     if actual != trusted {
         return Err(format!(
             "production executable SHA-256 mismatch: expected {trusted}, got {actual}"
         ));
     }
-    Ok(actual)
+    Ok((actual, bytes))
 }
 
-fn embedded_hash(name: &str, value: &'static str) -> Result<&'static str, String> {
+fn require_hash(name: &str, value: &str) -> Result<(), String> {
     if value.len() != 64
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
+        return Err(format!("sealed build receipt has malformed {name}"));
+    }
+    Ok(())
+}
+
+fn require_object_id(name: &str, value: &str) -> Result<(), String> {
+    if !matches!(value.len(), 40 | 64)
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!("sealed build receipt has malformed {name}"));
+    }
+    Ok(())
+}
+
+fn validated_sealed_build() -> Result<EvidenceSealedBuild, String> {
+    let path = env::var(SEALED_BUILD_RECEIPT_ENV)
+        .map_err(|_| format!("{SEALED_BUILD_RECEIPT_ENV} is required for production evidence"))?;
+    let expected_sha256 = required_sha256_environment(SEALED_BUILD_RECEIPT_SHA256_ENV)?;
+    let raw = crate::nofollow_io::read_regular(Path::new(&path))?;
+    let actual_sha256 = sha256_hex(&raw);
+    if actual_sha256 != expected_sha256 {
         return Err(format!(
-            "production evidence requires a sealed Linux build with embedded {name}"
+            "sealed build receipt SHA-256 mismatch: expected {expected_sha256}, got {actual_sha256}"
         ));
     }
-    Ok(value)
+    let receipt: SealedBuildReceipt = serde_json::from_slice(&raw)
+        .map_err(|error| format!("invalid sealed build receipt: {error}"))?;
+    if canonical_bytes(&receipt)? != raw {
+        return Err("sealed build receipt is not canonical JSON".to_owned());
+    }
+    if receipt.schema != SEALED_BUILD_RECEIPT_SCHEMA || receipt.status != "accepted" {
+        return Err("sealed build receipt has an unsupported schema or status".to_owned());
+    }
+    if receipt.source.dirty {
+        return Err("sealed build receipt records a dirty source tree".to_owned());
+    }
+    require_object_id("source revision", &receipt.source.revision)?;
+    require_object_id("source tree", &receipt.source.tree)?;
+    require_hash(
+        "source snapshot manifest SHA-256",
+        &receipt.source.snapshot_manifest_sha256,
+    )?;
+    require_hash(
+        "build execution closure SHA-256",
+        &receipt.build.execution_closure_sha256,
+    )?;
+    require_hash(
+        "sealed build manifest SHA-256",
+        &receipt.sealed_build_manifest_sha256,
+    )?;
+    if !receipt.build.target.contains("linux") || receipt.build.profile != "release" {
+        return Err("sealed build receipt does not describe a Linux release build".to_owned());
+    }
+    if receipt.build.features.is_empty()
+        || receipt
+            .build
+            .features
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        || !receipt
+            .build
+            .features
+            .iter()
+            .any(|feature| feature == "production-evidence")
+    {
+        return Err("sealed build receipt has an invalid feature set".to_owned());
+    }
+    let expected_toolchain = ["cargo", "rustc"];
+    if receipt
+        .build
+        .toolchain
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        != expected_toolchain
+        || receipt
+            .build
+            .toolchain
+            .values()
+            .any(|value| value.is_empty())
+    {
+        return Err("sealed build receipt has an incomplete toolchain binding".to_owned());
+    }
+    let expected_artifacts = ["euf-viper", "euf-viper-build-features"];
+    if receipt
+        .artifacts
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        != expected_artifacts
+    {
+        return Err("sealed build receipt has an unexpected artifact set".to_owned());
+    }
+    for (name, artifact) in &receipt.artifacts {
+        require_hash(&format!("artifact {name} SHA-256"), &artifact.sha256)?;
+        if artifact.bytes == 0 || artifact.mode != "0500" {
+            return Err(format!(
+                "sealed build receipt has invalid metadata for {name}"
+            ));
+        }
+    }
+    let (executable_sha256, executable_bytes) = trusted_executable()?;
+    let executable = &receipt.artifacts["euf-viper"];
+    if executable.sha256 != executable_sha256 {
+        return Err("sealed build receipt does not bind the running executable".to_owned());
+    }
+    if executable.bytes != executable_bytes {
+        return Err("sealed build receipt executable byte count differs".to_owned());
+    }
+
+    // These embedded values are diagnostics only.  The external receipt above is
+    // the authority; disagreement still indicates a corrupt or mixed build set.
+    let embedded_features = env!("EUF_VIPER_BUILD_FEATURES")
+        .split(',')
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if embedded_features != receipt.build.features
+        || env!("EUF_VIPER_BUILD_TARGET") != receipt.build.target
+        || env!("EUF_VIPER_BUILD_PROFILE") != receipt.build.profile
+        || env!("EUF_VIPER_GIT_REVISION") != receipt.source.revision
+        || env!("EUF_VIPER_GIT_DIRTY") != "0"
+        || env!("EUF_VIPER_BUILD_SEALED_SOURCE_TREE") != receipt.source.tree
+        || env!("EUF_VIPER_BUILD_SEALED_SOURCE_MANIFEST_SHA256")
+            != receipt.source.snapshot_manifest_sha256
+        || env!("EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256")
+            != receipt.build.execution_closure_sha256
+    {
+        return Err("sealed build receipt disagrees with diagnostic binary markers".to_owned());
+    }
+    Ok(EvidenceSealedBuild {
+        receipt,
+        receipt_sha256: expected_sha256,
+    })
 }
 
 pub(crate) fn require_sealed_build() -> Result<(), String> {
-    if !env!("EUF_VIPER_BUILD_TARGET").contains("linux") {
-        return Err("production evidence requires a sealed Linux build".to_owned());
-    }
-    embedded_hash(
-        "source snapshot manifest SHA-256",
-        env!("EUF_VIPER_BUILD_SEALED_SOURCE_MANIFEST_SHA256"),
-    )?;
-    embedded_hash(
-        "build execution closure SHA-256",
-        env!("EUF_VIPER_BUILD_EXECUTION_CLOSURE_SHA256"),
-    )?;
-    if env!("EUF_VIPER_BUILD_SEALED_SOURCE_TREE") == "unsealed"
-        || env!("EUF_VIPER_GIT_REVISION") == "unknown"
-        || env!("EUF_VIPER_GIT_DIRTY") != "0"
-    {
-        return Err("production evidence build lacks an exact sealed Git snapshot".to_owned());
-    }
-    Ok(())
+    validated_sealed_build().map(|_| ())
 }
 
 fn build_manifest() -> Result<(EvidenceBuild, String), String> {
@@ -274,6 +465,7 @@ fn runtime_config(root_cnf: RootCnfOptions) -> Result<(BTreeMap<String, String>,
             key.starts_with("EUF_VIPER_")
                 && key != RUN_NONCE_ENV
                 && key != TRUSTED_EXECUTABLE_SHA256_ENV
+                && key != SEALED_BUILD_RECEIPT_ENV
         })
         .collect::<BTreeMap<_, _>>();
     config.insert(
@@ -537,18 +729,20 @@ fn evidence_payload(
         bytes: source_bytes.len(),
     };
     let (config, config_sha256) = runtime_config(root_cnf)?;
-    let executable_sha256 = trusted_executable_sha256()?;
+    let sealed_build = validated_sealed_build()?;
+    let executable_sha256 = sealed_build.receipt.artifacts["euf-viper"].sha256.clone();
     let (build, build_sha256) = build_manifest()?;
     let solver = EvidenceSolver {
         package_version: env!("CARGO_PKG_VERSION"),
-        revision: env!("EUF_VIPER_GIT_REVISION"),
-        dirty: env!("EUF_VIPER_GIT_DIRTY") != "0",
+        revision: sealed_build.receipt.source.revision.clone(),
+        dirty: sealed_build.receipt.source.dirty,
         executable_sha256,
         backend: report.backend.to_owned(),
         config,
         config_sha256,
         build,
         build_sha256,
+        sealed_build,
     };
     match &report.result {
         SolveResult::Sat => {

@@ -41,6 +41,7 @@ REQUIRED_RUNTIME_TOOLS = frozenset(
         "unshare",
         "sbatch",
         "sha256sum",
+        "strace",
         "tar",
         "unzip",
     }
@@ -877,6 +878,8 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
             "sha256",
             "source_snapshot_manifest_sha256",
             "build_execution_closure_sha256",
+            "receipt_path",
+            "receipt_sha256",
         },
         "sealed build",
     )
@@ -894,6 +897,7 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
             "artifacts",
             "build_execution_closure",
             "build_execution_closure_sha256",
+            "build_execution_verification",
             "revision",
             "source_snapshot",
             "source_snapshot_manifest_sha256",
@@ -903,7 +907,7 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         "sealed build manifest",
     )
     if (
-        sealed_value.get("schema") != "euf-viper.sealed-linux-build.v1"
+        sealed_value.get("schema") != "euf-viper.sealed-linux-build.v2"
         or sealed_value.get("status") != "built"
         or sealed_value.get("revision") != value["revision"]
         or sealed_value.get("source_tree") != provenance["source_tree"]
@@ -924,6 +928,39 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         != sealed_build["build_execution_closure_sha256"]
     ):
         raise ProvenanceError("sealed build embedded manifest hash mismatch")
+    sealed_toolchain = sealed_value["toolchain"]
+    if (
+        type(sealed_toolchain) is not dict
+        or set(sealed_toolchain) != {"cargo", "rustc"}
+        or any(type(item) is not str or not item for item in sealed_toolchain.values())
+    ):
+        raise ProvenanceError("sealed build toolchain binding differs")
+    build_verification = sealed_value["build_execution_verification"]
+    require_exact_keys(
+        build_verification,
+        {
+            "actual_trace_sha256",
+            "external_directory_count",
+            "external_input_count",
+            "status",
+            "unexpected_external_inputs",
+            "virtual_paths",
+        },
+        "sealed build execution verification",
+    )
+    if (
+        build_verification["status"] != "accepted"
+        or build_verification["unexpected_external_inputs"] != []
+        or build_verification["external_input_count"]
+        != len(sealed_value["build_execution_closure"].get("external_inputs", []))
+        or build_verification["external_directory_count"]
+        != len(
+            sealed_value["build_execution_closure"].get(
+                "external_directories", []
+            )
+        )
+    ):
+        raise ProvenanceError("sealed build execution verification differs")
     sealed_artifacts = sealed_value["artifacts"]
     if type(sealed_artifacts) is not dict or set(sealed_artifacts) != {
         "euf-viper",
@@ -936,6 +973,77 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         require_exact_keys(record, {"bytes", "name", "sha256"}, f"sealed artifact {name}")
         if record["name"] != name or not HEX64.fullmatch(record["sha256"]):
             raise ProvenanceError(f"sealed build artifact {name} binding is invalid")
+    receipt_bytes, _ = read_regular_nofollow(
+        Path(sealed_build["receipt_path"]), "sealed build receipt"
+    )
+    if sha256_bytes(receipt_bytes) != sealed_build["receipt_sha256"]:
+        raise ProvenanceError("sealed build receipt SHA-256 drifted")
+    receipt_value = strict_json_load_bytes(
+        receipt_bytes, Path(sealed_build["receipt_path"])
+    )
+    if canonical_bytes(receipt_value) != receipt_bytes:
+        raise ProvenanceError("sealed build receipt is not canonical JSON")
+    require_exact_keys(
+        receipt_value,
+        {
+            "artifacts",
+            "build",
+            "schema",
+            "sealed_build_manifest_sha256",
+            "source",
+            "status",
+        },
+        "sealed build receipt",
+    )
+    receipt_source = receipt_value["source"]
+    require_exact_keys(
+        receipt_source,
+        {"dirty", "revision", "snapshot_manifest_sha256", "tree"},
+        "sealed build receipt source",
+    )
+    receipt_build = receipt_value["build"]
+    require_exact_keys(
+        receipt_build,
+        {"execution_closure_sha256", "features", "profile", "target", "toolchain"},
+        "sealed build receipt build",
+    )
+    receipt_artifacts = receipt_value["artifacts"]
+    if type(receipt_artifacts) is not dict or set(receipt_artifacts) != set(
+        sealed_artifacts
+    ):
+        raise ProvenanceError("sealed build receipt artifact set differs")
+    for name, record in receipt_artifacts.items():
+        require_exact_keys(
+            record,
+            {"bytes", "mode", "sha256"},
+            f"sealed build receipt artifact {name}",
+        )
+        sealed_record = sealed_artifacts[name]
+        if (
+            record["bytes"] != sealed_record["bytes"]
+            or record["sha256"] != sealed_record["sha256"]
+            or record["mode"] != "0500"
+        ):
+            raise ProvenanceError("sealed build receipt artifact binding mismatch")
+    if (
+        receipt_value.get("schema") != "euf-viper.sealed-build-receipt.v2"
+        or receipt_value.get("status") != "accepted"
+        or receipt_value.get("sealed_build_manifest_sha256")
+        != sealed_build["sha256"]
+        or receipt_source["revision"] != value["revision"]
+        or receipt_source["tree"] != provenance["source_tree"]
+        or receipt_source["dirty"] is not False
+        or receipt_source["snapshot_manifest_sha256"]
+        != sealed_build["source_snapshot_manifest_sha256"]
+        or receipt_build["execution_closure_sha256"]
+        != sealed_build["build_execution_closure_sha256"]
+        or receipt_build["features"] != value["build_features"]
+        or receipt_build["profile"] != "release"
+        or type(receipt_build["target"]) is not str
+        or "linux" not in receipt_build["target"]
+        or receipt_build["toolchain"] != sealed_toolchain
+    ):
+        raise ProvenanceError("sealed build receipt binding mismatch")
     if (
         sealed_artifacts["euf-viper"]["sha256"] != value["viper"]["sha256"]
         or sealed_artifacts["euf-viper"]["bytes"] != value["viper"]["bytes"]
@@ -957,16 +1065,25 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         raise ProvenanceError("execution closure is not canonical JSON")
     require_exact_keys(
         closure_value,
-        {"schema", "artifacts", "executables", "libraries", "virtual_libraries"},
+        {
+            "schema",
+            "artifacts",
+            "executables",
+            "libraries",
+            "python_runtime",
+            "resolver",
+            "virtual_libraries",
+        },
         "execution closure",
     )
-    if closure_value["schema"] != "euf-viper.linux-execution-closure.v1":
+    if closure_value["schema"] != "euf-viper.linux-execution-closure.v2":
         raise ProvenanceError("execution closure schema mismatch")
     if set(closure_value["artifacts"]) != {
         "checker",
         "independent-parser",
         "libz3",
         "sealed-build",
+        "sealed-build-receipt",
     } or set(closure_value["executables"]) != {
         "euf-viper",
         "feature-report",
@@ -1019,9 +1136,56 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         )
         if record["category"] != "dynamic_library":
             raise ProvenanceError("execution closure library category differs")
+    resolver = closure_value["resolver"]
+    require_exact_keys(
+        resolver,
+        {
+            "interpreter",
+            "interpreter_dynamic_dependencies",
+            "interpreter_ldd_sha256",
+            "program",
+        },
+        "execution closure resolver",
+    )
+    resolver_program = resolver["program"]
+    require_exact_keys(
+        resolver_program,
+        {"bytes", "category", "name", "path", "sha256"},
+        "execution closure resolver program",
+    )
+    if resolver_program["category"] != "loader_resolver":
+        raise ProvenanceError("execution closure resolver identity differs")
+    python_runtime = closure_value["python_runtime"]
+    require_exact_keys(
+        python_runtime,
+        {"executable_name", "probe", "probe_sha256"},
+        "execution closure Python runtime",
+    )
+    if python_runtime["executable_name"] != "python":
+        raise ProvenanceError("execution closure Python executable differs")
+    probe = python_runtime["probe"]
+    require_exact_keys(
+        probe,
+        {
+            "builtin_or_frozen_modules",
+            "files",
+            "implementation",
+            "modules",
+            "scripts",
+            "version",
+        },
+        "execution closure Python probe",
+    )
+    if sha256_bytes(canonical_bytes(probe)) != python_runtime["probe_sha256"]:
+        raise ProvenanceError("execution closure Python probe hash differs")
     closure_records = list(closure_value.get("artifacts", {}).values())
     closure_records.extend(closure_value.get("executables", {}).values())
     closure_records.extend(closure_value.get("libraries", []))
+    closure_records.append(resolver_program)
+    if resolver["interpreter"] is not None:
+        closure_records.append(resolver["interpreter"])
+    closure_records.extend(probe.get("scripts", {}).values())
+    closure_records.extend(probe.get("files", []))
     for record in closure_records:
         if type(record) is not dict:
             raise ProvenanceError("execution closure member must be an object")
@@ -1072,6 +1236,8 @@ def verify_preparation_receipt(args: argparse.Namespace) -> dict[str, Any]:
         or executable_hashes["opensmt"] != value["solver_executables"]["opensmt"]["sha256"]
         or closure_value["artifacts"]["sealed-build"]["sha256"]
         != sealed_build["sha256"]
+        or closure_value["artifacts"]["sealed-build-receipt"]["sha256"]
+        != sealed_build["receipt_sha256"]
     ):
         raise ProvenanceError("execution closure differs from prepared runtime bindings")
     libz3 = closure_value["artifacts"]["libz3"]

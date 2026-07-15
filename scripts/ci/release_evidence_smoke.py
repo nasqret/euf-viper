@@ -44,7 +44,9 @@ def run(
     return completed
 
 
-def solver_environment(binary_hash: str, nonce: str) -> dict[str, str]:
+def solver_environment(
+    binary_hash: str, nonce: str, receipt: Path, receipt_sha256: str
+) -> dict[str, str]:
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -54,6 +56,8 @@ def solver_environment(binary_hash: str, nonce: str) -> dict[str, str]:
         {
             "EUF_VIPER_RUN_NONCE": nonce,
             "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": binary_hash,
+            "EUF_VIPER_SEALED_BUILD_RECEIPT": str(receipt),
+            "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": receipt_sha256,
             "LANG": "C",
             "LC_ALL": "C",
         }
@@ -66,6 +70,8 @@ def solve_with_evidence(
     source: Path,
     output: Path,
     binary_hash: str,
+    receipt: Path,
+    receipt_sha256: str,
     *,
     nonce: str | None = None,
 ) -> tuple[subprocess.CompletedProcess[bytes], str]:
@@ -73,7 +79,7 @@ def solve_with_evidence(
     completed = run(
         [binary, "solve", source, "--evidence-out", output],
         cwd=source.parent,
-        environment=solver_environment(binary_hash, nonce),
+        environment=solver_environment(binary_hash, nonce, receipt, receipt_sha256),
         allowed={0, 2, 3},
     )
     return completed, nonce
@@ -88,6 +94,7 @@ def check_sidecar(
     nonce: str,
     status: str,
     repository: Path,
+    receipt_sha256: str,
 ) -> None:
     run(
         [
@@ -104,6 +111,8 @@ def check_sidecar(
             sha256(evidence),
             "--run-nonce",
             nonce,
+            "--sealed-build-receipt-sha256",
+            receipt_sha256,
         ],
         cwd=repository,
     )
@@ -115,6 +124,7 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--feature-report", type=Path, required=True)
     parser.add_argument("--sealed-build-manifest", type=Path, required=True)
+    parser.add_argument("--sealed-build-receipt", type=Path, required=True)
     parser.add_argument("--baseline-binary", type=Path, required=True)
     parser.add_argument("--baseline-receipt", type=Path, required=True)
     parser.add_argument("--z3", type=Path, required=True)
@@ -136,8 +146,10 @@ def main() -> int:
     checker = repository / "scripts/cert/check_production_evidence.py"
     binary_hash = sha256(binary)
     sealed_build = json.loads(args.sealed_build_manifest.read_bytes())
+    sealed_receipt = args.sealed_build_receipt.resolve(strict=True)
+    sealed_receipt_sha256 = sha256(sealed_receipt)
     if (
-        sealed_build.get("schema") != "euf-viper.sealed-linux-build.v1"
+        sealed_build.get("schema") != "euf-viper.sealed-linux-build.v2"
         or sealed_build.get("status") != "built"
     ):
         raise SystemExit("release smoke received an invalid sealed build manifest")
@@ -179,7 +191,12 @@ def main() -> int:
         )
         sat_evidence = root / "sat.evidence.json"
         completed, sat_nonce = solve_with_evidence(
-            binary, sat_source, sat_evidence, binary_hash
+            binary,
+            sat_source,
+            sat_evidence,
+            binary_hash,
+            sealed_receipt,
+            sealed_receipt_sha256,
         )
         if (completed.returncode, completed.stdout) != (0, b"sat\n"):
             raise SystemExit(
@@ -195,6 +212,7 @@ def main() -> int:
             sat_nonce,
             "sat",
             repository,
+            sealed_receipt_sha256,
         )
         sat_payload = json.loads(sat_evidence.read_bytes())
         build = sat_payload.get("solver", {}).get("build", {})
@@ -218,7 +236,12 @@ def main() -> int:
         )
         unsat_evidence = root / "unsat.evidence.json"
         completed, unsat_nonce = solve_with_evidence(
-            binary, unsat_source, unsat_evidence, binary_hash
+            binary,
+            unsat_source,
+            unsat_evidence,
+            binary_hash,
+            sealed_receipt,
+            sealed_receipt_sha256,
         )
         if (completed.returncode, completed.stdout) != (3, b"unsupported\n"):
             raise SystemExit(
@@ -240,6 +263,7 @@ def main() -> int:
             unsat_nonce,
             "unsupported",
             repository,
+            sealed_receipt_sha256,
         )
         rejected = run(
             [
@@ -252,6 +276,8 @@ def main() -> int:
                 "sat",
                 "--executable-sha256",
                 binary_hash,
+                "--sealed-build-receipt-sha256",
+                sealed_receipt_sha256,
             ],
             cwd=repository,
             allowed={1},
@@ -266,7 +292,14 @@ def main() -> int:
 
         existing = root / "existing.json"
         existing.write_bytes(b"do-not-replace\n")
-        completed, _ = solve_with_evidence(binary, sat_source, existing, binary_hash)
+        completed, _ = solve_with_evidence(
+            binary,
+            sat_source,
+            existing,
+            binary_hash,
+            sealed_receipt,
+            sealed_receipt_sha256,
+        )
         if completed.returncode != 2 or completed.stdout or existing.read_bytes() != b"do-not-replace\n":
             raise SystemExit("existing evidence target was replaced or yielded a result")
 
@@ -274,14 +307,26 @@ def main() -> int:
         victim.write_bytes(b"victim\n")
         output_link = root / "output-link.json"
         output_link.symlink_to(victim)
-        completed, _ = solve_with_evidence(binary, sat_source, output_link, binary_hash)
+        completed, _ = solve_with_evidence(
+            binary,
+            sat_source,
+            output_link,
+            binary_hash,
+            sealed_receipt,
+            sealed_receipt_sha256,
+        )
         if completed.returncode != 2 or completed.stdout or victim.read_bytes() != b"victim\n":
             raise SystemExit("symlinked evidence output escaped no-follow publication")
 
         source_link = root / "source-link.smt2"
         source_link.symlink_to(sat_source)
         completed, _ = solve_with_evidence(
-            binary, source_link, root / "source-link.json", binary_hash
+            binary,
+            source_link,
+            root / "source-link.json",
+            binary_hash,
+            sealed_receipt,
+            sealed_receipt_sha256,
         )
         if completed.returncode != 2 or completed.stdout:
             raise SystemExit("symlinked source was accepted in evidence mode")
@@ -295,7 +340,9 @@ def main() -> int:
                 cwd=root,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                env=solver_environment(binary_hash, nonce),
+                env=solver_environment(
+                    binary_hash, nonce, sealed_receipt, sealed_receipt_sha256
+                ),
             )
             processes.append((process, nonce))
         results = [(process.wait(), *process.communicate(), nonce) for process, nonce in processes]
@@ -318,6 +365,8 @@ def main() -> int:
                 binary,
                 "--viper-feature-report",
                 feature_report,
+                "--viper-sealed-build-receipt",
+                sealed_receipt,
                 "--viper-version",
                 "release-evidence-smoke",
                 "--z3",

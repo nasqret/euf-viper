@@ -24,6 +24,7 @@ PREPARE_JOB_ID="${EUF_VIPER_PREPARE_JOB_ID:?set EUF_VIPER_PREPARE_JOB_ID}"
 PREPARE_RECEIPT_SHA256="${EUF_VIPER_PREPARE_RECEIPT_SHA256:?set EUF_VIPER_PREPARE_RECEIPT_SHA256}"
 CORPUS_KIND="${EUF_VIPER_CORPUS_KIND:?set EUF_VIPER_CORPUS_KIND}"
 PROVENANCE_HELPER="$CHECKOUT/scripts/wmi/hermetic_provenance.py"
+EXECUTION_CLOSURE_HELPER="$CHECKOUT/scripts/wmi/execution_closure.py"
 
 case "$CORPUS_KIND" in
   full|official) ;;
@@ -62,11 +63,18 @@ fields = [environment[name] for name in (
     "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
 )]
 fields.append(value["runtime_tools"]["env"]["realpath"])
+fields.append(value["execution_closure_helper_sha256"])
 if any("\t" in item or "\n" in item for item in fields): raise SystemExit("unsafe environment")
 print("\t".join(fields))
 ' "$VERIFIED_PROVENANCE")"
 IFS=$'\t' read -r PRIVATE_HOME RUNTIME_PATH RUSTUP_HOME CARGO_TARGET_DIR \
-  PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME ENV_BIN <<<"$EXECUTION_FIELDS"
+  PRIVATE_TMP XDG_CACHE_HOME XDG_CONFIG_HOME ENV_BIN \
+  EXECUTION_CLOSURE_HELPER_SHA256 <<<"$EXECUTION_FIELDS"
+
+if [ "$(hash_file "$EXECUTION_CLOSURE_HELPER")" != "$EXECUTION_CLOSURE_HELPER_SHA256" ]; then
+  echo "receipt-bound execution-closure helper SHA-256 mismatch" >&2
+  exit 2
+fi
 
 clean_env() {
   "$ENV_BIN" -i HOME="$PRIVATE_HOME" LANG=C LC_ALL=C PATH="$RUNTIME_PATH" \
@@ -87,6 +95,19 @@ PREPARATION_BINDING="$(python_clean "$PROVENANCE_HELPER" verify-preparation-rece
   --run-root "$RUN_ROOT" \
   --prepare-job "$PREPARE_JOB_ID" \
   --expected-sha256 "$PREPARE_RECEIPT_SHA256")"
+
+EXECUTION_CLOSURE_FIELDS="$(python_clean -c '
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+closure = value["execution_closure"]
+print(closure["path"] + "\t" + closure["sha256"])
+' "$PREPARE_RECEIPT")"
+IFS=$'\t' read -r EXECUTION_CLOSURE_MANIFEST EXECUTION_CLOSURE_SHA256 \
+  <<<"$EXECUTION_CLOSURE_FIELDS"
+python_clean "$EXECUTION_CLOSURE_HELPER" verify \
+  --manifest "$EXECUTION_CLOSURE_MANIFEST" \
+  --expected-sha256 "$EXECUTION_CLOSURE_SHA256" \
+  >"$RUN_ROOT/execution-closure-shard-${SLURM_ARRAY_TASK_ID}.json"
 
 INDEX="$(printf '%04d' "$SLURM_ARRAY_TASK_ID")"
 PREPARED_LOCK="$RUN_ROOT/locks/$CORPUS_KIND/lock-$INDEX.json"
