@@ -6,9 +6,15 @@
   "campaign": {
     "expected_sources": 7503,
     "max_parallel": 32,
-    "repetitions": 128,
     "source_count": 7503,
     "shards": 128
+  },
+  "corpus": {
+    "accepted_manifest_sha256": "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4",
+    "accepted_parity_receipt_path": "results/wmi/typed-parser-parity-146510/receipt.json",
+    "accepted_parity_receipt_sha256": "c0c9c1879c9ac2da524c69f07affa991626c326ac0837f8f8066fde708d8482c",
+    "accepted_workset_sha256": "35127766939028747b170b2dc26ca74b78a89c39833c37cd6961146b09cbb7a3",
+    "source_count": 7503
   },
   "execution": {
     "binary_command": "research-parser-timing",
@@ -63,5 +69,19 @@
     "rss_unit_linux": "KiB"
   },
   "name": "T1 typed stream parser causal timing gate",
-  "schema": "euf-viper.typed-parser-timing-contract.v1"
+  "schema": "euf-viper.typed-parser-timing-contract.v2",
+  "timing_environment": {
+    "allowed_hostnames": [
+      "c1n1.cluster.wmi.amu.edu.pl"
+    ],
+    "core_binding": "slurm-cpu-bind-cores-singleton.v1",
+    "exclusive_control_required_for_promotion": true,
+    "governor_control_required_for_promotion": true,
+    "max_parallel": 32,
+    "memory_binding": "slurm-mem-bind-local.v1",
+    "partition": "cpu_idle",
+    "promotion_eligibility": "research-only-first-campaign",
+    "slurm_nodelist": "c1n1",
+    "threads_per_core": 1
+  }
 }

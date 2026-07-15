@@ -11,6 +11,10 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      T1_CI_ROOT: ${{ runner.temp }}/euf-viper-t1-locked-release
+      CARGO_HOME: ${{ runner.temp }}/euf-viper-t1-locked-release/cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/euf-viper-t1-locked-release/target
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -30,6 +34,7 @@ jobs:
             results/wmi/guarded-range-census-146071/receipt.json
           python3 -m py_compile \
             scripts/bench/typed_parser_timing.py \
+            scripts/wmi/t1_timing_build_guard.py \
             scripts/wmi/t1_timing_checkout_receipt.py
       - name: Test campaign validator
         run: |
@@ -41,6 +46,7 @@ jobs:
             tests.test_wmi_typed_parser_parity \
             tests.test_t1_parity_receipt \
             tests.test_typed_parser_timing \
+            tests.test_wmi_t1_timing \
             tests.test_ingest_smtcomp_2025_qf_uf \
             tests.test_record_solver_config \
             tests.test_freeze_campaign \
@@ -84,5 +90,10 @@ jobs:
           bash -n scripts/wmi/euf_viper_t1_timing_array.sbatch
           bash -n scripts/wmi/euf_viper_t1_timing_audit.sbatch
           bash -n scripts/wmi/submit_t1_timing.sh
+          bash -n scripts/ci/t1_timing_release_integration.sh
+      - name: Build and exercise guarded T1 release
+        run: scripts/ci/t1_timing_release_integration.sh
       - name: Test Rust solver
-        run: cargo test --all-features
+        run: |
+          cargo test --locked
+          cargo test --locked --all-features

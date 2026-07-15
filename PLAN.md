@@ -250,12 +250,22 @@ independent evidence checks, and a frozen family holdout.
 - [x] Implement and preregister the isolated T1 timing gate on the source-complete
   main baseline. The same binary exposes stdin-only tree/stream research modes
   for parse-only and parser-inclusive solving; the production default remains
-  tree. A descriptor-bound, singleton-CPU WMI prepare/ABBA-array/audit chain
-  freezes one warmup plus five measured rounds and rejects ambiguous/non-finite
-  evidence, identity drift, observation loss/reordering, semantic mismatch, and
-  solved-count regression. No WMI job has been submitted from this branch.
+  tree. The immutable contract separates 128 shards from one warmup plus five
+  measured ABBA rounds, pins the accepted 7,503-source parity manifest, and
+  retains exact raw process output behind every parsed payload. A guarded
+  exact-revision snapshot build materializes the locked dependency set into a
+  hash-bound external tree, recursively monitors both source and dependencies,
+  and compiles strictly offline with pinned Rust and C toolchains. Close-time
+  shard receipts plus a pre-metrics shard-set receipt are
+  revalidated after analysis. Fixed WMI node, physical-core, and local-NUMA
+  placement reject source mutation, payload/record alteration, identity drift,
+  observation loss/reordering, semantic mismatch, and solved-count regression.
+  Hosted Linux CI owns the real locked-release, descriptor-harness, transient
+  mutation, and Rust feature matrices. No WMI job has been submitted from this
+  branch, and the first campaign is research-only/nonpromotable regardless of
+  timing outcome.
 - [ ] Execute the fixed WMI contract. Require parse and end-to-end aggregate and
-  paired improvement plus p95 miss overhead strictly below 1%; otherwise stop
+  paired improvement plus all-source nearest-rank p95 overhead strictly below 1%; otherwise stop
   T1. Passing authorizes review, not automatic production promotion.
 - [ ] Profile fused Boolean/model/signature passes. Build bytecode only if at
   least 70% of routed CPU time is reusable and schedule cost projects below 5%.

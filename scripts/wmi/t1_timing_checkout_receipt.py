@@ -15,7 +15,14 @@ RUNTIME_PATHS = (
     "Cargo.lock",
     "Cargo.toml",
     "campaigns/t1-typed-parser-timing-v1.json",
+    "results/wmi/typed-parser-parity-146510/audit.json",
+    "results/wmi/typed-parser-parity-146510/prepare.json",
+    "results/wmi/typed-parser-parity-146510/preflight.json",
+    "results/wmi/typed-parser-parity-146510/receipt.json",
+    "results/wmi/typed-parser-parity-146510/submission.json",
+    "results/wmi/typed-parser-parity-146510/typed-parser-parity-20260713T221314Z-66099-independent.json",
     "scripts/bench/typed_parser_timing.py",
+    "scripts/wmi/t1_timing_build_guard.py",
     "scripts/wmi/t1_timing_checkout_receipt.py",
     "scripts/wmi/t1_timing_common.sh",
     "scripts/wmi/euf_viper_t1_timing_prepare.sbatch",
@@ -28,7 +35,14 @@ RUNTIME_PATHS = (
 
 
 def git(repo: Path, *args: str) -> bytes:
-    env = {"LANG": "C", "LC_ALL": "C", "PATH": os.environ["PATH"]}
+    env = {
+        "HOME": str(Path.home()),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+    }
     return subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
@@ -47,6 +61,7 @@ def reject_cargo_configs(repo: Path) -> None:
     candidates.update(
         (Path.home() / ".cargo" / "config", Path.home() / ".cargo" / "config.toml")
     )
+    candidates.update((Path("/.cargo/config"), Path("/.cargo/config.toml")))
     present = sorted(str(path) for path in candidates if path.exists())
     if present:
         raise SystemExit(f"cargo configuration can influence build: {present}")

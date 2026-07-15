@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -8,6 +9,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -34,6 +36,8 @@ if os.environ.get("EUF_VIPER_SCOPED_LET") != "auto":
     raise SystemExit("scoped-let drift")
 if os.environ.get("EUF_VIPER_LEGACY_PREPROCESS_TERM_LIMIT") != "1024":
     raise SystemExit("preprocess-limit drift")
+if os.environ.get("EUF_VIPER_BACKEND") != "auto":
+    raise SystemExit("backend drift")
 if "EUF_VIPER_PROFILE" in os.environ:
     raise SystemExit("profile drift")
 args = sys.argv[1:]
@@ -117,19 +121,73 @@ def valid_semantic(parser: str, *, source_bytes: int = 5) -> dict[str, object]:
     }
 
 
-def valid_observation(schedule: dict[str, object], *, source_bytes: int = 5) -> dict[str, object]:
+def captured_payload(payload: dict[str, object]) -> dict[str, object]:
+    stdout = TIMING.canonical_bytes(payload)
+    stderr = b""
     return {
-        **schedule,
-        "outcome": "ok",
         "exit_code": 0,
         "external_elapsed_ns": 1000,
         "max_rss_kb": 4096,
-        "stdout_sha256": ZERO_SHA256,
-        "stderr_sha256": ZERO_SHA256,
+        "stdout_base64": TIMING.encode_raw(stdout),
+        "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+        "stderr_base64": TIMING.encode_raw(stderr),
+        "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+        "payload": payload,
+    }
+
+
+def valid_semantic_capture(parser: str, *, source_bytes: int = 5) -> dict[str, object]:
+    return captured_payload(valid_semantic(parser, source_bytes=source_bytes))
+
+
+def valid_worker() -> dict[str, object]:
+    return {
+        "hostname": "c1n1.cluster.wmi.amu.edu.pl",
+        "platform": "Linux",
+        "machine": "x86_64",
+        "cpu_id": 0,
+        "affinity": "sched_setaffinity-singleton.v1",
+        "cpu_model": "fixture CPU",
+        "microcode": "0x1",
+        "physical_package_id": 0,
+        "core_id": 0,
+        "thread_siblings_list": "0",
+        "numa_node": 0,
+        "scaling_governor": "performance",
+        "scaling_driver": "fixture",
+        "scaling_min_khz": 1000,
+        "scaling_max_khz": 1000,
+        "scaling_current_khz": 1000,
+        "turbo_state": "1",
+        "slurm_partition": "cpu_idle",
+        "slurm_nodelist": "c1n1",
+        "slurm_cpus_per_task": 1,
+        "slurm_cpu_bind": "cores",
+        "slurm_mem_bind": "local",
+        "slurm_threads_per_core": 1,
+        "governor_control": True,
+        "exclusive_control": False,
+        "libc": {
+            "path": "/usr/lib/libc.so.6",
+            "sha256": "3" * 64,
+            "bytes": 1,
+            "name": "glibc",
+            "version": "2.35",
+        },
+        "allocator": "system-libc",
+        "backend": "auto",
+    }
+
+
+def valid_observation(schedule: dict[str, object], *, source_bytes: int = 5) -> dict[str, object]:
+    payload = valid_payload(
+        str(schedule["parser"]), str(schedule["phase"]), source_bytes=source_bytes
+    )
+    return {
+        **schedule,
+        "outcome": "ok",
+        **captured_payload(payload),
         "diagnostic": None,
-        "payload": valid_payload(
-            str(schedule["parser"]), str(schedule["phase"]), source_bytes=source_bytes
-        ),
     }
 
 
@@ -147,10 +205,10 @@ def valid_record(*, result_mismatch: bool = False, parse_mismatch: bool = False)
     if parse_mismatch:
         pass
     semantic_attestations = {
-        parser: valid_semantic(parser) for parser in ("tree", "stream")
+        parser: valid_semantic_capture(parser) for parser in ("tree", "stream")
     }
     if parse_mismatch:
-        semantic_attestations["stream"]["canonical_sha256"] = "2" * 64
+        semantic_attestations["stream"]["payload"]["canonical_sha256"] = "2" * 64
     return {
         "schema": TIMING.RECORD_SCHEMA,
         "byte_binding": TIMING.BYTE_BINDING,
@@ -172,13 +230,7 @@ def valid_record(*, result_mismatch: bool = False, parse_mismatch: bool = False)
             "execution": TIMING.EXECUTABLE_BINDING,
         },
         "runtime_environment": TIMING.RUNTIME_ENVIRONMENT,
-        "worker": {
-            "hostname": "test",
-            "platform": "Linux",
-            "machine": "x86_64",
-            "cpu_id": 0,
-            "affinity": "sched_setaffinity-singleton.v1",
-        },
+        "worker": valid_worker(),
         "relative_path": "QF_UF/family/example.smt2",
         "family": "family",
         "expected_status": "sat",
@@ -246,18 +298,191 @@ class StrictJsonTests(unittest.TestCase):
             )
 
 
+class RawEvidenceBindingTests(unittest.TestCase):
+    def test_timing_payload_cannot_change_independently_of_stdout(self) -> None:
+        schedule = next(
+            item
+            for item in TIMING.expected_schedule(
+                CONTRACT, measured_rounds=1, warmup_rounds=0
+            )
+            if item["parser"] == "stream" and item["phase"] == "parse"
+        )
+        observation = valid_observation(schedule)
+        observation["payload"]["elapsed_ns"] = 1
+        with self.assertRaisesRegex(TIMING.CampaignError, "stored payload differs"):
+            TIMING.validate_observation(
+                observation, schedule=schedule, source_bytes=5, where="elapsed attack"
+            )
+        observation = valid_observation(schedule)
+        observation["stdout_sha256"] = ZERO_SHA256
+        observation["stderr_sha256"] = ZERO_SHA256
+        with self.assertRaisesRegex(TIMING.CampaignError, "stdout SHA-256"):
+            TIMING.validate_observation(
+                observation, schedule=schedule, source_bytes=5, where="zero hash attack"
+            )
+
+    def test_semantic_counters_and_digest_must_equal_captured_stdout(self) -> None:
+        pair = {parser: valid_semantic_capture(parser) for parser in ("tree", "stream")}
+        pair["stream"]["payload"]["terms"] = 999
+        pair["stream"]["payload"]["canonical_sha256"] = "f" * 64
+        with self.assertRaisesRegex(TIMING.CampaignError, "stored semantic payload"):
+            TIMING.validate_semantic_pair(pair, source_bytes=5, where="semantic attack")
+
+    def test_malformed_raw_capture_and_malformed_jsonl_fail_closed(self) -> None:
+        schedule = TIMING.expected_schedule(
+            CONTRACT, measured_rounds=1, warmup_rounds=0
+        )[0]
+        observation = valid_observation(schedule)
+        observation["stdout_base64"] = "***"
+        with self.assertRaisesRegex(TIMING.CampaignError, "malformed base64"):
+            TIMING.validate_observation(
+                observation, schedule=schedule, source_bytes=5, where="base64 attack"
+            )
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name).resolve()
+            for name, content in (
+                ("truncated.jsonl", b'{"sequence":0}'),
+                ("nonfinite.jsonl", b'{"sequence":NaN}\n'),
+                ("duplicate-key.jsonl", b'{"sequence":0,"sequence":1}\n'),
+            ):
+                path = root / name
+                path.write_bytes(content)
+                with self.subTest(name=name), self.assertRaises(TIMING.CampaignError):
+                    TIMING.load_jsonl(path)
+
+    def test_duplicate_and_missing_record_sequences_fail(self) -> None:
+        with self.assertRaises(TIMING.CampaignError):
+            TIMING.assert_complete_record_sequences([{"sequence": 0}, {"sequence": 0}], 2)
+        with self.assertRaises(TIMING.CampaignError):
+            TIMING.assert_complete_record_sequences([{"sequence": 0}], 2)
+
+    def test_sealed_shard_receipt_precedes_audit_and_detects_post_close_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            (root / "shards").mkdir()
+            dummy = root / "prepare.json"
+            dummy.write_bytes(b"prepare\n")
+            artifact = TIMING.open_regular_artifact(dummy)
+            prepared = TIMING.PreparedCampaign(
+                metadata={
+                    "revision": "a" * 40,
+                    "contract": {"sha256": "b" * 64},
+                    "shard_count": 1,
+                },
+                prepare_artifact=artifact,
+                contract=CONTRACT,
+                workset=[],
+                workset_artifact=artifact,
+            )
+            records_artifact, receipt_artifact = TIMING.publish_sealed_shard(
+                root=root,
+                shard=0,
+                records=[valid_record()],
+                prepared=prepared,
+                worker=valid_worker(),
+            )
+            self.assertTrue(receipt_artifact.path.is_file())
+            TIMING.load_sealed_shard(root=root, shard=0, prepared=prepared)
+            records_artifact.path.chmod(0o600)
+            records_artifact.path.write_bytes(records_artifact.content + b"{}\n")
+            with self.assertRaisesRegex(
+                TIMING.CampaignError, "sealed artifact mode mismatch|file identity mismatch"
+            ):
+                TIMING.load_sealed_shard(root=root, shard=0, prepared=prepared)
+
+    def test_shard_set_close_rejects_self_consistent_elapsed_and_semantic_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            (root / "shards").mkdir()
+            dummy = root / "prepare.json"
+            dummy.write_bytes(b"prepare\n")
+            artifact = TIMING.open_regular_artifact(dummy)
+            prepared = TIMING.PreparedCampaign(
+                metadata={
+                    "revision": "a" * 40,
+                    "contract": {"sha256": "b" * 64},
+                    "shard_count": 1,
+                },
+                prepare_artifact=artifact,
+                contract=CONTRACT,
+                workset=[],
+                workset_artifact=artifact,
+            )
+            records_artifact, receipt_artifact = TIMING.publish_sealed_shard(
+                root=root,
+                shard=0,
+                records=[valid_record()],
+                prepared=prepared,
+                worker=valid_worker(),
+            )
+            _, _, _, receipt = TIMING.load_sealed_shard(
+                root=root, shard=0, prepared=prepared
+            )
+            closed, closed_artifact = TIMING.publish_shard_set_receipt(
+                root=root,
+                prepared=prepared,
+                shards={
+                    "00000": TIMING.shard_set_entry(
+                        records_artifact, receipt_artifact, receipt
+                    )
+                },
+            )
+
+            rewritten = valid_record()
+            for observation in rewritten["observations"]:
+                observation["payload"]["elapsed_ns"] = 1
+                raw = TIMING.canonical_bytes(observation["payload"])
+                observation["stdout_base64"] = TIMING.encode_raw(raw)
+                observation["stdout_sha256"] = hashlib.sha256(raw).hexdigest()
+            for semantic in rewritten["semantic_attestations"].values():
+                semantic["payload"]["terms"] = 999
+                raw = TIMING.canonical_bytes(semantic["payload"])
+                semantic["stdout_base64"] = TIMING.encode_raw(raw)
+                semantic["stdout_sha256"] = hashlib.sha256(raw).hexdigest()
+            TIMING.validate_record(rewritten, contract=CONTRACT, where="rewritten record")
+
+            shard = root / "shards" / "shard-00000"
+            shard.chmod(0o700)
+            records_path = shard / "records.jsonl"
+            receipt_path = shard / "receipt.json"
+            records_path.chmod(0o600)
+            receipt_path.chmod(0o600)
+            rewritten_bytes = TIMING.canonical_bytes(rewritten)
+            records_path.write_bytes(rewritten_bytes)
+            records_path.chmod(0o400)
+            rebound = TIMING.open_regular_artifact(records_path)
+            receipt["records"] = TIMING.file_binding(rebound)
+            receipt["records_chain"] = TIMING.record_hash_chain(rebound.content)
+            receipt_path.write_bytes(TIMING.canonical_bytes(receipt))
+            receipt_path.chmod(0o400)
+            shard.chmod(0o500)
+
+            with self.assertRaisesRegex(TIMING.CampaignError, "changed after close"):
+                TIMING.revalidate_shard_set(
+                    root=root,
+                    prepared=prepared,
+                    expected=closed,
+                    expected_artifact=closed_artifact,
+                    where="post-check attack",
+                )
+
+
 class ScheduleTests(unittest.TestCase):
     def test_contract_dimensions_and_order_are_immutable(self) -> None:
         mutations = [
             ("campaign", "source_count", 7502),
             ("campaign", "expected_sources", 7502),
-            ("campaign", "repetitions", 127),
             ("campaign", "shards", 127),
             ("execution", "warmup_rounds", 0),
             ("execution", "measured_rounds", 4),
             ("execution", "per_observation_timeout_seconds", 3),
             ("execution", "order", ["stream", "tree", "tree", "stream"]),
             ("execution", "semantic_digest", "fnv64"),
+            ("corpus", "accepted_manifest_sha256", "0" * 64),
+            ("corpus", "accepted_parity_receipt_sha256", "0" * 64),
+            ("timing_environment", "partition", "ambient"),
+            ("timing_environment", "slurm_nodelist", "ambient"),
+            ("timing_environment", "memory_binding", "ambient"),
             ("gates", "common_sources_required_per_phase", 7502),
             ("gates", "zero_timeout_observations", False),
             ("gates", "no_baseline_only_solve", False),
@@ -273,6 +498,78 @@ class ScheduleTests(unittest.TestCase):
         renamed["name"] = "mutable"
         with self.assertRaises(TIMING.CampaignError):
             TIMING.validate_contract(renamed)
+        for section, alias in (
+            ("campaign", "repetitions"),
+            ("campaign", "timing_repetitions"),
+            ("execution", "rounds"),
+        ):
+            altered = copy.deepcopy(CONTRACT)
+            altered[section][alias] = 128
+            with self.subTest(alias=alias), self.assertRaises(TIMING.CampaignError):
+                TIMING.validate_contract(altered)
+        missing = copy.deepcopy(CONTRACT)
+        del missing["campaign"]["shards"]
+        with self.assertRaises(TIMING.CampaignError):
+            TIMING.validate_contract(missing)
+
+    def test_frozen_parity_receipt_binds_the_accepted_manifest(self) -> None:
+        path = ROOT / CONTRACT["corpus"]["accepted_parity_receipt_path"]
+        artifact = TIMING.load_accepted_parity_receipt(
+            path, contract=CONTRACT, where="frozen parity receipt"
+        )
+        self.assertEqual(artifact.sha256, TIMING.ACCEPTED_PARITY_RECEIPT_SHA256)
+        with tempfile.TemporaryDirectory() as directory_name:
+            frozen = Path(directory_name)
+            for filename in ("receipt.json", *TIMING.ACCEPTED_PARITY_LOCAL_ARTIFACTS.values()):
+                (frozen / filename).write_bytes((path.parent / filename).read_bytes())
+            TIMING.load_accepted_parity_receipt(
+                frozen / "receipt.json", contract=CONTRACT, where="copied frozen bundle"
+            )
+            prepare = frozen / "prepare.json"
+            prepare.write_bytes(prepare.read_bytes() + b"\n")
+            with self.assertRaisesRegex(TIMING.CampaignError, "frozen local artifact hash mismatch"):
+                TIMING.load_accepted_parity_receipt(
+                    frozen / "receipt.json", contract=CONTRACT, where="modified frozen bundle"
+                )
+            altered = frozen / "altered-receipt.json"
+            value = json.loads(path.read_text(encoding="ascii"))
+            value["remote_artifacts"]["manifest_sha256"] = "f" * 64
+            altered.write_bytes(TIMING.canonical_bytes(value))
+            with self.assertRaisesRegex(TIMING.CampaignError, "receipt hash mismatch"):
+                TIMING.load_accepted_parity_receipt(
+                    altered, contract=CONTRACT, where="altered parity receipt"
+                )
+
+    def test_worker_identity_rejects_missing_state_but_allows_unenforced_control(self) -> None:
+        worker = valid_worker()
+        worker["governor_control"] = False
+        worker["exclusive_control"] = False
+        TIMING.validate_worker(worker, where="research-only worker")
+        for key, value in (
+            ("scaling_governor", "unavailable"),
+            ("turbo_state", "unavailable"),
+            ("scaling_current_khz", 0),
+        ):
+            altered = copy.deepcopy(worker)
+            altered[key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(
+                TIMING.CampaignError, "identity is unavailable"
+            ):
+                TIMING.validate_worker(altered, where="missing worker identity")
+
+    def test_worker_homogeneity_rejects_mixed_identity(self) -> None:
+        first = valid_worker()
+        second = copy.deepcopy(first)
+        second["cpu_id"] = 2
+        second["core_id"] = 2
+        second["thread_siblings_list"] = "2"
+        second["scaling_current_khz"] = 999
+        TIMING.require_homogeneous_workers([first, second])
+        second["microcode"] = "0x2"
+        with self.assertRaisesRegex(TIMING.CampaignError, "mixed hardware"):
+            TIMING.require_homogeneous_workers([first, second])
+        with self.assertRaisesRegex(TIMING.CampaignError, "mixed hardware"):
+            TIMING.require_homogeneous_workers([])
 
     def test_schedule_is_immutable_abba_for_both_phases(self) -> None:
         schedule = TIMING.expected_schedule(CONTRACT)
@@ -307,8 +604,8 @@ class ParityAndGateTests(unittest.TestCase):
         parse = TIMING.analyze_source(valid_record(parse_mismatch=True), CONTRACT)
         self.assertFalse(parse["parse_parity"])
         counter_mismatch = valid_record()
-        counter_mismatch["semantic_attestations"]["stream"]["terms"] += 1
-        with self.assertRaisesRegex(TIMING.CampaignError, "attestations differ"):
+        counter_mismatch["semantic_attestations"]["stream"]["payload"]["terms"] += 1
+        with self.assertRaisesRegex(TIMING.CampaignError, "stored semantic payload"):
             TIMING.validate_semantic_pair(
                 counter_mismatch["semantic_attestations"],
                 source_bytes=5,
@@ -353,6 +650,7 @@ class ParityAndGateTests(unittest.TestCase):
             if item["stage"] == "measure" and item["phase"] == "parse"
         )
         timed.update(outcome="timeout", exit_code=None, diagnostic="timeout", payload=None)
+        TIMING.validate_record(timeout_record, contract=CONTRACT, where="one timeout")
         timeout_row = TIMING.analyze_source(timeout_record, CONTRACT)
         self.assertIsNone(timeout_row["phase_metrics"]["parse"])
         rows = [timeout_row] * TIMING.LOCKED_SOURCE_COUNT
@@ -527,13 +825,7 @@ class IdentityAndExecutionTests(unittest.TestCase):
                 "family": "fixture",
                 "expected_status": "sat",
             }
-            worker = {
-                "hostname": "test",
-                "platform": "test",
-                "machine": "test",
-                "cpu_id": None,
-                "affinity": "unavailable-nonlinux",
-            }
+            worker = valid_worker()
             with TIMING.open_verified_executable(binary) as executable:
                 record = TIMING.run_work_item(
                     work,
@@ -555,7 +847,7 @@ class IdentityAndExecutionTests(unittest.TestCase):
             self.assertIsNotNone(analyzed["phase_metrics"]["parse"])
             self.assertIsNotNone(analyzed["phase_metrics"]["end_to_end"])
 
-    def test_oversized_output_is_an_error_not_a_timeout(self) -> None:
+    def test_oversized_output_is_rejected_instead_of_retained_truncated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "fake-timing"
             binary.write_text(FAKE_BINARY, encoding="utf-8")
@@ -564,14 +856,13 @@ class IdentityAndExecutionTests(unittest.TestCase):
                 CONTRACT, measured_rounds=1, warmup_rounds=0
             )[0]
             with TIMING.open_verified_executable(binary) as executable:
-                observation = TIMING.execute_scheduled_observation(
-                    executable,
-                    b"FLOOD",
-                    schedule,
-                    timeout_seconds=2,
-                )
-            self.assertEqual(observation["outcome"], "error")
-            self.assertNotEqual(observation["outcome"], "timeout")
+                with self.assertRaisesRegex(TIMING.CampaignError, "exact-capture limit"):
+                    TIMING.execute_scheduled_observation(
+                        executable,
+                        b"FLOOD",
+                        schedule,
+                        timeout_seconds=2,
+                    )
 
     def test_publication_never_replaces_existing_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -580,6 +871,241 @@ class IdentityAndExecutionTests(unittest.TestCase):
             with self.assertRaisesRegex(TIMING.CampaignError, "refusing to replace"):
                 TIMING.publish_new(path, b"second\n")
             self.assertEqual(path.read_bytes(), b"first\n")
+
+
+class BuildReceiptValidationTests(unittest.TestCase):
+    def test_guarded_build_receipt_binds_inventory_monitor_tools_libc_and_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name).resolve()
+            snapshot = root / "source"
+            snapshot.mkdir()
+            revision = "a" * 40
+            inventory = {
+                "schema": "euf-viper.t1-source-snapshot-inventory.v1",
+                "repository": str(root),
+                "revision": revision,
+                "snapshot": str(snapshot),
+                "tree": "b" * 40,
+                "files": 1,
+                "source_bytes": 1,
+                "entries_sha256": "c" * 64,
+            }
+            pre = TIMING.publish_json(root / "pre.json", inventory)
+            post = TIMING.publish_json(root / "post.json", inventory)
+            events = TIMING.publish_new(root / "events.jsonl", b"")
+            monitor_payload = {
+                "schema": "euf-viper.t1-mutation-monitor-receipt.v1",
+                "snapshot": str(snapshot),
+                "watched_directories": 1,
+                "watch_mask": 1,
+                "event_count": 0,
+                "events": TIMING.file_binding(events),
+                "status": "clean",
+            }
+            monitor = TIMING.publish_json(root / "monitor.json", monitor_payload)
+            dependency_root = root / "dependencies"
+            vendor_dir = dependency_root / "vendor"
+            vendor_dir.mkdir(parents=True)
+            (vendor_dir / "crate").write_bytes(b"x")
+            dependency_events = TIMING.publish_new(
+                root / "dependency-events.jsonl", b""
+            )
+            dependency_monitor_payload = {
+                "schema": "euf-viper.t1-mutation-monitor-receipt.v1",
+                "snapshot": str(dependency_root),
+                "watched_directories": 2,
+                "watch_mask": 1,
+                "event_count": 0,
+                "events": TIMING.file_binding(dependency_events),
+                "status": "clean",
+            }
+            dependency_monitor = TIMING.publish_json(
+                root / "dependency-monitor.json", dependency_monitor_payload
+            )
+            dependency_inventory = {
+                "schema": "euf-viper.t1-external-dependency-inventory.v1",
+                "root": str(dependency_root),
+                "directories": 2,
+                "files": 1,
+                "bytes": 1,
+                "entries_sha256": "f" * 64,
+            }
+            dependency_pre = TIMING.publish_json(
+                root / "dependency-pre.json", dependency_inventory
+            )
+            dependency_post = TIMING.publish_json(
+                root / "dependency-post.json", dependency_inventory
+            )
+            binary_path = root / "euf-viper"
+            binary_path.write_bytes(b"binary")
+            binary_path.chmod(0o500)
+            binary = {
+                "path": str(binary_path),
+                "sha256": hashlib.sha256(b"binary").hexdigest(),
+                "bytes": 6,
+                "execution": TIMING.executable_binding_contract(),
+            }
+            python_identity = {
+                "path": "/usr/bin/python3",
+                "sha256": "d" * 64,
+                "version": "Python 3.12.0",
+            }
+            tools = {
+                name: {
+                    "path": f"/usr/bin/{name}",
+                    "sha256": str(index) * 64,
+                    "bytes": 1,
+                    "version": f"{name} 1.0",
+                }
+                for index, name in enumerate(sorted(TIMING.BUILD_TOOL_ENVIRONMENT), 1)
+            }
+            (root / "cargo-home").mkdir()
+            (root / "fetch-cargo-home").mkdir()
+            (root / "target").mkdir()
+            receipt = {
+                "schema": TIMING.BUILD_RECEIPT_SCHEMA,
+                "status": "clean",
+                "revision": revision,
+                "source_snapshot": str(snapshot),
+                "pre_inventory": {
+                    "path": str(pre.path),
+                    "sha256": pre.sha256,
+                    "payload": inventory,
+                },
+                "post_inventory": {
+                    "path": str(post.path),
+                    "sha256": post.sha256,
+                    "payload": inventory,
+                },
+                "mutation_monitor": {
+                    "path": str(monitor.path),
+                    "sha256": monitor.sha256,
+                    "payload": monitor_payload,
+                },
+                "dependency_pre_inventory": {
+                    "path": str(dependency_pre.path),
+                    "sha256": dependency_pre.sha256,
+                    "payload": dependency_inventory,
+                },
+                "dependency_post_inventory": {
+                    "path": str(dependency_post.path),
+                    "sha256": dependency_post.sha256,
+                    "payload": dependency_inventory,
+                },
+                "dependency_mutation_monitor": {
+                    "path": str(dependency_monitor.path),
+                    "sha256": dependency_monitor.sha256,
+                    "payload": dependency_monitor_payload,
+                },
+                "binary": {key: binary[key] for key in ("path", "sha256", "bytes")},
+                "python": {**python_identity, "bytes": 1},
+                "tools": tools,
+                "libc": {
+                    "path": "/usr/lib/libc.so.6",
+                    "sha256": "e" * 64,
+                    "bytes": 1,
+                    "name": "glibc",
+                    "version": "2.35",
+                },
+                "build": {
+                    "allocator": "system-libc",
+                    "backend": "auto",
+                    "cargo_home": str(root / "cargo-home"),
+                    "cargo_profile": "release",
+                    "dependency_mode": "locked-vendor-offline-v1",
+                    "features": ["finite-symmetry"],
+                    "fetch_cargo_home": str(root / "fetch-cargo-home"),
+                    "locked": True,
+                    "offline": True,
+                    "rustflags": f"-C linker={tools['cc']['path']} -C link-arg=-fuse-ld=bfd",
+                    "target_dir": str(root / "target"),
+                    "vendor_dir": str(vendor_dir),
+                },
+            }
+            artifact = TIMING.publish_json(root / "build-receipt.json", receipt)
+            TIMING.validate_build_receipt(
+                artifact,
+                revision=revision,
+                binary=binary,
+                python_identity=python_identity,
+                build_tools=tools,
+                where="build receipt fixture",
+            )
+            (snapshot / "target").mkdir()
+            inside = copy.deepcopy(receipt)
+            inside["build"]["target_dir"] = str(snapshot / "target")
+            inside_artifact = TIMING.publish_json(root / "inside-build-receipt.json", inside)
+            with self.assertRaisesRegex(TIMING.CampaignError, "inside the watched source"):
+                TIMING.validate_build_receipt(
+                    inside_artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="inside build receipt fixture",
+                )
+            altered_dependency = copy.deepcopy(dependency_inventory)
+            altered_dependency["entries_sha256"] = "0" * 64
+            altered_dependency_artifact = TIMING.publish_json(
+                root / "altered-dependency-post.json", altered_dependency
+            )
+            dependency_drift = copy.deepcopy(receipt)
+            dependency_drift["dependency_post_inventory"] = {
+                "path": str(altered_dependency_artifact.path),
+                "sha256": altered_dependency_artifact.sha256,
+                "payload": altered_dependency,
+            }
+            dependency_drift_artifact = TIMING.publish_json(
+                root / "dependency-drift-build-receipt.json", dependency_drift
+            )
+            with self.assertRaisesRegex(TIMING.CampaignError, "dependency inventory changed"):
+                TIMING.validate_build_receipt(
+                    dependency_drift_artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="dependency drift build receipt fixture",
+                )
+            online = copy.deepcopy(receipt)
+            online["build"]["offline"] = False
+            online_artifact = TIMING.publish_json(root / "online-build-receipt.json", online)
+            with self.assertRaisesRegex(TIMING.CampaignError, "configuration drifted"):
+                TIMING.validate_build_receipt(
+                    online_artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="online build receipt fixture",
+                )
+            dependency_events.path.chmod(0o600)
+            dependency_events.path.write_bytes(b"transient dependency mutation\n")
+            dependency_events.path.chmod(0o400)
+            with self.assertRaisesRegex(TIMING.CampaignError, "event log"):
+                TIMING.validate_build_receipt(
+                    artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="modified dependency monitor fixture",
+                )
+            dependency_events.path.chmod(0o600)
+            dependency_events.path.write_bytes(b"")
+            dependency_events.path.chmod(0o400)
+            events.path.chmod(0o600)
+            events.path.write_bytes(b"post-check mutation\n")
+            events.path.chmod(0o400)
+            with self.assertRaisesRegex(TIMING.CampaignError, "event log"):
+                TIMING.validate_build_receipt(
+                    artifact,
+                    revision=revision,
+                    binary=binary,
+                    python_identity=python_identity,
+                    build_tools=tools,
+                    where="modified build receipt fixture",
+                )
 
 
 class CleanCheckoutAndWrapperTests(unittest.TestCase):
@@ -592,7 +1118,14 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             "Cargo.lock",
             "Cargo.toml",
             "campaigns/t1-typed-parser-timing-v1.json",
+            "results/wmi/typed-parser-parity-146510/audit.json",
+            "results/wmi/typed-parser-parity-146510/prepare.json",
+            "results/wmi/typed-parser-parity-146510/preflight.json",
+            "results/wmi/typed-parser-parity-146510/receipt.json",
+            "results/wmi/typed-parser-parity-146510/submission.json",
+            "results/wmi/typed-parser-parity-146510/typed-parser-parity-20260713T221314Z-66099-independent.json",
             "scripts/bench/typed_parser_timing.py",
+            "scripts/wmi/t1_timing_build_guard.py",
             "scripts/wmi/t1_timing_checkout_receipt.py",
             "scripts/wmi/t1_timing_common.sh",
             "scripts/wmi/euf_viper_t1_timing_prepare.sbatch",
@@ -653,7 +1186,30 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             receipt = json.loads((root / "receipt.json").read_text(encoding="ascii"))
             self.assertEqual(receipt["revision"], revision)
             self.assertEqual(receipt["published_ref"], "main")
-            self.assertEqual(len(receipt["runtime_blobs"]), 12)
+            self.assertEqual(
+                set(receipt["runtime_blobs"]),
+                {
+                    "Cargo.lock",
+                    "Cargo.toml",
+                    "campaigns/t1-typed-parser-timing-v1.json",
+                    "results/wmi/typed-parser-parity-146510/audit.json",
+                    "results/wmi/typed-parser-parity-146510/prepare.json",
+                    "results/wmi/typed-parser-parity-146510/preflight.json",
+                    "results/wmi/typed-parser-parity-146510/receipt.json",
+                    "results/wmi/typed-parser-parity-146510/submission.json",
+                    "results/wmi/typed-parser-parity-146510/typed-parser-parity-20260713T221314Z-66099-independent.json",
+                    "scripts/bench/typed_parser_timing.py",
+                    "scripts/wmi/euf_viper_t1_timing_array.sbatch",
+                    "scripts/wmi/euf_viper_t1_timing_audit.sbatch",
+                    "scripts/wmi/euf_viper_t1_timing_prepare.sbatch",
+                    "scripts/wmi/submit_t1_timing.sh",
+                    "scripts/wmi/t1_timing_build_guard.py",
+                    "scripts/wmi/t1_timing_checkout_receipt.py",
+                    "scripts/wmi/t1_timing_common.sh",
+                    "src/main.rs",
+                    "src/smt2_stream.rs",
+                },
+            )
             self.assertEqual(receipt["cargo_configs"], [])
             TIMING.validate_checkout_receipt(
                 TIMING.open_regular_artifact(root / "receipt.json"),
@@ -684,6 +1240,111 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
                 self.assertNotEqual(completed.returncode, 0)
                 self.assertIn(diagnostic, completed.stderr)
 
+    def test_exact_snapshot_inventory_rejects_untracked_build_influence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            repository, revision = self._receipt_repository(root)
+            archive = root / "source.tar"
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            subprocess.run(
+                ["git", "archive", "--format=tar", f"--output={archive}", revision],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(["tar", "-xf", archive, "-C", snapshot], check=True)
+            guard = ROOT / "scripts/wmi/t1_timing_build_guard.py"
+            output = root / "inventory.json"
+            command = [
+                sys.executable,
+                "-I",
+                "-B",
+                str(guard),
+                "inventory",
+                "--repository",
+                str(repository),
+                "--revision",
+                revision,
+                "--snapshot",
+                str(snapshot),
+                "--output",
+                str(output),
+            ]
+            subprocess.run(command, check=True)
+            payload = json.loads(output.read_text(encoding="ascii"))
+            self.assertEqual(payload["revision"], revision)
+            (snapshot / "build.py").write_text("hidden influence\n", encoding="ascii")
+            rejected = subprocess.run(
+                [*command[:-1], str(root / "rejected-inventory.json")],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("snapshot path inventory mismatch", rejected.stderr)
+            (snapshot / "build.py").unlink()
+            (snapshot / "empty-build-input").mkdir()
+            rejected = subprocess.run(
+                [*command[:-1], str(root / "rejected-directory-inventory.json")],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("snapshot path inventory mismatch", rejected.stderr)
+
+    def test_external_dependency_inventory_binds_bytes_and_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            dependencies = root / "dependencies"
+            vendor = dependencies / "vendor" / "crate-1.0.0"
+            vendor.mkdir(parents=True)
+            source = vendor / "lib.rs"
+            source.write_text("pub fn one() {}\n", encoding="ascii")
+            guard = ROOT / "scripts/wmi/t1_timing_build_guard.py"
+
+            def inventory(name: str) -> dict[str, object]:
+                output = root / name
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        str(guard),
+                        "inventory-tree",
+                        "--root",
+                        str(dependencies),
+                        "--output",
+                        str(output),
+                    ],
+                    check=True,
+                )
+                return json.loads(output.read_text(encoding="ascii"))
+
+            before = inventory("before.json")
+            source.write_text("pub fn two() {}\n", encoding="ascii")
+            after = inventory("after.json")
+            self.assertNotEqual(before["entries_sha256"], after["entries_sha256"])
+            (vendor / "link").symlink_to(source)
+            rejected = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(guard),
+                    "inventory-tree",
+                    "--root",
+                    str(dependencies),
+                    "--output",
+                    str(root / "rejected.json"),
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("not regular", rejected.stderr)
+
     def test_wrappers_override_paths_and_forward_all_expected_hashes(self) -> None:
         text = "\n".join(
             (ROOT / relative).read_text(encoding="utf-8")
@@ -697,6 +1358,8 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             "EUF_VIPER_T1_TIMING_CONTRACT",
             "EUF_VIPER_T1_TIMING_MANIFEST",
             "EUF_VIPER_T1_TIMING_ROOT",
+            "EUF_VIPER_T1_TIMING_ACCEPTED_PARITY_RECEIPT",
+            "EUF_VIPER_T1_TIMING_BUILD_RECEIPT",
             "EUF_VIPER_SHARED_CORPUS",
         ):
             self.assertIn(f"unset {variable}", (ROOT / "scripts/wmi/t1_timing_common.sh").read_text())
@@ -713,11 +1376,17 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             "EUF_VIPER_T1_TIMING_MANIFEST": "/tmp/evil-manifest",
             "EUF_VIPER_T1_TIMING_ROOT": "/tmp/evil-root",
             "EUF_VIPER_SHARED_CORPUS": "/tmp/evil-corpus",
+            "EUF_VIPER_T1_PARTITION": "evil",
+            "EUF_VIPER_T1_NODELIST": "evil",
             "PYTHONPATH": "/tmp/shadow",
             "RUSTFLAGS": "--cfg hidden_flag",
             "CARGO_PROFILE_RELEASE_LTO": "false",
             "CC": "/tmp/compiler-wrapper",
             "LD_PRELOAD": "/tmp/inject.so",
+            "GIT_WORK_TREE": "/tmp/alternate-tree",
+            "GIT_CONFIG_GLOBAL": "/tmp/alternate-git-config",
+            "BASH_ENV": "",
+            "ENV": "/tmp/alternate-shell-env",
         }
         command = (
             "source scripts/wmi/t1_timing_common.sh; t1_reject_ambient_influence; "
@@ -725,9 +1394,13 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
             "test -z \"${EUF_VIPER_T1_TIMING_MANIFEST-}\"; "
             "test -z \"${EUF_VIPER_T1_TIMING_ROOT-}\"; "
             "test -z \"${EUF_VIPER_SHARED_CORPUS-}\"; "
+            "test -z \"${EUF_VIPER_T1_PARTITION-}\"; "
+            "test -z \"${EUF_VIPER_T1_NODELIST-}\"; "
             "test -z \"${PYTHONPATH-}\"; test -z \"${RUSTFLAGS-}\"; "
             "test -z \"${CARGO_PROFILE_RELEASE_LTO-}\"; test -z \"${CC-}\"; "
-            "test -z \"${LD_PRELOAD-}\""
+            "test -z \"${LD_PRELOAD-}\"; test -z \"${GIT_WORK_TREE-}\"; "
+            "test -z \"${GIT_CONFIG_GLOBAL-}\"; test -z \"${BASH_ENV-}\"; "
+            "test -z \"${ENV-}\""
         )
         subprocess.run(["bash", "-c", command], cwd=ROOT, env=environment, check=True)
 
@@ -754,6 +1427,99 @@ class CleanCheckoutAndWrapperTests(unittest.TestCase):
         body = source.split("fn parse_for_timing(", 1)[1].split("fn parse_for_semantics(", 1)[0]
         self.assertNotIn("finish_with_symbol_names", body)
         self.assertIn("timed_parser_path_never_clones_symbol_telemetry", source)
+
+
+class LinuxMutationMonitorTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "inotify attack runs in Linux CI")
+    def test_transient_modify_then_restore_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            root = Path(directory_name)
+            snapshot = root / "source"
+            snapshot.mkdir()
+            source = snapshot / "Cargo.toml"
+            original = b"[package]\nname='fixture'\n"
+            source.write_bytes(original)
+            ready = root / "ready.json"
+            stop = root / "stop"
+            events = root / "events.jsonl"
+            receipt = root / "receipt.json"
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(ROOT / "scripts/wmi/t1_timing_build_guard.py"),
+                    "monitor",
+                    "--snapshot",
+                    str(snapshot),
+                    "--ready",
+                    str(ready),
+                    "--stop",
+                    str(stop),
+                    "--events",
+                    str(events),
+                    "--receipt",
+                    str(receipt),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for _ in range(200):
+                if ready.is_file():
+                    break
+                if process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            self.assertTrue(ready.is_file())
+            source.write_bytes(b"transient mutation\n")
+            source.write_bytes(original)
+            stop.touch()
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(stdout, "")
+            self.assertEqual(process.returncode, 3, stderr)
+            payload = json.loads(receipt.read_text(encoding="ascii"))
+            self.assertEqual(payload["status"], "mutated")
+            self.assertGreater(payload["event_count"], 0)
+            self.assertEqual(payload["events"]["path"], str(events))
+            self.assertIn("WRITE", events.read_text(encoding="ascii"))
+
+
+class RealReleaseIntegrationTests(unittest.TestCase):
+    @unittest.skipUnless(
+        os.environ.get("EUF_VIPER_T1_REAL_BINARY"),
+        "hosted Linux CI supplies the exact locked release ELF",
+    )
+    def test_real_release_binary_uses_descriptor_harness_for_both_commands(self) -> None:
+        binary = Path(os.environ["EUF_VIPER_T1_REAL_BINARY"]).resolve(strict=True)
+        self.assertEqual(binary.read_bytes()[:4], b"\x7fELF")
+        source = (ROOT / "tests/fixtures/basic_sat.smt2").read_bytes()
+        with TIMING.open_verified_executable(binary) as executable:
+            semantics = TIMING.collect_semantic_attestations(
+                executable, source, timeout_seconds=2
+            )
+            observations = [
+                TIMING.execute_scheduled_observation(
+                    executable, source, schedule, timeout_seconds=2
+                )
+                for schedule in TIMING.expected_schedule(
+                    CONTRACT, measured_rounds=1, warmup_rounds=0
+                )
+            ]
+        TIMING.validate_semantic_pair(
+            semantics, source_bytes=len(source), where="real release semantics"
+        )
+        TIMING.validate_schedule(
+            observations,
+            contract=CONTRACT,
+            source_bytes=len(source),
+            where="real release timing",
+            measured_rounds=1,
+            warmup_rounds=0,
+        )
+        TIMING.assert_exact_observation_parity(
+            observations, expected_status="sat", where="real release parity"
+        )
 
 
 if __name__ == "__main__":

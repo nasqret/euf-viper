@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+CI_ROOT="${T1_CI_ROOT:?set T1_CI_ROOT to a fresh hosted-Linux directory}"
+REVISION="$(git -C "$ROOT" rev-parse --verify HEAD^{commit})"
+SOURCE="$CI_ROOT/source"
+export CARGO_HOME="$CI_ROOT/cargo-home"
+export CARGO_TARGET_DIR="$CI_ROOT/target"
+FETCH_CARGO_HOME="$CI_ROOT/fetch-cargo-home"
+BUILD_HOME="$CI_ROOT/build-home"
+DEPENDENCY_ROOT="$CI_ROOT/dependencies"
+VENDOR_DIR="$DEPENDENCY_ROOT/vendor"
+VENDOR_CONFIG="$DEPENDENCY_ROOT/cargo-vendor-config.toml"
+GUARD="$SOURCE/scripts/wmi/t1_timing_build_guard.py"
+PRE="$CI_ROOT/pre-build-inventory.json"
+POST="$CI_ROOT/post-build-inventory.json"
+READY="$CI_ROOT/mutation-monitor-ready.json"
+STOP="$CI_ROOT/mutation-monitor.stop"
+EVENTS="$CI_ROOT/mutation-events.jsonl"
+MONITOR_RECEIPT="$CI_ROOT/mutation-monitor-receipt.json"
+BUILD_RECEIPT="$CI_ROOT/build-receipt.json"
+DEPENDENCY_PRE="$CI_ROOT/pre-build-dependency-inventory.json"
+DEPENDENCY_POST="$CI_ROOT/post-build-dependency-inventory.json"
+DEPENDENCY_READY="$CI_ROOT/dependency-mutation-monitor-ready.json"
+DEPENDENCY_STOP="$CI_ROOT/dependency-mutation-monitor.stop"
+DEPENDENCY_EVENTS="$CI_ROOT/dependency-mutation-events.jsonl"
+DEPENDENCY_MONITOR_RECEIPT="$CI_ROOT/dependency-mutation-monitor-receipt.json"
+
+[ "$(uname -s)" = Linux ] || { echo "T1 release integration requires Linux" >&2; exit 2; }
+[ ! -e "$CI_ROOT" ] || { echo "T1 CI root must be fresh: $CI_ROOT" >&2; exit 2; }
+umask 077
+mkdir -m 700 -p \
+  "$CI_ROOT" "$SOURCE" "$CARGO_HOME" "$CARGO_TARGET_DIR" \
+  "$FETCH_CARGO_HOME" "$BUILD_HOME" "$DEPENDENCY_ROOT"
+env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C LC_ALL=C \
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+  git -C "$ROOT" archive --format=tar "$REVISION" | \
+  env -i PATH=/usr/bin:/bin /usr/bin/tar -xf - -C "$SOURCE"
+[ ! -e /.cargo/config ] && [ ! -e /.cargo/config.toml ] || {
+  echo "root Cargo configuration can influence the guarded build" >&2
+  exit 2
+}
+
+tool_identity() {
+  local name="$1"
+  local requested="$2"
+  local upper path digest output version
+  upper="$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')"
+  path="$(readlink -f -- "$requested")"
+  [ -f "$path" ] && [ -x "$path" ] && [ ! -L "$path" ]
+  digest="$(sha256sum "$path" | awk '{print $1}')"
+  output="$("$path" --version 2>&1)"
+  version="${output%%$'\n'*}"
+  printf -v "EUF_VIPER_${upper}" '%s' "$path"
+  printf -v "EUF_VIPER_${upper}_SHA256" '%s' "$digest"
+  printf -v "EUF_VIPER_${upper}_VERSION" '%s' "$version"
+  export "EUF_VIPER_${upper}" "EUF_VIPER_${upper}_SHA256" "EUF_VIPER_${upper}_VERSION"
+}
+
+tool_identity python "$(command -v python3)"
+tool_identity cargo "$(rustup which cargo)"
+tool_identity rustc "$(rustup which rustc)"
+tool_identity cc /usr/bin/cc
+tool_identity ld /usr/bin/ld
+tool_identity ar /usr/bin/ar
+
+MONITOR_PID=""
+DEPENDENCY_MONITOR_PID=""
+stop_monitor() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "$DEPENDENCY_MONITOR_PID" ]; then
+    [ -e "$DEPENDENCY_STOP" ] || : > "$DEPENDENCY_STOP"
+    wait "$DEPENDENCY_MONITOR_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$MONITOR_PID" ]; then
+    [ -e "$STOP" ] || : > "$STOP"
+    wait "$MONITOR_PID" >/dev/null 2>&1 || true
+  fi
+  exit "$status"
+}
+trap stop_monitor EXIT HUP INT TERM
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" monitor \
+  --snapshot "$SOURCE" --ready "$READY" --stop "$STOP" \
+  --events "$EVENTS" --receipt "$MONITOR_RECEIPT" &
+MONITOR_PID=$!
+for _ in $(seq 1 400); do
+  [ -s "$READY" ] && break
+  kill -0 "$MONITOR_PID" 2>/dev/null || { echo "mutation monitor exited before ready" >&2; exit 2; }
+  sleep 0.05
+done
+[ -s "$READY" ] || { echo "mutation monitor did not become ready" >&2; exit 2; }
+
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory \
+  --repository "$ROOT" --revision "$REVISION" --snapshot "$SOURCE" --output "$PRE"
+cd /
+env -i \
+  HOME="$BUILD_HOME" PATH=/usr/bin:/bin \
+  CARGO_HOME="$FETCH_CARGO_HOME" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
+  CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 \
+  RUSTC="$EUF_VIPER_RUSTC" CC="$EUF_VIPER_CC" LD="$EUF_VIPER_LD" AR="$EUF_VIPER_AR" \
+  "$EUF_VIPER_CARGO" vendor \
+    --manifest-path "$SOURCE/Cargo.toml" \
+    --locked --versioned-dirs "$VENDOR_DIR" > "$VENDOR_CONFIG"
+[ -s "$VENDOR_CONFIG" ] || { echo "Cargo did not emit a vendor configuration" >&2; exit 2; }
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" monitor \
+  --snapshot "$DEPENDENCY_ROOT" --ready "$DEPENDENCY_READY" \
+  --stop "$DEPENDENCY_STOP" --events "$DEPENDENCY_EVENTS" \
+  --receipt "$DEPENDENCY_MONITOR_RECEIPT" &
+DEPENDENCY_MONITOR_PID=$!
+for _ in $(seq 1 400); do
+  [ -s "$DEPENDENCY_READY" ] && break
+  kill -0 "$DEPENDENCY_MONITOR_PID" 2>/dev/null || {
+    echo "dependency mutation monitor exited before ready" >&2
+    exit 2
+  }
+  sleep 0.05
+done
+[ -s "$DEPENDENCY_READY" ] || {
+  echo "dependency mutation monitor did not become ready" >&2
+  exit 2
+}
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory-tree \
+  --root "$DEPENDENCY_ROOT" --output "$DEPENDENCY_PRE"
+env -i \
+  HOME="$BUILD_HOME" PATH=/usr/bin:/bin \
+  CARGO_HOME="$CARGO_HOME" CARGO_TARGET_DIR="$CARGO_TARGET_DIR" \
+  CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true \
+  RUSTC="$EUF_VIPER_RUSTC" CC="$EUF_VIPER_CC" LD="$EUF_VIPER_LD" AR="$EUF_VIPER_AR" \
+  RUSTFLAGS="-C linker=$EUF_VIPER_CC -C link-arg=-fuse-ld=bfd" \
+  "$EUF_VIPER_CARGO" build \
+    --manifest-path "$SOURCE/Cargo.toml" \
+    --release --locked --offline \
+    --config "source.crates-io.replace-with='vendored-sources'" \
+    --config "source.vendored-sources.directory='$VENDOR_DIR'"
+cd "$ROOT"
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory \
+  --repository "$ROOT" --revision "$REVISION" --snapshot "$SOURCE" --output "$POST"
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" inventory-tree \
+  --root "$DEPENDENCY_ROOT" --output "$DEPENDENCY_POST"
+: > "$STOP"
+: > "$DEPENDENCY_STOP"
+set +e
+wait "$MONITOR_PID"
+MONITOR_STATUS=$?
+wait "$DEPENDENCY_MONITOR_PID"
+DEPENDENCY_MONITOR_STATUS=$?
+set -e
+MONITOR_PID=""
+DEPENDENCY_MONITOR_PID=""
+trap - EXIT HUP INT TERM
+[ "$MONITOR_STATUS" -eq 0 ] || { echo "mutation monitor rejected hosted build" >&2; exit "$MONITOR_STATUS"; }
+[ "$DEPENDENCY_MONITOR_STATUS" -eq 0 ] || {
+  echo "dependency mutation monitor rejected hosted build" >&2
+  exit "$DEPENDENCY_MONITOR_STATUS"
+}
+
+BINARY="$CARGO_TARGET_DIR/release/euf-viper"
+"$EUF_VIPER_PYTHON" -I -B "$GUARD" receipt \
+  --revision "$REVISION" --pre-inventory "$PRE" --post-inventory "$POST" \
+  --monitor-receipt "$MONITOR_RECEIPT" \
+  --dependency-pre-inventory "$DEPENDENCY_PRE" \
+  --dependency-post-inventory "$DEPENDENCY_POST" \
+  --dependency-monitor-receipt "$DEPENDENCY_MONITOR_RECEIPT" \
+  --binary "$BINARY" --cargo-home "$CARGO_HOME" \
+  --fetch-cargo-home "$FETCH_CARGO_HOME" --target-dir "$CARGO_TARGET_DIR" \
+  --vendor-dir "$VENDOR_DIR" --output "$BUILD_RECEIPT"
+"$EUF_VIPER_PYTHON" -I -B "$SOURCE/scripts/bench/typed_parser_timing.py" \
+  verify-build-receipt --build-receipt "$BUILD_RECEIPT" \
+  --binary "$BINARY" --revision "$REVISION" >/dev/null
+
+cd "$SOURCE"
+EUF_VIPER_T1_REAL_BINARY="$BINARY" "$EUF_VIPER_PYTHON" -I -B -m unittest \
+  tests.test_typed_parser_timing.RealReleaseIntegrationTests
