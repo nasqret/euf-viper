@@ -1726,6 +1726,43 @@
   and UTF-8 receipts are reopened as ASCII. A four-defect repair is active; no
   hosted or WMI campaign is authorized.
 
+## 2026-07-15 - Sole-tail diagnosis and T9 preregistration
+
+- Independent review accepts T6 commit `c8c336d` as diagnostic-only. Its eight
+  focused tests and 64 mixed-polarity reference cases pass, but the frozen
+  Goel/PEQ projection gates still reject any route or solve-path use.
+- Exact local projection on the sole 1,200-second timeout reduces direct-root
+  Boolean-DAG clauses from 89,470 to 27,875 and literals from 147,132 to
+  55,250, but takes longer to encode and does not reverse T6's broad rejection.
+  A separate eager dump has 342,033 clauses, including 186,075 equality
+  transitivity clauses and no congruence or finite-domain clauses.
+- Bounded tail tracing localizes the failure to repeated theory validation and
+  explanation. Ten rounds spend about 5.07 ms in SAT and 823.36 ms in
+  validation while hitting the 32-cut cap every round. Older Linux telemetry
+  records 1,192 rounds, 37,714 cuts, 31.10 seconds of validation, and 3.66
+  seconds of SAT. Parser time and backend replacement are not the first target.
+- The existing dynamic full-Ackermann route excludes this source because its
+  89,470 base clauses miss the arbitrary 100,000-clause threshold. T9 is now
+  preregistered before implementation or candidate timing as an opt-in,
+  clique-gated, allocation-bounded pre-SAT completion escape. Stage 0 is a
+  no-solve census over all 7,503 sources. It must select the terminal timeout,
+  reject `frogs.1`, `frogs.4`, and every QG source, and preserve feature-off CNF
+  bytes.
+- T9's later paired gate reuses only the source identities in frozen rollback
+  manifest SHA-256 `85c18f76...ff18390`. It requires at most 1% anti-target
+  p95 overhead and at least 1.05x median and geometric speed over same-node
+  Yices2 on the complete selected population. Historical forced completion at
+  roughly 0.609 seconds still trails the sealed Yices2 row near 0.117 seconds,
+  so closing the final timeout alone cannot promote the route.
+- Production-evidence exact review of `aac576c` closes the original UTF-8 and
+  existing-output replacement defects but remains NO-GO: fresh publication can
+  accept parent replacement during its callback, and an existing FIFO can
+  block before file-type validation. A bounded isolated repair is active.
+- Certificate exact review of `f07ecff` closes the original symlink-plus-parent
+  alias defect but finds one low adjacent regression for a nonexistent path
+  component followed by `..`. An isolated normalization repair is active; no
+  push, hosted claim, or WMI action is authorized.
+
 ## Next Entry Template
 
 - Benchmark corpus:

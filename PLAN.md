@@ -819,8 +819,10 @@ fallback can be an operational portfolio but never a standalone victory.
    The replacement `/work` chain is complete: 60-second audits `147308`/`147310`,
    1,200-second arrays/audits `147684`-`147687`, and finalizer `147688` are all
    terminal `0:0`. Preserve index SHA-256 `2d1c7a3b...58b64d15` as rejected
-   evidence. Diagnose the sole 1,200-second candidate timeout without rerunning
-   or mutating the sealed graph.
+   evidence. Diagnosis of the sole 1,200-second candidate timeout is complete:
+   repeated closure/explanation work dominates SAT, and the current dynamic
+   completion route misses the source only because 89,470 base clauses fall
+   below its 100,000-clause threshold. Do not rerun or mutate the sealed graph.
 6. Keep production-evidence repair `f27e254` NO-GO after adversarial review.
    Its real release smoke uses one official instance with two shards, its
    prepare/audit provenance comparison requires impossible stage-environment
@@ -868,6 +870,16 @@ fallback can be an operational portfolio but never a standalone victory.
     only if its independently replayable guard can beat the syntactic control
     and pass all original qg7/Goel/PEQ thresholds. No novelty claim is allowed
     before pinned prior-art review.
+12. Execute T9 only under
+    `research-vault/02-design/2026-07-15-t9-clique-gated-ackermann-escape.md`.
+    First port only the allocation-independent budget planner into an isolated
+    default-off branch, then run the no-solve 7,503-source projection census.
+    The sole terminal timeout must be selected; `frogs.1`, `frogs.4`, and every
+    QG source must be rejected structurally. No candidate timing precedes that
+    census. A later same-binary ABBA gate must preserve nonselected CNF bytes,
+    keep anti-target p95 overhead at most 1%, and beat same-node Yices2 by at
+    least 1.05x on the complete selected population. Closing coverage alone is
+    not promotion evidence.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

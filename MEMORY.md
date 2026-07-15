@@ -1175,3 +1175,26 @@
   local tests. Repair its invalid one-instance/two-shard smoke, impossible
   prepare/audit environment equality, post-verification publication race, and
   UTF-8/ASCII receipt mismatch before another review or any remote run.
+- Independent review accepts T6 `c8c336d` only as diagnostic infrastructure;
+  its broad Goel/PEQ projection rejection remains binding. On the sole
+  1,200-second timeout, syntactic DAG projection cuts clauses from 89,470 to
+  27,875, but eager CNF still exposes 186,075 transitivity clauses and no
+  congruence clauses. Do not infer a solve-path gain.
+- The sole tail is validation-bound: a bounded ten-round trace spends about
+  823.36 ms in validation versus 5.07 ms in SAT and hits the 32-cut cap each
+  round. The automatic completion route misses it because 89,470 base clauses
+  fall below a 100,000-clause threshold, not because its bounded completion
+  plan is too large.
+- T9 is preregistered in
+  `research-vault/02-design/2026-07-15-t9-clique-gated-ackermann-escape.md`.
+  Before candidate timing, a no-solve 7,503-source census must select the sole
+  timeout, reject `frogs.1`, `frogs.4`, and all QG sources, and prove every
+  allocation cap. Later ABBA evidence must preserve nonselected CNF bytes,
+  keep anti-target p95 overhead at most 1%, and beat same-node Yices2 by at
+  least 1.05x on the complete selected population. Coverage closure alone is
+  insufficient.
+- Exact certificate review closes the symlink-plus-parent defect in `f07ecff`
+  but finds a low nonexistent-component-plus-`..` normalization regression.
+  Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
+  replacement and FIFO blocking. Both repairs remain isolated; do not push,
+  host, or run WMI controls before new exact reviews pass.
