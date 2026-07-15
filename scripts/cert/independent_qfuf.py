@@ -1791,9 +1791,13 @@ def parse_dimacs(source: str) -> tuple[int, tuple[tuple[int, ...], ...]]:
 def _v2_manifest(manifest: Mapping[str, object], result: str) -> None:
     if type(manifest) is not dict:
         raise IndependentQfufError("certificate manifest must be an object")
-    if manifest.get("format") != V2_FORMAT:
+    if any(type(key) is not str for key in manifest):
+        raise IndependentQfufError("certificate manifest keys must be exact strings")
+    manifest_format = manifest.get("format")
+    if type(manifest_format) is not str or manifest_format != V2_FORMAT:
         raise IndependentQfufError("unsupported certificate manifest format")
-    if manifest.get("result") != result:
+    manifest_result = manifest.get("result")
+    if type(manifest_result) is not str or manifest_result != result:
         raise IndependentQfufError(
             f"certificate manifest does not claim {result.upper()}"
         )
@@ -1878,11 +1882,11 @@ def _validate_euf_suffix(
             ) from error
 
 
-def _certificate_equality_variables(
+def _certificate_theory_variables(
     problem: EncodedProblem,
-) -> dict[tuple[int, int], int]:
+) -> tuple[dict[tuple[int, int], int], dict[int, int]]:
     equality_variables: dict[tuple[int, int], int] = {}
-    bool_terms: set[int] = set()
+    bool_variables: dict[int, int] = {}
     for atom in problem.atoms:
         if atom.kind == "equality":
             assert atom.left is not None and atom.right is not None
@@ -1894,117 +1898,229 @@ def _certificate_equality_variables(
             equality_variables[key] = atom.variable
         elif atom.kind == "bool_term":
             assert atom.term is not None
-            if atom.term in bool_terms:
+            if atom.term in bool_variables:
                 raise IndependentQfufError(
                     f"duplicate BoolTerm atom metadata for term {atom.term}"
                 )
-            bool_terms.add(atom.term)
-    return equality_variables
+            bool_variables[atom.term] = atom.variable
+    return equality_variables, bool_variables
 
 
-def _is_transitivity_clause(problem: EncodedProblem, clause: tuple[int, ...]) -> bool:
-    if len(set(clause)) != len(clause):
-        return False
-    if len(clause) == 1:
-        literal = clause[0]
-        atom = problem.atoms[abs(literal) - 1]
-        return (
-            literal > 0
-            and atom.kind == "equality"
-            and atom.left == atom.right
-        )
-    if len(clause) != 3 or sum(literal > 0 for literal in clause) != 1:
-        return False
-    atoms = [problem.atoms[abs(literal) - 1] for literal in clause]
-    if any(atom.kind != "equality" for atom in atoms):
-        return False
-    pairs = [
-        tuple(sorted((atom.left, atom.right)))
-        for atom in atoms
-        if atom.left is not None and atom.right is not None
-    ]
+_CERTIFICATE_EAGER_CLAUSE_BUDGET: Final = 262_144
+_CERTIFICATE_EAGER_LITERAL_BUDGET: Final = 1_048_576
+_CERTIFICATE_MAX_CANDIDATES_PER_APPLICATION: Final = 4_096
+
+
+class _CertificateSeedBudgetExceeded(Exception):
+    pass
+
+
+def _normalized_term_pair(left: int, right: int) -> tuple[int, int]:
+    return (left, right) if left <= right else (right, left)
+
+
+def _append_certificate_seed(
+    target: list[tuple[int, ...]],
+    clause: Sequence[int],
+    totals: list[int],
+    *,
+    normalize: bool = False,
+) -> None:
+    if normalize:
+        normalized = tuple(sorted(set(clause)))
+        if any(-literal in normalized for literal in normalized):
+            return
+    else:
+        normalized = tuple(clause)
+    next_clauses = totals[0] + 1
+    next_literals = totals[1] + len(normalized)
     if (
-        len(pairs) != 3
-        or len(set(pairs)) != 3
-        or any(left == right for left, right in pairs)
-        or len({term for pair in pairs for term in pair}) != 3
+        next_clauses > _CERTIFICATE_EAGER_CLAUSE_BUDGET
+        or next_literals > _CERTIFICATE_EAGER_LITERAL_BUDGET
     ):
-        return False
-    return all(
-        sum(term in pair for pair in pairs) == 2
-        for term in {endpoint for pair in pairs for endpoint in pair}
-    )
+        raise _CertificateSeedBudgetExceeded
+    totals[0] = next_clauses
+    totals[1] = next_literals
+    target.append(normalized)
 
 
-def _required_argument_equalities(
+def _reconstruct_certificate_transitivity(
     problem: EncodedProblem,
-    left_id: int,
-    right_id: int,
     equality_variables: Mapping[tuple[int, int], int],
-) -> frozenset[int] | None:
-    if left_id == right_id:
-        return None
-    left = problem.terms[left_id]
-    right = problem.terms[right_id]
-    if left.function != right.function or len(left.args) != len(right.args):
-        return None
-    required: set[int] = set()
-    for left_arg, right_arg in zip(left.args, right.args):
-        if left_arg == right_arg:
+    totals: list[int],
+) -> list[tuple[int, ...]]:
+    clauses: list[tuple[int, ...]] = []
+    edges = sorted(
+        (left, right, variable)
+        for (left, right), variable in equality_variables.items()
+    )
+    adjacency: list[list[tuple[int, int]]] = [
+        [] for _ in range(len(problem.terms))
+    ]
+    for left, right, variable in edges:
+        if left == right:
+            _append_certificate_seed(clauses, (variable,), totals)
             continue
-        variable = equality_variables.get(tuple(sorted((left_arg, right_arg))))
-        if variable is None:
-            return None
-        required.add(variable)
-    return frozenset(required) if required else None
+        adjacency[left].append((right, variable))
+        adjacency[right].append((left, variable))
+    for term, neighbors in enumerate(adjacency):
+        neighbors.sort()
+        if len({neighbor for neighbor, _ in neighbors}) != len(neighbors):
+            raise IndependentQfufError(
+                f"duplicate equality neighbor metadata for term {term}"
+            )
 
-
-def _is_congruence_clause(
-    problem: EncodedProblem,
-    clause: tuple[int, ...],
-    equality_variables: Mapping[tuple[int, int], int],
-) -> bool:
-    literals = set(clause)
-    if len(literals) != len(clause) or any(-literal in literals for literal in literals):
-        return False
-    equality_literals = [
-        literal
-        for literal in clause
-        if problem.atoms[abs(literal) - 1].kind == "equality"
-    ]
-    bool_literals = [
-        literal
-        for literal in clause
-        if problem.atoms[abs(literal) - 1].kind == "bool_term"
-    ]
-    if len(equality_literals) + len(bool_literals) != len(clause):
-        return False
-    negative_conditions = {
-        abs(literal) for literal in equality_literals if literal < 0
-    }
-    positive_equalities = [literal for literal in equality_literals if literal > 0]
-
-    if not bool_literals and len(positive_equalities) == 1:
-        result = problem.atoms[positive_equalities[0] - 1]
-        assert result.left is not None and result.right is not None
-        required = _required_argument_equalities(
-            problem, result.left, result.right, equality_variables
+    for left, right, left_right in edges:
+        if left == right:
+            continue
+        incident = (
+            adjacency[left]
+            if len(adjacency[left]) <= len(adjacency[right])
+            else adjacency[right]
         )
-        return required is not None and negative_conditions == required
+        for third, _ in incident:
+            if third <= right:
+                continue
+            left_third = equality_variables.get(_normalized_term_pair(left, third))
+            right_third = equality_variables.get(_normalized_term_pair(right, third))
+            if left_third is None or right_third is None:
+                continue
+            _append_certificate_seed(
+                clauses, (-left_right, -left_third, right_third), totals
+            )
+            _append_certificate_seed(
+                clauses, (-left_right, -right_third, left_third), totals
+            )
+            _append_certificate_seed(
+                clauses, (-left_third, -right_third, left_right), totals
+            )
+    clauses.sort()
+    return clauses
 
-    if (
-        positive_equalities
-        or len(bool_literals) != 2
-        or sum(literal > 0 for literal in bool_literals) != 1
-    ):
-        return False
-    left_atom = problem.atoms[abs(bool_literals[0]) - 1]
-    right_atom = problem.atoms[abs(bool_literals[1]) - 1]
-    assert left_atom.term is not None and right_atom.term is not None
-    required = _required_argument_equalities(
-        problem, left_atom.term, right_atom.term, equality_variables
+
+def _reconstruct_certificate_congruence(
+    problem: EncodedProblem,
+    equality_variables: Mapping[tuple[int, int], int],
+    bool_variables: Mapping[int, int],
+    totals: list[int],
+) -> list[tuple[int, ...]]:
+    clauses: list[tuple[int, ...]] = []
+    equality_neighbors: list[list[tuple[int, int]]] = [
+        [] for _ in range(len(problem.terms))
+    ]
+    degree = [0] * len(problem.terms)
+    for (left, right), variable in equality_variables.items():
+        if left == right:
+            continue
+        equality_neighbors[left].append((right, variable))
+        equality_neighbors[right].append((left, variable))
+        degree[left] += 1
+        degree[right] += 1
+    for neighbors in equality_neighbors:
+        neighbors.sort()
+
+    applications = [term.id for term in problem.terms if term.args]
+    canonical_values = {
+        term.id
+        for term in problem.terms
+        if not term.args and degree[term.id] >= 16
+    }
+    canonical_only = len(canonical_values) >= 3 and (
+        len(applications) > 1_000
+        or any(problem.terms[term].args for term in bool_variables)
     )
-    return required is not None and negative_conditions == required
+    term_ids: dict[tuple[int, tuple[int, ...]], int] = {}
+    for term in problem.terms:
+        key = (term.function, term.args)
+        if key in term_ids:
+            raise IndependentQfufError(
+                f"duplicate canonical term metadata for term {term.id}"
+            )
+        term_ids[key] = term.id
+
+    candidate_counts: dict[int, int] = {}
+    for application in applications:
+        count = 1
+        for argument in problem.terms[application].args:
+            count *= len(equality_neighbors[argument]) + 1
+        if count <= _CERTIFICATE_MAX_CANDIDATES_PER_APPLICATION:
+            candidate_counts[application] = count
+
+    for left_id in applications:
+        candidate_count = candidate_counts.get(left_id)
+        if candidate_count is None:
+            continue
+        left = problem.terms[left_id]
+        for ordinal in range(1, candidate_count):
+            remainder = ordinal
+            digits = [0] * len(left.args)
+            for position in range(len(left.args) - 1, -1, -1):
+                radix = len(equality_neighbors[left.args[position]]) + 1
+                digits[position] = remainder % radix
+                remainder //= radix
+            if remainder:
+                raise IndependentQfufError("certificate candidate enumeration overflow")
+            arguments: list[int] = []
+            conditions: list[int] = []
+            for argument, digit in zip(left.args, digits):
+                if digit == 0:
+                    arguments.append(argument)
+                else:
+                    neighbor, equality = equality_neighbors[argument][digit - 1]
+                    arguments.append(neighbor)
+                    conditions.append(-equality)
+            right_id = term_ids.get((left.function, tuple(arguments)))
+            if right_id is None or right_id == left_id:
+                continue
+            if left_id > right_id and right_id in candidate_counts:
+                continue
+            right = problem.terms[right_id]
+            if canonical_only and not (
+                all(argument in canonical_values for argument in left.args)
+                or all(argument in canonical_values for argument in right.args)
+            ):
+                continue
+
+            result = equality_variables.get(_normalized_term_pair(left_id, right_id))
+            if result is not None:
+                _append_certificate_seed(
+                    clauses, (*conditions, result), totals, normalize=True
+                )
+            left_bool = bool_variables.get(left_id)
+            right_bool = bool_variables.get(right_id)
+            if left_bool is None or right_bool is None:
+                continue
+            _append_certificate_seed(
+                clauses,
+                (*conditions, -left_bool, right_bool),
+                totals,
+                normalize=True,
+            )
+            _append_certificate_seed(
+                clauses,
+                (*conditions, left_bool, -right_bool),
+                totals,
+                normalize=True,
+            )
+    clauses.sort()
+    return clauses
+
+
+def _reconstruct_certificate_static_prefix(
+    problem: EncodedProblem,
+) -> tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]]:
+    equality_variables, bool_variables = _certificate_theory_variables(problem)
+    totals = [0, 0]
+    try:
+        transitivity = _reconstruct_certificate_transitivity(
+            problem, equality_variables, totals
+        )
+        congruence = _reconstruct_certificate_congruence(
+            problem, equality_variables, bool_variables, totals
+        )
+    except _CertificateSeedBudgetExceeded:
+        return (), ()
+    return tuple(transitivity), tuple(congruence)
 
 
 _UNSAT_CLAUSE_CATEGORIES: Final = (
@@ -2032,9 +2148,13 @@ def _unsat_manifest_counts(
             "UNSAT manifest finite_domain_axioms must be the integer zero"
         )
     raw_counts = manifest.get("clauses")
-    if type(raw_counts) is not dict or set(raw_counts) != set(
-        _UNSAT_CLAUSE_CATEGORIES
-    ):
+    if type(raw_counts) is not dict:
+        raise IndependentQfufError("UNSAT manifest clauses must be an object")
+    if any(type(key) is not str for key in raw_counts):
+        raise IndependentQfufError(
+            "UNSAT manifest clause category keys must be exact strings"
+        )
+    if set(raw_counts) != set(_UNSAT_CLAUSE_CATEGORIES):
         raise IndependentQfufError(
             "UNSAT manifest clauses must contain exactly base, transitivity, "
             "congruence, theory_conflicts, and total"
@@ -2067,24 +2187,28 @@ def _validate_unsat_clause_categories(
     clauses: Sequence[tuple[int, ...]],
     counts: Mapping[str, int],
 ) -> None:
-    equality_variables = _certificate_equality_variables(problem)
     transitivity_start = counts["base"]
     congruence_start = transitivity_start + counts["transitivity"]
     theory_start = congruence_start + counts["congruence"]
-    for index, clause in enumerate(
-        clauses[transitivity_start:congruence_start], start=transitivity_start + 1
-    ):
-        if not _is_transitivity_clause(problem, clause):
-            raise IndependentQfufError(
-                f"DIMACS clause {index} is not a transitivity seed"
-            )
-    for index, clause in enumerate(
-        clauses[congruence_start:theory_start], start=congruence_start + 1
-    ):
-        if not _is_congruence_clause(problem, clause, equality_variables):
-            raise IndependentQfufError(
-                f"DIMACS clause {index} is not a direct congruence seed"
-            )
+    expected_transitivity, expected_congruence = (
+        _reconstruct_certificate_static_prefix(problem)
+    )
+    if counts["transitivity"] != len(expected_transitivity):
+        raise IndependentQfufError(
+            "UNSAT manifest transitivity count differs from independent regeneration"
+        )
+    if counts["congruence"] != len(expected_congruence):
+        raise IndependentQfufError(
+            "UNSAT manifest congruence count differs from independent regeneration"
+        )
+    if tuple(clauses[transitivity_start:congruence_start]) != expected_transitivity:
+        raise IndependentQfufError(
+            "DIMACS transitivity prefix differs from independent regeneration"
+        )
+    if tuple(clauses[congruence_start:theory_start]) != expected_congruence:
+        raise IndependentQfufError(
+            "DIMACS congruence prefix differs from independent regeneration"
+        )
 
 
 def validate_v2_unsat_manifest(

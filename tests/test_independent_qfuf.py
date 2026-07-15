@@ -739,6 +739,48 @@ class ManifestAndTamperTests(unittest.TestCase):
                         mutation, self.problem, self.problem.variable_count, clauses
                     )
 
+        class AlwaysEqual:
+            def __eq__(self, other: object) -> bool:
+                return True
+
+        class HostileComparison:
+            def __eq__(self, other: object) -> bool:
+                raise RuntimeError("hostile comparison executed")
+
+        class StringSubclass(str):
+            pass
+
+        for field in ("format", "result"):
+            for value in (AlwaysEqual(), HostileComparison()):
+                with self.subTest(field=field, value=type(value).__name__):
+                    with self.assertRaises(QFUF.IndependentQfufError):
+                        QFUF.validate_v2_unsat_manifest(
+                            {**manifest, field: value},
+                            self.problem,
+                            self.problem.variable_count,
+                            clauses,
+                        )
+        subclass_counts = dict(manifest["clauses"])
+        base = subclass_counts.pop("base")
+        subclass_counts[StringSubclass("base")] = base
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "exact strings"):
+            QFUF.validate_v2_unsat_manifest(
+                {**manifest, "clauses": subclass_counts},
+                self.problem,
+                self.problem.variable_count,
+                clauses,
+            )
+        subclass_manifest = dict(manifest)
+        manifest_format = subclass_manifest.pop("format")
+        subclass_manifest[StringSubclass("format")] = manifest_format
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "exact strings"):
+            QFUF.validate_v2_unsat_manifest(
+                subclass_manifest,
+                self.problem,
+                self.problem.variable_count,
+                clauses,
+            )
+
     def test_unsat_manifest_rejects_redistributed_seed_categories(self) -> None:
         premise, consequence = self.equalities
         congruence = (-premise, consequence)
@@ -756,7 +798,9 @@ class ManifestAndTamperTests(unittest.TestCase):
                 "total": len(clauses),
             },
         }
-        with self.assertRaisesRegex(QFUF.IndependentQfufError, "transitivity seed"):
+        with self.assertRaisesRegex(
+            QFUF.IndependentQfufError, "transitivity count"
+        ):
             QFUF.validate_v2_unsat_manifest(
                 manifest, self.problem, self.problem.variable_count, clauses
             )
@@ -783,12 +827,19 @@ class ManifestAndTamperTests(unittest.TestCase):
             if triangle.functions[term.function].name in {"a", "b", "c"}
         ]
         a, b, c = terms
-        transitivity = (
-            -pairs[frozenset((a, b))],
-            -pairs[frozenset((b, c))],
-            pairs[frozenset((a, c))],
+        ab = pairs[frozenset((a, b))]
+        ac = pairs[frozenset((a, c))]
+        bc = pairs[frozenset((b, c))]
+        transitivity = tuple(
+            sorted(
+                (
+                    (-ab, -ac, bc),
+                    (-ab, -bc, ac),
+                    (-ac, -bc, ab),
+                )
+            )
         )
-        triangle_clauses = (*triangle.clauses, transitivity)
+        triangle_clauses = (*triangle.clauses, *transitivity)
         triangle_manifest = {
             "format": QFUF.V2_FORMAT,
             "result": "unsat",
@@ -796,7 +847,7 @@ class ManifestAndTamperTests(unittest.TestCase):
             "finite_domain_axioms": 0,
             "clauses": {
                 "base": triangle.base_count,
-                "transitivity": 1,
+                "transitivity": 3,
                 "congruence": 0,
                 "theory_conflicts": 0,
                 "total": len(triangle_clauses),
@@ -805,15 +856,80 @@ class ManifestAndTamperTests(unittest.TestCase):
         QFUF.validate_v2_unsat_manifest(
             triangle_manifest, triangle, triangle.variable_count, triangle_clauses
         )
+        reordered = (
+            *triangle.clauses,
+            transitivity[1],
+            transitivity[0],
+            *transitivity[2:],
+        )
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "prefix differs"):
+            QFUF.validate_v2_unsat_manifest(
+                triangle_manifest, triangle, triangle.variable_count, reordered
+            )
         triangle_manifest["clauses"] = {
             **triangle_manifest["clauses"],
             "transitivity": 0,
-            "congruence": 1,
+            "congruence": 3,
         }
-        with self.assertRaisesRegex(QFUF.IndependentQfufError, "congruence seed"):
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "transitivity count"):
             QFUF.validate_v2_unsat_manifest(
                 triangle_manifest, triangle, triangle.variable_count, triangle_clauses
             )
+
+        congruence_manifest = {
+            "format": QFUF.V2_FORMAT,
+            "result": "unsat",
+            "variables": self.problem.variable_count,
+            "finite_domain_axioms": 0,
+            "clauses": {
+                "base": self.problem.base_count,
+                "transitivity": 0,
+                "congruence": 0,
+                "theory_conflicts": 1,
+                "total": len(clauses),
+            },
+        }
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "congruence count"):
+            QFUF.validate_v2_unsat_manifest(
+                congruence_manifest,
+                self.problem,
+                self.problem.variable_count,
+                clauses,
+            )
+        triangle_manifest["clauses"] = {
+            **triangle_manifest["clauses"],
+            "congruence": 0,
+            "theory_conflicts": 3,
+        }
+        with self.assertRaisesRegex(QFUF.IndependentQfufError, "transitivity count"):
+            QFUF.validate_v2_unsat_manifest(
+                triangle_manifest, triangle, triangle.variable_count, triangle_clauses
+            )
+
+    def test_static_prefix_regeneration_falls_back_before_dense_materialization(
+        self,
+    ) -> None:
+        size = 82
+        declarations = "\n".join(
+            f"(declare-const c{index} U)" for index in range(size)
+        )
+        equalities = " ".join(
+            f"(= c{left} c{right})"
+            for left in range(size)
+            for right in range(left + 1, size)
+        )
+        problem = QFUF._validate_problem(
+            QFUF.parse_and_encode(
+                query(
+                    f"""
+                    (declare-sort U 0)
+                    {declarations}
+                    (assert (and {equalities}))
+                    """
+                )
+            )
+        )
+        self.assertEqual(QFUF._reconstruct_certificate_static_prefix(problem), ((), ()))
 
     def test_unsat_manifest_accepts_boolean_predicate_congruence_seeds(self) -> None:
         problem = QFUF.parse_and_encode(
@@ -842,7 +958,8 @@ class ManifestAndTamperTests(unittest.TestCase):
             predicates[problem.functions[argument.function].name] = atom.variable
         forward = (-equality, -predicates["a"], predicates["b"])
         backward = (-equality, predicates["a"], -predicates["b"])
-        clauses = (*problem.clauses, forward, backward)
+        congruence = sorted((tuple(sorted(forward)), tuple(sorted(backward))))
+        clauses = (*problem.clauses, *congruence)
         manifest = {
             "format": QFUF.V2_FORMAT,
             "result": "unsat",
