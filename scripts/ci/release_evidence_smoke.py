@@ -233,10 +233,15 @@ def main() -> int:
                 binary_hash,
             ],
             cwd=repository,
-            allowed={2},
+            allowed={1},
         )
-        if not rejected.stderr:
-            raise SystemExit("checker rejected UNSAT-as-SAT without an error diagnostic")
+        expected_rejection = (
+            b"evidence status mismatch: expected 'sat', got 'unsupported'"
+        )
+        if expected_rejection not in rejected.stderr:
+            raise SystemExit(
+                "checker rejected UNSAT-as-SAT without the required status diagnostic"
+            )
 
         existing = root / "existing.json"
         existing.write_bytes(b"do-not-replace\n")

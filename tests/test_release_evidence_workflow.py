@@ -48,6 +48,8 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             self.assertIn(required, text)
         self.assertNotIn("#!/bin/sh", text)
         self.assertNotIn("fake solver", text.lower())
+        self.assertIn("allowed={1}", text)
+        self.assertIn("evidence status mismatch: expected 'sat', got 'unsupported'", text)
 
     def test_cli_contract_locks_baseline_bytes_not_weak_statuses(self) -> None:
         text = CLI_CONTRACT.read_text(encoding="ascii")
