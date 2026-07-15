@@ -6888,13 +6888,10 @@ fn certify_orbit_kernel(
 }
 
 #[cfg(feature = "certificates")]
-fn certify_file(
-    path: &str,
-    prefix: &str,
-    max_rounds: usize,
-    finite_orbit: bool,
-) -> Result<i32, String> {
+fn certify_file_from_cli_args(path: &str, prefix: &str, args: &[String]) -> Result<i32, String> {
     with_certificate_output_transaction(Path::new(prefix), |outputs| {
+        let max_rounds = parse_flag_usize(args, "--max-theory-rounds", 100_000)?;
+        let finite_orbit = args.iter().any(|argument| argument == "--finite-orbit");
         let seed_budget = certificate_seed_budget()?;
         certify_file_with_seed_budget_inner(path, max_rounds, seed_budget, finite_orbit, outputs)
     })
@@ -8809,8 +8806,7 @@ fn usage() -> &'static str {
   euf-viper bench-or [--cases N] [--branches N] [--depth N]"
 }
 
-fn run() -> Result<i32, String> {
-    let args: Vec<String> = env::args().collect();
+fn run_with_args(args: &[String]) -> Result<i32, String> {
     if args.len() < 2 {
         return Err(usage().to_owned());
     }
@@ -8854,11 +8850,7 @@ fn run() -> Result<i32, String> {
         "certify" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             let prefix = parse_required_flag(&args[3..], "--out-prefix")?;
-            let max_rounds = parse_flag_usize(&args[3..], "--max-theory-rounds", 100_000)?;
-            let finite_orbit = args[3..]
-                .iter()
-                .any(|argument| argument == "--finite-orbit");
-            certify_file(file, prefix, max_rounds, finite_orbit)
+            certify_file_from_cli_args(file, prefix, &args[3..])
         }
         "gen" => gen_cmd(&args[1..]),
         "bench" => bench_cmd(&args[1..]),
@@ -8873,6 +8865,11 @@ fn run() -> Result<i32, String> {
         }
         other => Err(format!("unknown command `{other}`\n{}", usage())),
     }
+}
+
+fn run() -> Result<i32, String> {
+    let args: Vec<String> = env::args().collect();
+    run_with_args(&args)
 }
 
 fn main() {
@@ -9683,6 +9680,47 @@ mod tests {
             Err("--max-theory-rounds must be at least 1".to_owned())
         );
         assert_no_certificate_outputs(&prefix);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn certificate_cli_reused_prefix_is_cleared_before_max_round_validation() {
+        let directory = CertificateTestDirectory::new("cli-stale-certificate-outputs");
+        let source_path = directory.path("input.smt2");
+        fs::write(&source_path, MIXED_CERTIFICATE_SOURCE)
+            .expect("write CLI transaction test input");
+
+        for (label, max_round_args, expected_error) in [
+            (
+                "malformed",
+                vec!["--max-theory-rounds", "not-a-number"],
+                "invalid value for --max-theory-rounds:",
+            ),
+            (
+                "missing",
+                vec!["--max-theory-rounds"],
+                "--max-theory-rounds requires a value",
+            ),
+        ] {
+            let prefix = directory.path(label);
+            preseed_certificate_outputs(&prefix);
+            let mut args = vec![
+                "euf-viper".to_owned(),
+                "certify".to_owned(),
+                source_path.to_str().unwrap().to_owned(),
+                "--out-prefix".to_owned(),
+                prefix.to_str().unwrap().to_owned(),
+            ];
+            args.extend(max_round_args.into_iter().map(str::to_owned));
+
+            let error =
+                run_with_args(&args).expect_err("invalid max rounds must abort certification");
+            assert!(
+                error.starts_with(expected_error),
+                "unexpected CLI validation error: {error}"
+            );
+            assert_no_certificate_outputs(&prefix);
+        }
     }
 
     #[cfg(feature = "certificates")]
