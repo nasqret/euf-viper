@@ -2234,8 +2234,6 @@ enum CertificateAtom {
 #[derive(Debug, Serialize)]
 struct CertificateClauseCounts {
     base: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    finite_domain: Option<usize>,
     transitivity: usize,
     congruence: usize,
     theory_conflicts: usize,
@@ -2276,6 +2274,56 @@ struct SatCertificateManifest {
     assignment: Vec<i32>,
     theory_rounds: usize,
     theory_conflicts: usize,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct OrbitCertificateClauseCounts {
+    base: usize,
+    guarded_rows: usize,
+    finite_coverage: usize,
+    equality_channels: usize,
+    predicate_channels: usize,
+    orbit_lex: usize,
+    guarded_channels: usize,
+    total: usize,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct OrbitCertificateWitness {
+    domain_terms: Vec<TermId>,
+    membership_terms: Vec<TermId>,
+    lex_terms: Vec<TermId>,
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Serialize)]
+struct OrbitCertificateManifest {
+    format: &'static str,
+    result: &'static str,
+    encoding: &'static str,
+    source: String,
+    source_sha256: String,
+    dimacs: String,
+    dimacs_sha256: String,
+    proof: String,
+    proof_sha256: String,
+    variables: usize,
+    clauses: OrbitCertificateClauseCounts,
+    finite_orbit: OrbitCertificateWitness,
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+#[derive(Debug)]
+struct OrbitCertificateKernel {
+    guarded_rows: usize,
+    finite_coverage: usize,
+    equality_channels: usize,
+    predicate_channels: usize,
+    orbit_lex: usize,
+    guarded_channels: usize,
+    witness: OrbitCertificateWitness,
 }
 
 #[cfg(feature = "certificates")]
@@ -5190,6 +5238,16 @@ const CERTIFICATE_FINITE_ENV_VARS: [&str; 11] = [
     "EUF_VIPER_FINITE_SYMMETRY",
     "EUF_VIPER_FINITE_SYMMETRY_MIN_APPS",
 ];
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+const CERTIFICATE_ORBIT_MAX_DOMAIN: usize = 32;
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+const CERTIFICATE_ORBIT_MAX_MEMBERSHIP_CELLS: usize = 262_144;
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+const CERTIFICATE_ORBIT_MAX_EFFECTIVE_LEX_COORDINATES: usize = 262_144;
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+const CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES: usize = 262_144;
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+const CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS: usize = 1_048_576;
 
 #[cfg(feature = "certificates")]
 fn certificate_finite_environment_from_overrides(overridden: &[&str]) -> Result<(), String> {
@@ -5211,6 +5269,469 @@ fn certificate_finite_environment_is_closed() -> Result<(), String> {
         .filter(|name| env::var_os(name).is_some())
         .collect::<Vec<_>>();
     certificate_finite_environment_from_overrides(&overridden)
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+fn certificate_orbit_lex_clause_count(coordinates: usize) -> Option<usize> {
+    match coordinates {
+        0 => Some(0),
+        1 => Some(1),
+        count => count.checked_mul(6)?.checked_sub(6),
+    }
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+fn certificate_orbit_lex_literal_count(coordinates: usize) -> Option<usize> {
+    match coordinates {
+        0 => Some(0),
+        1 => Some(2),
+        count => count.checked_mul(19)?.checked_sub(21),
+    }
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+fn visit_certificate_orbit_channels(
+    arena: &TermArena,
+    domain: &[TermId],
+    domain_set: &HashSet<TermId>,
+    finite_terms: &HashSet<TermId>,
+    closed_functions: &HashSet<SymId>,
+    membership: &HashMap<(TermId, TermId), i32>,
+    visit: &mut impl FnMut(&[i32]) -> Result<(), String>,
+) -> Result<(), String> {
+    for &term_id in &arena.apps {
+        if !finite_terms.contains(&term_id) {
+            continue;
+        }
+        let term = &arena.terms[term_id];
+        if !closed_functions.contains(&term.fun) {
+            continue;
+        }
+        let mut tuple_count = 1usize;
+        for argument in &term.args {
+            let choices = if domain_set.contains(argument) {
+                1
+            } else {
+                domain.len()
+            };
+            if tuple_count > CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION / choices {
+                tuple_count = 0;
+                break;
+            }
+            tuple_count *= choices;
+        }
+        if tuple_count == 0 {
+            continue;
+        }
+        for tuple in domain_tuples_for_args(domain, domain_set, &term.args) {
+            let key = TermKey {
+                fun: term.fun,
+                args: tuple.clone(),
+            };
+            let Some(&canonical) = arena.interned.get(&key) else {
+                continue;
+            };
+            if canonical == term_id {
+                continue;
+            }
+            let conditions = term
+                .args
+                .iter()
+                .zip(&tuple)
+                .filter(|(argument, value)| argument != value)
+                .map(|(argument, value)| membership[&(*argument, *value)])
+                .collect::<Vec<_>>();
+            for &output in domain {
+                let mut clause = conditions
+                    .iter()
+                    .map(|literal| -*literal)
+                    .collect::<Vec<_>>();
+                clause.push(-membership[&(canonical, output)]);
+                clause.push(membership[&(term_id, output)]);
+                clause.sort_unstable();
+                clause.dedup();
+                visit(&clause)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+fn build_certificate_orbit_kernel(
+    cnf: &mut CnfProblem,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> Result<OrbitCertificateKernel, String> {
+    certificate_finite_environment_is_closed()?;
+    let mut context = finite_analysis::FiniteAnalysisContext::default();
+    context.domain_analysis(arena, bool_problem);
+    let mut domain = context.domain.as_ref().unwrap().domain.clone();
+    domain.sort_unstable();
+    if !(2..=CERTIFICATE_ORBIT_MAX_DOMAIN).contains(&domain.len()) {
+        return Err(format!(
+            "finite-orbit certificate requires a domain of size 2..={CERTIFICATE_ORBIT_MAX_DOMAIN}"
+        ));
+    }
+    context.finite_closure(arena, bool_problem);
+    let domain_set = domain.iter().copied().collect::<HashSet<_>>();
+    let closure = context.closure.as_ref().unwrap();
+    let finite_terms = &closure.finite_terms;
+    let closed_functions = &closure.closed_functions;
+    if !domain.iter().all(|term| finite_terms.contains(term)) {
+        return Err("finite-orbit domain terms are absent from finite closure".to_owned());
+    }
+
+    let mut membership_terms = finite_terms.iter().copied().collect::<Vec<_>>();
+    membership_terms.sort_unstable();
+    let mut lex_terms = closure.covered_terms.iter().copied().collect::<Vec<_>>();
+    lex_terms.sort_unstable_by_key(|term| (!arena.terms[*term].args.is_empty(), *term));
+    if lex_terms.is_empty() || !lex_terms.iter().all(|term| finite_terms.contains(term)) {
+        return Err("finite-orbit lex terms are empty or outside finite closure".to_owned());
+    }
+    let membership_cells = membership_terms
+        .len()
+        .checked_mul(domain.len())
+        .ok_or_else(|| "finite-orbit membership cell count overflow".to_owned())?;
+    if membership_cells > CERTIFICATE_ORBIT_MAX_MEMBERSHIP_CELLS {
+        return Err(format!(
+            "finite-orbit membership cell cap exceeded: {membership_cells}"
+        ));
+    }
+
+    let swap_maps = verified_domain_swap_maps(arena, bool_problem, &domain)
+        .ok_or_else(|| "finite-orbit domain swaps are not source automorphisms".to_owned())?;
+    if swap_maps.len() + 1 != domain.len() {
+        return Err("finite-orbit adjacent generator count mismatch".to_owned());
+    }
+    let lex_set = lex_terms.iter().copied().collect::<HashSet<_>>();
+    if !swap_maps.iter().all(|term_map| {
+        lex_terms
+            .iter()
+            .all(|term| lex_set.contains(&term_map[*term]))
+    }) {
+        return Err("finite-orbit lex terms are not generator-closed".to_owned());
+    }
+
+    let original_equalities = cnf
+        .var_atoms
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter_map(|(variable, atom)| match atom {
+            Some(BoolAtomKey::Eq(left, right)) => Some((variable as i32, *left, *right)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut original_predicates = cnf
+        .var_atoms
+        .iter()
+        .filter_map(|atom| match atom {
+            Some(BoolAtomKey::BoolTerm(term)) if !arena.terms[*term].args.is_empty() => Some(*term),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    original_predicates.sort_unstable();
+    original_predicates.dedup();
+
+    let mut membership = HashMap::default();
+    for &term in &membership_terms {
+        for &value in &domain {
+            let literal = cnf.atom_lit(BoolAtomKey::Eq(term, value));
+            membership.insert((term, value), literal);
+        }
+    }
+
+    let domain_pairs = domain
+        .len()
+        .checked_mul(domain.len() - 1)
+        .and_then(|count| count.checked_div(2))
+        .ok_or_else(|| "finite-orbit domain pair count overflow".to_owned())?;
+    let non_domain_terms = membership_terms
+        .iter()
+        .filter(|term| !domain_set.contains(term))
+        .count();
+    let guarded_rows = non_domain_terms
+        .checked_mul(domain_pairs)
+        .and_then(|count| count.checked_add(domain.len()))
+        .ok_or_else(|| "finite-orbit guarded row count overflow".to_owned())?;
+    let guarded_row_literals = non_domain_terms
+        .checked_mul(domain_pairs)
+        .and_then(|count| count.checked_mul(3))
+        .and_then(|count| count.checked_add(domain.len()))
+        .ok_or_else(|| "finite-orbit guarded row literal count overflow".to_owned())?;
+    if guarded_rows > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+        || guarded_row_literals > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+    {
+        return Err("finite-orbit guarded row budget exceeded".to_owned());
+    }
+    cnf.clauses
+        .try_reserve_additional(guarded_rows, guarded_row_literals)
+        .map_err(|error| format!("finite-orbit guarded row allocation failed: {error}"))?;
+    let row_start = cnf.clauses.len();
+    for &term in &membership_terms {
+        if domain_set.contains(&term) {
+            cnf.clauses.push(vec![membership[&(term, term)]]);
+            continue;
+        }
+        for left in 0..domain.len() {
+            for right in (left + 1)..domain.len() {
+                cnf.clauses.push(vec![
+                    membership[&(domain[left], domain[right])],
+                    -membership[&(term, domain[left])],
+                    -membership[&(term, domain[right])],
+                ]);
+            }
+        }
+    }
+    if cnf.clauses.len() - row_start != guarded_rows {
+        return Err("finite-orbit guarded row materialization mismatch".to_owned());
+    }
+
+    let finite_coverage = non_domain_terms;
+    let finite_coverage_literals = non_domain_terms
+        .checked_mul(domain.len())
+        .ok_or_else(|| "finite-orbit coverage literal count overflow".to_owned())?;
+    if finite_coverage > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+        || finite_coverage_literals > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+    {
+        return Err("finite-orbit coverage budget exceeded".to_owned());
+    }
+    cnf.clauses
+        .try_reserve_additional(finite_coverage, finite_coverage_literals)
+        .map_err(|error| format!("finite-orbit coverage allocation failed: {error}"))?;
+    let coverage_start = cnf.clauses.len();
+    for &term in &membership_terms {
+        if !domain_set.contains(&term) {
+            cnf.clauses.push(
+                domain
+                    .iter()
+                    .map(|value| membership[&(term, *value)])
+                    .collect(),
+            );
+        }
+    }
+    if cnf.clauses.len() - coverage_start != finite_coverage {
+        return Err("finite-orbit coverage materialization mismatch".to_owned());
+    }
+
+    let channeled_equalities = original_equalities
+        .iter()
+        .filter(|(_, left, right)| {
+            left != right
+                && finite_terms.contains(left)
+                && finite_terms.contains(right)
+                && !domain_set.contains(left)
+                && !domain_set.contains(right)
+        })
+        .count();
+    let equality_channels = channeled_equalities
+        .checked_mul(domain.len())
+        .and_then(|count| count.checked_mul(3))
+        .ok_or_else(|| "finite-orbit equality channel count overflow".to_owned())?;
+    let equality_channel_literals = equality_channels
+        .checked_mul(3)
+        .ok_or_else(|| "finite-orbit equality channel literal count overflow".to_owned())?;
+    if equality_channels > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+        || equality_channel_literals > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+    {
+        return Err("finite-orbit equality channel budget exceeded".to_owned());
+    }
+    cnf.clauses
+        .try_reserve_additional(equality_channels, equality_channel_literals)
+        .map_err(|error| format!("finite-orbit equality channel allocation failed: {error}"))?;
+    let equality_channel_start = cnf.clauses.len();
+    for &(equality, left, right) in &original_equalities {
+        if left == right
+            || !finite_terms.contains(&left)
+            || !finite_terms.contains(&right)
+            || domain_set.contains(&left)
+            || domain_set.contains(&right)
+        {
+            continue;
+        }
+        for &value in &domain {
+            let left_value = membership[&(left, value)];
+            let right_value = membership[&(right, value)];
+            cnf.clauses.push(vec![-equality, -left_value, right_value]);
+            cnf.clauses.push(vec![-equality, left_value, -right_value]);
+            cnf.clauses.push(vec![-left_value, -right_value, equality]);
+        }
+    }
+    if cnf.clauses.len() - equality_channel_start != equality_channels {
+        return Err("finite-orbit equality channel materialization mismatch".to_owned());
+    }
+
+    let mut predicate_channel_clause_bound = 0usize;
+    let mut predicate_channel_literal_bound = 0usize;
+    for &term_id in &original_predicates {
+        let term = &arena.terms[term_id];
+        if !term.args.iter().all(|arg| finite_terms.contains(arg)) {
+            return Err("finite-orbit predicate arguments are outside finite closure".to_owned());
+        }
+        let mut tuple_count = 1usize;
+        for argument in &term.args {
+            let choices = if domain_set.contains(argument) {
+                1
+            } else {
+                domain.len()
+            };
+            tuple_count = tuple_count
+                .checked_mul(choices)
+                .ok_or_else(|| "finite-orbit predicate tuple count overflow".to_owned())?;
+        }
+        if tuple_count > CERTIFICATE_EAGER_MAX_CANDIDATES_PER_APPLICATION {
+            return Err("finite-orbit predicate tuple cap exceeded".to_owned());
+        }
+        let clauses = tuple_count
+            .checked_mul(2)
+            .ok_or_else(|| "finite-orbit predicate channel count overflow".to_owned())?;
+        predicate_channel_clause_bound = predicate_channel_clause_bound
+            .checked_add(clauses)
+            .ok_or_else(|| "finite-orbit predicate channel count overflow".to_owned())?;
+        predicate_channel_literal_bound = predicate_channel_literal_bound
+            .checked_add(clauses.checked_mul(term.args.len() + 2).ok_or_else(|| {
+                "finite-orbit predicate channel literal count overflow".to_owned()
+            })?)
+            .ok_or_else(|| "finite-orbit predicate channel literal count overflow".to_owned())?;
+    }
+    if predicate_channel_clause_bound > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+        || predicate_channel_literal_bound > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+    {
+        return Err("finite-orbit predicate channel budget exceeded".to_owned());
+    }
+    let predicate_channel_start = cnf.clauses.len();
+    let (predicate_channels, predicates_complete) = add_finite_predicate_channeling(
+        cnf,
+        arena,
+        &domain,
+        &domain_set,
+        finite_terms,
+        &membership,
+        &original_predicates,
+    );
+    if !predicates_complete {
+        return Err("finite-orbit predicate channel reconstruction is incomplete".to_owned());
+    }
+    if predicate_channels != cnf.clauses.len() - predicate_channel_start
+        || predicate_channels > predicate_channel_clause_bound
+    {
+        return Err("finite-orbit predicate channel materialization mismatch".to_owned());
+    }
+
+    let mut effective_coordinates = 0usize;
+    let mut planned_lex_clauses = 0usize;
+    let mut planned_lex_literals = 0usize;
+    for term_map in &swap_maps {
+        let mut generator_coordinates = 0usize;
+        for &term in &lex_terms {
+            for &value in &domain {
+                let left = membership[&(term, value)];
+                let right = membership[&(term_map[term], term_map[value])];
+                generator_coordinates += usize::from(left != right);
+            }
+        }
+        effective_coordinates = effective_coordinates
+            .checked_add(generator_coordinates)
+            .ok_or_else(|| "finite-orbit lex coordinate count overflow".to_owned())?;
+        planned_lex_clauses = planned_lex_clauses
+            .checked_add(
+                certificate_orbit_lex_clause_count(generator_coordinates)
+                    .ok_or_else(|| "finite-orbit lex clause count overflow".to_owned())?,
+            )
+            .ok_or_else(|| "finite-orbit lex clause count overflow".to_owned())?;
+        planned_lex_literals = planned_lex_literals
+            .checked_add(
+                certificate_orbit_lex_literal_count(generator_coordinates)
+                    .ok_or_else(|| "finite-orbit lex literal count overflow".to_owned())?,
+            )
+            .ok_or_else(|| "finite-orbit lex literal count overflow".to_owned())?;
+    }
+    if effective_coordinates > CERTIFICATE_ORBIT_MAX_EFFECTIVE_LEX_COORDINATES
+        || planned_lex_clauses > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+        || planned_lex_literals > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+    {
+        return Err("finite-orbit lex budget exceeded".to_owned());
+    }
+    cnf.clauses
+        .try_reserve_additional(planned_lex_clauses, planned_lex_literals)
+        .map_err(|error| format!("finite-orbit lex allocation failed: {error}"))?;
+    let lex_start = cnf.clauses.len();
+    for term_map in &swap_maps {
+        let mut comparison = Vec::with_capacity(lex_terms.len() * domain.len());
+        for &term in &lex_terms {
+            for &value in &domain {
+                comparison.push((
+                    -membership[&(term, value)],
+                    -membership[&(term_map[term], term_map[value])],
+                ));
+            }
+        }
+        add_lex_less_or_equal(cnf, &comparison);
+    }
+    let orbit_lex = cnf.clauses.len() - lex_start;
+    if orbit_lex != planned_lex_clauses {
+        return Err("finite-orbit lex materialization mismatch".to_owned());
+    }
+
+    let mut planned_channels = 0usize;
+    let mut planned_channel_literals = 0usize;
+    visit_certificate_orbit_channels(
+        arena,
+        &domain,
+        &domain_set,
+        finite_terms,
+        closed_functions,
+        &membership,
+        &mut |clause| {
+            planned_channels = planned_channels
+                .checked_add(1)
+                .ok_or_else(|| "finite-orbit channel count overflow".to_owned())?;
+            planned_channel_literals = planned_channel_literals
+                .checked_add(clause.len())
+                .ok_or_else(|| "finite-orbit channel literal count overflow".to_owned())?;
+            if planned_channels > CERTIFICATE_ORBIT_MAX_GUARDED_CLAUSES
+                || planned_channel_literals > CERTIFICATE_ORBIT_MAX_GUARDED_LITERALS
+            {
+                return Err("finite-orbit channel budget exceeded".to_owned());
+            }
+            Ok(())
+        },
+    )?;
+    cnf.clauses
+        .try_reserve_additional(planned_channels, planned_channel_literals)
+        .map_err(|error| format!("finite-orbit channel allocation failed: {error}"))?;
+    let channel_start = cnf.clauses.len();
+    visit_certificate_orbit_channels(
+        arena,
+        &domain,
+        &domain_set,
+        finite_terms,
+        closed_functions,
+        &membership,
+        &mut |clause| {
+            cnf.clauses.push(clause.to_vec());
+            Ok(())
+        },
+    )?;
+    let guarded_channels = cnf.clauses.len() - channel_start;
+    if guarded_channels != planned_channels {
+        return Err("finite-orbit channel materialization mismatch".to_owned());
+    }
+
+    Ok(OrbitCertificateKernel {
+        guarded_rows,
+        finite_coverage,
+        equality_channels,
+        predicate_channels,
+        orbit_lex,
+        guarded_channels,
+        witness: OrbitCertificateWitness {
+            domain_terms: domain,
+            membership_terms,
+            lex_terms,
+        },
+    })
 }
 
 #[cfg(feature = "certificates")]
@@ -6021,6 +6542,17 @@ fn path_with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
 }
 
 #[cfg(feature = "certificates")]
+fn clear_certificate_artifacts(paths: &[&Path]) -> Result<(), String> {
+    for path in paths {
+        if path.exists() {
+            fs::remove_file(path)
+                .map_err(|error| format!("failed to remove stale {}: {error}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "certificates")]
 fn certificate_atoms(cnf: &CnfProblem) -> Vec<CertificateAtom> {
     cnf.var_atoms
         .iter()
@@ -6039,6 +6571,102 @@ fn certificate_atoms(cnf: &CnfProblem) -> Vec<CertificateAtom> {
             },
         })
         .collect()
+}
+
+#[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+#[allow(clippy::too_many_arguments)]
+fn certify_orbit_kernel(
+    source_path: &Path,
+    source_bytes: &[u8],
+    dimacs_path: &Path,
+    proof_path: &Path,
+    manifest_path: &Path,
+    cnf: &mut CnfProblem,
+    problem: &Problem,
+    bool_problem: &BoolProblem,
+) -> Result<i32, String> {
+    let base_count = cnf.clauses.len();
+    let kernel = build_certificate_orbit_kernel(cnf, &problem.arena, bool_problem)?;
+    let accounted = base_count
+        .checked_add(kernel.guarded_rows)
+        .and_then(|count| count.checked_add(kernel.finite_coverage))
+        .and_then(|count| count.checked_add(kernel.equality_channels))
+        .and_then(|count| count.checked_add(kernel.predicate_channels))
+        .and_then(|count| count.checked_add(kernel.orbit_lex))
+        .and_then(|count| count.checked_add(kernel.guarded_channels))
+        .ok_or_else(|| "finite-orbit kernel clause accounting overflow".to_owned())?;
+    if accounted != cnf.clauses.len() {
+        return Err(format!(
+            "finite-orbit kernel clause accounting mismatch: expected {accounted}, got {}",
+            cnf.clauses.len()
+        ));
+    }
+
+    if let Err(error) = write_cadical_drat(proof_path, cnf) {
+        let _ = fs::remove_file(proof_path);
+        return Err(error);
+    }
+    write_dimacs(dimacs_path, cnf)?;
+    let manifest = OrbitCertificateManifest {
+        format: "euf-viper-euf-cnf-v3",
+        result: "unsat",
+        encoding: "canonical-tseitin-v1+finite-closure-v1+guarded-euf-v1+adjacent-orbit-lex-v1",
+        source: source_path.display().to_string(),
+        source_sha256: sha256_hex(source_bytes),
+        dimacs: dimacs_path.display().to_string(),
+        dimacs_sha256: sha256_file(dimacs_path)?,
+        proof: proof_path.display().to_string(),
+        proof_sha256: sha256_file(proof_path)?,
+        variables: cnf.var_count(),
+        clauses: OrbitCertificateClauseCounts {
+            base: base_count,
+            guarded_rows: kernel.guarded_rows,
+            finite_coverage: kernel.finite_coverage,
+            equality_channels: kernel.equality_channels,
+            predicate_channels: kernel.predicate_channels,
+            orbit_lex: kernel.orbit_lex,
+            guarded_channels: kernel.guarded_channels,
+            total: cnf.clauses.len(),
+        },
+        finite_orbit: kernel.witness,
+    };
+    let manifest_file = fs::File::create(manifest_path)
+        .map_err(|error| format!("failed to create {}: {error}", manifest_path.display()))?;
+    let mut manifest_writer = BufWriter::new(manifest_file);
+    serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
+        .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
+    writeln!(manifest_writer)
+        .map_err(|error| format!("failed to finish {}: {error}", manifest_path.display()))?;
+
+    println!("unsat");
+    eprintln!("dimacs={}", dimacs_path.display());
+    eprintln!("proof={}", proof_path.display());
+    eprintln!("manifest={}", manifest_path.display());
+    eprintln!("certificate_saturation_backend=cadical-orbit-kernel");
+    eprintln!("cnf_vars={}", cnf.var_count());
+    eprintln!("cnf_clauses={}", cnf.clauses.len());
+    eprintln!("guarded_rows={}", kernel.guarded_rows);
+    eprintln!("finite_coverage={}", kernel.finite_coverage);
+    eprintln!("equality_channels={}", kernel.equality_channels);
+    eprintln!("predicate_channels={}", kernel.predicate_channels);
+    eprintln!("orbit_lex={}", kernel.orbit_lex);
+    eprintln!("guarded_channels={}", kernel.guarded_channels);
+    Ok(0)
+}
+
+#[cfg(all(feature = "certificates", not(feature = "finite-symmetry")))]
+#[allow(clippy::too_many_arguments)]
+fn certify_orbit_kernel(
+    _source_path: &Path,
+    _source_bytes: &[u8],
+    _dimacs_path: &Path,
+    _proof_path: &Path,
+    _manifest_path: &Path,
+    _cnf: &mut CnfProblem,
+    _problem: &Problem,
+    _bool_problem: &BoolProblem,
+) -> Result<i32, String> {
+    Err("finite-orbit certification requires the finite-symmetry feature".to_owned())
 }
 
 #[cfg(feature = "certificates")]
@@ -6107,13 +6735,34 @@ fn certify_file_with_seed_budget_and_finite(
     for assertion in &bool_problem.assertions {
         cnf.add_assertion(assertion);
     }
+    if finite_orbit {
+        let artifacts = [
+            dimacs_path.as_path(),
+            proof_path.as_path(),
+            manifest_path.as_path(),
+        ];
+        clear_certificate_artifacts(&artifacts)?;
+        let result = certify_orbit_kernel(
+            source_path,
+            &source_bytes,
+            &dimacs_path,
+            &proof_path,
+            &manifest_path,
+            &mut cnf,
+            &problem,
+            bool_problem,
+        );
+        if let Err(error) = result {
+            return match clear_certificate_artifacts(&artifacts) {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(format!(
+                    "{error}; finite-orbit artifact cleanup also failed: {cleanup_error}"
+                )),
+            };
+        }
+        return result;
+    }
     let base_count = cnf.clauses.len();
-    let finite_domain_count = if finite_orbit {
-        certificate_finite_environment_is_closed()?;
-        add_finite_domain_axioms(&mut cnf, &problem.arena, bool_problem)
-    } else {
-        0
-    };
     let theory_seed_start = cnf.clauses.len();
     let seeds = certificate_theory_seeds_with_budget(&cnf, &problem.arena, seed_budget);
     if let Some(reason) = seeds.fallback
@@ -6160,19 +6809,12 @@ fn certify_file_with_seed_budget_and_finite(
         theory_seed_start,
         max_rounds,
     )?;
-    if finite_domain_count > 0 && matches!(saturation, CertificateSaturation::Sat { .. }) {
-        return Err(
-            "finite-orbit certificate mode currently emits only independently checkable UNSAT artifacts"
-                .to_owned(),
-        );
-    }
     let dynamic_conflict_count = match &saturation {
         CertificateSaturation::Sat { conflict_count, .. }
         | CertificateSaturation::Unsat { conflict_count, .. } => *conflict_count,
     };
     let accounted_clause_count = base_count
-        .checked_add(finite_domain_count)
-        .and_then(|count| count.checked_add(transitivity_count))
+        .checked_add(transitivity_count)
         .and_then(|count| count.checked_add(congruence_count))
         .and_then(|count| count.checked_add(dynamic_conflict_count))
         .ok_or_else(|| "certificate clause accounting overflow".to_owned())?;
@@ -6236,11 +6878,7 @@ fn certify_file_with_seed_budget_and_finite(
                 })
                 .collect();
             let manifest = CertificateManifest {
-                format: if finite_domain_count > 0 {
-                    "euf-viper-euf-cnf-v3"
-                } else {
-                    "euf-viper-euf-cnf-v2"
-                },
+                format: "euf-viper-euf-cnf-v2",
                 result: "unsat",
                 encoding: "canonical-tseitin-v1",
                 source: source_path.display().to_string(),
@@ -6256,14 +6894,13 @@ fn certify_file_with_seed_budget_and_finite(
                 atoms: certificate_atoms(&cnf),
                 clauses: CertificateClauseCounts {
                     base: base_count,
-                    finite_domain: (finite_domain_count > 0).then_some(finite_domain_count),
                     transitivity: transitivity_count,
                     congruence: congruence_count,
                     theory_conflicts: conflict_count,
                     total: cnf.clauses.len(),
                 },
                 theory_rounds,
-                finite_domain_axioms: finite_domain_count,
+                finite_domain_axioms: 0,
             };
             serde_json::to_writer_pretty(&mut manifest_writer, &manifest)
                 .map_err(|error| format!("failed to write {}: {error}", manifest_path.display()))?;
@@ -6281,7 +6918,7 @@ fn certify_file_with_seed_budget_and_finite(
             eprintln!("transitivity_clauses={transitivity_count}");
             eprintln!("congruence_clauses={congruence_count}");
             eprintln!("dynamic_theory_conflicts={conflict_count}");
-            eprintln!("finite_domain_axioms={finite_domain_count}");
+            eprintln!("finite_domain_axioms=0");
         }
     }
     Ok(0)
@@ -8712,7 +9349,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "certificates")]
+    #[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
     #[test]
     fn finite_orbit_certificate_uses_v3_and_preserves_v2_by_default() {
         let source = r#"
@@ -8722,10 +9359,14 @@ mod tests {
             (declare-fun c1 () U)
             (declare-fun c2 () U)
             (declare-fun f (U) U)
+            (declare-fun p (U) Bool)
             (assert (distinct c0 c1 c2))
             (assert (or (= (f c0) c0) (= (f c0) c1) (= (f c0) c2)))
             (assert (or (= (f c1) c0) (= (f c1) c1) (= (f c1) c2)))
             (assert (or (= (f c2) c0) (= (f c2) c1) (= (f c2) c2)))
+            (assert (distinct (f c0) (f c1) (f c2)))
+            (assert (and (p c0) (p c1) (p c2)))
+            (assert (and (p (f c0)) (p (f c1)) (p (f c2))))
             (assert false)
             (check-sat)
         "#;
@@ -8782,8 +9423,87 @@ mod tests {
         assert_eq!(v2["finite_domain_axioms"], 0);
         assert!(v2["clauses"].get("finite_domain").is_none());
         assert_eq!(v3["format"], "euf-viper-euf-cnf-v3");
-        assert!(v3["finite_domain_axioms"].as_u64().unwrap() > 0);
-        assert_eq!(v3["clauses"]["finite_domain"], v3["finite_domain_axioms"]);
+        assert_eq!(
+            v3["encoding"],
+            "canonical-tseitin-v1+finite-closure-v1+guarded-euf-v1+adjacent-orbit-lex-v1"
+        );
+        assert!(v3.get("finite_domain_axioms").is_none());
+        assert!(v3["clauses"]["guarded_rows"].as_u64().unwrap() > 0);
+        assert!(v3["clauses"]["finite_coverage"].as_u64().unwrap() > 0);
+        assert!(v3["clauses"]["equality_channels"].as_u64().unwrap() > 0);
+        assert!(v3["clauses"]["predicate_channels"].as_u64().unwrap() > 0);
+        assert!(v3["clauses"]["orbit_lex"].as_u64().unwrap() > 0);
+        assert!(v3["finite_orbit"]["domain_terms"].as_array().unwrap().len() == 3);
+        assert!(
+            !v3["finite_orbit"]["membership_terms"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !v3["finite_orbit"]["lex_terms"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg(all(feature = "certificates", feature = "finite-symmetry"))]
+    #[test]
+    fn finite_orbit_certificate_failure_removes_stale_artifacts() {
+        let source = r#"
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun c0 () U)
+            (declare-fun c1 () U)
+            (declare-fun f (U) U)
+            (assert (distinct c0 c1))
+            (assert (or (= (f c0) c0) (= (f c0) c1)))
+            (assert (or (= (f c1) c0) (= (f c1) c1)))
+            (check-sat)
+        "#;
+        let directory = CertificateTestDirectory::new("finite-orbit-stale-artifacts");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, source).expect("write finite-orbit SAT source");
+        for suffix in [".cnf", ".drat", ".euf.json"] {
+            fs::write(path_with_suffix(&prefix, suffix), b"stale")
+                .expect("write stale certificate artifact");
+        }
+
+        let error = certify_file_with_seed_budget_and_finite(
+            source_path.to_str().unwrap(),
+            prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+            true,
+        )
+        .unwrap_err();
+        assert!(error.contains("CaDiCaL returned Sat"));
+        for suffix in [".cnf", ".drat", ".euf.json"] {
+            assert!(!path_with_suffix(&prefix, suffix).exists());
+        }
+    }
+
+    #[cfg(all(feature = "certificates", not(feature = "finite-symmetry")))]
+    #[test]
+    fn finite_orbit_certificate_requires_symmetry_feature() {
+        let directory = CertificateTestDirectory::new("finite-orbit-feature-off");
+        let source_path = directory.path("input.smt2");
+        let prefix = directory.path("certificate");
+        fs::write(&source_path, "(set-logic QF_UF) (assert false) (check-sat)").unwrap();
+        let error = certify_file_with_seed_budget_and_finite(
+            source_path.to_str().unwrap(),
+            prefix.to_str().unwrap(),
+            8,
+            CertificateSeedBudget::default(),
+            true,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "finite-orbit certification requires the finite-symmetry feature"
+        );
     }
 
     #[cfg(feature = "certificates")]
