@@ -167,7 +167,18 @@ result cache can satisfy V1-V4.
   untracked build/checker influence, ordinary usage output is not byte-identical
   to `f8d9205`, exceptional paths lack zero-work coverage, and the exact
   combined release has no end-to-end smoke. An attempt-private, environment-
-  whitelisted repair is active; no branch publication or corpus run exists.
+  whitelisted repair was published to research branch
+  `research-production-evidence-v3-current`. Exact SHA `e838c1f` received a
+  narrow publication-only GO, but WMI remains NO-GO: the prepare receipt
+  self-certifies replaceable bytes, Cargo and solver execution are not bound to
+  the descriptors/hash checks, final publication can be replaced after its
+  check, dynamic loaders/libraries/toolchain closure are incomplete, and the
+  CLI oracle is candidate-controlled. First hosted run `29384179332` exposed a
+  negative-smoke exit-code bug. Commit `b9da60b` requires the checker's actual
+  semantic-rejection exit and exact diagnostic; hosted run `29384633378` then
+  passed all six Rust feature matrices and the real combined-release locked
+  smoke. This authorizes neither merge nor WMI. A phase-separated, immutable-
+  snapshot v4 repair is active; no production-evidence corpus run exists.
 - [ ] Finish independent base-CNF reconstruction and batch certificate checking.
   The standalone typed parser, canonical Tseitin reconstruction, SAT witness
   checker, EUF lemma replay, and DRAT integration now pass focused and smoke

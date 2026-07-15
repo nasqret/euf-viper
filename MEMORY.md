@@ -941,3 +941,11 @@
   `147318`-`147320`. Preserve original audit identity `144993`, use the separate
   live dependency barrier from `b99bff3`, and require every new terminal audit.
   Certificate no-dependency submission is fixed and tested at `026f283`.
+- Production-evidence research branch exact SHA `b9da60b` passed hosted run
+  `29384633378` after correcting the negative checker's expected semantic exit.
+  This is publication/smoke evidence only. WMI and merge remain NO-GO because
+  prepare receipts are not externally hash-bound, build/exec bytes are not
+  descriptor-bound, final publication has a replacement window, runtime closure
+  is incomplete, and the CLI baseline oracle is candidate-controlled. Continue
+  only through the isolated phase-separated immutable-snapshot v4 repair; no
+  corpus run exists.

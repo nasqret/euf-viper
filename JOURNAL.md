@@ -1347,6 +1347,23 @@
   `147315`/`147316`/`147317` and official `147318`/`147319`/`147320`; their P0
   inputs and pinned `drat-trim` now reside under `/work`. Both audits remain
   mandatory and no prior partial certificate artifact is reused.
+- Independent production-evidence review gave exact `e838c1f` a narrow GO only
+  for research-branch publication and hosted Ubuntu execution. It remained
+  WMI NO-GO because dependent jobs accept a mutable self-certified prepare
+  receipt; pre/post source and executable hashing does not bind bytes consumed
+  by Cargo or `exec`; final artifact paths can be replaced after checking; the
+  loader/shared-library/native-toolchain/Cargo-registry closure is incomplete;
+  and the `f8d9205` CLI oracle lives inside the candidate. The reviewer also
+  confirmed strong but test-only off-mode instrumentation. No WMI action used
+  this branch.
+- Hosted run `29384179332` at `e838c1f` passed every matrix through the exact
+  release build, then failed because its negative smoke expected exit 2 while
+  semantic evidence rejection correctly returned exit 1. Commit `b9da60b`
+  now requires exit 1 and the exact status-mismatch diagnostic. Exact-head run
+  `29384633378` passed in `5m43s`, including default, no-default, certificate,
+  production-evidence, combined, all-feature, real comparator, CLI, and locked
+  release-smoke steps. This is hosted smoke evidence only, not provenance or
+  merge acceptance. Production-evidence v4 repair is isolated and active.
 
 ## Next Entry Template
 

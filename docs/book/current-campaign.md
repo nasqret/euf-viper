@@ -130,6 +130,18 @@ pipeline. A private attempt checkout, environment allowlist, exhaustive CLI
 differential, path-complete telemetry, and combined-release Linux smoke are
 required before publication or WMI.
 
+Research successor `e838c1f` earned a narrow independent GO for branch
+publication and hosted Linux matrices only. Review still found a mutable
+self-certified prepare receipt, hash-check/build and hash-check/exec gaps,
+replaceable final publication, incomplete loader/library/toolchain closure, and
+a candidate-owned CLI oracle. It is therefore WMI and merge NO-GO. The first
+hosted run `29384179332` found a negative-smoke exit expectation bug. Commit
+`b9da60b` bound that check to exit 1 plus the exact status-mismatch diagnostic,
+and exact-head run `29384633378` passed every feature matrix plus the real
+combined-release recorder/checker/runner/analyzer smoke in `5m43s`. That green
+run changes no promotion decision. A phase-separated immutable-snapshot repair
+is the next evidence step; no production-evidence corpus run exists.
+
 ## Causal Controls
 
 ### Modern Kissat
