@@ -41,9 +41,20 @@ class T9ProjectionWmiContractTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_CARGO_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_RUSTC_SHA256:?", self.text)
         self.assertIn("EUF_VIPER_PYTHON_SHA256:?", self.text)
-        self.assertIn("git status --porcelain=v1 --untracked-files=no", self.text)
+        self.assertIn("git status --porcelain=v1 --untracked-files=all", self.text)
         self.assertIn("manifest SHA-256 mismatch", self.text)
         self.assertIn("rustc version mismatch", self.text)
+
+    def test_all_generated_state_is_outside_the_clean_checkout(self) -> None:
+        self.assertIn("EUF_VIPER_T9_REPO_ROOT:?", self.text)
+        self.assertIn("EUF_VIPER_T9_RUN_BASE:?", self.text)
+        self.assertIn("CARGO_HOME:?", self.text)
+        self.assertIn('if [ "$SUBMIT_ROOT" != "$RUN_BASE" ]', self.text)
+        self.assertIn('RUN_ROOT="$RUN_BASE/t9-projection-census-${SLURM_JOB_ID}"', self.text)
+        self.assertIn('cd "$REPO_ROOT"', self.text)
+        self.assertNotIn('RUN_ROOT="$PWD/results/', self.text)
+        self.assertNotIn("#SBATCH --output=results/", self.text)
+        self.assertNotIn("#SBATCH --error=results/", self.text)
 
     def test_census_is_no_sat_and_requires_independent_audit(self) -> None:
         self.assertIn("run_t9_projection_census.py", self.text)

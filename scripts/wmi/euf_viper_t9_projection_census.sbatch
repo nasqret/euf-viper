@@ -5,12 +5,43 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --time=04:00:00
-#SBATCH --output=results/t9-projection-census-%j.out
-#SBATCH --error=results/t9-projection-census-%j.err
+#SBATCH --output=t9-projection-census-%j.out
+#SBATCH --error=t9-projection-census-%j.err
 
 set -euo pipefail
 
-cd "${SLURM_SUBMIT_DIR:-$PWD}"
+REPO_ROOT_INPUT="${EUF_VIPER_T9_REPO_ROOT:?set absolute clean checkout root}"
+RUN_BASE_INPUT="${EUF_VIPER_T9_RUN_BASE:?set absolute external run base}"
+CARGO_HOME_INPUT="${CARGO_HOME:?set absolute external Cargo home}"
+case "$REPO_ROOT_INPUT:$RUN_BASE_INPUT:$CARGO_HOME_INPUT" in
+  /*:/*:/*) ;;
+  *)
+    echo "checkout, run base, and Cargo home must be absolute" >&2
+    exit 2
+    ;;
+esac
+for directory in "$REPO_ROOT_INPUT" "$RUN_BASE_INPUT" "$CARGO_HOME_INPUT"; do
+  if [ ! -d "$directory" ]; then
+    echo "required directory is missing: $directory" >&2
+    exit 2
+  fi
+done
+REPO_ROOT="$(cd "$REPO_ROOT_INPUT" && pwd -P)"
+RUN_BASE="$(cd "$RUN_BASE_INPUT" && pwd -P)"
+CARGO_HOME="$(cd "$CARGO_HOME_INPUT" && pwd -P)"
+SUBMIT_ROOT="$(cd "${SLURM_SUBMIT_DIR:-$PWD}" && pwd -P)"
+case "$RUN_BASE:$CARGO_HOME" in
+  "$REPO_ROOT":*|"$REPO_ROOT"/*:*|*:"$REPO_ROOT"|*:"$REPO_ROOT"/*)
+    echo "run base and Cargo home must be outside the checkout" >&2
+    exit 2
+    ;;
+esac
+if [ "$SUBMIT_ROOT" != "$RUN_BASE" ]; then
+  echo "submit directory must equal the external run base" >&2
+  exit 2
+fi
+export CARGO_HOME
+cd "$REPO_ROOT"
 export LANG=C
 export LC_ALL=C
 export TZ=UTC
@@ -122,8 +153,8 @@ if [ "$ACTUAL_REVISION" != "$EXPECTED_REVISION" ]; then
   echo "revision mismatch: expected $EXPECTED_REVISION, got $ACTUAL_REVISION" >&2
   exit 2
 fi
-if [ -n "$(git status --porcelain=v1 --untracked-files=no)" ]; then
-  echo "tracked repository state is dirty" >&2
+if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+  echo "repository state is dirty" >&2
   exit 2
 fi
 
@@ -156,7 +187,7 @@ if [ "$(wc -l < "$CONTROL_MANIFEST" | tr -d ' ')" != "24" ] \
   exit 2
 fi
 
-RUN_ROOT="$PWD/results/t9-projection-census-${SLURM_JOB_ID}"
+RUN_ROOT="$RUN_BASE/t9-projection-census-${SLURM_JOB_ID}"
 mkdir -p "$RUN_ROOT"
 export CARGO_TARGET_DIR="$RUN_ROOT/target"
 export RUSTC
