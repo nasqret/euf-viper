@@ -7210,22 +7210,21 @@ fn project_t9_problem_without_sat_measurement(
     if !problem.terms_are_well_sorted() {
         return Err("T9 projection encountered an unsupported sort configuration".to_owned());
     }
-    if !problem.unsupported.is_empty() {
-        return Err(format!(
-            "T9 projection requires fully supported QF_UF input: {}",
-            problem.unsupported.join("; ")
-        ));
+    let bool_problem = problem.bool_problem.as_ref();
+    if !problem.unsupported.is_empty()
+        || bool_problem.is_none_or(|candidate| !candidate.unsupported.is_empty())
+    {
+        let cnf = CnfProblem::new();
+        let facts = t9_ackermann::StructuralFacts::dpll_route(problem.arena.apps.len());
+        return Ok(t9_ackermann::attempt(
+            t9_ackermann::Mode::CliqueAuto,
+            &cnf,
+            &problem.arena,
+            facts,
+        )
+        .report);
     }
-    let bool_problem = problem
-        .bool_problem
-        .as_ref()
-        .ok_or_else(|| "T9 projection requires a Boolean source formula".to_owned())?;
-    if !bool_problem.unsupported.is_empty() {
-        return Err(format!(
-            "T9 projection requires fully supported QF_UF input: {}",
-            bool_problem.unsupported.join("; ")
-        ));
-    }
+    let bool_problem = bool_problem.expect("checked above");
 
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
@@ -10829,6 +10828,38 @@ mod tests {
             .find_map(|line| line.strip_prefix("baseline_after_sha256 "))
             .unwrap();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn project_t9_reports_positive_or_inputs_as_dpll_rejections() {
+        let mut source = "(set-logic QF_UF) (declare-sort U 0) ".to_owned();
+        for index in 0..10 {
+            source.push_str(&format!("(declare-fun x{index} () U) "));
+        }
+        for index in 0..9 {
+            source.push_str(&format!(
+                "(declare-fun y{index} () U) (declare-fun z{index} () U) "
+            ));
+        }
+        source.push_str("(assert (and ");
+        for index in 0..9 {
+            let next = index + 1;
+            source.push_str(&format!(
+                "(or (and (= x{index} y{index}) (= y{index} x{next})) \
+                 (and (= x{index} z{index}) (= z{index} x{next}))) "
+            ));
+        }
+        source.push_str("(not (= x0 x9)))) (check-sat)");
+        let report = project_t9_source(&source).unwrap();
+        let mut output = Vec::new();
+        report.write_to(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("selector_selected 0\n"));
+        assert!(output.contains("selected 0\n"));
+        assert!(output.contains("reason backend_not_kissat\n"));
+        assert!(output.contains("backend dpll\n"));
+        assert!(output.contains("sat_calls 0\n"));
+        assert!(output.contains("planned_ackermann_clauses_state not_computed\n"));
     }
 
     #[test]

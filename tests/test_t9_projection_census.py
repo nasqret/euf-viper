@@ -806,6 +806,25 @@ class AdversarialAuditTests(unittest.TestCase):
 
         self._assert_audit_rejects(mutate, "selector false although")
 
+    def test_dpll_route_rejects_before_uncomputed_structural_thresholds(self) -> None:
+        projection = expected_projection(b"dpll-route\n", False)
+        projection.update(
+            {
+                "finite_added": 0,
+                "reason": "backend_not_kissat",
+                "backend": "dpll",
+                "all_different_clique_lb": 0,
+                "disequality_graph_edges": 0,
+                "disequality_clique_excess_edges": 0,
+                "equality_graph_vertices": 0,
+                "equality_graph_edges": 0,
+            }
+        )
+        self.assertEqual(
+            audit._selector_reason(projection, "dpll-route"),
+            "backend_not_kissat",
+        )
+
     def test_impossible_clique_and_candidate_equations_are_rejected(self) -> None:
         def clique(records):
             self._target(records)["disequality_clique_excess_edges"] = 1

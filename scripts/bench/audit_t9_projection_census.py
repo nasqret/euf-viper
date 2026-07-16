@@ -1146,6 +1146,8 @@ def _selector_reason(projection: Mapping[str, Any], path: str) -> str | None:
         )
     ordered_conditions = (
         (projection["finite_added"] != 0, "finite_added_nonzero"),
+        (projection["applications"] > MAX_APPLICATIONS, "application_count_cap"),
+        (projection["backend"] != "kissat", "backend_not_kissat"),
         (projection["covered_finite_terms"] != 0, "covered_finite_terms_nonzero"),
         (projection["closed_table_functions"] != 0, "closed_table_functions_nonzero"),
         (clique < 48, "all_different_clique_below_minimum"),
@@ -1158,8 +1160,6 @@ def _selector_reason(projection: Mapping[str, Any], path: str) -> str | None:
             projection["equality_graph_edges"] < 10_000,
             "equality_graph_edges_below_minimum",
         ),
-        (projection["applications"] > MAX_APPLICATIONS, "application_count_cap"),
-        (projection["backend"] != "kissat", "backend_not_kissat"),
     )
     return next((reason for failed, reason in ordered_conditions if failed), None)
 

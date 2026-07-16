@@ -325,6 +325,20 @@ impl StructuralFacts {
             backend,
         }
     }
+
+    pub(crate) fn dpll_route(applications: usize) -> Self {
+        Self {
+            finite_added: 0,
+            covered_finite_terms: 0,
+            closed_table_functions: 0,
+            all_different_clique_lower_bound: 0,
+            disequality_graph_edges: 0,
+            equality_graph_vertices: 0,
+            equality_graph_edges: 0,
+            applications,
+            backend: BackendRoute::Dpll,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1009,6 +1023,12 @@ fn selector_rejection(report: &ProjectionReport) -> Option<Rejection> {
     if report.facts.finite_added != 0 {
         return Some(Rejection::FiniteAddedNonzero);
     }
+    if report.facts.applications > MAX_APPLICATIONS {
+        return Some(Rejection::ApplicationCountCap);
+    }
+    if report.facts.backend != BackendRoute::Kissat {
+        return Some(Rejection::BackendNotKissat);
+    }
     if report.facts.covered_finite_terms != 0 {
         return Some(Rejection::CoveredFiniteTermsNonzero);
     }
@@ -1031,12 +1051,6 @@ fn selector_rejection(report: &ProjectionReport) -> Option<Rejection> {
     }
     if report.facts.equality_graph_edges < MIN_EQUALITY_GRAPH_EDGES {
         return Some(Rejection::EqualityGraphEdgesBelowMinimum);
-    }
-    if report.facts.applications > MAX_APPLICATIONS {
-        return Some(Rejection::ApplicationCountCap);
-    }
-    if report.facts.backend != BackendRoute::Kissat {
-        return Some(Rejection::BackendNotKissat);
     }
     None
 }
