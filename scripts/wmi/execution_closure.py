@@ -37,6 +37,7 @@ F_SEAL_SHRINK = getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
 F_SEAL_GROW = getattr(fcntl, "F_SEAL_GROW", 0x0004)
 F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 0x0008)
 REQUIRED_SEALS = F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
+ELF_ET_DYN = 3
 
 
 class ClosureError(ValueError):
@@ -96,6 +97,22 @@ def stable_read(path: Path, label: str) -> tuple[bytes, os.stat_result]:
     if identity(before) != identity(after) or size != after.st_size:
         raise ClosureError(f"{label} changed while it was inventoried: {path}")
     return b"".join(chunks), after
+
+
+def is_dynamic_elf(content: bytes, label: str) -> bool:
+    """Return whether ELF bytes are loadable ET_DYN rather than static input."""
+
+    if not content.startswith(b"\x7fELF"):
+        return False
+    if len(content) < 18:
+        raise ClosureError(f"{label} has a truncated ELF header")
+    elf_class = content[4]
+    encoding = content[5]
+    version = content[6]
+    if elf_class not in {1, 2} or encoding not in {1, 2} or version != 1:
+        raise ClosureError(f"{label} has an invalid ELF identification header")
+    byteorder = "little" if encoding == 1 else "big"
+    return int.from_bytes(content[16:18], byteorder=byteorder) == ELF_ET_DYN
 
 
 def descriptor_bytes(descriptor: int, label: str) -> tuple[bytes, os.stat_result]:
@@ -495,7 +512,7 @@ def create_manifest(
     for item in python_runtime["files"]:
         path = Path(item["path"])
         content, _ = stable_read(path, "Python native extension probe")
-        if not content.startswith(b"\x7fELF"):
+        if not is_dynamic_elf(content, f"Python runtime file {path}"):
             continue
         output = ldd_output(ldd, path)
         dependencies, names = dependency_paths(output)
@@ -738,6 +755,7 @@ def verify_manifest(path: Path, expected_sha256: str) -> dict[str, Any]:
             raise ClosureError(f"Python script {name} identity differs")
         require_current(item, f"Python script {name}")
         python_scripts[name] = Path(item["path"])
+    expected_native_extension_paths: set[str] = set()
     for index, item in enumerate(probe["files"]):
         require_exact_keys(
             item,
@@ -747,6 +765,11 @@ def verify_manifest(path: Path, expected_sha256: str) -> dict[str, Any]:
         if item["category"] != "python_runtime":
             raise ClosureError("Python runtime file category differs")
         require_current(item, f"Python runtime file {index}")
+        content, _ = stable_read(
+            Path(item["path"]), f"Python runtime ELF classification {index}"
+        )
+        if is_dynamic_elf(content, f"Python runtime file {item['path']}"):
+            expected_native_extension_paths.add(item["path"])
     rerun_probe = run_python_probe(
         Path(executables[python_runtime["executable_name"]]["path"]),
         python_scripts,
@@ -773,8 +796,8 @@ def verify_manifest(path: Path, expected_sha256: str) -> dict[str, Any]:
             raise ClosureError("Python native-extension closure differs")
         native_extension_paths.add(item["path"])
         content, _ = stable_read(Path(item["path"]), "Python native extension")
-        if not content.startswith(b"\x7fELF"):
-            raise ClosureError("Python native-extension binding is not ELF")
+        if not is_dynamic_elf(content, f"Python native extension {item['path']}"):
+            raise ClosureError("Python native-extension binding is not ET_DYN ELF")
         output = ldd_output(Path(resolver_program["path"]), Path(item["path"]))
         dependencies, resolved_virtual = dependency_paths(output)
         if (
@@ -783,6 +806,8 @@ def verify_manifest(path: Path, expected_sha256: str) -> dict[str, Any]:
             or any(name not in virtual for name in resolved_virtual)
         ):
             raise ClosureError("Python native-extension loader resolution drifted")
+    if native_extension_paths != expected_native_extension_paths:
+        raise ClosureError("Python native-extension closure is incomplete or extraneous")
     records = list(artifacts.values())
     records.extend(executables.values())
     records.extend(libraries)

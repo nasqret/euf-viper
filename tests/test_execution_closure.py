@@ -21,6 +21,18 @@ LINUX = sys.platform.startswith("linux") and Path("/proc/self/fd").is_dir()
 
 
 class ExecutionClosureTests(unittest.TestCase):
+    def test_relocatable_elf_is_not_a_dynamic_loader_target(self) -> None:
+        def elf_header(object_type: int) -> bytes:
+            content = bytearray(64)
+            content[:7] = b"\x7fELF\x02\x01\x01"
+            content[16:18] = object_type.to_bytes(2, "little")
+            return bytes(content)
+
+        self.assertFalse(CLOSURE.is_dynamic_elf(elf_header(1), "python.o"))
+        self.assertTrue(CLOSURE.is_dynamic_elf(elf_header(3), "extension.so"))
+        with self.assertRaisesRegex(CLOSURE.ClosureError, "truncated ELF"):
+            CLOSURE.is_dynamic_elf(b"\x7fELF", "truncated.so")
+
     def test_loader_target_second_read_substitution_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             executable = Path(temporary) / "tool"
@@ -100,6 +112,12 @@ class ExecutionClosureTests(unittest.TestCase):
             )
             self.assertTrue(value["libraries"])
             self.assertTrue(value["python_runtime"]["native_extensions"])
+            self.assertFalse(
+                any(
+                    Path(record["path"]).name == "python.o"
+                    for record in value["python_runtime"]["native_extensions"]
+                )
+            )
             self.assertTrue(
                 any(
                     "ld-linux" in record["path"] or "ld-musl" in record["path"]

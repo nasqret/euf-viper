@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -305,9 +306,14 @@ class ProductionEvidenceTests(unittest.TestCase):
         )
         cls.sealed_receipt = Path(cls.clean_build.name) / "sealed-build-receipt.json"
         cls.sealed_receipt.write_bytes(CHECKER.canonical_bytes(receipt))
-        (Path(cls.clean_build.name) / "sealed-build-attestation.json").write_bytes(
+        cls.sealed_receipt.chmod(0o400)
+        cls.sealed_attestation = (
+            Path(cls.clean_build.name) / "sealed-build-attestation.json"
+        )
+        cls.sealed_attestation.write_bytes(
             CHECKER.canonical_bytes(receipt["independent_attestation"])
         )
+        cls.sealed_attestation.chmod(0o400)
         cls.sealed_receipt_sha256 = hashlib.sha256(
             cls.sealed_receipt.read_bytes()
         ).hexdigest()
@@ -425,6 +431,10 @@ class ProductionEvidenceTests(unittest.TestCase):
             allow_dirty=True,
             **kwargs,
         )
+
+    def test_sealed_build_fixture_has_required_immutable_modes(self) -> None:
+        self.assertEqual(stat.S_IMODE(self.sealed_receipt.stat().st_mode), 0o400)
+        self.assertEqual(stat.S_IMODE(self.sealed_attestation.stat().st_mode), 0o400)
 
     def test_build_environment_strings_alone_cannot_authorize_evidence(self) -> None:
         source = self.root / "forged-markers.smt2"
@@ -827,6 +837,7 @@ class ProductionEvidenceTests(unittest.TestCase):
                 source,
                 expected_status="sat",
                 expected_executable_sha256=self.binary_sha256,
+                expected_sealed_build_receipt_sha256=self.sealed_receipt_sha256,
             )
 
     def test_decisive_checker_requires_a_trusted_executable_hash(self) -> None:
@@ -842,6 +853,7 @@ class ProductionEvidenceTests(unittest.TestCase):
                 evidence,
                 source,
                 expected_status="sat",
+                expected_sealed_build_receipt_sha256=self.sealed_receipt_sha256,
                 allow_dirty=True,
             )
 
@@ -880,6 +892,8 @@ class ProductionEvidenceTests(unittest.TestCase):
                 **os.environ,
                 "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
                 "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(self.sealed_receipt),
+                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": self.sealed_receipt_sha256,
             },
         )
         self.assertEqual(completed.returncode, 2)
@@ -965,6 +979,8 @@ class ProductionEvidenceTests(unittest.TestCase):
                 **os.environ,
                 "EUF_VIPER_RUN_NONCE": secrets.token_hex(32),
                 "EUF_VIPER_TRUSTED_EXECUTABLE_SHA256": self.binary_sha256,
+                "EUF_VIPER_SEALED_BUILD_RECEIPT": str(self.sealed_receipt),
+                "EUF_VIPER_SEALED_BUILD_RECEIPT_SHA256": self.sealed_receipt_sha256,
             },
         )
         self.assertEqual(rerun.returncode, 2)

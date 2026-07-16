@@ -1097,6 +1097,17 @@ def validate_production_evidence(
     executable_sha256 = _hash(
         solver["executable_sha256"], "solver.executable_sha256"
     )
+    if status == "sat":
+        if solver["dirty"] and not allow_dirty:
+            raise ProductionEvidenceError(
+                "decisive evidence was emitted by a dirty build"
+            )
+        if expected_executable_sha256 is None:
+            raise ProductionEvidenceError(
+                "trusted executable SHA-256 is required for decisive evidence"
+            )
+        if executable_sha256 != expected_executable_sha256:
+            raise ProductionEvidenceError("trusted executable SHA-256 mismatch")
     _string(solver["backend"], "solver.backend")
     config = solver["config"]
     if type(config) is not dict or any(
@@ -1182,12 +1193,6 @@ def validate_production_evidence(
             "solver_build_sha256": build_hash,
             "sealed_build_receipt_sha256": sealed_build_receipt_sha256,
         }
-    if solver["dirty"] and not allow_dirty:
-        raise ProductionEvidenceError("decisive evidence was emitted by a dirty build")
-    if expected_executable_sha256 is None:
-        raise ProductionEvidenceError("trusted executable SHA-256 is required for decisive evidence")
-    if executable_sha256 != expected_executable_sha256:
-        raise ProductionEvidenceError("trusted executable SHA-256 mismatch")
     if backend_status != "sat" or limitations:
         raise ProductionEvidenceError("SAT evidence has inconsistent status or limitations")
     backend = _string(solver["backend"], "solver.backend")

@@ -61,12 +61,12 @@ FAKE_VIPER = textwrap.dedent(
         print("invalid fake certifier invocation", file=sys.stderr)
         raise SystemExit(64)
 
-    source = Path(sys.argv[2]).resolve()
+    source = Path(sys.argv[2])
     prefix = Path(sys.argv[4]).resolve()
     payload = json.loads(source.read_text(encoding="utf-8"))
     call_log = Path(os.environ["CALL_LOG"])
     with call_log.open("a", encoding="utf-8") as handle:
-        handle.write(source.name + "\\n")
+        handle.write(payload["_fixture_source_name"] + "\\n")
         handle.flush()
         os.fsync(handle.fileno())
 
@@ -201,6 +201,7 @@ class CampaignFixture:
         source = self.corpus / relative_path
         source.parent.mkdir(parents=True, exist_ok=True)
         content = {
+            "_fixture_source_name": source.name,
             "expected": expected,
             "checker_log": str(self.checker_log),
             **payload,
@@ -587,6 +588,52 @@ class SelectionAndPartitionTests(unittest.TestCase):
 
 
 class DescriptorExecutionContractTests(unittest.TestCase):
+    def test_procfd_manifest_source_requires_its_sealed_descriptor_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            prefix = root / "certificate"
+            manifest_path = Path(f"{prefix}.euf.json")
+            source_path = "/campaign/family/input.smt2"
+            source_sha256 = "1" * 64
+            work = {
+                "expected_result": "sat",
+                "source_path": source_path,
+                "source_sha256": source_sha256,
+            }
+            manifest_path.write_bytes(
+                canonical_bytes(
+                    {
+                        "encoding": "canonical-tseitin-v1",
+                        "format": "euf-viper-euf-cnf-v2",
+                        "result": "sat",
+                        "source": "/proc/self/fd/17",
+                        "source_sha256": source_sha256,
+                    }
+                )
+            )
+            descriptor_binding = {
+                "files": [{"path": source_path, "sha256": source_sha256}],
+                "mechanism": "linux_procfd",
+            }
+
+            SHADOW.validate_manifest_binding(
+                manifest_path, prefix, work, descriptor_binding
+            )
+
+            descriptor_binding["files"][0]["sha256"] = "2" * 64
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError, "lacks its sealed descriptor binding"
+            ):
+                SHADOW.validate_manifest_binding(
+                    manifest_path, prefix, work, descriptor_binding
+                )
+            descriptor_binding["files"][0]["sha256"] = source_sha256
+            descriptor_binding["mechanism"] = "platform_pathname"
+            with self.assertRaisesRegex(SHADOW.ShadowError, "source path mismatch"):
+                SHADOW.validate_manifest_binding(
+                    manifest_path, prefix, work, descriptor_binding
+                )
+
     def test_unsat_checker_command_binds_generated_proof_artifacts(self) -> None:
         prefix = Path("/attempt/certificate")
         command = SHADOW._checker_command(

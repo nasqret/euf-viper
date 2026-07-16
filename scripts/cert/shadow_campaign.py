@@ -27,6 +27,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import stat
@@ -68,6 +69,7 @@ ABSTENTIONS = {"unknown", "unsupported"}
 HEX_DIGITS = frozenset("0123456789abcdef")
 MAX_EXCERPT_BYTES = 2_000
 MAX_JSON_OUTPUT_BYTES = 1024 * 1024
+LINUX_PROC_FD = re.compile(r"/proc/self/fd/[1-9][0-9]*\Z")
 CHECKER_BOOTSTRAP = """\
 import importlib.machinery
 import importlib.util
@@ -1249,10 +1251,50 @@ def _resolve_declared_artifact(value: object, label: str) -> Path:
     return canonical_nofollow_path(Path(value))
 
 
+def _validate_manifest_source_binding(
+    declared: object,
+    work: Mapping[str, Any],
+    descriptor_binding: Mapping[str, Any],
+) -> None:
+    if type(declared) is not str or not declared:
+        raise ShadowError("certificate manifest has invalid source path")
+    binding = _require_exact_keys(
+        descriptor_binding,
+        {"files", "mechanism"},
+        "certifier descriptor binding",
+    )
+    mechanism = binding["mechanism"]
+    if mechanism == "platform_pathname":
+        if canonical_nofollow_path(Path(declared)) != Path(work["source_path"]):
+            raise ShadowError("certificate manifest source path mismatch")
+        return
+    if mechanism != "linux_procfd" or LINUX_PROC_FD.fullmatch(declared) is None:
+        raise ShadowError(
+            "certificate manifest source is not the sealed Linux descriptor path"
+        )
+    files = binding["files"]
+    if type(files) is not list:
+        raise ShadowError("certifier descriptor file bindings are invalid")
+    matches = []
+    for index, raw_item in enumerate(files):
+        item = _require_exact_keys(
+            raw_item,
+            {"path", "sha256"},
+            f"certifier descriptor file {index}",
+        )
+        if item["path"] == work["source_path"]:
+            matches.append(item)
+    if len(matches) != 1 or matches[0]["sha256"] != work["source_sha256"]:
+        raise ShadowError(
+            "certificate manifest source lacks its sealed descriptor binding"
+        )
+
+
 def validate_manifest_binding(
     manifest_path: Path,
     prefix: Path,
     work: Mapping[str, Any],
+    descriptor_binding: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Verify that the emitted manifest and artifacts are bound to this work item."""
 
@@ -1269,9 +1311,9 @@ def validate_manifest_binding(
         )
     if manifest.get("source_sha256") != work["source_sha256"]:
         raise ShadowError("certificate manifest source SHA-256 mismatch")
-    declared_source = _resolve_declared_artifact(manifest.get("source"), "source")
-    if declared_source != Path(work["source_path"]):
-        raise ShadowError("certificate manifest source path mismatch")
+    _validate_manifest_source_binding(
+        manifest.get("source"), work, descriptor_binding
+    )
 
     expected_dimacs = canonical_nofollow_path(Path(f"{prefix}.cnf"))
     expected_proof = canonical_nofollow_path(Path(f"{prefix}.drat"))
@@ -1507,7 +1549,12 @@ def execute_attempt(
 
     if failure is None:
         try:
-            validate_manifest_binding(manifest_path, prefix, work)
+            validate_manifest_binding(
+                manifest_path,
+                prefix,
+                work,
+                certify_process["descriptor_binding"],
+            )
         except ShadowError as error:
             kind = (
                 "manifest_missing"
@@ -1551,7 +1598,12 @@ def execute_attempt(
         failure = _failure_from_process("checker", checker_process)
         if failure is None:
             try:
-                validate_manifest_binding(manifest_path, prefix, work)
+                validate_manifest_binding(
+                    manifest_path,
+                    prefix,
+                    work,
+                    certify_process["descriptor_binding"],
+                )
                 validate_checker_binding(
                     _artifact_absolute(
                         checker_process["stdout_path"], output_directory
@@ -1772,7 +1824,12 @@ def validate_attempt_record(
         )
         if token_status != "decisive" or token != work["expected_result"]:
             raise ShadowError(f"{context}: verified certifier result is not matching")
-        validate_manifest_binding(Path(f"{prefix}.euf.json"), prefix, work)
+        validate_manifest_binding(
+            Path(f"{prefix}.euf.json"),
+            prefix,
+            work,
+            certify["descriptor_binding"],
+        )
         validate_checker_binding(
             _artifact_absolute(checker["stdout_path"], output_directory), work
         )
