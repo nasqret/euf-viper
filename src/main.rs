@@ -6311,7 +6311,7 @@ fn solve_problem_with_options_and_eq_abstraction(
     if let Some(bool_problem) = &problem.bool_problem {
         let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
         finite_analysis::profile_if_enabled(&problem.arena, bool_problem, &mut finite_context);
-        if bool_problem.unsupported.is_empty() {
+        if routes_to_boolean_sat(&problem) {
             if let Some((result, cnf_vars, cnf_clauses, search_nodes, sat_calls, theory_lemmas)) =
                 solve_bool_problem(
                     &problem.arena,
@@ -6376,6 +6376,14 @@ fn solve_problem_with_options_and_eq_abstraction(
             ..stats_base
         },
     }
+}
+
+fn routes_to_boolean_sat(problem: &Problem) -> bool {
+    !problem.contradiction
+        && problem
+            .bool_problem
+            .as_ref()
+            .is_some_and(|bool_problem| bool_problem.unsupported.is_empty())
 }
 
 #[cfg(test)]
@@ -7211,11 +7219,9 @@ fn project_t9_problem_without_sat_measurement(
         return Err("T9 projection encountered an unsupported sort configuration".to_owned());
     }
     let bool_problem = problem.bool_problem.as_ref();
-    if !problem.unsupported.is_empty()
-        || bool_problem.is_none_or(|candidate| !candidate.unsupported.is_empty())
-    {
+    if !routes_to_boolean_sat(problem) {
         let cnf = CnfProblem::new();
-        let facts = t9_ackermann::StructuralFacts::dpll_route(problem.arena.apps.len());
+        let facts = t9_ackermann::StructuralFacts::fallback_route(problem.arena.apps.len());
         return Ok(t9_ackermann::attempt(
             t9_ackermann::Mode::CliqueAuto,
             &cnf,
@@ -10831,7 +10837,7 @@ mod tests {
     }
 
     #[test]
-    fn project_t9_reports_positive_or_inputs_as_dpll_rejections() {
+    fn project_t9_reports_positive_or_inputs_as_fallback_rejections() {
         let mut source = "(set-logic QF_UF) (declare-sort U 0) ".to_owned();
         for index in 0..10 {
             source.push_str(&format!("(declare-fun x{index} () U) "));
@@ -10857,9 +10863,43 @@ mod tests {
         assert!(output.contains("selector_selected 0\n"));
         assert!(output.contains("selected 0\n"));
         assert!(output.contains("reason backend_not_kissat\n"));
-        assert!(output.contains("backend dpll\n"));
+        assert!(output.contains("backend fallback\n"));
         assert!(output.contains("sat_calls 0\n"));
         assert!(output.contains("planned_ackermann_clauses_state not_computed\n"));
+    }
+
+    #[test]
+    fn project_t9_shares_the_production_boolean_route_gate() {
+        let supported_source = "(set-logic QF_UF) (assert true) (check-sat)";
+        let legacy_unsupported_source =
+            "(set-logic QF_UF) (assert true) (legacy-command) (check-sat)";
+        let supported =
+            parse_problem_with_scoped_let_mode(supported_source, ScopedLetMode::Auto).unwrap();
+        let legacy_unsupported =
+            parse_problem_with_scoped_let_mode(legacy_unsupported_source, ScopedLetMode::Auto)
+                .unwrap();
+
+        assert!(supported.unsupported.is_empty());
+        assert!(!legacy_unsupported.unsupported.is_empty());
+        assert!(routes_to_boolean_sat(&supported));
+        assert!(routes_to_boolean_sat(&legacy_unsupported));
+
+        let mut supported_output = Vec::new();
+        project_t9_problem(&supported)
+            .unwrap()
+            .write_to(&mut supported_output)
+            .unwrap();
+        let mut legacy_output = Vec::new();
+        project_t9_problem(&legacy_unsupported)
+            .unwrap()
+            .write_to(&mut legacy_output)
+            .unwrap();
+        assert_eq!(legacy_output, supported_output);
+        assert!(
+            String::from_utf8(legacy_output)
+                .unwrap()
+                .contains("backend kissat\n")
+        );
     }
 
     #[test]

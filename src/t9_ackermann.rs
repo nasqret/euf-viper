@@ -67,6 +67,7 @@ pub(crate) enum BackendRoute {
     Cadical,
     CadicalRefine,
     Varisat,
+    Fallback,
     Dpll,
 }
 
@@ -77,6 +78,7 @@ impl BackendRoute {
             Self::Cadical => "cadical",
             Self::CadicalRefine => "cadical-refine",
             Self::Varisat => "varisat",
+            Self::Fallback => "fallback",
             Self::Dpll => "dpll",
         }
     }
@@ -326,7 +328,7 @@ impl StructuralFacts {
         }
     }
 
-    pub(crate) fn dpll_route(applications: usize) -> Self {
+    pub(crate) fn fallback_route(applications: usize) -> Self {
         Self {
             finite_added: 0,
             covered_finite_terms: 0,
@@ -336,7 +338,7 @@ impl StructuralFacts {
             equality_graph_vertices: 0,
             equality_graph_edges: 0,
             applications,
-            backend: BackendRoute::Dpll,
+            backend: BackendRoute::Fallback,
         }
     }
 }

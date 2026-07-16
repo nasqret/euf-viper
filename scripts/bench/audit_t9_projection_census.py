@@ -152,7 +152,7 @@ REQUIRED_PROJECTION_FIELDS = (
     COUNT_FIELDS | COUNT_STATE_FIELDS | BOOLEAN_FIELDS | TEXT_FIELDS
 )
 COUNT_STATES = {"not_computed", "exact", "lower_bound", "unavailable"}
-BACKENDS = {"kissat", "cadical", "cadical-refine", "varisat", "dpll"}
+BACKENDS = {"kissat", "cadical", "cadical-refine", "varisat", "fallback", "dpll"}
 REASON_VOCABULARY = {
     "selected",
     "mode_off",
