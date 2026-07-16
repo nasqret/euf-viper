@@ -10,6 +10,11 @@
 
 set -euo pipefail
 
+[ "$(uname -s)" = Linux ] || {
+  echo "T9 Stage1 requires Linux resource-limit semantics" >&2
+  exit 2
+}
+
 REPO_ROOT_INPUT="${EUF_VIPER_T9_REPO_ROOT:?set absolute clean harness checkout root}"
 RUN_BASE_INPUT="${EUF_VIPER_T9_RUN_BASE:?set absolute external run base}"
 STAGE0_ROOT_INPUT="${EUF_VIPER_T9_STAGE0_ROOT:?set absolute immutable Stage0 root}"
@@ -64,6 +69,13 @@ STAGE0_RECEIPT="$STAGE0_ROOT/audit-receipt.json"
 EXPECTED_RECORDS_SHA256="${EUF_VIPER_T9_RECORDS_SHA256:?set Stage0 records SHA-256}"
 EXPECTED_SUMMARY_SHA256="${EUF_VIPER_T9_SUMMARY_SHA256:?set Stage0 summary SHA-256}"
 EXPECTED_RECEIPT_SHA256="${EUF_VIPER_T9_RECEIPT_SHA256:?set Stage0 receipt SHA-256}"
+MANIFEST_SHA256="32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
+CONTROL_SHA256="85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"
+readonly \
+  EXPECTED_REVISION BINARY_REVISION PYTHON PYTHON_SHA256 PYTHON_VERSION \
+  YICES YICES_SHA256 YICES_VERSION BINARY BINARY_SHA256 STAGE0_RECORDS \
+  STAGE0_SUMMARY STAGE0_RECEIPT EXPECTED_RECORDS_SHA256 \
+  EXPECTED_SUMMARY_SHA256 EXPECTED_RECEIPT_SHA256 MANIFEST_SHA256 CONTROL_SHA256
 
 canonical_sha256() {
   [ "${#1}" -eq 64 ] || return 1
@@ -71,6 +83,16 @@ canonical_sha256() {
     *[!0-9a-f]*) return 1 ;;
     *) return 0 ;;
   esac
+}
+
+require_sha256() {
+  local path="$1"
+  local expected="$2"
+  local label="$3"
+  [ "$(sha256sum "$path" | awk '{print $1}')" = "$expected" ] || {
+    echo "$label SHA-256 mismatch" >&2
+    return 1
+  }
 }
 
 for revision in "$EXPECTED_REVISION" "$BINARY_REVISION"; do
@@ -84,7 +106,8 @@ for revision in "$EXPECTED_REVISION" "$BINARY_REVISION"; do
 done
 for digest in \
   "$PYTHON_SHA256" "$YICES_SHA256" "$BINARY_SHA256" \
-  "$EXPECTED_RECORDS_SHA256" "$EXPECTED_SUMMARY_SHA256" "$EXPECTED_RECEIPT_SHA256"; do
+  "$EXPECTED_RECORDS_SHA256" "$EXPECTED_SUMMARY_SHA256" "$EXPECTED_RECEIPT_SHA256" \
+  "$MANIFEST_SHA256" "$CONTROL_SHA256"; do
   canonical_sha256 "$digest" || {
     echo "input SHA-256 is not canonical" >&2
     exit 2
@@ -106,29 +129,20 @@ for artifact in "$STAGE0_RECORDS" "$STAGE0_SUMMARY" "$STAGE0_RECEIPT"; do
     exit 2
   }
 done
-[ "$(sha256sum "$PYTHON" | awk '{print $1}')" = "$PYTHON_SHA256" ] || {
-  echo "Python SHA-256 mismatch" >&2
-  exit 2
-}
+require_sha256 "$PYTHON" "$PYTHON_SHA256" Python || exit 2
 [ "$($PYTHON --version 2>&1)" = "$PYTHON_VERSION" ] || {
   echo "Python version mismatch" >&2
   exit 2
 }
-[ "$(sha256sum "$YICES" | awk '{print $1}')" = "$YICES_SHA256" ] || {
-  echo "Yices SHA-256 mismatch" >&2
-  exit 2
-}
+require_sha256 "$YICES" "$YICES_SHA256" Yices || exit 2
 [ "$($YICES --version | sed -n '1p')" = "$YICES_VERSION" ] || {
   echo "Yices version mismatch" >&2
   exit 2
 }
-[ "$(sha256sum "$BINARY" | awk '{print $1}')" = "$BINARY_SHA256" ] || {
-  echo "Stage0 binary SHA-256 mismatch" >&2
-  exit 2
-}
-[ "$(sha256sum "$STAGE0_RECORDS" | awk '{print $1}')" = "$EXPECTED_RECORDS_SHA256" ] || exit 2
-[ "$(sha256sum "$STAGE0_SUMMARY" | awk '{print $1}')" = "$EXPECTED_SUMMARY_SHA256" ] || exit 2
-[ "$(sha256sum "$STAGE0_RECEIPT" | awk '{print $1}')" = "$EXPECTED_RECEIPT_SHA256" ] || exit 2
+require_sha256 "$BINARY" "$BINARY_SHA256" "Stage0 binary" || exit 2
+require_sha256 "$STAGE0_RECORDS" "$EXPECTED_RECORDS_SHA256" "Stage0 records" || exit 2
+require_sha256 "$STAGE0_SUMMARY" "$EXPECTED_SUMMARY_SHA256" "Stage0 summary" || exit 2
+require_sha256 "$STAGE0_RECEIPT" "$EXPECTED_RECEIPT_SHA256" "Stage0 receipt" || exit 2
 
 cd "$REPO_ROOT"
 [ "$(git rev-parse HEAD^{commit})" = "$EXPECTED_REVISION" ] || {
@@ -155,7 +169,10 @@ SUMMARY="$RUN_ROOT/summary.json"
 RECEIPT="$RUN_ROOT/audit-receipt.json"
 RUNNER="$REPO_ROOT/scripts/bench/run_t9_stage1.py"
 AUDITOR="$REPO_ROOT/scripts/bench/audit_t9_stage1.py"
+require_sha256 "$MANIFEST" "$MANIFEST_SHA256" "full manifest" || exit 2
+require_sha256 "$CONTROL_MANIFEST" "$CONTROL_SHA256" "control manifest" || exit 2
 
+set +e
 "$PYTHON" -B "$RUNNER" \
   --manifest "$MANIFEST" \
   --control-manifest "$CONTROL_MANIFEST" \
@@ -171,7 +188,17 @@ AUDITOR="$REPO_ROOT/scripts/bench/audit_t9_stage1.py"
   --raw-out "$RAW" \
   --summary-out "$SUMMARY" \
   > "$RUN_ROOT/stage1.stdout"
+RUNNER_STATUS=$?
+set -e
+case "$RUNNER_STATUS" in
+  0|3) ;;
+  *)
+    echo "Stage1 runner failed its execution contract: $RUNNER_STATUS" >&2
+    exit 2
+    ;;
+esac
 
+set +e
 "$PYTHON" -B "$AUDITOR" \
   --manifest "$MANIFEST" \
   --control-manifest "$CONTROL_MANIFEST" \
@@ -187,8 +214,62 @@ AUDITOR="$REPO_ROOT/scripts/bench/audit_t9_stage1.py"
   --summary "$SUMMARY" \
   --receipt-out "$RECEIPT" \
   > "$RUN_ROOT/audit.stdout"
+AUDITOR_STATUS=$?
+set -e
+case "$AUDITOR_STATUS" in
+  0|3) ;;
+  *)
+    echo "Stage1 auditor rejected the evidence: $AUDITOR_STATUS" >&2
+    exit 2
+    ;;
+esac
+[ "$RUNNER_STATUS" -eq "$AUDITOR_STATUS" ] || {
+  echo "runner and auditor scientific exit codes disagree" >&2
+  exit 2
+}
+require_sha256 "$PYTHON" "$PYTHON_SHA256" Python || exit 2
+require_sha256 "$YICES" "$YICES_SHA256" Yices || exit 2
+require_sha256 "$BINARY" "$BINARY_SHA256" "Stage0 binary" || exit 2
+require_sha256 "$STAGE0_RECORDS" "$EXPECTED_RECORDS_SHA256" "Stage0 records" || exit 2
+require_sha256 "$STAGE0_SUMMARY" "$EXPECTED_SUMMARY_SHA256" "Stage0 summary" || exit 2
+require_sha256 "$STAGE0_RECEIPT" "$EXPECTED_RECEIPT_SHA256" "Stage0 receipt" || exit 2
+require_sha256 "$MANIFEST" "$MANIFEST_SHA256" "full manifest" || exit 2
+require_sha256 "$CONTROL_MANIFEST" "$CONTROL_SHA256" "control manifest" || exit 2
+[ "$(git rev-parse HEAD^{commit})" = "$EXPECTED_REVISION" ] || {
+  echo "harness revision changed during Stage1" >&2
+  exit 2
+}
+[ -z "$(git status --porcelain=v1 --untracked-files=all)" ] || {
+  echo "harness checkout changed during Stage1" >&2
+  exit 2
+}
+chmod 400 "$RUN_ROOT/stage1.stdout" "$RUN_ROOT/audit.stdout"
 
-"$PYTHON" -B - "$RUN_ROOT/metadata.json" "$SUMMARY" "$RECEIPT" "$EXPECTED_REVISION" <<'PY'
+SCIENTIFIC_DECISION="$(
+  "$PYTHON" -B -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["decision"])' \
+    "$SUMMARY"
+)"
+RECEIPT_DECISION="$(
+  "$PYTHON" -B -c \
+    'import json,sys; print(json.load(open(sys.argv[1]))["scientific_decision"])' \
+    "$RECEIPT"
+)"
+[ "$SCIENTIFIC_DECISION" = "$RECEIPT_DECISION" ] || {
+  echo "summary and receipt scientific decisions disagree" >&2
+  exit 2
+}
+case "$SCIENTIFIC_DECISION:$RUNNER_STATUS" in
+  pass:0|fail:3) ;;
+  *)
+    echo "scientific decision and exit code disagree" >&2
+    exit 2
+    ;;
+esac
+
+"$PYTHON" -B - \
+  "$RUN_ROOT/metadata.json" "$SUMMARY" "$RECEIPT" "$EXPECTED_REVISION" \
+  "$RUNNER_STATUS" "$AUDITOR_STATUS" <<'PY'
 import hashlib
 import json
 import os
@@ -205,12 +286,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-output, summary_path, receipt_path, revision = map(Path, sys.argv[1:])
+output = Path(sys.argv[1])
+summary_path = Path(sys.argv[2])
+receipt_path = Path(sys.argv[3])
+revision = sys.argv[4]
+runner_status = int(sys.argv[5])
+auditor_status = int(sys.argv[6])
 summary = json.loads(summary_path.read_text(encoding="ascii"))
 receipt = json.loads(receipt_path.read_text(encoding="ascii"))
 payload = {
     "schema": "euf-viper.t9-stage1-wmi-run.v1",
-    "status": "completed",
+    "status": f"completed_scientific_{summary['decision']}",
     "scientific_decision": summary["decision"],
     "job_id": int(os.environ["SLURM_JOB_ID"]),
     "hostname": platform.node(),
@@ -219,6 +305,8 @@ payload = {
     "summary_sha256": sha256(summary_path),
     "receipt_sha256": sha256(receipt_path),
     "receipt_status": receipt["status"],
+    "runner_exit_code": runner_status,
+    "auditor_exit_code": auditor_status,
 }
 encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
 descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -229,6 +317,8 @@ with os.fdopen(descriptor, "wb") as handle:
 output.chmod(0o400)
 PY
 
-printf 't9_stage1_status=completed scientific_decision=%s run_root=%s\n' \
-  "$($PYTHON -B -c 'import json,sys; print(json.load(open(sys.argv[1]))["decision"])' "$SUMMARY")" \
+printf 't9_stage1_status=completed_scientific_%s scientific_decision=%s run_root=%s\n' \
+  "$SCIENTIFIC_DECISION" \
+  "$SCIENTIFIC_DECISION" \
   "$RUN_ROOT"
+exit "$RUNNER_STATUS"

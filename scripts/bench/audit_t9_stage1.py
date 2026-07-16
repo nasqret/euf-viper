@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -19,8 +21,9 @@ RAW_SCHEMA = "euf-viper.t9-stage1-observation.v1"
 AUDIT_SCHEMA = "euf-viper.t9-stage1-audit.v1"
 REPEATS = 4
 TIMEOUT_SECONDS = 2.0
+MAX_OUTPUT_BYTES = 64 * 1024
 CONTROL_SHA256 = "85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"
-MANIFEST_SHA256 = "32aba287e33c566584f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
+MANIFEST_SHA256 = "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
 TARGET_PATH = (
     "QF_UF/2018-Goel-hwbench/"
     "QF_UF_sokoban.2.prop1_ab_br_max.smt2"
@@ -47,10 +50,11 @@ OBSERVATION_KEYS = {
     "result",
     "elapsed_ns",
     "exit_code",
+    "timed_out",
     "stdout_sha256",
     "stderr_sha256",
-    "stdout",
-    "stderr",
+    "stdout_b64",
+    "stderr_b64",
 }
 
 
@@ -75,6 +79,60 @@ def sha256_file(path: Path) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def decode_stream(row: dict[str, Any], stream: str) -> bytes:
+    encoded = row.get(f"{stream}_b64")
+    if type(encoded) is not str:
+        raise AuditError(f"observation {stream} is not canonical base64")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise AuditError(f"observation {stream} is not canonical base64") from error
+    if (
+        len(payload) > MAX_OUTPUT_BYTES
+        or base64.b64encode(payload).decode("ascii") != encoded
+    ):
+        raise AuditError(f"observation {stream} exceeds or violates its encoding contract")
+    if row.get(f"{stream}_sha256") != sha256_bytes(payload):
+        raise AuditError(f"observation {stream} hash mismatch")
+    return payload
+
+
+def derive_result(stdout: bytes, exit_code: int, timed_out: bool) -> str:
+    if timed_out:
+        if exit_code != 124:
+            raise AuditError("timeout observation does not use synthetic exit code 124")
+        return "timeout"
+    if exit_code != 0:
+        return f"exit-{exit_code}"
+    tokens = [
+        line.strip()
+        for line in stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip() in {"sat", "unsat", "unknown"}
+    ]
+    if len(tokens) == 1:
+        return tokens[0]
+    return "invalid-status-output"
+
+
+def parse_t9_profile(stderr: bytes) -> dict[str, str]:
+    lines = [
+        line.removeprefix("profile_t9_ackermann ")
+        for line in stderr.decode("utf-8", errors="replace").splitlines()
+        if line.startswith("profile_t9_ackermann ")
+    ]
+    if len(lines) != 1:
+        raise AuditError(f"expected one T9 profile line, observed {len(lines)}")
+    fields: dict[str, str] = {}
+    for token in lines[0].split():
+        if "=" not in token:
+            raise AuditError("T9 profile token is not key=value")
+        key, value = token.split("=", 1)
+        if not key or not value or key in fields:
+            raise AuditError("T9 profile contains an invalid or duplicate field")
+        fields[key] = value
+    return fields
 
 
 def load_object(path: Path) -> dict[str, Any]:
@@ -271,8 +329,7 @@ def validate_observations(
             or type(row.get("elapsed_ns")) is not int
             or row["elapsed_ns"] <= 0
             or type(row.get("exit_code")) is not int
-            or type(row.get("stdout")) is not str
-            or type(row.get("stderr")) is not str
+            or type(row.get("timed_out")) is not bool
         ):
             raise AuditError("observation source or scalar fields mismatch")
         for field in ("stdout_sha256", "stderr_sha256"):
@@ -281,6 +338,13 @@ def validate_observations(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise AuditError("observation stream hash is not canonical")
+        stdout = decode_stream(row, "stdout")
+        stderr = decode_stream(row, "stderr")
+        derived_result = derive_result(stdout, row["exit_code"], row["timed_out"])
+        if row.get("result") != derived_result:
+            raise AuditError("observation result differs from complete stream evidence")
+        if row["timed_out"] and row["elapsed_ns"] < int(TIMEOUT_SECONDS * 1e9):
+            raise AuditError("timeout observation elapsed less than its wall limit")
         phase = row.get("phase")
         arm = row.get("arm")
         if phase == "preflight":
@@ -304,6 +368,8 @@ def validate_observations(
                     for key, value in profile.items()
                 ):
                     raise AuditError("candidate preflight profile is not canonical")
+                if parse_t9_profile(stderr) != profile:
+                    raise AuditError("published candidate profile differs from stderr")
                 projection = source.get("projection")
                 if type(projection) is not dict:
                     raise AuditError("candidate preflight lacks its Stage0 projection")
@@ -347,6 +413,11 @@ def validate_observations(
                 or row.get("profile") is not None
             ):
                 raise AuditError("invalid timing observation")
+            if any(
+                line.startswith(b"profile_t9_ackermann ")
+                for line in stderr.splitlines()
+            ):
+                raise AuditError("timing observation unexpectedly enabled profiling")
             expected_arms = (
                 {"off", "candidate"}
                 if comparison == "off_candidate"
@@ -359,7 +430,9 @@ def validate_observations(
             raise AuditError("unknown observation phase")
     if any(count != 1 for count in preflight.values()) or len(preflight) != len(contract) * 3:
         raise AuditError("preflight schedule is incomplete")
-    if any(len(rows) != 1 for rows in timing.values()) or len(timing) != len(contract) * 4 * REPEATS:
+    if any(len(rows) != 1 for rows in timing.values()) or len(timing) != (
+        len(contract) * 4 * REPEATS
+    ):
         raise AuditError("timing schedule is incomplete")
 
     paths = sorted(contract)
@@ -458,13 +531,27 @@ def recompute(
     nonselected_ratios: list[float] = []
     yices_speedups: list[float] = []
     improvements: dict[str, bool] = {}
+    selected_baseline_all_timeout: dict[str, bool] = {}
     candidate_timeout_yices: list[str] = []
     for relative_path, source in contract.items():
         off_pair = paths[relative_path]["off_candidate"]
         yices_pair = paths[relative_path]["yices_candidate"]
         off_correct = off_pair["off"]["correct"]
         candidate_correct = off_pair["candidate"]["correct"]
-        if candidate_correct and not off_correct:
+        baseline_all_timeout = False
+        if relative_path in selected:
+            selected_off_rows = [
+                row
+                for row in observations
+                if row["relative_path"] == relative_path and row["arm"] == "off"
+            ]
+            baseline_all_timeout = len(selected_off_rows) == REPEATS + 1 and all(
+                row["result"] == "timeout" for row in selected_off_rows
+            )
+            selected_baseline_all_timeout[relative_path] = baseline_all_timeout
+        if candidate_correct and (
+            baseline_all_timeout if relative_path in selected else not off_correct
+        ):
             candidate_only.append(relative_path)
         if off_correct and not candidate_correct:
             baseline_only.append(relative_path)
@@ -511,7 +598,19 @@ def recompute(
         "required_arms_correct": check(all_required_correct, all_required_correct, "==", True),
         "candidate_correct": check(candidate_correct, candidate_correct, "==", True),
         "baseline_only": check(not baseline_only, len(baseline_only), "==", 0),
-        "selected_converted": check(set(candidate_only) == selected, sorted(candidate_only), "==", sorted(selected)),
+        "selected_baseline_all_timeout": check(
+            set(selected_baseline_all_timeout) == selected
+            and all(selected_baseline_all_timeout.values()),
+            selected_baseline_all_timeout,
+            "all_true",
+            sorted(selected),
+        ),
+        "selected_converted": check(
+            set(candidate_only) == selected,
+            sorted(candidate_only),
+            "==",
+            sorted(selected),
+        ),
         "selected_improvement": check(
             set(improvements) == selected and all(improvements.values()),
             improvements,
@@ -545,6 +644,7 @@ def recompute(
         "missing_groups": [],
         "candidate_only_paths": sorted(candidate_only),
         "baseline_only_paths": sorted(baseline_only),
+        "selected_baseline_all_timeout": selected_baseline_all_timeout,
         "candidate_timeout_yices_solve": sorted(candidate_timeout_yices),
         "anti_target_overhead_ratios": anti_ratios,
         "anti_target_p95_overhead": anti_p95,
@@ -625,7 +725,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         raise AuditError("Stage1 decision does not match independent recomputation")
     receipt = {
         "schema": AUDIT_SCHEMA,
-        "status": "pass",
+        "status": "verified",
         "scientific_decision": evaluation["decision"],
         "raw_sha256": sha256_file(args.raw),
         "summary_sha256": sha256_file(args.summary),
@@ -662,11 +762,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     try:
-        audit(parse_args())
+        receipt = audit(parse_args())
     except (AuditError, OSError, KeyError) as error:
         print(f"T9 Stage1 audit rejected: {error}", file=os.sys.stderr)
         return 2
-    return 0
+    return 0 if receipt["scientific_decision"] == "pass" else 3
 
 
 if __name__ == "__main__":

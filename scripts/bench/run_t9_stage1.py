@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -12,6 +13,7 @@ import resource
 import signal
 import statistics
 import subprocess
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -23,7 +25,7 @@ SCHEMA = "euf-viper.t9-stage1.v1"
 RAW_SCHEMA = "euf-viper.t9-stage1-observation.v1"
 REPEATS = 4
 TIMEOUT_SECONDS = 2.0
-MAX_OUTPUT_BYTES = 1 << 20
+MAX_OUTPUT_BYTES = 64 * 1024
 MAX_ADDRESS_SPACE_BYTES = 6 * 1024**3
 MAX_OPEN_FILES = 64
 CONTROL_SHA256 = "85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"
@@ -74,6 +76,19 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validate_input_identities(
+    identities: list[tuple[str, Path, str, bool]],
+) -> None:
+    for label, path, expected_sha256, executable in identities:
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or (executable and not os.access(path, os.X_OK))
+            or sha256_file(path) != expected_sha256
+        ):
+            raise Stage1Error(f"input identity changed during Stage1: {label}")
+
+
 def load_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="ascii"))
@@ -122,64 +137,131 @@ def immutable_write(path: Path, payload: bytes) -> None:
 
 
 def _child_limits() -> None:
-    resource.setrlimit(
-        resource.RLIMIT_AS, (MAX_ADDRESS_SPACE_BYTES, MAX_ADDRESS_SPACE_BYTES)
-    )
+    if os.uname().sysname == "Linux":
+        resource.setrlimit(
+            resource.RLIMIT_AS, (MAX_ADDRESS_SPACE_BYTES, MAX_ADDRESS_SPACE_BYTES)
+        )
     resource.setrlimit(resource.RLIMIT_NOFILE, (MAX_OPEN_FILES, MAX_OPEN_FILES))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
     if hasattr(resource, "RLIMIT_NPROC"):
         soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
         limit = min(value for value in (64, soft, hard) if value >= 0)
         resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
 
 
-def _bounded_text(payload: bytes, stream: str) -> str:
-    if len(payload) > MAX_OUTPUT_BYTES:
+def _parse_result(stdout: bytes, return_code: int) -> str:
+    if return_code != 0:
+        return f"exit-{return_code}"
+    tokens = [
+        line.strip()
+        for line in stdout.decode("utf-8", errors="replace").splitlines()
+        if line.strip() in {"sat", "unsat", "unknown"}
+    ]
+    if len(tokens) == 1:
+        return tokens[0]
+    return "invalid-status-output"
+
+
+def _read_output(handle: Any, stream: str) -> bytes:
+    handle.flush()
+    handle.seek(0, os.SEEK_END)
+    size = handle.tell()
+    if size > MAX_OUTPUT_BYTES:
         raise Stage1Error(f"{stream} exceeded {MAX_OUTPUT_BYTES} bytes")
-    return payload.decode("utf-8", errors="replace")
+    handle.seek(0)
+    return handle.read()
 
 
-def _parse_result(stdout: str, return_code: int) -> str:
-    for line in stdout.splitlines():
-        token = line.strip()
-        if token in {"sat", "unsat", "unknown"}:
-            return token
-    return f"exit-{return_code}"
-
-
-def run_process(argv: list[str], environment: Mapping[str, str]) -> dict[str, Any]:
-    start = time.perf_counter_ns()
-    process = subprocess.Popen(
-        argv,
-        env=dict(environment),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        close_fds=True,
-        preexec_fn=_child_limits,
-    )
-    timed_out = False
+def _signal_process_group(pid: int) -> bool:
     try:
-        stdout_bytes, stderr_bytes = process.communicate(timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return False
+    except PermissionError as error:
+        raise Stage1Error(f"cannot terminate process group {pid}: {error}") from error
+    return True
+
+
+def _wait_process_group_gone(pid: int) -> None:
+    deadline = time.monotonic() + 1.0
+    while True:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(pid, 0)
         except ProcessLookupError:
-            pass
-        stdout_bytes, stderr_bytes = process.communicate()
+            return
+        except PermissionError:
+            # SIGKILL was accepted immediately before this check. Darwin can
+            # report EPERM while its service manager reaps the dead orphan.
+            return
+        if time.monotonic() >= deadline:
+            raise Stage1Error(f"process group {pid} survived SIGKILL")
+        time.sleep(0.01)
+
+
+def run_process(
+    argv: list[str], environment: Mapping[str, str]
+) -> tuple[dict[str, Any], str]:
+    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+        raise Stage1Error("Stage1 refuses to replace an active process timer")
+    start = time.perf_counter_ns()
+    with (
+        tempfile.TemporaryFile() as stdout_handle,
+        tempfile.TemporaryFile() as stderr_handle,
+    ):
+        process = subprocess.Popen(
+            argv,
+            env=dict(environment),
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_handle,
+            stderr=stderr_handle,
+            start_new_session=True,
+            close_fds=True,
+            preexec_fn=_child_limits,
+        )
+        timed_out = False
+        timeout_signalled = False
+
+        def timeout_handler(_signum: int, _frame: Any) -> None:
+            nonlocal timed_out, timeout_signalled
+            timed_out = True
+            timeout_signalled = _signal_process_group(process.pid)
+
+        previous_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.setitimer(signal.ITIMER_REAL, TIMEOUT_SECONDS)
+        try:
+            try:
+                process.wait()
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+                signal.signal(signal.SIGALRM, previous_handler)
+        except BaseException:
+            _signal_process_group(process.pid)
+            process.wait()
+            raise
+        if timed_out:
+            group_signalled = timeout_signalled
+        else:
+            # Solvers are single-process. Kill any unexpected descendants before
+            # the next observation even when the leader exited successfully.
+            group_signalled = _signal_process_group(process.pid)
+        if group_signalled:
+            _wait_process_group_gone(process.pid)
+        stdout_bytes = _read_output(stdout_handle, "stdout")
+        stderr_bytes = _read_output(stderr_handle, "stderr")
     elapsed_ns = time.perf_counter_ns() - start
-    stdout = _bounded_text(stdout_bytes, "stdout")
-    stderr = _bounded_text(stderr_bytes, "stderr")
-    return {
-        "result": "timeout" if timed_out else _parse_result(stdout, process.returncode),
+    record = {
+        "result": (
+            "timeout" if timed_out else _parse_result(stdout_bytes, process.returncode)
+        ),
         "elapsed_ns": elapsed_ns,
         "exit_code": 124 if timed_out else process.returncode,
+        "timed_out": timed_out,
         "stdout_sha256": sha256_bytes(stdout_bytes),
         "stderr_sha256": sha256_bytes(stderr_bytes),
-        "stdout": stdout[:1000],
-        "stderr": stderr[:4000],
+        "stdout_b64": base64.b64encode(stdout_bytes).decode("ascii"),
+        "stderr_b64": base64.b64encode(stderr_bytes).decode("ascii"),
     }
+    return record, stderr_bytes.decode("utf-8", errors="replace")
 
 
 def arm_environment(arm: str, *, profile: bool = False) -> dict[str, str]:
@@ -343,6 +425,7 @@ def evaluate(
     nonselected_ratios: list[float] = []
     selected_yices_speedups: list[float] = []
     selected_improvements: dict[str, bool] = {}
+    selected_baseline_all_timeout: dict[str, bool] = {}
     candidate_timeout_yices_solve: list[str] = []
     for source in sources:
         metrics = path_metrics[source.relative_path]
@@ -355,7 +438,23 @@ def evaluate(
             continue
         off_correct = off_pair["off"]["correct"]
         candidate_correct = off_pair["candidate"]["correct"]
-        if candidate_correct and not off_correct:
+        baseline_all_timeout = False
+        if source.relative_path in selected:
+            selected_off_rows = [
+                row
+                for row in observations
+                if row["relative_path"] == source.relative_path
+                and row["arm"] == "off"
+            ]
+            baseline_all_timeout = len(selected_off_rows) == REPEATS + 1 and all(
+                row["result"] == "timeout" for row in selected_off_rows
+            )
+            selected_baseline_all_timeout[source.relative_path] = baseline_all_timeout
+        if candidate_correct and (
+            baseline_all_timeout
+            if source.relative_path in selected
+            else not off_correct
+        ):
             candidate_only.append(source.relative_path)
         if off_correct and not candidate_correct:
             baseline_only.append(source.relative_path)
@@ -411,7 +510,19 @@ def evaluate(
         ),
         "candidate_correct": _check(candidate_correct, candidate_correct, "==", True),
         "baseline_only": _check(not baseline_only, len(baseline_only), "==", 0),
-        "selected_converted": _check(set(candidate_only) == selected, candidate_only, "==", sorted(selected)),
+        "selected_baseline_all_timeout": _check(
+            set(selected_baseline_all_timeout) == selected
+            and all(selected_baseline_all_timeout.values()),
+            selected_baseline_all_timeout,
+            "all_true",
+            sorted(selected),
+        ),
+        "selected_converted": _check(
+            set(candidate_only) == selected,
+            sorted(candidate_only),
+            "==",
+            sorted(selected),
+        ),
         "selected_improvement": _check(
             set(selected_improvements) == selected and all(selected_improvements.values()),
             selected_improvements,
@@ -448,6 +559,7 @@ def evaluate(
         "missing_groups": missing,
         "candidate_only_paths": sorted(candidate_only),
         "baseline_only_paths": sorted(baseline_only),
+        "selected_baseline_all_timeout": selected_baseline_all_timeout,
         "candidate_timeout_yices_solve": sorted(candidate_timeout_yices_solve),
         "anti_target_overhead_ratios": anti_ratios,
         "anti_target_p95_overhead": anti_p95,
@@ -476,7 +588,10 @@ def load_sources(
     receipt = load_json(receipt_path)
     if summary.get("status") != "completed_no_sat" or summary.get("sat_calls") != 0:
         raise Stage1Error("Stage0 summary is not a completed no-SAT census")
-    if receipt.get("status") != "pass" or receipt.get("schema") != "euf-viper.t9-projection-audit.v2":
+    if (
+        receipt.get("status") != "pass"
+        or receipt.get("schema") != "euf-viper.t9-projection-audit.v2"
+    ):
         raise Stage1Error("Stage0 audit receipt does not pass")
     if receipt.get("artifacts", {}).get("records_sha256") != sha256_file(records_path):
         raise Stage1Error("Stage0 records hash does not match its receipt")
@@ -575,7 +690,16 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
     affinity = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
     if len(affinity) != 1:
         raise Stage1Error(f"Stage1 requires exactly one CPU in affinity, observed {affinity}")
-    for path, expected in ((args.binary, args.binary_sha256), (args.yices, args.yices_sha256)):
+    if args.raw_out == args.summary_out or any(
+        path.exists() or path.is_symlink() for path in (args.raw_out, args.summary_out)
+    ):
+        raise Stage1Error("Stage1 output paths must be distinct and absent")
+    runner_path = Path(__file__).resolve()
+    runner_sha256 = sha256_file(runner_path)
+    for path, expected in (
+        (args.binary, args.binary_sha256),
+        (args.yices, args.yices_sha256),
+    ):
         if not path.is_file() or not os.access(path, os.X_OK) or sha256_file(path) != expected:
             raise Stage1Error(f"executable identity mismatch: {path}")
     sources, stage0_summary, stage0_receipt = load_sources(
@@ -587,20 +711,50 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
         args.stage0_receipt,
         args.binary_sha256,
     )
+    stage0_receipt_sha256 = sha256_file(args.stage0_receipt)
+    input_identities = [
+        ("manifest", args.manifest, MANIFEST_SHA256, False),
+        ("control_manifest", args.control_manifest, CONTROL_SHA256, False),
+        (
+            "stage0_records",
+            args.stage0_records,
+            stage0_receipt["artifacts"]["records_sha256"],
+            False,
+        ),
+        (
+            "stage0_summary",
+            args.stage0_summary,
+            stage0_receipt["artifacts"]["summary_sha256"],
+            False,
+        ),
+        ("stage0_receipt", args.stage0_receipt, stage0_receipt_sha256, False),
+        ("binary", args.binary, args.binary_sha256, True),
+        ("yices", args.yices, args.yices_sha256, True),
+        ("runner", runner_path, runner_sha256, True),
+    ]
+    input_identities.extend(
+        (
+            f"source:{source.relative_path}",
+            source.path,
+            source.sha256,
+            False,
+        )
+        for source in sources
+    )
     selected = set(stage0_summary["selected_paths"])
     observations: list[dict[str, Any]] = []
     ordinal = 0
 
     for source in sources:
         for arm in ("off", "candidate", "yices"):
-            observation = run_process(
+            observation, stderr = run_process(
                 arm_argv(arm, args.binary, args.yices, source.path),
                 arm_environment(arm, profile=arm == "candidate"),
             )
             profile_kind = None
             profile = None
             if arm == "candidate":
-                profile = parse_t9_profile(observation["stderr"])
+                profile = parse_t9_profile(stderr)
                 profile_kind = validate_profile(source, profile)
             observations.append(
                 {
@@ -635,7 +789,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
                     else (second, first)
                 )
                 for position, arm in enumerate(arms):
-                    observation = run_process(
+                    observation, _ = run_process(
                         arm_argv(arm, args.binary, args.yices, source.path),
                         arm_environment(arm),
                     )
@@ -659,6 +813,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
                     )
                     ordinal += 1
 
+    validate_input_identities(input_identities)
     evaluation = evaluate(sources, observations, selected)
     raw_payload = b"".join(canonical_json_bytes(row) for row in observations)
     summary = {
@@ -678,7 +833,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
             "binary_sha256": stage0_summary["binary_sha256"],
             "records_sha256": stage0_receipt["artifacts"]["records_sha256"],
             "summary_sha256": stage0_receipt["artifacts"]["summary_sha256"],
-            "receipt_sha256": sha256_file(args.stage0_receipt),
+            "receipt_sha256": stage0_receipt_sha256,
         },
         "artifacts": {
             "manifest_sha256": sha256_file(args.manifest),
@@ -686,7 +841,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
             "binary_sha256": args.binary_sha256,
             "yices_sha256": args.yices_sha256,
             "yices_version": args.yices_version,
-            "runner_sha256": sha256_file(Path(__file__).resolve()),
+            "runner_sha256": runner_sha256,
         },
         "environment": BASE_ENVIRONMENT,
         "evaluation": evaluation,
@@ -717,11 +872,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     try:
-        run_stage1(parse_args())
+        summary = run_stage1(parse_args())
     except Stage1Error as error:
         print(f"T9 Stage1 rejected: {error}", file=os.sys.stderr)
         return 2
-    return 0
+    return 0 if summary["decision"] == "pass" else 3
 
 
 if __name__ == "__main__":

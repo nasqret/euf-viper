@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import os
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from scripts.bench import audit_t9_stage1 as audit
 from scripts.bench import run_t9_stage1 as runner
 
 
 ANTI_PATH = "QF_UF/QG-classification/qg5/anti.smt2"
+ROOT = Path(__file__).resolve().parents[1]
+SBATCH = ROOT / "scripts" / "wmi" / "euf_viper_t9_stage1.sbatch"
 
 
 def observation(
@@ -28,7 +35,23 @@ def observation(
     position: int | None = None,
     profile_kind: str | None = None,
     profile: dict[str, str] | None = None,
+    stdout: bytes | None = None,
+    stderr: bytes | None = None,
+    exit_code: int | None = None,
+    timed_out: bool | None = None,
 ) -> dict[str, object]:
+    if timed_out is None:
+        timed_out = result == "timeout"
+    if exit_code is None:
+        exit_code = 124 if timed_out else 0
+    if stdout is None:
+        stdout = f"{result}\n".encode("ascii") if result in {"sat", "unsat", "unknown"} else b""
+    if stderr is None:
+        if profile is None:
+            stderr = b""
+        else:
+            fields = " ".join(f"{key}={value}" for key, value in sorted(profile.items()))
+            stderr = f"profile_t9_ackermann {fields}\n".encode("ascii")
     return {
         "schema": runner.RAW_SCHEMA,
         "ordinal": ordinal,
@@ -45,11 +68,12 @@ def observation(
         "profile": profile,
         "result": result,
         "elapsed_ns": elapsed_ns,
-        "exit_code": 124 if result == "timeout" else 0,
-        "stdout_sha256": "0" * 64,
-        "stderr_sha256": "1" * 64,
-        "stdout": "",
-        "stderr": "",
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+        "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+        "stdout_b64": base64.b64encode(stdout).decode("ascii"),
+        "stderr_b64": base64.b64encode(stderr).decode("ascii"),
     }
 
 
@@ -216,6 +240,25 @@ class EvaluationTests(unittest.TestCase):
         result = runner.evaluate(sources, rows, {runner.TARGET_PATH})
         self.assertFalse(result["checks"]["required_arms_correct"]["passed"])
 
+    def test_partial_baseline_timeout_is_not_a_conversion(self) -> None:
+        sources, rows = fixture()
+        baseline = next(
+            row
+            for row in rows
+            if row["phase"] == "timing"
+            and row["relative_path"] == runner.TARGET_PATH
+            and row["arm"] == "off"
+        )
+        baseline["result"] = "unsat"
+        baseline["exit_code"] = 0
+        baseline["timed_out"] = False
+        result = runner.evaluate(sources, rows, {runner.TARGET_PATH})
+        self.assertEqual(result["decision"], "fail")
+        self.assertFalse(
+            result["checks"]["selected_baseline_all_timeout"]["passed"]
+        )
+        self.assertNotIn(runner.TARGET_PATH, result["candidate_only_paths"])
+
     def test_schedule_tampering_is_rejected(self) -> None:
         sources, rows = fixture()
         contract = {
@@ -249,15 +292,180 @@ class EvaluationTests(unittest.TestCase):
             if row["phase"] == "preflight" and row["arm"] == "candidate"
         )
         candidate["profile"] = {**candidate["profile"], "reason": "tampered"}
-        with self.assertRaisesRegex(audit.AuditError, "differs from Stage0"):
+        with self.assertRaisesRegex(audit.AuditError, "differs from stderr"):
             audit.validate_observations(rows, contract)
 
         _, rows = fixture()
         first, second = rows[0], rows[1]
-        for field in ("arm", "profile_kind", "profile", "result", "exit_code"):
+        for field in (
+            "arm",
+            "profile_kind",
+            "profile",
+            "result",
+            "elapsed_ns",
+            "exit_code",
+            "timed_out",
+            "stdout_sha256",
+            "stderr_sha256",
+            "stdout_b64",
+            "stderr_b64",
+        ):
             first[field], second[field] = second[field], first[field]
         with self.assertRaisesRegex(audit.AuditError, "warmup schedule"):
             audit.validate_observations(rows, contract)
+
+
+class EvidenceBindingTests(unittest.TestCase):
+    @staticmethod
+    def contract(sources: list[runner.Source]) -> dict[str, dict[str, object]]:
+        return {
+            source.relative_path: {
+                "status": source.status,
+                "control_class": source.control_class,
+                "selected": source.relative_path == runner.TARGET_PATH,
+                "projection": source.projection,
+            }
+            for source in sources
+        }
+
+    def test_stream_hash_tampering_is_rejected(self) -> None:
+        sources, rows = fixture()
+        row = rows[0]
+        row["stdout_b64"] = base64.b64encode(b"tampered\n").decode("ascii")
+        with self.assertRaisesRegex(audit.AuditError, "stdout hash mismatch"):
+            audit.validate_observations(rows, self.contract(sources))
+
+    def test_nonzero_exit_cannot_publish_a_solver_answer(self) -> None:
+        sources, rows = fixture()
+        row = next(
+            row
+            for row in rows
+            if row["relative_path"] == ANTI_PATH and row["phase"] == "preflight"
+        )
+        row["exit_code"] = 7
+        with self.assertRaisesRegex(audit.AuditError, "differs from complete stream"):
+            audit.validate_observations(rows, self.contract(sources))
+
+    def test_conflicting_status_tokens_are_rejected(self) -> None:
+        sources, rows = fixture()
+        row = next(
+            row
+            for row in rows
+            if row["relative_path"] == ANTI_PATH and row["phase"] == "preflight"
+        )
+        stdout = b"sat\nunsat\n"
+        row["stdout_b64"] = base64.b64encode(stdout).decode("ascii")
+        row["stdout_sha256"] = hashlib.sha256(stdout).hexdigest()
+        with self.assertRaisesRegex(audit.AuditError, "differs from complete stream"):
+            audit.validate_observations(rows, self.contract(sources))
+
+    def test_timeout_requires_synthetic_exit_code_and_full_duration(self) -> None:
+        sources, rows = fixture()
+        timeout = next(row for row in rows if row["result"] == "timeout")
+        timeout["exit_code"] = 0
+        with self.assertRaisesRegex(audit.AuditError, "synthetic exit code 124"):
+            audit.validate_observations(rows, self.contract(sources))
+
+        _, rows = fixture()
+        timeout = next(row for row in rows if row["result"] == "timeout")
+        timeout["elapsed_ns"] = int(runner.TIMEOUT_SECONDS * 1e9) - 1
+        with self.assertRaisesRegex(audit.AuditError, "elapsed less"):
+            audit.validate_observations(rows, self.contract(sources))
+
+
+class ProcessContainmentTests(unittest.TestCase):
+    def test_nonzero_and_conflicting_results_are_derived_strictly(self) -> None:
+        self.assertEqual(runner._parse_result(b"sat\n", 7), "exit-7")
+        self.assertEqual(
+            runner._parse_result(b"sat\nunsat\n", 0), "invalid-status-output"
+        )
+
+    def test_successful_leader_cannot_leave_a_descendant(self) -> None:
+        with mock.patch.object(runner, "_child_limits", lambda: None):
+            record, stderr = runner.run_process(
+                [
+                    "/bin/sh",
+                    "-c",
+                    "/bin/sleep 30 & child=$!; printf '%s\\n' \"$child\" >&2; printf 'sat\\n'",
+                ],
+                runner.BASE_ENVIRONMENT,
+            )
+        self.assertEqual(record["result"], "sat")
+        child_pid = int(stderr.strip())
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+            time.sleep(0.01)
+        else:
+            self.fail("solver descendant survived the observation")
+
+    def test_output_flood_is_file_bounded(self) -> None:
+        program = (
+            "import os\n"
+            f"chunk=b'x'*{runner.MAX_OUTPUT_BYTES // 2}\n"
+            "for _ in range(3): os.write(1, chunk)\n"
+        )
+        record, _ = runner.run_process(
+            [sys.executable, "-c", program], runner.BASE_ENVIRONMENT
+        )
+        stdout = base64.b64decode(record["stdout_b64"], validate=True)
+        self.assertLessEqual(len(stdout), runner.MAX_OUTPUT_BYTES)
+        self.assertNotIn(record["result"], {"sat", "unsat"})
+
+    def test_os_timer_enforces_the_wall_timeout(self) -> None:
+        timeout = 0.05
+        with mock.patch.object(runner, "TIMEOUT_SECONDS", timeout):
+            record, _ = runner.run_process(
+                ["/bin/sleep", "1"], runner.BASE_ENVIRONMENT
+            )
+        self.assertTrue(record["timed_out"])
+        self.assertEqual(record["result"], "timeout")
+        self.assertEqual(record["exit_code"], 124)
+        self.assertGreaterEqual(record["elapsed_ns"], int(timeout * 1e9))
+        self.assertLess(record["elapsed_ns"], 500_000_000)
+
+    def test_changed_input_is_rejected_after_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "input"
+            path.write_bytes(b"before")
+            expected = hashlib.sha256(b"before").hexdigest()
+            path.write_bytes(b"after")
+            with self.assertRaisesRegex(runner.Stage1Error, "identity changed"):
+                runner.validate_input_identities(
+                    [("test_input", path, expected, False)]
+                )
+
+
+class ExitSemanticsTests(unittest.TestCase):
+    def test_scientific_failure_propagates_from_runner_and_auditor(self) -> None:
+        with (
+            mock.patch.object(runner, "parse_args", return_value=object()),
+            mock.patch.object(
+                runner, "run_stage1", return_value={"decision": "fail"}
+            ),
+        ):
+            self.assertEqual(runner.main(), 3)
+        with (
+            mock.patch.object(audit, "parse_args", return_value=object()),
+            mock.patch.object(
+                audit,
+                "audit",
+                return_value={"status": "verified", "scientific_decision": "fail"},
+            ),
+        ):
+            self.assertEqual(audit.main(), 3)
+
+    def test_wmi_wrapper_preserves_and_propagates_scientific_failure(self) -> None:
+        script = SBATCH.read_text(encoding="ascii")
+        self.assertIn('case "$RUNNER_STATUS" in', script)
+        self.assertIn('case "$AUDITOR_STATUS" in', script)
+        self.assertIn('pass:0|fail:3)', script)
+        self.assertIn('"status": f"completed_scientific_{summary[\'decision\']}"', script)
+        self.assertIn('exit "$RUNNER_STATUS"', script)
+        self.assertIn("harness checkout changed during Stage1", script)
 
 
 class ProfileAndArtifactTests(unittest.TestCase):
