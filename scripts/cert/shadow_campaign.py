@@ -69,7 +69,7 @@ ABSTENTIONS = {"unknown", "unsupported"}
 HEX_DIGITS = frozenset("0123456789abcdef")
 MAX_EXCERPT_BYTES = 2_000
 MAX_JSON_OUTPUT_BYTES = 1024 * 1024
-LINUX_PROC_FD = re.compile(r"/proc/self/fd/[1-9][0-9]*\Z")
+LINUX_PROC_FD = re.compile(r"/proc/self/fd/(?:[3-9]|[1-9][0-9]+)\Z")
 CHECKER_BOOTSTRAP = """\
 import importlib.machinery
 import importlib.util
@@ -1109,9 +1109,14 @@ def run_cold_process(
                 except StrictArtifactError as error:
                     raise ShadowError(str(error)) from error
                 bound_descriptors.append(descriptor)
-                replacements[raw_path] = f"/proc/self/fd/{descriptor}"
+                execution_path = f"/proc/self/fd/{descriptor}"
+                replacements[raw_path] = execution_path
                 descriptor_records.append(
-                    {"path": raw_path, "sha256": expected_hash}
+                    {
+                        "execution_path": execution_path,
+                        "path": raw_path,
+                        "sha256": expected_hash,
+                    }
                 )
             execution_command = [replacements.get(argument, argument) for argument in command]
             if not command or execution_command[0] == command[0]:
@@ -1251,6 +1256,50 @@ def _resolve_declared_artifact(value: object, label: str) -> Path:
     return canonical_nofollow_path(Path(value))
 
 
+def _validate_descriptor_binding(value: object, context: str) -> dict[str, Any]:
+    binding = _require_exact_keys(value, {"files", "mechanism"}, context)
+    mechanism = binding["mechanism"]
+    if mechanism not in {"linux_procfd", "platform_pathname"}:
+        raise ShadowError(f"{context}: invalid descriptor mechanism")
+    files = binding["files"]
+    if type(files) is not list:
+        raise ShadowError(f"{context}: invalid descriptor file bindings")
+
+    seen_paths: set[str] = set()
+    seen_execution_paths: set[str] = set()
+    expected_keys = (
+        {"execution_path", "path", "sha256"}
+        if mechanism == "linux_procfd"
+        else {"path", "sha256"}
+    )
+    for index, raw_item in enumerate(files):
+        item = _require_exact_keys(
+            raw_item, expected_keys, f"{context} file {index}"
+        )
+        path = item["path"]
+        if type(path) is not str or not path:
+            raise ShadowError(f"{context}: descriptor path must be a nonempty string")
+        if path in seen_paths:
+            raise ShadowError(f"{context}: duplicate descriptor path {path!r}")
+        seen_paths.add(path)
+        _require_hash(item["sha256"], f"{context} file {index} SHA-256")
+        if mechanism == "linux_procfd":
+            execution_path = item["execution_path"]
+            if (
+                type(execution_path) is not str
+                or LINUX_PROC_FD.fullmatch(execution_path) is None
+            ):
+                raise ShadowError(
+                    f"{context}: invalid Linux procfd execution path"
+                )
+            if execution_path in seen_execution_paths:
+                raise ShadowError(
+                    f"{context}: duplicate Linux procfd execution path"
+                )
+            seen_execution_paths.add(execution_path)
+    return binding
+
+
 def _validate_manifest_source_binding(
     declared: object,
     work: Mapping[str, Any],
@@ -1258,10 +1307,8 @@ def _validate_manifest_source_binding(
 ) -> None:
     if type(declared) is not str or not declared:
         raise ShadowError("certificate manifest has invalid source path")
-    binding = _require_exact_keys(
-        descriptor_binding,
-        {"files", "mechanism"},
-        "certifier descriptor binding",
+    binding = _validate_descriptor_binding(
+        descriptor_binding, "certifier descriptor binding"
     )
     mechanism = binding["mechanism"]
     if mechanism == "platform_pathname":
@@ -1272,21 +1319,20 @@ def _validate_manifest_source_binding(
         raise ShadowError(
             "certificate manifest source is not the sealed Linux descriptor path"
         )
-    files = binding["files"]
-    if type(files) is not list:
-        raise ShadowError("certifier descriptor file bindings are invalid")
-    matches = []
-    for index, raw_item in enumerate(files):
-        item = _require_exact_keys(
-            raw_item,
-            {"path", "sha256"},
-            f"certifier descriptor file {index}",
-        )
-        if item["path"] == work["source_path"]:
-            matches.append(item)
-    if len(matches) != 1 or matches[0]["sha256"] != work["source_sha256"]:
+    matches = [
+        item
+        for item in binding["files"]
+        if item["path"] == work["source_path"]
+        and item["sha256"] == work["source_sha256"]
+    ]
+    if len(matches) != 1:
         raise ShadowError(
             "certificate manifest source lacks its sealed descriptor binding"
+        )
+    if declared != matches[0]["execution_path"]:
+        raise ShadowError(
+            "certificate manifest source does not match its sealed source "
+            "descriptor execution path"
         )
 
 
@@ -1694,20 +1740,9 @@ def _validate_process_record(
         type(value["spawn_error"]) is not str or not value["spawn_error"]
     ):
         raise ShadowError(f"{context}: invalid spawn_error")
-    descriptor_binding = _require_exact_keys(
-        value["descriptor_binding"], {"mechanism", "files"}, f"{context} descriptor binding"
+    _validate_descriptor_binding(
+        value["descriptor_binding"], f"{context} descriptor binding"
     )
-    if descriptor_binding["mechanism"] not in {"linux_procfd", "platform_pathname"}:
-        raise ShadowError(f"{context}: invalid descriptor mechanism")
-    if type(descriptor_binding["files"]) is not list:
-        raise ShadowError(f"{context}: invalid descriptor file bindings")
-    for index, item in enumerate(descriptor_binding["files"]):
-        binding = _require_exact_keys(
-            item, {"path", "sha256"}, f"{context} descriptor file {index}"
-        )
-        if type(binding["path"]) is not str:
-            raise ShadowError(f"{context}: descriptor path must be a string")
-        _require_hash(binding["sha256"], f"{context} descriptor SHA-256")
     wall = value["wall_time_s"]
     if type(wall) not in {int, float} or not math.isfinite(wall) or wall < 0:
         raise ShadowError(f"{context}: invalid wall_time_s")

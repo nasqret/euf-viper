@@ -588,50 +588,102 @@ class SelectionAndPartitionTests(unittest.TestCase):
 
 
 class DescriptorExecutionContractTests(unittest.TestCase):
-    def test_procfd_manifest_source_requires_its_sealed_descriptor_binding(self) -> None:
+    def test_procfd_manifest_source_requires_its_exact_execution_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             prefix = root / "certificate"
             manifest_path = Path(f"{prefix}.euf.json")
-            source_path = "/campaign/family/input.smt2"
+            source = root / "input.smt2"
+            source.write_text("fixture\n", encoding="ascii")
+            source_path = str(source.resolve())
             source_sha256 = "1" * 64
             work = {
                 "expected_result": "sat",
                 "source_path": source_path,
                 "source_sha256": source_sha256,
             }
-            manifest_path.write_bytes(
-                canonical_bytes(
-                    {
-                        "encoding": "canonical-tseitin-v1",
-                        "format": "euf-viper-euf-cnf-v2",
-                        "result": "sat",
-                        "source": "/proc/self/fd/17",
-                        "source_sha256": source_sha256,
-                    }
-                )
-            )
+            manifest = {
+                "encoding": "canonical-tseitin-v1",
+                "format": "euf-viper-euf-cnf-v2",
+                "result": "sat",
+                "source": "/proc/self/fd/17",
+                "source_sha256": source_sha256,
+            }
+
+            def write_manifest_source(value: str) -> None:
+                manifest["source"] = value
+                manifest_path.write_bytes(canonical_bytes(manifest))
+
+            source_record = {
+                "execution_path": "/proc/self/fd/17",
+                "path": source_path,
+                "sha256": source_sha256,
+            }
             descriptor_binding = {
-                "files": [{"path": source_path, "sha256": source_sha256}],
+                "files": [
+                    {
+                        "execution_path": "/proc/self/fd/16",
+                        "path": "/tools/solver",
+                        "sha256": "2" * 64,
+                    },
+                    source_record,
+                ],
                 "mechanism": "linux_procfd",
             }
 
+            write_manifest_source(source_record["execution_path"])
             SHADOW.validate_manifest_binding(
                 manifest_path, prefix, work, descriptor_binding
             )
 
-            descriptor_binding["files"][0]["sha256"] = "2" * 64
+            for invalid_source in (
+                "/proc/self/fd/16",
+                "/proc/self/fd/99999",
+            ):
+                with self.subTest(invalid_source=invalid_source):
+                    write_manifest_source(invalid_source)
+                    with self.assertRaisesRegex(
+                        SHADOW.ShadowError,
+                        "does not match its sealed source descriptor execution path",
+                    ):
+                        SHADOW.validate_manifest_binding(
+                            manifest_path, prefix, work, descriptor_binding
+                        )
+
+            write_manifest_source("/proc/self/fd/1")
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError, "not the sealed Linux descriptor path"
+            ):
+                SHADOW.validate_manifest_binding(
+                    manifest_path, prefix, work, descriptor_binding
+                )
+
+            write_manifest_source(source_record["execution_path"])
+            source_record["sha256"] = "3" * 64
             with self.assertRaisesRegex(
                 SHADOW.ShadowError, "lacks its sealed descriptor binding"
             ):
                 SHADOW.validate_manifest_binding(
                     manifest_path, prefix, work, descriptor_binding
                 )
-            descriptor_binding["files"][0]["sha256"] = source_sha256
-            descriptor_binding["mechanism"] = "platform_pathname"
-            with self.assertRaisesRegex(SHADOW.ShadowError, "source path mismatch"):
+            source_record["sha256"] = source_sha256
+
+            execution_path = source_record.pop("execution_path")
+            with self.assertRaisesRegex(SHADOW.ShadowError, "incorrect fields"):
                 SHADOW.validate_manifest_binding(
                     manifest_path, prefix, work, descriptor_binding
+                )
+            source_record["execution_path"] = execution_path
+
+            platform_binding = {"files": [], "mechanism": "platform_pathname"}
+            write_manifest_source(source_path)
+            SHADOW.validate_manifest_binding(
+                manifest_path, prefix, work, platform_binding
+            )
+            write_manifest_source(source_record["execution_path"])
+            with self.assertRaisesRegex(SHADOW.ShadowError, "source path mismatch"):
+                SHADOW.validate_manifest_binding(
+                    manifest_path, prefix, work, platform_binding
                 )
 
     def test_unsat_checker_command_binds_generated_proof_artifacts(self) -> None:
@@ -682,7 +734,9 @@ class DescriptorExecutionContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             executable = root / "checker"
-            executable.write_text("#!/bin/sh\nprintf 'original\\n'\n", encoding="ascii")
+            executable.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$0\"\n", encoding="ascii"
+            )
             executable.chmod(0o755)
             expected = sha256_file(executable)
             real_lseek = os.lseek
@@ -716,7 +770,17 @@ class DescriptorExecutionContractTests(unittest.TestCase):
                 )
             self.assertFalse(mutation_probe_reached)
             self.assertEqual(process["exit_code"], 0)
-            self.assertEqual((root / "stdout").read_bytes(), b"original\n")
+            binding = process["descriptor_binding"]
+            self.assertEqual(binding["mechanism"], "linux_procfd")
+            self.assertEqual(len(binding["files"]), 1)
+            record = binding["files"][0]
+            self.assertEqual(record["path"], str(executable))
+            self.assertEqual(record["sha256"], expected)
+            self.assertRegex(record["execution_path"], SHADOW.LINUX_PROC_FD)
+            self.assertEqual(
+                (root / "stdout").read_text(encoding="ascii"),
+                record["execution_path"] + "\n",
+            )
 
 
 @unittest.skipUnless(
