@@ -481,6 +481,21 @@ class ProjectionParserTests(unittest.TestCase):
         self.assertIs(parsed["selected"], True)
         self.assertEqual(parsed, self.projection)
 
+    def test_non_projector_backend_routes_are_rejected(self) -> None:
+        for backend in ("dpll", "varisat", "cadical-refine"):
+            projection = dict(self.projection)
+            projection["backend"] = backend
+            with self.subTest(backend=backend, validator="runner"):
+                with self.assertRaisesRegex(
+                    census.CensusError, "outside the frozen vocabulary"
+                ):
+                    census.parse_projection_report(render_projection(projection), 0)
+            with self.subTest(backend=backend, validator="auditor"):
+                with self.assertRaisesRegex(
+                    audit.AuditError, "outside the frozen vocabulary"
+                ):
+                    audit._validate_projection_shape(projection, "adversarial")
+
     def test_duplicate_unknown_and_misleading_clique_keys_are_rejected(self) -> None:
         rendered = render_projection(self.projection).decode("ascii")
         duplicate = rendered + "reason selected\n"
