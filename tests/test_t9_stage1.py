@@ -469,6 +469,16 @@ class ExitSemanticsTests(unittest.TestCase):
 
 
 class ProfileAndArtifactTests(unittest.TestCase):
+    def test_manifest_digest_is_exact_and_shared_by_all_three_layers(self) -> None:
+        expected = (
+            "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
+        )
+        self.assertEqual(len(expected), 64)
+        self.assertEqual(runner.MANIFEST_SHA256, expected)
+        self.assertEqual(audit.MANIFEST_SHA256, expected)
+        script = SBATCH.read_text(encoding="ascii")
+        self.assertIn(f'MANIFEST_SHA256="{expected}"', script)
+
     def test_full_and_precheck_profiles_are_bound_to_stage0(self) -> None:
         projection = {
             "selected": True,
