@@ -111,68 +111,131 @@ jobs:
 
             # Ubuntu 24.04 AppArmor denies UID-map setup to unprofiled
             # processes. Open only that gate while the sealed build runs.
-            USERNS_POLICY=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
-            test -r "$USERNS_POLICY"
+            test -r /proc/sys/kernel/apparmor_restrict_unprivileged_userns
             test -x /usr/bin/sudo
             test -x /usr/sbin/sysctl
-            ORIGINAL_USERNS_POLICY="$(cat "$USERNS_POLICY")"
-            case "$ORIGINAL_USERNS_POLICY" in
-              0|1) ;;
-              *)
-                printf 'sealed userns policy has unexpected value: %s\n' \
-                  "$ORIGINAL_USERNS_POLICY" >&2
-                exit 1
-                ;;
-            esac
 
-            restore_userns_policy() {
-              local status="$?"
-              local current_policy=""
-              local restore_needed="0"
-              local restored_policy=""
-              trap - EXIT
-              if ! current_policy="$(cat "$USERNS_POLICY")"; then
-                printf 'sealed userns policy could not be read during cleanup\n' >&2
-                restore_needed="1"
-                status="1"
-              elif test "$current_policy" != "$ORIGINAL_USERNS_POLICY"; then
-                restore_needed="1"
+            run_with_sealed_userns_policy() {
+              test "$#" -ge 4
+              readonly SEALED_USERNS_POLICY="$1"
+              readonly SEALED_USERNS_SUDO="$2"
+              readonly SEALED_USERNS_SYSCTL="$3"
+              shift 3
+              local active_userns_policy=""
+              local command_status="0"
+              SEALED_USERNS_ORIGINAL=""
+
+              if ! IFS= builtin read -r SEALED_USERNS_ORIGINAL < "$SEALED_USERNS_POLICY"; then
+                printf 'sealed userns policy could not be read\n' >&2
+                return 1
               fi
-              if test "$restore_needed" = "1"; then
-                if ! /usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w \
-                  "kernel.apparmor_restrict_unprivileged_userns=$ORIGINAL_USERNS_POLICY"
-                then
-                  printf 'sealed userns policy restoration failed\n' >&2
+              case "$SEALED_USERNS_ORIGINAL" in
+                0|1) ;;
+                *)
+                  printf 'sealed userns policy has unexpected value: %s\n' \
+                    "$SEALED_USERNS_ORIGINAL" >&2
+                  return 1
+                  ;;
+              esac
+              readonly SEALED_USERNS_ORIGINAL
+
+              restore_userns_policy() {
+                local current_policy=""
+                local restore_needed="0"
+                local restored_policy=""
+                local restore_status="0"
+                if ! IFS= builtin read -r current_policy < "$SEALED_USERNS_POLICY"; then
+                  printf 'sealed userns policy could not be read during cleanup\n' >&2
+                  restore_needed="1"
+                  restore_status="1"
+                elif test "$current_policy" != "$SEALED_USERNS_ORIGINAL"; then
+                  restore_needed="1"
+                fi
+                if test "$restore_needed" = "1"; then
+                  if ! "$SEALED_USERNS_SUDO" --non-interactive \
+                    "$SEALED_USERNS_SYSCTL" -q -w \
+                    "kernel.apparmor_restrict_unprivileged_userns=$SEALED_USERNS_ORIGINAL"
+                  then
+                    printf 'sealed userns policy restoration failed\n' >&2
+                    restore_status="1"
+                  fi
+                fi
+                if ! IFS= builtin read -r restored_policy < "$SEALED_USERNS_POLICY"; then
+                  printf 'sealed userns policy is unreadable after cleanup\n' >&2
+                  restore_status="1"
+                elif test "$restored_policy" != "$SEALED_USERNS_ORIGINAL"; then
+                  printf 'sealed userns policy restoration mismatch: %s != %s\n' \
+                    "$restored_policy" "$SEALED_USERNS_ORIGINAL" >&2
+                  restore_status="1"
+                fi
+                printf 'sealed-userns-policy phase=restored value=%s expected=%s\n' \
+                  "${restored_policy:-unreadable}" "$SEALED_USERNS_ORIGINAL"
+                return "$restore_status"
+              }
+
+              finish_userns_policy() {
+                local status="${1-$?}"
+                trap - EXIT
+                trap '' HUP INT TERM
+                if ! restore_userns_policy; then
                   status="1"
                 fi
+                exit "$status"
+              }
+
+              signal_userns_policy() {
+                local -r status="$1"
+                trap - EXIT
+                trap '' HUP INT TERM
+                if ! restore_userns_policy; then
+                  printf 'sealed userns policy signal restoration failed\n' >&2
+                fi
+                exit "$status"
+              }
+
+              trap finish_userns_policy EXIT
+              trap 'signal_userns_policy 129' HUP
+              trap 'signal_userns_policy 130' INT
+              trap 'signal_userns_policy 143' TERM
+
+              printf 'sealed-userns-policy phase=before value=%s runner=%s os=%s ubuntu=%s\n' \
+                "$SEALED_USERNS_ORIGINAL" "$RUNNER_ENVIRONMENT" "$RUNNER_OS" \
+                "$VERSION_ID"
+              if test "$SEALED_USERNS_ORIGINAL" = "1"; then
+                if ! "$SEALED_USERNS_SUDO" --non-interactive \
+                  "$SEALED_USERNS_SYSCTL" -q -w \
+                  kernel.apparmor_restrict_unprivileged_userns=0
+                then
+                  printf 'sealed userns policy write failed\n' >&2
+                  finish_userns_policy 1
+                fi
               fi
-              if ! restored_policy="$(cat "$USERNS_POLICY")"; then
-                printf 'sealed userns policy is unreadable after cleanup\n' >&2
-                status="1"
-              elif test "$restored_policy" != "$ORIGINAL_USERNS_POLICY"; then
-                printf 'sealed userns policy restoration mismatch: %s != %s\n' \
-                  "$restored_policy" "$ORIGINAL_USERNS_POLICY" >&2
-                status="1"
+              if ! IFS= builtin read -r active_userns_policy < "$SEALED_USERNS_POLICY"; then
+                printf 'sealed userns policy is unreadable before build\n' >&2
+                finish_userns_policy 1
               fi
-              printf 'sealed-userns-policy phase=restored value=%s expected=%s\n' \
-                "${restored_policy:-unreadable}" "$ORIGINAL_USERNS_POLICY"
-              exit "$status"
+              printf 'sealed-userns-policy phase=build value=%s expected=0\n' \
+                "$active_userns_policy"
+              if test "$active_userns_policy" != "0"; then
+                printf 'sealed userns policy build mismatch: %s != 0\n' \
+                  "$active_userns_policy" >&2
+                finish_userns_policy 1
+              fi
+
+              "$@" || command_status="$?"
+              if ! restore_userns_policy; then
+                command_status="1"
+                finish_userns_policy "$command_status"
+              fi
+              trap - EXIT HUP INT TERM
+              return "$command_status"
             }
-            trap restore_userns_policy EXIT
 
-            printf 'sealed-userns-policy phase=before value=%s runner=%s os=%s ubuntu=%s\n' \
-              "$ORIGINAL_USERNS_POLICY" "$RUNNER_ENVIRONMENT" "$RUNNER_OS" \
-              "$VERSION_ID"
-            if test "$ORIGINAL_USERNS_POLICY" = "1"; then
-              /usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w \
-                kernel.apparmor_restrict_unprivileged_userns=0
-            fi
-            ACTIVE_USERNS_POLICY="$(cat "$USERNS_POLICY")"
-            printf 'sealed-userns-policy phase=build value=%s expected=0\n' \
-              "$ACTIVE_USERNS_POLICY"
-            test "$ACTIVE_USERNS_POLICY" = "0"
-
-            python3 -B scripts/wmi/sealed_linux_build.py build \
+            run_with_sealed_userns_policy \
+              /proc/sys/kernel/apparmor_restrict_unprivileged_userns \
+              /usr/bin/sudo \
+              /usr/sbin/sysctl \
+              python3 -B scripts/wmi/sealed_linux_build.py build \
               --repository . \
               --revision "$(git rev-parse HEAD)" \
               --artifact-dir "$SEALED_ROOT/release" \

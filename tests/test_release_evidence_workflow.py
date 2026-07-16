@@ -3,9 +3,13 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -35,6 +39,21 @@ SMOKE_SPEC = importlib.util.spec_from_file_location(
 assert SMOKE_SPEC is not None and SMOKE_SPEC.loader is not None
 SMOKE_MODULE = importlib.util.module_from_spec(SMOKE_SPEC)
 SMOKE_SPEC.loader.exec_module(SMOKE_MODULE)
+
+
+def sealed_build_step_text() -> str:
+    text = WORKFLOW.read_text(encoding="ascii")
+    start = text.index("      - name: Build exact combined release\n")
+    end = text.index("      - name: Build independent f8d9205 CLI baseline\n")
+    return text[start:end]
+
+
+def sealed_userns_function_text() -> str:
+    step = sealed_build_step_text()
+    start = step.index("            run_with_sealed_userns_policy() {\n")
+    call = "            run_with_sealed_userns_policy " + "\\\n"
+    end = step.index(call, start)
+    return textwrap.dedent(step[start:end])
 
 
 class ReleaseEvidenceWorkflowTests(unittest.TestCase):
@@ -264,10 +283,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
     def test_sealed_build_userns_policy_is_hosted_ubuntu_only_and_restored(
         self,
     ) -> None:
-        text = WORKFLOW.read_text(encoding="ascii")
-        start = text.index("      - name: Build exact combined release\n")
-        end = text.index("      - name: Build independent f8d9205 CLI baseline\n")
-        step = text[start:end]
+        step = sealed_build_step_text()
         ordered_contract = (
             'test "${RUNNER_ENVIRONMENT:-}" = "github-hosted"',
             'test "${RUNNER_OS:-}" = "Linux"',
@@ -275,12 +291,12 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             ". /etc/os-release",
             'test "${ID:-}" = "ubuntu"',
             'test "${VERSION_ID:-}" = "24.04"',
-            "USERNS_POLICY=/proc/sys/kernel/apparmor_restrict_unprivileged_userns",
-            'ORIGINAL_USERNS_POLICY="$(cat "$USERNS_POLICY")"',
-            "trap restore_userns_policy EXIT",
-            "kernel.apparmor_restrict_unprivileged_userns=0",
-            'ACTIVE_USERNS_POLICY="$(cat "$USERNS_POLICY")"',
-            'test "$ACTIVE_USERNS_POLICY" = "0"',
+            "run_with_sealed_userns_policy() {",
+            "trap finish_userns_policy EXIT",
+            "trap 'signal_userns_policy 129' HUP",
+            "trap 'signal_userns_policy 130' INT",
+            "trap 'signal_userns_policy 143' TERM",
+            "run_with_sealed_userns_policy \\",
             "python3 -B scripts/wmi/sealed_linux_build.py build",
         )
         positions = []
@@ -288,32 +304,325 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             self.assertEqual(step.count(item), 1, item)
             positions.append(step.index(item))
         self.assertEqual(positions, sorted(positions))
+        self.assertEqual(step.count("IFS= builtin read -r"), 4)
+        self.assertNotIn("cat ", step)
+        self.assertEqual(
+            step.count("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"),
+            2,
+        )
+        self.assertEqual(step.count("/usr/bin/sudo"), 2)
+        self.assertEqual(step.count("/usr/sbin/sysctl"), 2)
         self.assertEqual(
             step.count(
-                "/usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w"
+                '"$SEALED_USERNS_SUDO" --non-interactive'
             ),
             2,
         )
-        self.assertEqual(step.count("/usr/bin/sudo"), 3)
-        self.assertIn(
-            '"kernel.apparmor_restrict_unprivileged_userns=$ORIGINAL_USERNS_POLICY"',
-            step,
+        self.assertEqual(
+            step.count("kernel.apparmor_restrict_unprivileged_userns="),
+            2,
         )
-        self.assertIn(
-            'test "$restored_policy" != "$ORIGINAL_USERNS_POLICY"',
-            step,
-        )
-        self.assertIn('local status="$?"', step)
-        self.assertIn('exit "$status"', step)
-        for phase in ("before", "build", "restored"):
-            self.assertIn(f"sealed-userns-policy phase={phase}", step)
+        self.assertIn("trap '' HUP INT TERM", step)
+        self.assertIn("trap - EXIT HUP INT TERM", step)
+        self.assertIn('--unshare "$(command -v unshare)"', step)
+        self.assertNotIn("unsealed", step.lower())
         self.assertIn(
             '          )\n          echo "SEALED_RELEASE=$SEALED_ROOT/release"',
             step,
         )
-        self.assertIn("trap - EXIT", step)
-        self.assertIn('--unshare "$(command -v unshare)"', step)
-        self.assertNotIn("unsealed", step.lower())
+
+    @staticmethod
+    def _write_executable(path: Path, content: str) -> None:
+        path.write_text(content, encoding="ascii")
+        path.chmod(0o700)
+
+    def _sealed_userns_fixture(
+        self,
+        root: Path,
+        *,
+        original: str,
+        behavior: str = "ok",
+        build_command: str = "exit 0",
+        shell_exit_status: int | None = None,
+    ) -> tuple[str, dict[str, str], Path, Path, Path]:
+        policy = root / "userns-policy"
+        policy.write_text(f"{original}\n", encoding="ascii")
+        sysctl_log = root / "sysctl.log"
+        sysctl_log.touch()
+        cat_marker = root / "path-cat-ran"
+        fake_sudo = root / "sudo"
+        fake_sysctl = root / "sysctl"
+        self._write_executable(
+            fake_sudo,
+            "#!/bin/sh\n"
+            "set -eu\n"
+            'test "$1" = "--non-interactive"\n'
+            "shift\n"
+            'exec "$@"\n',
+        )
+        self._write_executable(
+            fake_sysctl,
+            "#!/bin/sh\n"
+            "set -eu\n"
+            'test "$1" = "-q"\n'
+            'test "$2" = "-w"\n'
+            'case "$3" in\n'
+            "  kernel.apparmor_restrict_unprivileged_userns=0) value=0 ;;\n"
+            "  kernel.apparmor_restrict_unprivileged_userns=1) value=1 ;;\n"
+            "  *) exit 64 ;;\n"
+            "esac\n"
+            'printf "%s\\n" "$value" >> "$FAKE_SYSCTL_LOG"\n'
+            'case "$FAKE_SYSCTL_BEHAVIOR:$value" in\n'
+            "  fail-zero:0|fail-one:1) exit 19 ;;\n"
+            "  ignore-zero:0|ignore-one:1) exit 0 ;;\n"
+            "esac\n"
+            'printf "%s\\n" "$value" > "$FAKE_USERNS_POLICY"\n',
+        )
+        spoof_bin = root / "spoof-bin"
+        spoof_bin.mkdir()
+        self._write_executable(
+            spoof_bin / "cat",
+            "#!/bin/sh\n"
+            'printf spoofed > "$FAKE_CAT_MARKER"\n'
+            "exit 77\n",
+        )
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "FAKE_BUILD_COMMAND": build_command,
+                "FAKE_CAT_MARKER": str(cat_marker),
+                "FAKE_SYSCTL_BEHAVIOR": behavior,
+                "FAKE_SYSCTL_LOG": str(sysctl_log),
+                "FAKE_USERNS_POLICY": str(policy),
+                "PATH": f"{spoof_bin}:{environment.get('PATH', '')}",
+                "RUNNER_ENVIRONMENT": "github-hosted",
+                "RUNNER_OS": "Linux",
+                "VERSION_ID": "24.04",
+            }
+        )
+        if shell_exit_status is None:
+            build_fixture = ""
+            build_invocation = '  /bin/sh -c "$FAKE_BUILD_COMMAND"\n'
+        else:
+            build_fixture = (
+                "fixture_shell_exit() { "
+                f"exit {shell_exit_status}; "
+                "}\n"
+            )
+            build_invocation = "  fixture_shell_exit\n"
+        script = (
+            "set -euo pipefail\n"
+            f"{sealed_userns_function_text()}\n"
+            f"{build_fixture}"
+            "run_with_sealed_userns_policy "
+            "\\\n"
+            '  "$FAKE_USERNS_POLICY" '
+            "\\\n"
+            f'  "{fake_sudo}" '
+            "\\\n"
+            f'  "{fake_sysctl}" '
+            "\\\n"
+            f"{build_invocation}"
+        )
+        return script, environment, policy, sysctl_log, cat_marker
+
+    def _assert_userns_fixture_state(
+        self,
+        policy: Path,
+        sysctl_log: Path,
+        cat_marker: Path,
+        *,
+        expected_policy: str,
+        expected_writes: list[str],
+    ) -> None:
+        self.assertEqual(policy.read_text(encoding="ascii").strip(), expected_policy)
+        self.assertEqual(sysctl_log.read_text(encoding="ascii").splitlines(), expected_writes)
+        self.assertFalse(cat_marker.exists(), "PATH-spoofed cat executed")
+
+    def test_sealed_userns_shell_restores_original_zero_and_one(self) -> None:
+        for original, writes in (("0", []), ("1", ["0", "1"])):
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                script, environment, policy, sysctl_log, cat_marker = (
+                    self._sealed_userns_fixture(root, original=original)
+                )
+                completed = subprocess.run(
+                    ["/bin/bash", "-c", script],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env=environment,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self._assert_userns_fixture_state(
+                    policy,
+                    sysctl_log,
+                    cat_marker,
+                    expected_policy=original,
+                    expected_writes=writes,
+                )
+
+    def test_sealed_userns_shell_restores_after_build_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root, original="1", build_command="exit 23"
+                )
+            )
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(completed.returncode, 23, completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
+
+    def test_sealed_userns_shell_exit_fallback_restores_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root, original="1", shell_exit_status=37
+                )
+            )
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(completed.returncode, 37, completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
+
+    def test_sealed_userns_shell_fails_closed_on_policy_write_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root, original="1", behavior="fail-zero"
+                )
+            )
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("sealed userns policy write failed", completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0"],
+            )
+
+    def test_sealed_userns_shell_fails_closed_on_restore_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root, original="1", behavior="ignore-one"
+                )
+            )
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("sealed userns policy restoration mismatch", completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="0",
+                expected_writes=["0", "1", "1"],
+            )
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
+    def test_sealed_userns_shell_restores_on_catchable_signals(self) -> None:
+        for caught_signal, expected_status, behavior, expected_policy in (
+            (signal.SIGHUP, 129, "ok", "1"),
+            (signal.SIGINT, 130, "ok", "1"),
+            (signal.SIGTERM, 143, "ok", "1"),
+            (signal.SIGTERM, 143, "ignore-one", "0"),
+        ):
+            with self.subTest(
+                signal=caught_signal, behavior=behavior
+            ), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                started = root / "build-started"
+                script, environment, policy, sysctl_log, cat_marker = (
+                    self._sealed_userns_fixture(
+                        root,
+                        original="1",
+                        behavior=behavior,
+                        build_command=(
+                            'printf started > "$FAKE_BUILD_STARTED"; '
+                            "exec /bin/sleep 30"
+                        ),
+                    )
+                )
+                environment["FAKE_BUILD_STARTED"] = str(started)
+                process = subprocess.Popen(
+                    ["/bin/bash", "-c", script],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment,
+                    start_new_session=True,
+                )
+                try:
+                    deadline = time.monotonic() + 5
+                    while not started.exists() and time.monotonic() < deadline:
+                        if process.poll() is not None:
+                            break
+                        time.sleep(0.01)
+                    if not started.exists():
+                        if process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        stdout, stderr = process.communicate()
+                        self.fail(f"fixture build did not start: {stderr}")
+                    os.killpg(process.pid, caught_signal)
+                    stdout, stderr = process.communicate(timeout=5)
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.communicate()
+                self.assertEqual(process.returncode, expected_status, stderr)
+                self.assertIn("sealed-userns-policy phase=restored", stdout)
+                if behavior != "ok":
+                    self.assertIn(
+                        "sealed userns policy signal restoration failed", stderr
+                    )
+                self._assert_userns_fixture_state(
+                    policy,
+                    sysctl_log,
+                    cat_marker,
+                    expected_policy=expected_policy,
+                    expected_writes=["0", "1"],
+                )
 
     def test_cli_baseline_forces_effective_compiler_and_sanitizes_ambient_controls(self) -> None:
         text = CLI_BASELINE.read_text(encoding="ascii")
