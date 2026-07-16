@@ -312,6 +312,11 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(step.count("/usr/bin/sudo"), 2)
         self.assertEqual(step.count("/usr/sbin/sysctl"), 2)
+        self.assertEqual(step.count("/usr/bin/setsid"), 2)
+        self.assertEqual(step.count("/usr/bin/ps"), 2)
+        self.assertEqual(step.count("/usr/bin/sleep"), 2)
+        self.assertEqual(step.count("test -x /bin/sh"), 1)
+        self.assertEqual(step.count("              /bin/sh \\\n"), 1)
         self.assertEqual(
             step.count(
                 '"$SEALED_USERNS_SUDO" --non-interactive'
@@ -324,6 +329,24 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         )
         self.assertIn("trap '' HUP INT TERM", step)
         self.assertIn("trap - EXIT HUP INT TERM", step)
+        self.assertIn('SEALED_USERNS_CHILD_PID="$!"', step)
+        self.assertIn("for job_pid in $(builtin jobs -p)", step)
+        self.assertIn(
+            'if test "$SEALED_USERNS_CHILD_STARTING" = "1"', step
+        )
+        self.assertIn('SEALED_USERNS_PENDING_SIGNAL="$status"', step)
+        self.assertIn('builtin wait "$SEALED_USERNS_CHILD_PID"', step)
+        self.assertIn(
+            'builtin kill -TERM -- "-$SEALED_USERNS_CHILD_PGID"', step
+        )
+        self.assertIn(
+            'builtin kill -KILL -- "-$SEALED_USERNS_CHILD_PGID"', step
+        )
+        self.assertIn(
+            "'trap - HUP INT TERM; kill -STOP \"$$\"; exec \"$@\"'",
+            step,
+        )
+        self.assertIn('sealed-userns-child "$@" &', step)
         self.assertIn('--unshare "$(command -v unshare)"', step)
         self.assertNotIn("unsealed", step.lower())
         self.assertIn(
@@ -343,6 +366,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         original: str,
         behavior: str = "ok",
         build_command: str = "exit 0",
+        setsid_signal: int | None = None,
         shell_exit_status: int | None = None,
     ) -> tuple[str, dict[str, str], Path, Path, Path]:
         policy = root / "userns-policy"
@@ -350,8 +374,10 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         sysctl_log = root / "sysctl.log"
         sysctl_log.touch()
         cat_marker = root / "path-cat-ran"
+        setsid_pid = root / "setsid.pid"
         fake_sudo = root / "sudo"
         fake_sysctl = root / "sysctl"
+        fake_setsid = root / "setsid"
         self._write_executable(
             fake_sudo,
             "#!/bin/sh\n"
@@ -378,6 +404,19 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "esac\n"
             'printf "%s\\n" "$value" > "$FAKE_USERNS_POLICY"\n',
         )
+        self._write_executable(
+            fake_setsid,
+            f"#!{sys.executable}\n"
+            "import os\n"
+            "import sys\n"
+            "os.setsid()\n"
+            "with open(os.environ['FAKE_SETSID_PID'], 'w', encoding='ascii') as stream:\n"
+            "    stream.write(f'{os.getpid()}\\n')\n"
+            "signal_number = int(os.environ['FAKE_SETSID_SIGNAL'])\n"
+            "if signal_number:\n"
+            "    os.kill(os.getppid(), signal_number)\n"
+            "os.execv(sys.argv[1], sys.argv[1:])\n",
+        )
         spoof_bin = root / "spoof-bin"
         spoof_bin.mkdir()
         self._write_executable(
@@ -391,6 +430,8 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             {
                 "FAKE_BUILD_COMMAND": build_command,
                 "FAKE_CAT_MARKER": str(cat_marker),
+                "FAKE_SETSID_PID": str(setsid_pid),
+                "FAKE_SETSID_SIGNAL": str(setsid_signal or 0),
                 "FAKE_SYSCTL_BEHAVIOR": behavior,
                 "FAKE_SYSCTL_LOG": str(sysctl_log),
                 "FAKE_USERNS_POLICY": str(policy),
@@ -402,14 +443,12 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         )
         if shell_exit_status is None:
             build_fixture = ""
-            build_invocation = '  /bin/sh -c "$FAKE_BUILD_COMMAND"\n'
         else:
-            build_fixture = (
-                "fixture_shell_exit() { "
-                f"exit {shell_exit_status}; "
-                "}\n"
+            build_fixture = f"trap 'exit {shell_exit_status}' USR1\n"
+            environment["FAKE_BUILD_COMMAND"] = (
+                'kill -USR1 "$PPID"; exec /bin/sleep 30'
             )
-            build_invocation = "  fixture_shell_exit\n"
+        build_invocation = '  /bin/sh -c "$FAKE_BUILD_COMMAND"\n'
         script = (
             "set -euo pipefail\n"
             f"{sealed_userns_function_text()}\n"
@@ -421,6 +460,14 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             f'  "{fake_sudo}" '
             "\\\n"
             f'  "{fake_sysctl}" '
+            "\\\n"
+            f'  "{fake_setsid}" '
+            "\\\n"
+            '  "/bin/ps" '
+            "\\\n"
+            '  "/bin/sleep" '
+            "\\\n"
+            '  "/bin/sh" '
             "\\\n"
             f"{build_invocation}"
         )
@@ -561,6 +608,43 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             )
 
     @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
+    def test_sealed_userns_shell_handles_signal_during_child_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root,
+                    original="1",
+                    setsid_signal=signal.SIGTERM,
+                )
+            )
+            started = time.monotonic()
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+                timeout=1.5,
+            )
+            self.assertEqual(completed.returncode, 143, completed.stderr)
+            self.assertLess(time.monotonic() - started, 1.5)
+            self.assertIn("sealed-userns-policy phase=restored", completed.stdout)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
+            child_pid = int(
+                Path(environment["FAKE_SETSID_PID"])
+                .read_text(encoding="ascii")
+                .strip()
+            )
+            self.assertFalse(self._process_exists(child_pid))
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
     def test_sealed_userns_shell_restores_on_catchable_signals(self) -> None:
         for caught_signal, expected_status, behavior, expected_policy in (
             (signal.SIGHUP, 129, "ok", "1"),
@@ -573,17 +657,23 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             ), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 started = root / "build-started"
+                build_pids = root / "build-pids"
                 script, environment, policy, sysctl_log, cat_marker = (
                     self._sealed_userns_fixture(
                         root,
                         original="1",
                         behavior=behavior,
                         build_command=(
+                            'trap "" HUP INT TERM; '
+                            "/bin/sleep 30 & descendant=$!; "
+                            'printf "%s %s\\n" "$$" "$descendant" '
+                            '> "$FAKE_BUILD_PIDS"; '
                             'printf started > "$FAKE_BUILD_STARTED"; '
-                            "exec /bin/sleep 30"
+                            'wait "$descendant"'
                         ),
                     )
                 )
+                environment["FAKE_BUILD_PIDS"] = str(build_pids)
                 environment["FAKE_BUILD_STARTED"] = str(started)
                 process = subprocess.Popen(
                     ["/bin/bash", "-c", script],
@@ -591,7 +681,6 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env=environment,
-                    start_new_session=True,
                 )
                 try:
                     deadline = time.monotonic() + 5
@@ -600,17 +689,19 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                             break
                         time.sleep(0.01)
                     if not started.exists():
-                        if process.poll() is None:
-                            os.killpg(process.pid, signal.SIGKILL)
+                        self._kill_sealed_userns_fixture(process, environment)
                         stdout, stderr = process.communicate()
                         self.fail(f"fixture build did not start: {stderr}")
-                    os.killpg(process.pid, caught_signal)
-                    stdout, stderr = process.communicate(timeout=5)
+                    signal_started = time.monotonic()
+                    os.kill(process.pid, caught_signal)
+                    stdout, stderr = process.communicate(timeout=1.5)
+                    signal_elapsed = time.monotonic() - signal_started
                 finally:
                     if process.poll() is None:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        self._kill_sealed_userns_fixture(process, environment)
                         process.communicate()
                 self.assertEqual(process.returncode, expected_status, stderr)
+                self.assertLess(signal_elapsed, 1.5)
                 self.assertIn("sealed-userns-policy phase=restored", stdout)
                 if behavior != "ok":
                     self.assertIn(
@@ -623,6 +714,51 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                     expected_policy=expected_policy,
                     expected_writes=["0", "1"],
                 )
+                tracked_pids = [
+                    int(value)
+                    for value in build_pids.read_text(encoding="ascii").split()
+                ]
+                tracked_pids.append(
+                    int(
+                        Path(environment["FAKE_SETSID_PID"])
+                        .read_text(encoding="ascii")
+                        .strip()
+                    )
+                )
+                deadline = time.monotonic() + 0.5
+                remaining = tracked_pids
+                while remaining and time.monotonic() < deadline:
+                    remaining = [
+                        pid for pid in remaining if self._process_exists(pid)
+                    ]
+                    if remaining:
+                        time.sleep(0.01)
+                self.assertEqual(remaining, [], "sealed child processes survived")
+
+    @staticmethod
+    def _process_exists(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    @staticmethod
+    def _kill_sealed_userns_fixture(
+        process: subprocess.Popen[str], environment: dict[str, str]
+    ) -> None:
+        pid_path = Path(environment["FAKE_SETSID_PID"])
+        if pid_path.exists():
+            child_pid = int(pid_path.read_text(encoding="ascii").strip())
+            try:
+                if os.getpgid(child_pid) == child_pid:
+                    os.killpg(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.poll() is None:
+            process.kill()
 
     def test_cli_baseline_forces_effective_compiler_and_sanitizes_ambient_controls(self) -> None:
         text = CLI_BASELINE.read_text(encoding="ascii")
