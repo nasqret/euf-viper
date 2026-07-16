@@ -100,26 +100,99 @@ jobs:
           SEALED_ROOT="$RUNNER_TEMP/euf-viper-sealed-output"
           install -d -m 0700 "$SEALED_ROOT" \
             "$RUNNER_TEMP/euf-viper-sealed-home"
-          python3 -B scripts/wmi/sealed_linux_build.py build \
-            --repository . \
-            --revision "$(git rev-parse HEAD)" \
-            --artifact-dir "$SEALED_ROOT/release" \
-            --staging-root "$RUNNER_TEMP/euf-viper-sealed-staging" \
-            --cargo-home "$HOME/.cargo" \
-            --rustup-home "$HOME/.rustup" \
-            --home "$RUNNER_TEMP/euf-viper-sealed-home" \
-            --git "$(command -v git)" \
-            --cargo "$(rustup which cargo)" \
-            --rustc "$(rustup which rustc)" \
-            --unshare "$(command -v unshare)" \
-            --ldd "$(command -v ldd)" \
-            --cc "$(command -v cc)" \
-            --cxx "$(command -v c++)" \
-            --ar "$(command -v ar)" \
-            --ranlib "$(command -v ranlib)" \
-            --strace "$(command -v strace)" \
-            --attestor scripts/wmi/attest_sealed_build.py \
-            --attestor-sha256 "$(sha256sum scripts/wmi/attest_sealed_build.py | cut -d' ' -f1)"
+          (
+            set -euo pipefail
+            test "${RUNNER_ENVIRONMENT:-}" = "github-hosted"
+            test "${RUNNER_OS:-}" = "Linux"
+            test "$(/usr/bin/id -u)" != "0"
+            . /etc/os-release
+            test "${ID:-}" = "ubuntu"
+            test "${VERSION_ID:-}" = "24.04"
+
+            # Ubuntu 24.04 AppArmor denies UID-map setup to unprofiled
+            # processes. Open only that gate while the sealed build runs.
+            USERNS_POLICY=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+            test -r "$USERNS_POLICY"
+            test -x /usr/bin/sudo
+            test -x /usr/sbin/sysctl
+            ORIGINAL_USERNS_POLICY="$(cat "$USERNS_POLICY")"
+            case "$ORIGINAL_USERNS_POLICY" in
+              0|1) ;;
+              *)
+                printf 'sealed userns policy has unexpected value: %s\n' \
+                  "$ORIGINAL_USERNS_POLICY" >&2
+                exit 1
+                ;;
+            esac
+
+            restore_userns_policy() {
+              local status="$?"
+              local current_policy=""
+              local restore_needed="0"
+              local restored_policy=""
+              trap - EXIT
+              if ! current_policy="$(cat "$USERNS_POLICY")"; then
+                printf 'sealed userns policy could not be read during cleanup\n' >&2
+                restore_needed="1"
+                status="1"
+              elif test "$current_policy" != "$ORIGINAL_USERNS_POLICY"; then
+                restore_needed="1"
+              fi
+              if test "$restore_needed" = "1"; then
+                if ! /usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w \
+                  "kernel.apparmor_restrict_unprivileged_userns=$ORIGINAL_USERNS_POLICY"
+                then
+                  printf 'sealed userns policy restoration failed\n' >&2
+                  status="1"
+                fi
+              fi
+              if ! restored_policy="$(cat "$USERNS_POLICY")"; then
+                printf 'sealed userns policy is unreadable after cleanup\n' >&2
+                status="1"
+              elif test "$restored_policy" != "$ORIGINAL_USERNS_POLICY"; then
+                printf 'sealed userns policy restoration mismatch: %s != %s\n' \
+                  "$restored_policy" "$ORIGINAL_USERNS_POLICY" >&2
+                status="1"
+              fi
+              printf 'sealed-userns-policy phase=restored value=%s expected=%s\n' \
+                "${restored_policy:-unreadable}" "$ORIGINAL_USERNS_POLICY"
+              exit "$status"
+            }
+            trap restore_userns_policy EXIT
+
+            printf 'sealed-userns-policy phase=before value=%s runner=%s os=%s ubuntu=%s\n' \
+              "$ORIGINAL_USERNS_POLICY" "$RUNNER_ENVIRONMENT" "$RUNNER_OS" \
+              "$VERSION_ID"
+            if test "$ORIGINAL_USERNS_POLICY" = "1"; then
+              /usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w \
+                kernel.apparmor_restrict_unprivileged_userns=0
+            fi
+            ACTIVE_USERNS_POLICY="$(cat "$USERNS_POLICY")"
+            printf 'sealed-userns-policy phase=build value=%s expected=0\n' \
+              "$ACTIVE_USERNS_POLICY"
+            test "$ACTIVE_USERNS_POLICY" = "0"
+
+            python3 -B scripts/wmi/sealed_linux_build.py build \
+              --repository . \
+              --revision "$(git rev-parse HEAD)" \
+              --artifact-dir "$SEALED_ROOT/release" \
+              --staging-root "$RUNNER_TEMP/euf-viper-sealed-staging" \
+              --cargo-home "$HOME/.cargo" \
+              --rustup-home "$HOME/.rustup" \
+              --home "$RUNNER_TEMP/euf-viper-sealed-home" \
+              --git "$(command -v git)" \
+              --cargo "$(rustup which cargo)" \
+              --rustc "$(rustup which rustc)" \
+              --unshare "$(command -v unshare)" \
+              --ldd "$(command -v ldd)" \
+              --cc "$(command -v cc)" \
+              --cxx "$(command -v c++)" \
+              --ar "$(command -v ar)" \
+              --ranlib "$(command -v ranlib)" \
+              --strace "$(command -v strace)" \
+              --attestor scripts/wmi/attest_sealed_build.py \
+              --attestor-sha256 "$(sha256sum scripts/wmi/attest_sealed_build.py | cut -d' ' -f1)"
+          )
           echo "SEALED_RELEASE=$SEALED_ROOT/release" >> "$GITHUB_ENV"
           test -x "$SEALED_ROOT/release/euf-viper"
           test -x "$SEALED_ROOT/release/euf-viper-build-features"

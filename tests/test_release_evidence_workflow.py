@@ -261,6 +261,60 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         self.assertNotIn("ubuntu-latest", text)
         self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', text)
 
+    def test_sealed_build_userns_policy_is_hosted_ubuntu_only_and_restored(
+        self,
+    ) -> None:
+        text = WORKFLOW.read_text(encoding="ascii")
+        start = text.index("      - name: Build exact combined release\n")
+        end = text.index("      - name: Build independent f8d9205 CLI baseline\n")
+        step = text[start:end]
+        ordered_contract = (
+            'test "${RUNNER_ENVIRONMENT:-}" = "github-hosted"',
+            'test "${RUNNER_OS:-}" = "Linux"',
+            'test "$(/usr/bin/id -u)" != "0"',
+            ". /etc/os-release",
+            'test "${ID:-}" = "ubuntu"',
+            'test "${VERSION_ID:-}" = "24.04"',
+            "USERNS_POLICY=/proc/sys/kernel/apparmor_restrict_unprivileged_userns",
+            'ORIGINAL_USERNS_POLICY="$(cat "$USERNS_POLICY")"',
+            "trap restore_userns_policy EXIT",
+            "kernel.apparmor_restrict_unprivileged_userns=0",
+            'ACTIVE_USERNS_POLICY="$(cat "$USERNS_POLICY")"',
+            'test "$ACTIVE_USERNS_POLICY" = "0"',
+            "python3 -B scripts/wmi/sealed_linux_build.py build",
+        )
+        positions = []
+        for item in ordered_contract:
+            self.assertEqual(step.count(item), 1, item)
+            positions.append(step.index(item))
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(
+            step.count(
+                "/usr/bin/sudo --non-interactive /usr/sbin/sysctl -q -w"
+            ),
+            2,
+        )
+        self.assertEqual(step.count("/usr/bin/sudo"), 3)
+        self.assertIn(
+            '"kernel.apparmor_restrict_unprivileged_userns=$ORIGINAL_USERNS_POLICY"',
+            step,
+        )
+        self.assertIn(
+            'test "$restored_policy" != "$ORIGINAL_USERNS_POLICY"',
+            step,
+        )
+        self.assertIn('local status="$?"', step)
+        self.assertIn('exit "$status"', step)
+        for phase in ("before", "build", "restored"):
+            self.assertIn(f"sealed-userns-policy phase={phase}", step)
+        self.assertIn(
+            '          )\n          echo "SEALED_RELEASE=$SEALED_ROOT/release"',
+            step,
+        )
+        self.assertIn("trap - EXIT", step)
+        self.assertIn('--unshare "$(command -v unshare)"', step)
+        self.assertNotIn("unsealed", step.lower())
+
     def test_cli_baseline_forces_effective_compiler_and_sanitizes_ambient_controls(self) -> None:
         text = CLI_BASELINE.read_text(encoding="ascii")
         self.assertIn(
