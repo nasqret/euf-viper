@@ -27,6 +27,7 @@ mod quotient_state_search;
 mod smt2_stream;
 #[cfg(test)]
 mod stabilizer_order;
+mod t10_ackermann;
 mod t9_ackermann;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -4550,6 +4551,18 @@ fn t9_backend_route(backend: &str, auto_uses_cadical: bool) -> t9_ackermann::Bac
     }
 }
 
+fn t10_backend_route(backend: &str, auto_uses_cadical: bool) -> t10_ackermann::BackendRoute {
+    match backend {
+        "kissat" => t10_ackermann::BackendRoute::Kissat,
+        "cadical" => t10_ackermann::BackendRoute::Cadical,
+        "cadical-refine" => t10_ackermann::BackendRoute::CadicalRefine,
+        "varisat" => t10_ackermann::BackendRoute::Varisat,
+        "auto" if auto_uses_cadical => t10_ackermann::BackendRoute::Cadical,
+        "auto" => t10_ackermann::BackendRoute::Kissat,
+        _ => t10_ackermann::BackendRoute::Dpll,
+    }
+}
+
 fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
     match setting {
         Some("cadical-refine") => true,
@@ -4629,6 +4642,111 @@ fn configure_kissat(solver: &mut KissatSolver<'_>) -> Option<()> {
         _ => KissatConfig::Default,
     };
     solver.set_configuration(configuration).ok()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum T10KernelOutcome {
+    Unsat,
+    Sat,
+    Unavailable { sat_calls: usize },
+}
+
+impl T10KernelOutcome {
+    fn sat_calls(self) -> usize {
+        match self {
+            Self::Unsat | Self::Sat => 1,
+            Self::Unavailable { sat_calls } => sat_calls,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Unsat => "unsat",
+            Self::Sat => "sat_discarded",
+            Self::Unavailable { .. } => "unavailable",
+        }
+    }
+
+    fn profile_if_enabled(self) {
+        if env::var_os("EUF_VIPER_PROFILE").is_some() {
+            eprintln!(
+                "profile_t10_kernel {{\"outcome\":\"{}\",\"trusted_unsat\":{},\"sat_calls\":{},\"transitivity_clauses\":0,\"congruence_clauses\":0}}",
+                self.as_str(),
+                matches!(self, Self::Unsat),
+                self.sat_calls()
+            );
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn solve_t10_kissat_kernel(cnf: &CnfProblem, closed_clauses: &[Vec<i32>]) -> T10KernelOutcome {
+    let load_start = Instant::now();
+    let mut solver = KissatSolver::new();
+    let variables = (0..cnf.var_count())
+        .map(|_| solver.var())
+        .collect::<Vec<_>>();
+    for clause in &cnf.clauses {
+        solver.add(&kissat_clause(clause, &variables));
+    }
+    profile_phase("t10_kissat_base_load", load_start, cnf.clauses.len());
+
+    let closed_load_start = Instant::now();
+    for clause in closed_clauses {
+        solver.add(&kissat_clause(clause, &variables));
+    }
+    profile_phase(
+        "t10_kissat_closed_atom_load",
+        closed_load_start,
+        closed_clauses.len(),
+    );
+
+    let sat_start = Instant::now();
+    record_sat_dispatch();
+    let result = solver.sat();
+    profile_phase("t10_kissat_solve", sat_start, 0);
+    if result.is_none() {
+        T10KernelOutcome::Unsat
+    } else {
+        T10KernelOutcome::Sat
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn solve_t10_kissat_kernel(cnf: &CnfProblem, closed_clauses: &[Vec<i32>]) -> T10KernelOutcome {
+    let load_start = Instant::now();
+    let mut solver = KissatSolver::default();
+    if configure_kissat(&mut solver).is_none() {
+        return T10KernelOutcome::Unavailable { sat_calls: 0 };
+    }
+    for clause in &cnf.clauses {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
+            return T10KernelOutcome::Unavailable { sat_calls: 0 };
+        }
+    }
+    profile_phase("t10_kissat_base_load", load_start, cnf.clauses.len());
+
+    let closed_load_start = Instant::now();
+    for clause in closed_clauses {
+        if solver.add_clause(rustsat_clause(clause)).is_err() {
+            return T10KernelOutcome::Unavailable { sat_calls: 0 };
+        }
+    }
+    profile_phase(
+        "t10_kissat_closed_atom_load",
+        closed_load_start,
+        closed_clauses.len(),
+    );
+
+    let sat_start = Instant::now();
+    record_sat_dispatch();
+    let result = solver.solve();
+    profile_phase("t10_kissat_solve", sat_start, 0);
+    match result {
+        Ok(RustSatResult::Unsat) => T10KernelOutcome::Unsat,
+        Ok(RustSatResult::Sat) => T10KernelOutcome::Sat,
+        Ok(RustSatResult::Interrupted) | Err(_) => T10KernelOutcome::Unavailable { sat_calls: 1 },
+    }
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -6257,12 +6375,14 @@ fn solve_problem_with_root_cnf_options(
     problem: Problem,
     root_cnf_options: RootCnfOptions,
     t9_mode: t9_ackermann::Mode,
+    t10_mode: t10_ackermann::Mode,
 ) -> SolveReport {
     solve_problem_with_options_and_eq_abstraction(
         problem,
         root_cnf_options,
         selected_eq_abstraction_mode(),
         t9_mode,
+        t10_mode,
     )
 }
 
@@ -6277,6 +6397,7 @@ fn solve_problem_with_eq_abstraction(
         RootCnfOptions::existing_behavior(direct_root_cnf),
         eq_abstraction_mode,
         t9_ackermann::Mode::Off,
+        t10_ackermann::Mode::Off,
     )
 }
 
@@ -6285,6 +6406,7 @@ fn solve_problem_with_options_and_eq_abstraction(
     root_cnf_options: RootCnfOptions,
     eq_abstraction_mode: EqAbstractionMode,
     t9_mode: t9_ackermann::Mode,
+    t10_mode: t10_ackermann::Mode,
 ) -> SolveReport {
     debug_assert!(problem.terms_are_well_sorted());
     let stats_base = SolveStats {
@@ -6320,6 +6442,7 @@ fn solve_problem_with_options_and_eq_abstraction(
                     eq_abstraction_mode,
                     &mut finite_context,
                     t9_mode,
+                    t10_mode,
                 )
             {
                 return SolveReport {
@@ -6460,6 +6583,31 @@ fn t9_attempt_for_solve(
     Some(t9_ackermann::attempt(mode, cnf, arena, facts))
 }
 
+fn t10_attempt_for_solve(
+    mode: t10_ackermann::Mode,
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    finite_added: usize,
+    backend: t10_ackermann::BackendRoute,
+    analyze: impl FnOnce() -> finite_analysis::FiniteAnalysis,
+) -> Option<t10_ackermann::Attempt> {
+    if mode != t10_ackermann::Mode::ClosedAtomAuto {
+        return None;
+    }
+    if let Err(rejection) = t10_ackermann::solve_precheck(finite_added, arena.apps.len(), backend) {
+        rejection.profile_if_enabled();
+        return None;
+    }
+    let analysis = analyze();
+    let facts = t10_ackermann::StructuralFacts::from_analysis(
+        &analysis,
+        finite_added,
+        arena.apps.len(),
+        backend,
+    );
+    Some(t10_ackermann::attempt(mode, cnf, arena, facts))
+}
+
 fn solve_bool_problem(
     arena: &TermArena,
     bool_problem: &BoolProblem,
@@ -6467,6 +6615,7 @@ fn solve_bool_problem(
     requested_eq_abstraction_mode: EqAbstractionMode,
     finite_context: &mut finite_analysis::FiniteAnalysisContext,
     t9_mode: t9_ackermann::Mode,
+    t10_mode: t10_ackermann::Mode,
 ) -> Option<(SolveResult, usize, usize, usize, usize, usize)> {
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
@@ -6538,13 +6687,47 @@ fn solve_bool_problem(
             .unwrap_or(1_000usize);
         let auto_uses_cadical = backend == "auto"
             && auto_prefers_cadical(arena.apps.len(), finite_added, auto_cadical_threshold);
-        let actual_backend = t9_backend_route(&backend, auto_uses_cadical);
+        let t10_actual_backend = t10_backend_route(&backend, auto_uses_cadical);
+        let mut t10_prior_sat_calls = 0usize;
+        if let Some(attempt) = t10_attempt_for_solve(
+            t10_mode,
+            &cnf,
+            arena,
+            finite_added,
+            t10_actual_backend,
+            || finite_context.analyze(arena, bool_problem).clone(),
+        ) {
+            attempt.report.profile_if_enabled();
+            if let Some(closed_clauses) = attempt.clauses
+                && let Some(candidate_clause_count) =
+                    cnf.clauses.len().checked_add(closed_clauses.len())
+            {
+                let outcome = solve_t10_kissat_kernel(&cnf, &closed_clauses);
+                outcome.profile_if_enabled();
+                t10_prior_sat_calls = t10_prior_sat_calls.saturating_add(outcome.sat_calls());
+                if outcome == T10KernelOutcome::Unsat {
+                    return Some((
+                        SolveResult::Unsat,
+                        cnf.var_count(),
+                        candidate_clause_count,
+                        0,
+                        t10_prior_sat_calls,
+                        0,
+                    ));
+                }
+            }
+        }
+
+        let t9_actual_backend = t9_backend_route(&backend, auto_uses_cadical);
         let mut t9_activated = false;
-        if let Some(attempt) =
-            t9_attempt_for_solve(t9_mode, &cnf, arena, finite_added, actual_backend, || {
-                finite_context.analyze(arena, bool_problem).clone()
-            })
-        {
+        if let Some(attempt) = t9_attempt_for_solve(
+            t9_mode,
+            &cnf,
+            arena,
+            finite_added,
+            t9_actual_backend,
+            || finite_context.analyze(arena, bool_problem).clone(),
+        ) {
             attempt.report.profile_if_enabled();
             if let Some(candidate) = attempt.candidate {
                 cnf = candidate;
@@ -6590,7 +6773,14 @@ fn solve_bool_problem(
                 bool_problem.false_term,
                 eager_congruence,
             ) {
-                return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+                return Some((
+                    result,
+                    cnf.var_count(),
+                    cnf.clauses.len(),
+                    0,
+                    t10_prior_sat_calls + 1,
+                    0,
+                ));
             }
         }
         if backend == "kissat" || (backend == "auto" && !auto_uses_cadical) {
@@ -6603,11 +6793,18 @@ fn solve_bool_problem(
             );
             match outcome {
                 EagerSolveOutcome::Solved(result) => {
-                    return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+                    return Some((
+                        result,
+                        cnf.var_count(),
+                        cnf.clauses.len(),
+                        0,
+                        t10_prior_sat_calls + 1,
+                        0,
+                    ));
                 }
                 EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
                     let mut completed_cnf = None;
-                    let mut prior_sat_calls = 1;
+                    let mut prior_sat_calls = t10_prior_sat_calls + 1;
                     if !t9_activated
                         && dynamic_full_ackermann_before_refinement(
                             full_ackermann_setting.as_deref(),
@@ -6675,7 +6872,14 @@ fn solve_bool_problem(
                 bool_problem.false_term,
                 eager_congruence,
             ) {
-                return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+                return Some((
+                    result,
+                    cnf.var_count(),
+                    cnf.clauses.len(),
+                    0,
+                    t10_prior_sat_calls + 1,
+                    0,
+                ));
             }
         }
         if backend == "cadical-refine" {
@@ -6691,7 +6895,7 @@ fn solve_bool_problem(
                     cnf.var_count(),
                     cnf.clauses.len(),
                     0,
-                    sat_calls,
+                    sat_calls + t10_prior_sat_calls,
                     theory_lemmas,
                 ));
             }
@@ -6707,7 +6911,8 @@ fn solve_bool_problem(
                 + usize::from(matches!(
                     backend.as_str(),
                     "auto" | "kissat" | "cadical" | "cadical-refine"
-                )),
+                ))
+                + t10_prior_sat_calls,
             theory_lemmas,
         ));
     }
@@ -7025,7 +7230,8 @@ fn print_report(report: &SolveReport, elapsed: std::time::Duration, with_stats: 
 fn solve_file(path: &str, with_stats: bool) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
     let t9_mode = t9_ackermann::selected_mode()?;
-    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, t9_mode)
+    let t10_mode = t10_ackermann::selected_mode()?;
+    solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, t9_mode, t10_mode)
 }
 
 fn solve_file_with_root_cnf_options(
@@ -7033,13 +7239,14 @@ fn solve_file_with_root_cnf_options(
     with_stats: bool,
     root_cnf_options: RootCnfOptions,
     t9_mode: t9_ackermann::Mode,
+    t10_mode: t10_ackermann::Mode,
 ) -> Result<i32, String> {
     let input = fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let start = Instant::now();
     let parse_start = Instant::now();
     let problem = parse_problem(&input)?;
     profile_phase("parse", parse_start, input.len());
-    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
+    let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode, t10_mode);
     let elapsed = start.elapsed();
     print_report(&report, elapsed, with_stats);
     Ok(match report.result {
@@ -7079,6 +7286,7 @@ fn structural_router_prefers_euf(input: &[u8]) -> bool {
 fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
     let t9_mode = t9_ackermann::selected_mode()?;
+    let t10_mode = t10_ackermann::selected_mode()?;
     let input = fs::read(path).map_err(|e| format!("failed to read {path}: {e}"))?;
     let use_euf = structural_router_prefers_euf(&input);
     if env::var_os("EUF_VIPER_PORTFOLIO_TRACE").is_some() {
@@ -7088,7 +7296,13 @@ fn portfolio_file(path: &str, yices: &str, with_stats: bool) -> Result<i32, Stri
         );
     }
     if use_euf {
-        return solve_file_with_root_cnf_options(path, with_stats, root_cnf_options, t9_mode);
+        return solve_file_with_root_cnf_options(
+            path,
+            with_stats,
+            root_cnf_options,
+            t9_mode,
+            t10_mode,
+        );
     }
 
     #[cfg(unix)]
@@ -7295,6 +7509,105 @@ fn project_t9_file(path: &str) -> Result<i32, String> {
     Ok(if selected { 0 } else { 3 })
 }
 
+#[cfg(test)]
+fn project_t10_problem(problem: &Problem) -> Result<t10_ackermann::ProjectionReport, String> {
+    let (result, sat_calls) =
+        measure_sat_dispatches(|| project_t10_problem_without_sat_measurement(problem));
+    let mut report = result?;
+    report.record_observed_sat_calls(sat_calls);
+    Ok(report)
+}
+
+fn project_t10_problem_without_sat_measurement(
+    problem: &Problem,
+) -> Result<t10_ackermann::ProjectionReport, String> {
+    if !problem.terms_are_well_sorted() {
+        return Err("T10 projection encountered an unsupported sort configuration".to_owned());
+    }
+    let bool_problem = problem.bool_problem.as_ref();
+    if !routes_to_boolean_sat(problem) {
+        let cnf = CnfProblem::new();
+        let facts = t10_ackermann::StructuralFacts::fallback_route(problem.arena.apps.len());
+        return Ok(t10_ackermann::attempt(
+            t10_ackermann::Mode::ClosedAtomAuto,
+            &cnf,
+            &problem.arena,
+            facts,
+        )
+        .report);
+    }
+    let bool_problem = bool_problem.expect("checked above");
+
+    let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
+    for assertion in &bool_problem.assertions {
+        // Stage 0 pins current default root-CNF behavior and ignores solve-path env vars.
+        cnf.add_direct_assertion_with_negated_root(assertion, false);
+    }
+    let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+    let finite_added = add_finite_domain_axioms_with_pinned_defaults(
+        &mut cnf,
+        &problem.arena,
+        bool_problem,
+        &mut finite_context,
+    );
+    let analysis = finite_context.analyze(&problem.arena, bool_problem).clone();
+    let pinned_auto_uses_cadical =
+        auto_prefers_cadical(problem.arena.apps.len(), finite_added, 1_000);
+    let backend = t10_backend_route("auto", pinned_auto_uses_cadical);
+    let facts = t10_ackermann::StructuralFacts::from_analysis(
+        &analysis,
+        finite_added,
+        problem.arena.apps.len(),
+        backend,
+    );
+    Ok(t10_ackermann::attempt(
+        t10_ackermann::Mode::ClosedAtomAuto,
+        &cnf,
+        &problem.arena,
+        facts,
+    )
+    .report)
+}
+
+fn read_project_t10_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
+    if path != "-" {
+        return fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"));
+    }
+    let mut input = String::new();
+    stdin
+        .read_to_string(&mut input)
+        .map_err(|error| format!("failed to read T10 projection stdin: {error}"))?;
+    Ok(input)
+}
+
+fn project_t10_source(input: &str) -> Result<t10_ackermann::ProjectionReport, String> {
+    let (result, sat_calls) = measure_sat_dispatches(|| {
+        let problem = parse_problem_with_scoped_let_mode(input, ScopedLetMode::Auto)?;
+        project_t10_problem_without_sat_measurement(&problem)
+    });
+    let mut report = result?;
+    report.record_source(input.as_bytes());
+    report.record_observed_sat_calls(sat_calls);
+    Ok(report)
+}
+
+fn project_t10_file(path: &str) -> Result<i32, String> {
+    let input = if path == "-" {
+        read_project_t10_input(path, &mut io::stdin().lock())?
+    } else {
+        read_project_t10_input(path, &mut io::empty())?
+    };
+    let report = project_t10_source(&input)?;
+    let selected = report.selected();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    report
+        .write_to(&mut output)
+        .map_err(|error| format!("failed to write T10 projection: {error}"))?;
+    Ok(if selected { 0 } else { 3 })
+}
+
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
     if path != "-" {
         return fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"));
@@ -7457,6 +7770,7 @@ fn gen_cmd(args: &[String]) -> Result<i32, String> {
 fn bench_cmd(args: &[String]) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
     let t9_mode = t9_ackermann::selected_mode()?;
+    let t10_mode = t10_ackermann::selected_mode()?;
     let cases = parse_flag_usize(args, "--cases", 20)?;
     let size = parse_flag_usize(args, "--size", 10_000)?;
     let mut total_terms = 0usize;
@@ -7470,7 +7784,8 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
+        let report =
+            solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode, t10_mode);
         let elapsed = start.elapsed();
         println!(
             "case={i} result={} elapsed_ns={} terms={} apps={} passes={} merges={}",
@@ -7497,6 +7812,7 @@ fn bench_cmd(args: &[String]) -> Result<i32, String> {
 fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
     let root_cnf_options = selected_root_cnf_options()?;
     let t9_mode = t9_ackermann::selected_mode()?;
+    let t10_mode = t10_ackermann::selected_mode()?;
     let cases = parse_flag_usize(args, "--cases", 8)?;
     let branches = parse_flag_usize(args, "--branches", 512)?;
     let depth = parse_flag_usize(args, "--depth", 4)?;
@@ -7511,7 +7827,8 @@ fn bench_or_cmd(args: &[String]) -> Result<i32, String> {
         let start = Instant::now();
         let problem = parse_problem(&input)?;
         total_terms += problem.arena.terms.len();
-        let report = solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode);
+        let report =
+            solve_problem_with_root_cnf_options(problem, root_cnf_options, t9_mode, t10_mode);
         let elapsed = start.elapsed();
         println!(
             "or_case={i} kind={} result={} elapsed_ns={} terms={} eqs={} diseqs={} passes={} merges={}",
@@ -7576,6 +7893,7 @@ fn usage() -> &'static str {
   euf-viper stats FILE
   euf-viper project-bool-dag FILE
   euf-viper project-t9 FILE|-
+  euf-viper project-t10 FILE|-
   euf-viper parse-check FILE|-
   euf-viper gen chain N [--sat]
   euf-viper gen grid WIDTH DEPTH
@@ -7593,6 +7911,7 @@ fn usage() -> &'static str {
   euf-viper stats FILE
   euf-viper project-bool-dag FILE
   euf-viper project-t9 FILE|-
+  euf-viper project-t10 FILE|-
   euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
@@ -7641,6 +7960,13 @@ fn run() -> Result<i32, String> {
                 return Err("usage: euf-viper project-t9 FILE|-".to_owned());
             }
             project_t9_file(file)
+        }
+        "project-t10" => {
+            let file = args.get(2).ok_or_else(|| usage().to_owned())?;
+            if args.len() != 3 {
+                return Err("usage: euf-viper project-t10 FILE|-".to_owned());
+            }
+            project_t10_file(file)
         }
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -9941,7 +10267,7 @@ mod tests {
     }
 
     #[test]
-    fn routes_auto_backend_and_t9_facts_through_the_same_branch() {
+    fn routes_auto_backend_and_ackermann_facts_through_the_same_branch() {
         assert!(auto_prefers_cadical(1_000, 0, 1_000));
         assert!(!auto_prefers_cadical(10, 0, 1_000));
         assert_eq!(
@@ -9960,6 +10286,18 @@ mod tests {
             t9_backend_route("kissat", true),
             t9_ackermann::BackendRoute::Kissat
         );
+        assert_eq!(
+            t10_backend_route("auto", true),
+            t10_ackermann::BackendRoute::Cadical
+        );
+        assert_eq!(
+            t10_backend_route("auto", false),
+            t10_ackermann::BackendRoute::Kissat
+        );
+        assert_eq!(
+            t10_backend_route("kissat", true),
+            t10_ackermann::BackendRoute::Kissat
+        );
     }
 
     #[test]
@@ -9976,6 +10314,26 @@ mod tests {
             || {
                 requests.set(requests.get() + 1);
                 panic!("cheap T9 rejection requested structural analysis")
+            },
+        );
+        assert!(attempt.is_none());
+        assert_eq!(requests.get(), 0);
+    }
+
+    #[test]
+    fn t10_cheap_precheck_does_not_request_expensive_analysis() {
+        let cnf = CnfProblem::new();
+        let arena = TermArena::default();
+        let requests = std::cell::Cell::new(0usize);
+        let attempt = t10_attempt_for_solve(
+            t10_ackermann::Mode::ClosedAtomAuto,
+            &cnf,
+            &arena,
+            1,
+            t10_ackermann::BackendRoute::Kissat,
+            || {
+                requests.set(requests.get() + 1);
+                panic!("cheap T10 rejection requested structural analysis")
             },
         );
         assert!(attempt.is_none());
@@ -10808,6 +11166,17 @@ mod tests {
     }
 
     #[test]
+    fn project_t10_dash_reads_the_supplied_stdin_bytes() {
+        let source = b"(set-logic QF_UF)\n(assert true)\n(check-sat)\n";
+        let mut stdin = std::io::Cursor::new(source);
+        assert_eq!(
+            read_project_t10_input("-", &mut stdin).unwrap().as_bytes(),
+            source
+        );
+        assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    #[test]
     fn project_t9_sat_counter_observes_real_dispatch_then_zero_projection_delta() {
         let mut arena = TermArena::default();
         let true_term = arena.intern(0, Vec::new());
@@ -10834,6 +11203,95 @@ mod tests {
             .find_map(|line| line.strip_prefix("baseline_after_sha256 "))
             .unwrap();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn project_t10_is_strict_json_and_never_dispatches_sat() {
+        let source = "(set-logic QF_UF) (assert true) (check-sat)";
+        let problem = parse_problem_with_scoped_let_mode(source, ScopedLetMode::Auto).unwrap();
+        let direct = project_t10_problem(&problem).unwrap();
+        let projected = project_t10_source(source).unwrap();
+        let mut direct_output = Vec::new();
+        direct.write_to(&mut direct_output).unwrap();
+        let mut projected_output = Vec::new();
+        projected.write_to(&mut projected_output).unwrap();
+        let direct_output = String::from_utf8(direct_output).unwrap();
+        let projected_output = String::from_utf8(projected_output).unwrap();
+
+        assert!(direct_output.contains("\"sat_calls\":0}"));
+        assert!(projected_output.starts_with("{\"t10_projection_version\":1,"));
+        assert!(projected_output.contains("\"mode\":\"closed-atom-auto\""));
+        assert!(projected_output.contains("\"backend\":\"kissat\""));
+        assert!(projected_output.contains("\"reason\":\"all_different_clique_below_minimum\""));
+        assert!(
+            projected_output
+                .contains("\"ackermann_replay_clauses\":0,\"ackermann_replay_failures\":0")
+        );
+        assert!(projected_output.contains("\"sat_calls\":0}"));
+        assert_eq!(projected_output.lines().count(), 1);
+    }
+
+    #[test]
+    fn t10_kernel_sat_is_discarded_and_fallback_dispatch_is_unchanged() {
+        let mut arena = TermArena::default();
+        let true_term = arena.intern(0, Vec::new());
+        let false_term = arena.intern(1, Vec::new());
+        let cnf = CnfProblem::new();
+        let clauses_before = cnf.clauses.clone();
+        let var_atoms_before = cnf.var_atoms.clone();
+        let atom_vars_before = cnf.atom_vars.clone();
+
+        let baseline = solve_kissat_euf_once(&cnf, &arena, true_term, false_term, false);
+        assert_eq!(baseline, EagerSolveOutcome::Solved(SolveResult::Sat));
+
+        let ((kernel, fallback), sat_calls) = measure_sat_dispatches(|| {
+            let kernel = solve_t10_kissat_kernel(&cnf, &[]);
+            assert_eq!(kernel, T10KernelOutcome::Sat);
+            let fallback = solve_kissat_euf_once(&cnf, &arena, true_term, false_term, false);
+            (kernel, fallback)
+        });
+        assert_eq!(kernel.sat_calls(), 1);
+        assert_eq!(fallback, baseline);
+        assert_eq!(sat_calls, 2);
+        assert_eq!(cnf.clauses, clauses_before);
+        assert_eq!(cnf.var_atoms, var_atoms_before);
+        assert_eq!(cnf.atom_vars, atom_vars_before);
+    }
+
+    #[test]
+    fn t10_nonselection_preserves_the_complete_baseline_report() {
+        let source = include_str!("../tests/fixtures/predicate_congruence_unsat.smt2");
+        let baseline = solve_problem_with_options_and_eq_abstraction(
+            parse_problem(source).unwrap(),
+            RootCnfOptions::existing_behavior(true),
+            EqAbstractionMode::Off,
+            t9_ackermann::Mode::Off,
+            t10_ackermann::Mode::Off,
+        );
+        let nonselected = solve_problem_with_options_and_eq_abstraction(
+            parse_problem(source).unwrap(),
+            RootCnfOptions::existing_behavior(true),
+            EqAbstractionMode::Off,
+            t9_ackermann::Mode::Off,
+            t10_ackermann::Mode::ClosedAtomAuto,
+        );
+        assert_eq!(nonselected.result, baseline.result);
+        let stats = |report: &SolveReport| {
+            [
+                report.stats.terms,
+                report.stats.apps,
+                report.stats.eqs,
+                report.stats.diseqs,
+                report.stats.closure_passes,
+                report.stats.congruence_merges,
+                report.stats.cnf_vars,
+                report.stats.cnf_clauses,
+                report.stats.search_nodes,
+                report.stats.sat_calls,
+                report.stats.theory_lemmas,
+            ]
+        };
+        assert_eq!(stats(&nonselected), stats(&baseline));
     }
 
     #[test]
