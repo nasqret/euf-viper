@@ -86,6 +86,13 @@ struct PreparedInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ApplicationShape {
+    pair_count: u64,
+    maximum_arity: u64,
+    argument_slots: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NegativeOccurrence {
     source: ClausePivot,
 }
@@ -293,6 +300,18 @@ fn validate_and_prepare(
     limits: CompilerLimits,
     counters: &mut DeterministicCounters,
 ) -> Result<PreparedInput, CompilerFailure> {
+    validate_and_prepare_with(input, limits, counters, materialize_application_pairs)
+}
+
+fn validate_and_prepare_with<F>(
+    input: EqresInput<'_>,
+    limits: CompilerLimits,
+    counters: &mut DeterministicCounters,
+    materialize: F,
+) -> Result<PreparedInput, CompilerFailure>
+where
+    F: FnOnce(EqresInput<'_>, u64) -> Result<Vec<ApplicationPair>, CompilerFailure>,
+{
     let term_count = to_u64(input.term_dag.len(), None)?;
     let variable_count =
         input
@@ -350,10 +369,59 @@ fn validate_and_prepare(
     validate_atom_maps(input)?;
     validate_clause_literals(input)?;
 
-    let mut application_pairs = Vec::new();
-    application_pairs
-        .try_reserve(input.ordered_applications.len())
-        .map_err(|_| allocation_failure(None))?;
+    let shape = summarize_application_pairs(input)?;
+    counters.input.application_pairs = shape.pair_count;
+    counters.input.maximum_arity = shape.maximum_arity;
+    counters.input.application_argument_slots = shape.argument_slots;
+
+    check_static_cap(
+        CapReason::ApplicationPairs,
+        shape.pair_count,
+        limits.application_pairs,
+    )?;
+    check_static_cap(
+        CapReason::MaximumArity,
+        shape.maximum_arity,
+        limits.maximum_arity,
+    )?;
+    check_static_cap(
+        CapReason::ApplicationArgumentSlots,
+        shape.argument_slots,
+        limits.application_argument_slots,
+    )?;
+
+    let initial_logical_memory = logical_memory(
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        shape.pair_count,
+        shape.argument_slots,
+        None,
+    )?;
+    check_static_cap(
+        CapReason::LogicalIncrementalMemoryBytes,
+        initial_logical_memory,
+        limits.logical_incremental_memory_bytes,
+    )?;
+
+    let application_pairs = materialize(input, shape.pair_count)?;
+    if to_u64(application_pairs.len(), None)? != shape.pair_count {
+        return Err(internal_invariant(None));
+    }
+
+    Ok(PreparedInput {
+        counters: counters.input,
+        application_pairs,
+        initial_logical_memory,
+    })
+}
+
+fn summarize_application_pairs(input: EqresInput<'_>) -> Result<ApplicationShape, CompilerFailure> {
+    let mut pair_count = 0u64;
     let mut maximum_arity = 0u64;
     let mut argument_slots = 0u64;
 
@@ -376,61 +444,72 @@ fn validate_and_prepare(
                 ));
             }
 
-            let mut requirements = Vec::new();
-            requirements
-                .try_reserve(left.args.len())
-                .map_err(|_| allocation_failure(None))?;
-            for (index, (&left_arg, &right_arg)) in left.args.iter().zip(&right.args).enumerate() {
-                if left_arg == right_arg {
-                    continue;
-                }
-                let key = normalized_equality(left_arg, right_arg);
-                requirements.push((ArgumentIndex::new(to_u32(index, None)?), key));
-            }
-            if requirements.is_empty() {
+            let requirements = left
+                .args
+                .iter()
+                .zip(&right.args)
+                .filter(|(left_arg, right_arg)| left_arg != right_arg)
+                .count();
+            if requirements == 0 {
                 return Err(CompilerFailure::MalformedInput(InputFailure::InvalidTerm));
             }
-            argument_slots = checked_add(argument_slots, to_u64(requirements.len(), None)?, None)?;
-            application_pairs
-                .try_reserve(1)
+            pair_count = checked_add(pair_count, 1, None)?;
+            argument_slots = checked_add(argument_slots, to_u64(requirements, None)?, None)?;
+        }
+    }
+
+    Ok(ApplicationShape {
+        pair_count,
+        maximum_arity,
+        argument_slots,
+    })
+}
+
+fn materialize_application_pairs(
+    input: EqresInput<'_>,
+    pair_count: u64,
+) -> Result<Vec<ApplicationPair>, CompilerFailure> {
+    let pair_capacity = usize::try_from(pair_count).map_err(|_| integer_overflow(None))?;
+    let mut application_pairs = Vec::new();
+    application_pairs
+        .try_reserve_exact(pair_capacity)
+        .map_err(|_| allocation_failure(None))?;
+
+    for (left_position, &left_id) in input.ordered_applications.iter().enumerate() {
+        let left = &input.term_dag[left_id];
+        for &right_id in &input.ordered_applications[(left_position + 1)..] {
+            let right = &input.term_dag[right_id];
+            if left.fun != right.fun {
+                continue;
+            }
+            let requirement_count = left
+                .args
+                .iter()
+                .zip(&right.args)
+                .filter(|(left_arg, right_arg)| left_arg != right_arg)
+                .count();
+            let mut requirements = Vec::new();
+            requirements
+                .try_reserve_exact(requirement_count)
                 .map_err(|_| allocation_failure(None))?;
+            for (index, (&left_arg, &right_arg)) in left.args.iter().zip(&right.args).enumerate() {
+                if left_arg != right_arg {
+                    requirements.push((
+                        ArgumentIndex::new(to_u32(index, None)?),
+                        normalized_equality(left_arg, right_arg),
+                    ));
+                }
+            }
+            if requirements.len() != requirement_count || requirements.is_empty() {
+                return Err(internal_invariant(None));
+            }
             application_pairs.push(ApplicationPair {
                 applications: [ApplicationId::new(left_id), ApplicationId::new(right_id)],
                 requirements,
             });
         }
     }
-
-    let pair_count = to_u64(application_pairs.len(), None)?;
-    counters.input.application_pairs = pair_count;
-    counters.input.maximum_arity = maximum_arity;
-    counters.input.application_argument_slots = argument_slots;
-
-    check_static_cap(
-        CapReason::ApplicationPairs,
-        pair_count,
-        limits.application_pairs,
-    )?;
-    check_static_cap(CapReason::MaximumArity, maximum_arity, limits.maximum_arity)?;
-    check_static_cap(
-        CapReason::ApplicationArgumentSlots,
-        argument_slots,
-        limits.application_argument_slots,
-    )?;
-
-    let initial_logical_memory =
-        logical_memory(0, 0, 0, 0, 0, 0, 0, pair_count, argument_slots, None)?;
-    check_static_cap(
-        CapReason::LogicalIncrementalMemoryBytes,
-        initial_logical_memory,
-        limits.logical_incremental_memory_bytes,
-    )?;
-
-    Ok(PreparedInput {
-        counters: counters.input,
-        application_pairs,
-        initial_logical_memory,
-    })
+    Ok(application_pairs)
 }
 
 fn validate_clause_store(input: EqresInput<'_>) -> Result<(), CompilerFailure> {
@@ -2413,6 +2492,31 @@ impl<'a> Compiler<'a> {
             )
         };
         self.check_final_limits(emitted, slots, p95, maximum)?;
+        self.commit_final_output_with(
+            retained,
+            emitted,
+            slots,
+            p95,
+            maximum,
+            mechanism_count,
+            materialize_output_candidates,
+        )
+    }
+
+    fn commit_final_output_with<F>(
+        &mut self,
+        retained: Vec<OutputCandidate>,
+        emitted: u64,
+        slots: u64,
+        p95: u64,
+        maximum: u64,
+        mechanism_count: u64,
+        materialize: F,
+    ) -> Result<EqresOutput, CompilerFailure>
+    where
+        F: FnOnce(Vec<OutputCandidate>) -> Result<EqresOutput, CompilerFailure>,
+    {
+        let output = materialize(retained)?;
         self.counters.output.emitted_lemmas = emitted;
         self.counters.output.emitted_literal_slots = slots;
         self.counters.output.emitted_p95_width = p95;
@@ -2420,21 +2524,7 @@ impl<'a> Compiler<'a> {
         self.counters
             .output
             .emitted_with_missing_equality_congruence = mechanism_count;
-
-        if retained.is_empty() {
-            return Ok(EqresOutput::NoLemmas);
-        }
-        let mut lemmas = Vec::new();
-        lemmas
-            .try_reserve(retained.len())
-            .map_err(|_| allocation_failure(None))?;
-        for candidate in retained {
-            lemmas.push(EmittedLemma {
-                source_clause_id: candidate.source_clause_id,
-                clause: candidate.clause,
-            });
-        }
-        Ok(EqresOutput::Lemmas(lemmas.into_boxed_slice()))
+        Ok(output)
     }
 
     fn check_final_limits(
@@ -2541,6 +2631,25 @@ impl<'a> Compiler<'a> {
             hashes: self.input_hashes,
         }
     }
+}
+
+fn materialize_output_candidates(
+    retained: Vec<OutputCandidate>,
+) -> Result<EqresOutput, CompilerFailure> {
+    if retained.is_empty() {
+        return Ok(EqresOutput::NoLemmas);
+    }
+    let mut lemmas = Vec::new();
+    lemmas
+        .try_reserve_exact(retained.len())
+        .map_err(|_| allocation_failure(None))?;
+    for candidate in retained {
+        lemmas.push(EmittedLemma {
+            source_clause_id: candidate.source_clause_id,
+            clause: candidate.clause,
+        });
+    }
+    Ok(EqresOutput::Lemmas(lemmas.into_boxed_slice()))
 }
 
 fn contains_endpoint(equality: EqualityKey, term: TermId) -> bool {
@@ -3220,6 +3329,7 @@ fn hash_trace(trace: &[TraceRecord]) -> Sha256Digest {
                     hash_u32(hash, record.clause_id.get());
                     hash_u32(hash, record.depth.get());
                     hash_clause(hash, &record.clause);
+                    hash_u8(hash, RuleKind::Conflict as u8);
                     hash_u32(hash, record.rule.equality_parent.get());
                     hash_clause_ref(hash, record.rule.negative_source);
                 }
@@ -3821,6 +3931,84 @@ mod tests {
             CompilerStatus::Completed(output) => panic!("unexpected completion: {output:?}"),
             CompilerStatus::Rejected(failure) => panic!("unexpected failure: {failure:?}"),
         }
+    }
+
+    #[test]
+    fn static_application_caps_precede_pair_materialization() {
+        use std::cell::Cell;
+
+        let mut builder = FixtureBuilder::new();
+        let left = builder.constant();
+        let right = builder.constant();
+        builder.unary_pair(left, right);
+        let fixture = builder.build();
+
+        for (configure, expected) in [
+            (
+                (
+                    0,
+                    CompilerLimits::FROZEN.maximum_arity,
+                    CompilerLimits::FROZEN.application_argument_slots,
+                ),
+                CapReason::ApplicationPairs,
+            ),
+            (
+                (
+                    CompilerLimits::FROZEN.application_pairs,
+                    0,
+                    CompilerLimits::FROZEN.application_argument_slots,
+                ),
+                CapReason::MaximumArity,
+            ),
+            (
+                (
+                    CompilerLimits::FROZEN.application_pairs,
+                    CompilerLimits::FROZEN.maximum_arity,
+                    0,
+                ),
+                CapReason::ApplicationArgumentSlots,
+            ),
+        ] {
+            let mut limits = CompilerLimits::FROZEN;
+            limits.application_pairs = configure.0;
+            limits.maximum_arity = configure.1;
+            limits.application_argument_slots = configure.2;
+            let materializer_called = Cell::new(false);
+            let mut counters = DeterministicCounters::default();
+            let result =
+                validate_and_prepare_with(fixture.input(), limits, &mut counters, |_, _| {
+                    materializer_called.set(true);
+                    Err(allocation_failure(None))
+                });
+            assert!(!materializer_called.get());
+            assert_eq!(counters.input.application_pairs, 1);
+            assert_eq!(counters.input.maximum_arity, 1);
+            assert_eq!(counters.input.application_argument_slots, 1);
+            match result {
+                Err(CompilerFailure::Cap(attempt)) => {
+                    assert_eq!(attempt.reason, expected);
+                    assert_eq!(attempt.boundary, CapBoundary::StaticInput);
+                }
+                other => panic!("unexpected static application result: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn failed_final_materialization_does_not_commit_output_counters() {
+        let mut builder = FixtureBuilder::new();
+        builder.constant();
+        let fixture = builder.build();
+        let mut compiler = compiler_for(&fixture, CompilerVariant::Ordinary);
+        let before = compiler.counters.output;
+
+        let result = compiler
+            .commit_final_output_with(Vec::new(), 0, 0, 0, 0, 0, |_| Err(allocation_failure(None)));
+        assert!(matches!(
+            result,
+            Err(CompilerFailure::AllocationFailure { event_id: None })
+        ));
+        assert_eq!(compiler.counters.output, before);
     }
 
     #[test]

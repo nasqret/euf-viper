@@ -83,7 +83,7 @@ impl ApplicationId {
 /// keeps normalization inside the compiler and checker independently while
 /// making every stored key satisfy `left <= right`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct EqualityKey {
     left: TermId,
     right: TermId,
@@ -115,11 +115,42 @@ impl EqualityKey {
     }
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for EqualityKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct EqualityKeyWire {
+            left: TermId,
+            right: TermId,
+        }
+
+        let wire = EqualityKeyWire::deserialize(deserializer)?;
+        Self::from_normalized(wire.left, wire.right)
+            .ok_or_else(|| serde::de::Error::custom("equality key endpoints must be normalized"))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CanonicalClauseError {
     ZeroLiteral,
+    InvalidLiteral,
     NotStrictlySorted,
     ComplementaryLiterals,
+}
+
+impl fmt::Display for CanonicalClauseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::ZeroLiteral => "canonical clause contains literal zero",
+            Self::InvalidLiteral => "canonical clause contains an invalid signed literal",
+            Self::NotStrictlySorted => "canonical clause literals are not strictly sorted",
+            Self::ComplementaryLiterals => "canonical clause contains complementary literals",
+        })
+    }
 }
 
 /// A side clause or conflict clause in frozen signed-`i32` order.
@@ -127,33 +158,13 @@ pub(crate) enum CanonicalClauseError {
 /// The boxed slice prevents capacity or insertion-order details from becoming
 /// part of the shared representation. Construction validates but never sorts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 #[cfg_attr(feature = "certificates", serde(transparent))]
 pub(crate) struct CanonicalClause(Box<[i32]>);
 
 impl CanonicalClause {
     pub(crate) fn from_sorted(literals: Vec<i32>) -> Result<Self, CanonicalClauseError> {
-        if literals.contains(&0) {
-            return Err(CanonicalClauseError::ZeroLiteral);
-        }
-        if literals.windows(2).any(|pair| pair[0] >= pair[1]) {
-            return Err(CanonicalClauseError::NotStrictlySorted);
-        }
-
-        let first_positive = literals.partition_point(|&literal| literal < 0);
-        let mut negative_end = first_positive;
-        let mut positive = first_positive;
-        while negative_end > 0 && positive < literals.len() {
-            let negative_variable = literals[negative_end - 1].unsigned_abs();
-            let positive_variable = literals[positive] as u32;
-            match negative_variable.cmp(&positive_variable) {
-                std::cmp::Ordering::Less => negative_end -= 1,
-                std::cmp::Ordering::Greater => positive += 1,
-                std::cmp::Ordering::Equal => {
-                    return Err(CanonicalClauseError::ComplementaryLiterals);
-                }
-            }
-        }
+        validate_canonical_clause_literals(&literals)?;
 
         Ok(Self(literals.into_boxed_slice()))
     }
@@ -172,6 +183,45 @@ impl CanonicalClause {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+fn validate_canonical_clause_literals(literals: &[i32]) -> Result<(), CanonicalClauseError> {
+    if literals.contains(&0) {
+        return Err(CanonicalClauseError::ZeroLiteral);
+    }
+    if literals.contains(&i32::MIN) {
+        return Err(CanonicalClauseError::InvalidLiteral);
+    }
+    if literals.windows(2).any(|pair| pair[0] >= pair[1]) {
+        return Err(CanonicalClauseError::NotStrictlySorted);
+    }
+
+    let first_positive = literals.partition_point(|&literal| literal < 0);
+    let mut negative_end = first_positive;
+    let mut positive = first_positive;
+    while negative_end > 0 && positive < literals.len() {
+        let negative_variable = literals[negative_end - 1].unsigned_abs();
+        let positive_variable = literals[positive] as u32;
+        match negative_variable.cmp(&positive_variable) {
+            std::cmp::Ordering::Less => negative_end -= 1,
+            std::cmp::Ordering::Greater => positive += 1,
+            std::cmp::Ordering::Equal => {
+                return Err(CanonicalClauseError::ComplementaryLiterals);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for CanonicalClause {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let literals = Vec::<i32>::deserialize(deserializer)?;
+        Self::from_sorted(literals).map_err(serde::de::Error::custom)
     }
 }
 
@@ -390,18 +440,30 @@ pub(crate) enum EqresOutput {
     NoLemmas,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum MaterializedClauseStoreError {
     MissingInitialOffset,
     NonMonotoneOffsets,
     FinalOffsetMismatch,
 }
 
+impl fmt::Display for MaterializedClauseStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingInitialOffset => "materialized clause offsets must start at zero",
+            Self::NonMonotoneOffsets => "materialized clause offsets must be monotone",
+            Self::FinalOffsetMismatch => {
+                "materialized clause final offset must equal the literal count"
+            }
+        })
+    }
+}
+
 /// Exact clause bytes exported by projection and consumed by a later SAT
 /// loader. Construction validates the flat-store shape but deliberately does
 /// not canonicalize, reorder, or deduplicate clauses.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct MaterializedClauseStore {
     end_offsets: Box<[u32]>,
     literals: Box<[i32]>,
@@ -412,15 +474,7 @@ impl MaterializedClauseStore {
         end_offsets: Vec<u32>,
         literals: Vec<i32>,
     ) -> Result<Self, MaterializedClauseStoreError> {
-        if end_offsets.first() != Some(&0) {
-            return Err(MaterializedClauseStoreError::MissingInitialOffset);
-        }
-        if end_offsets.windows(2).any(|bounds| bounds[0] > bounds[1]) {
-            return Err(MaterializedClauseStoreError::NonMonotoneOffsets);
-        }
-        if end_offsets.last().copied().map(u64::from) != u64::try_from(literals.len()).ok() {
-            return Err(MaterializedClauseStoreError::FinalOffsetMismatch);
-        }
+        validate_materialized_clause_store_shape(&end_offsets, literals.len())?;
         Ok(Self {
             end_offsets: end_offsets.into_boxed_slice(),
             literals: literals.into_boxed_slice(),
@@ -458,6 +512,40 @@ impl MaterializedClauseStore {
             end_offsets: end_offsets.into_boxed_slice(),
             literals: literals.into_boxed_slice(),
         }
+    }
+}
+
+fn validate_materialized_clause_store_shape(
+    end_offsets: &[u32],
+    literal_count: usize,
+) -> Result<(), MaterializedClauseStoreError> {
+    if end_offsets.first() != Some(&0) {
+        return Err(MaterializedClauseStoreError::MissingInitialOffset);
+    }
+    if end_offsets.windows(2).any(|bounds| bounds[0] > bounds[1]) {
+        return Err(MaterializedClauseStoreError::NonMonotoneOffsets);
+    }
+    if end_offsets.last().copied().map(u64::from) != u64::try_from(literal_count).ok() {
+        return Err(MaterializedClauseStoreError::FinalOffsetMismatch);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for MaterializedClauseStore {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct MaterializedClauseStoreWire {
+            end_offsets: Vec<u32>,
+            literals: Vec<i32>,
+        }
+
+        let wire = MaterializedClauseStoreWire::deserialize(deserializer)?;
+        Self::from_parts(wire.end_offsets, wire.literals).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1003,6 +1091,112 @@ pub(crate) struct EqresReport {
     pub(crate) hashes: HashBindings,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum EqresBundleStructureError {
+    InvalidMaterializedStore(MaterializedClauseStoreError),
+    InvalidSelectorState,
+    InvalidCompilerState,
+    InvalidCheckerState,
+    NonCanonicalTrace,
+    InvalidTraceOrder,
+    TraceCounterMismatch,
+    NonCanonicalOutput,
+    InvalidOutputShape,
+    OutputCounterMismatch,
+    MaterializedOutputMismatch,
+    CheckerReplayCountMismatch,
+    ReportSchemaMismatch,
+    ReportSelectorMismatch,
+    ReportCompilerVariantMismatch,
+    ReportCounterMismatch,
+    ReportCheckerCounterMismatch,
+    ReportCapAttemptMismatch,
+    ReportOutcomeMismatch,
+    ReportHashMismatch,
+    CompilerCheckerHashMismatch,
+    ReportIntegrityMismatch,
+    CounterOverflow,
+}
+
+impl fmt::Display for EqresBundleStructureError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidMaterializedStore(error) => write!(formatter, "{error}"),
+            Self::InvalidSelectorState => formatter.write_str("selector state is incoherent"),
+            Self::InvalidCompilerState => formatter.write_str("compiler state is incoherent"),
+            Self::InvalidCheckerState => formatter.write_str("checker state is incoherent"),
+            Self::NonCanonicalTrace => {
+                formatter.write_str("trace contains a noncanonical key or clause")
+            }
+            Self::InvalidTraceOrder => formatter.write_str("trace order is invalid"),
+            Self::TraceCounterMismatch => {
+                formatter.write_str("compiler trace counters do not match the sealed trace")
+            }
+            Self::NonCanonicalOutput => {
+                formatter.write_str("compiler output is not in canonical order")
+            }
+            Self::InvalidOutputShape => formatter.write_str("compiler output shape is invalid"),
+            Self::OutputCounterMismatch => {
+                formatter.write_str("compiler output counters do not match the sealed output")
+            }
+            Self::MaterializedOutputMismatch => formatter
+                .write_str("materialized clause store does not exactly match compiler output"),
+            Self::CheckerReplayCountMismatch => {
+                formatter.write_str("checker replay counters do not match trace and output")
+            }
+            Self::ReportSchemaMismatch => formatter.write_str("report schema version is invalid"),
+            Self::ReportSelectorMismatch => {
+                formatter.write_str("report selector does not match bundle selector")
+            }
+            Self::ReportCompilerVariantMismatch => {
+                formatter.write_str("report compiler variant does not match compiler result")
+            }
+            Self::ReportCounterMismatch => {
+                formatter.write_str("report compiler counters do not match compiler result")
+            }
+            Self::ReportCheckerCounterMismatch => {
+                formatter.write_str("report checker counters do not match checker result")
+            }
+            Self::ReportCapAttemptMismatch => {
+                formatter.write_str("report cap attempt does not match compiler status")
+            }
+            Self::ReportOutcomeMismatch => {
+                formatter.write_str("report outcome does not match pipeline status")
+            }
+            Self::ReportHashMismatch => {
+                formatter.write_str("report hashes do not match compiler hashes")
+            }
+            Self::CompilerCheckerHashMismatch => {
+                formatter.write_str("accepted checker hashes do not match compiler hashes")
+            }
+            Self::ReportIntegrityMismatch => {
+                formatter.write_str("report integrity flags contradict pipeline state")
+            }
+            Self::CounterOverflow => {
+                formatter.write_str("decoded structure exceeds representable counters")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TraceStructureSummary {
+    accepted_events: RuleCounters,
+    equality_nodes: u64,
+    conflict_clauses: u64,
+    proof_parent_references: u64,
+    maximum_proof_depth: u64,
+    trace_literal_slots: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct OutputStructureSummary {
+    emitted_lemmas: u64,
+    emitted_literal_slots: u64,
+    emitted_p95_width: u64,
+    emitted_maximum_width: u64,
+}
+
 /// Compiler output and independent replay are kept side by side rather than
 /// allowing the checker to mutate or replace compiler-owned records.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1035,10 +1229,422 @@ impl EqresBundle {
     pub(crate) fn materialized_lemmas(&self) -> &MaterializedClauseStore {
         &self.materialized_lemmas
     }
+
+    pub(crate) fn validate_structure(&self) -> Result<(), EqresBundleStructureError> {
+        validate_materialized_clause_store_shape(
+            self.materialized_lemmas.end_offsets(),
+            self.materialized_lemmas.literals().len(),
+        )
+        .map_err(EqresBundleStructureError::InvalidMaterializedStore)?;
+
+        validate_selector_and_execution_state(self)?;
+        let trace = validate_trace_structure(&self.compiler)?;
+        let output = validate_output_structure(&self.compiler)?;
+        validate_materialized_output(self)?;
+        validate_checker_structure(self, trace, output)?;
+        validate_report_structure(self)?;
+        Ok(())
+    }
+}
+
+fn validate_selector_and_execution_state(
+    bundle: &EqresBundle,
+) -> Result<(), EqresBundleStructureError> {
+    match (bundle.selector.mode, bundle.selector.decision) {
+        (EqresMode::Off, SelectorDecision::Rejected(SelectorRejection::ModeOff)) => {}
+        (EqresMode::Off, _)
+        | (EqresMode::CliqueErAuto, SelectorDecision::Rejected(SelectorRejection::ModeOff)) => {
+            return Err(EqresBundleStructureError::InvalidSelectorState);
+        }
+        (EqresMode::CliqueErAuto, _) => {}
+    }
+
+    match (&bundle.selector.decision, &bundle.compiler.status) {
+        (SelectorDecision::Selected, CompilerStatus::NotRun)
+        | (SelectorDecision::Rejected(_), CompilerStatus::Completed(_))
+        | (SelectorDecision::Rejected(_), CompilerStatus::Rejected(_)) => {
+            return Err(EqresBundleStructureError::InvalidCompilerState);
+        }
+        _ => {}
+    }
+
+    if matches!(bundle.compiler.status, CompilerStatus::NotRun) {
+        if !bundle.compiler.trace.is_empty()
+            || bundle.compiler.counters != DeterministicCounters::default()
+            || bundle.compiler.hashes != HashBindings::default()
+            || !matches!(bundle.checker.status, CheckerStatus::NotRun)
+            || bundle.checker.counters != CheckerCounters::default()
+            || bundle.checker.recomputed_hashes != HashBindings::default()
+            || bundle.materialized_lemmas.len() != 0
+        {
+            return Err(EqresBundleStructureError::InvalidCompilerState);
+        }
+    } else if matches!(bundle.checker.status, CheckerStatus::NotRun) {
+        return Err(EqresBundleStructureError::InvalidCheckerState);
+    }
+    Ok(())
+}
+
+fn validate_trace_structure(
+    compiler: &CompilerResult,
+) -> Result<TraceStructureSummary, EqresBundleStructureError> {
+    let mut summary = TraceStructureSummary::default();
+    let mut previous_event_id = None;
+
+    for record in &compiler.trace {
+        let (event_id, depth, clause, parent_references) = match record {
+            TraceRecord::Equality(record) => {
+                if record.conclusion.left > record.conclusion.right
+                    || validate_canonical_clause_literals(record.side_clause.as_slice()).is_err()
+                {
+                    return Err(EqresBundleStructureError::NonCanonicalTrace);
+                }
+                if record.node_id.get()
+                    != u32::try_from(summary.equality_nodes)
+                        .map_err(|_| EqresBundleStructureError::CounterOverflow)?
+                {
+                    return Err(EqresBundleStructureError::InvalidTraceOrder);
+                }
+                let (counter, parent_references) = match &record.rule {
+                    EqualityRuleRecord::Seed(_) => (&mut summary.accepted_events.seed, 0u64),
+                    EqualityRuleRecord::Reflexivity(_) => {
+                        (&mut summary.accepted_events.reflexivity, 0u64)
+                    }
+                    EqualityRuleRecord::Transitivity(transitivity) => {
+                        if transitivity.parents[0] > transitivity.parents[1] {
+                            return Err(EqresBundleStructureError::InvalidTraceOrder);
+                        }
+                        (&mut summary.accepted_events.transitivity, 2u64)
+                    }
+                    EqualityRuleRecord::Congruence(congruence) => {
+                        if congruence.applications[0].term() >= congruence.applications[1].term()
+                            || congruence
+                                .arguments
+                                .windows(2)
+                                .any(|pair| pair[0].argument_index >= pair[1].argument_index)
+                        {
+                            return Err(EqresBundleStructureError::InvalidTraceOrder);
+                        }
+                        (
+                            &mut summary.accepted_events.congruence,
+                            u64::try_from(congruence.arguments.len())
+                                .map_err(|_| EqresBundleStructureError::CounterOverflow)?,
+                        )
+                    }
+                };
+                *counter = counter
+                    .checked_add(1)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?;
+                summary.equality_nodes = summary
+                    .equality_nodes
+                    .checked_add(1)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?;
+                (
+                    record.event_id,
+                    record.depth,
+                    &record.side_clause,
+                    parent_references,
+                )
+            }
+            TraceRecord::Conflict(record) => {
+                if validate_canonical_clause_literals(record.clause.as_slice()).is_err() {
+                    return Err(EqresBundleStructureError::NonCanonicalTrace);
+                }
+                summary.accepted_events.conflict = summary
+                    .accepted_events
+                    .conflict
+                    .checked_add(1)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?;
+                summary.conflict_clauses = summary
+                    .conflict_clauses
+                    .checked_add(1)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?;
+                (record.event_id, record.depth, &record.clause, 1u64)
+            }
+        };
+
+        if previous_event_id.is_some_and(|previous| previous >= event_id.get())
+            || u64::from(event_id.get()) >= compiler.counters.search.events_popped
+        {
+            return Err(EqresBundleStructureError::InvalidTraceOrder);
+        }
+        previous_event_id = Some(event_id.get());
+        summary.proof_parent_references = summary
+            .proof_parent_references
+            .checked_add(parent_references)
+            .ok_or(EqresBundleStructureError::CounterOverflow)?;
+        summary.maximum_proof_depth = summary.maximum_proof_depth.max(u64::from(depth.get()));
+        summary.trace_literal_slots = summary
+            .trace_literal_slots
+            .checked_add(
+                u64::try_from(clause.len())
+                    .map_err(|_| EqresBundleStructureError::CounterOverflow)?,
+            )
+            .ok_or(EqresBundleStructureError::CounterOverflow)?;
+    }
+
+    let search = compiler.counters.search;
+    if search.accepted_events != summary.accepted_events
+        || search.accepted_equality_nodes != summary.equality_nodes
+        || search.accepted_conflict_clauses != summary.conflict_clauses
+        || search.proof_parent_references != summary.proof_parent_references
+        || search.maximum_proof_depth != summary.maximum_proof_depth
+        || search.accepted_trace_literal_slots != summary.trace_literal_slots
+    {
+        return Err(EqresBundleStructureError::TraceCounterMismatch);
+    }
+    Ok(summary)
+}
+
+fn validate_output_structure(
+    compiler: &CompilerResult,
+) -> Result<OutputStructureSummary, EqresBundleStructureError> {
+    let CompilerStatus::Completed(output) = &compiler.status else {
+        return Ok(OutputStructureSummary::default());
+    };
+
+    let mut summary = OutputStructureSummary::default();
+    match output {
+        EqresOutput::Lemmas(lemmas) => {
+            if lemmas.is_empty() {
+                return Err(EqresBundleStructureError::InvalidOutputShape);
+            }
+            for (index, lemma) in lemmas.iter().enumerate() {
+                if lemma.clause.is_empty() {
+                    return Err(EqresBundleStructureError::InvalidOutputShape);
+                }
+                if validate_canonical_clause_literals(lemma.clause.as_slice()).is_err() {
+                    return Err(EqresBundleStructureError::NonCanonicalOutput);
+                }
+                if index > 0 {
+                    let previous = &lemmas[index - 1].clause;
+                    if (previous.len(), previous) >= (lemma.clause.len(), &lemma.clause) {
+                        return Err(EqresBundleStructureError::NonCanonicalOutput);
+                    }
+                }
+                summary.emitted_literal_slots = summary
+                    .emitted_literal_slots
+                    .checked_add(
+                        u64::try_from(lemma.clause.len())
+                            .map_err(|_| EqresBundleStructureError::CounterOverflow)?,
+                    )
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?;
+            }
+            summary.emitted_lemmas = u64::try_from(lemmas.len())
+                .map_err(|_| EqresBundleStructureError::CounterOverflow)?;
+            summary.emitted_maximum_width = u64::try_from(
+                lemmas
+                    .last()
+                    .ok_or(EqresBundleStructureError::InvalidOutputShape)?
+                    .clause
+                    .len(),
+            )
+            .map_err(|_| EqresBundleStructureError::CounterOverflow)?;
+            let rank = summary
+                .emitted_lemmas
+                .checked_mul(95)
+                .and_then(|value| value.checked_add(99))
+                .ok_or(EqresBundleStructureError::CounterOverflow)?
+                / 100;
+            let percentile_index = usize::try_from(
+                rank.checked_sub(1)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?,
+            )
+            .map_err(|_| EqresBundleStructureError::CounterOverflow)?;
+            summary.emitted_p95_width = u64::try_from(
+                lemmas
+                    .get(percentile_index)
+                    .ok_or(EqresBundleStructureError::CounterOverflow)?
+                    .clause
+                    .len(),
+            )
+            .map_err(|_| EqresBundleStructureError::CounterOverflow)?;
+        }
+        EqresOutput::TheoryEmpty {
+            terminal_event_id,
+            lemma,
+        } => {
+            if !lemma.clause.is_empty() {
+                return Err(EqresBundleStructureError::InvalidOutputShape);
+            }
+            let Some(TraceRecord::Conflict(terminal)) = compiler.trace.last() else {
+                return Err(EqresBundleStructureError::InvalidOutputShape);
+            };
+            if terminal.event_id != *terminal_event_id
+                || terminal.clause_id != lemma.source_clause_id
+                || !terminal.clause.is_empty()
+            {
+                return Err(EqresBundleStructureError::InvalidOutputShape);
+            }
+            summary.emitted_lemmas = 1;
+        }
+        EqresOutput::NoLemmas => {}
+    }
+
+    let counters = compiler.counters.output;
+    if counters.emitted_lemmas != summary.emitted_lemmas
+        || counters.emitted_literal_slots != summary.emitted_literal_slots
+        || counters.emitted_p95_width != summary.emitted_p95_width
+        || counters.emitted_maximum_width != summary.emitted_maximum_width
+        || counters.emitted_with_missing_equality_congruence > summary.emitted_lemmas
+    {
+        return Err(EqresBundleStructureError::OutputCounterMismatch);
+    }
+    Ok(summary)
+}
+
+fn validate_materialized_output(bundle: &EqresBundle) -> Result<(), EqresBundleStructureError> {
+    let matches = match &bundle.compiler.status {
+        CompilerStatus::Completed(EqresOutput::Lemmas(lemmas)) => {
+            lemmas.len() == bundle.materialized_lemmas.len()
+                && lemmas.iter().enumerate().all(|(index, lemma)| {
+                    bundle.materialized_lemmas.clause(index) == Some(lemma.clause.as_slice())
+                })
+        }
+        CompilerStatus::Completed(EqresOutput::TheoryEmpty { lemma, .. }) => {
+            bundle.materialized_lemmas.len() == 1
+                && bundle.materialized_lemmas.clause(0) == Some(lemma.clause.as_slice())
+        }
+        CompilerStatus::Completed(EqresOutput::NoLemmas)
+        | CompilerStatus::NotRun
+        | CompilerStatus::Rejected(_) => bundle.materialized_lemmas.len() == 0,
+    };
+    if !matches {
+        return Err(EqresBundleStructureError::MaterializedOutputMismatch);
+    }
+    Ok(())
+}
+
+fn validate_checker_structure(
+    bundle: &EqresBundle,
+    trace: TraceStructureSummary,
+    output: OutputStructureSummary,
+) -> Result<(), EqresBundleStructureError> {
+    let counters = bundle.checker.counters;
+    let expected_emitted = if matches!(bundle.compiler.status, CompilerStatus::Completed(_)) {
+        output.emitted_lemmas
+    } else {
+        0
+    };
+    if counters.replayed_equality_nodes != trace.equality_nodes
+        || counters.replayed_conflict_clauses != trace.conflict_clauses
+        || counters.replayed_emitted_lemmas != expected_emitted
+    {
+        return Err(EqresBundleStructureError::CheckerReplayCountMismatch);
+    }
+
+    match &bundle.checker.status {
+        CheckerStatus::NotRun => {
+            if !matches!(bundle.compiler.status, CompilerStatus::NotRun)
+                || counters != CheckerCounters::default()
+                || bundle.checker.recomputed_hashes != HashBindings::default()
+            {
+                return Err(EqresBundleStructureError::InvalidCheckerState);
+            }
+        }
+        CheckerStatus::Accepted => {
+            if !matches!(bundle.compiler.status, CompilerStatus::Completed(_))
+                || counters.replay_failures != 0
+            {
+                return Err(EqresBundleStructureError::InvalidCheckerState);
+            }
+            if bundle.compiler.hashes != bundle.checker.recomputed_hashes {
+                return Err(EqresBundleStructureError::CompilerCheckerHashMismatch);
+            }
+        }
+        CheckerStatus::Rejected(failures) => {
+            if failures.is_empty()
+                || counters.replay_failures
+                    != u64::try_from(failures.len())
+                        .map_err(|_| EqresBundleStructureError::CounterOverflow)?
+            {
+                return Err(EqresBundleStructureError::InvalidCheckerState);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_report_structure(bundle: &EqresBundle) -> Result<(), EqresBundleStructureError> {
+    if bundle.report.schema_version != EQRES_SCHEMA_VERSION {
+        return Err(EqresBundleStructureError::ReportSchemaMismatch);
+    }
+    if bundle.report.selector != bundle.selector {
+        return Err(EqresBundleStructureError::ReportSelectorMismatch);
+    }
+    if bundle.report.compiler_variant != bundle.compiler.variant {
+        return Err(EqresBundleStructureError::ReportCompilerVariantMismatch);
+    }
+    if bundle.report.counters != bundle.compiler.counters {
+        return Err(EqresBundleStructureError::ReportCounterMismatch);
+    }
+    if bundle.report.checker_counters != bundle.checker.counters {
+        return Err(EqresBundleStructureError::ReportCheckerCounterMismatch);
+    }
+    if bundle.report.hashes != bundle.compiler.hashes {
+        return Err(EqresBundleStructureError::ReportHashMismatch);
+    }
+
+    let compiler_cap = match &bundle.compiler.status {
+        CompilerStatus::Rejected(CompilerFailure::Cap(attempt)) => Some(attempt),
+        _ => None,
+    };
+    if bundle.report.cap_attempt.as_ref() != compiler_cap {
+        return Err(EqresBundleStructureError::ReportCapAttemptMismatch);
+    }
+
+    let expected_outcome = if bundle.report.sat_calls != 0 {
+        ReportOutcome::Rejected
+    } else if bundle.selector.mode == EqresMode::Off {
+        ReportOutcome::Off
+    } else if bundle.selector.decision != SelectorDecision::Selected
+        || !matches!(bundle.checker.status, CheckerStatus::Accepted)
+    {
+        ReportOutcome::Rejected
+    } else {
+        match bundle.compiler.status {
+            CompilerStatus::Completed(EqresOutput::Lemmas(_)) => ReportOutcome::Lemmas,
+            CompilerStatus::Completed(EqresOutput::TheoryEmpty { .. }) => {
+                ReportOutcome::TheoryEmpty
+            }
+            CompilerStatus::Completed(EqresOutput::NoLemmas) => ReportOutcome::NoLemmas,
+            CompilerStatus::NotRun | CompilerStatus::Rejected(_) => ReportOutcome::Rejected,
+        }
+    };
+    if bundle.report.outcome != expected_outcome {
+        return Err(EqresBundleStructureError::ReportOutcomeMismatch);
+    }
+
+    let checker_accepted = matches!(bundle.checker.status, CheckerStatus::Accepted);
+    let hashes_agree = bundle.compiler.hashes == bundle.checker.recomputed_hashes;
+    let expected_baseline_unchanged = checker_accepted
+        && hashes_agree
+        && bundle.compiler.hashes.baseline_cnf_sha256 != Sha256Digest::ZERO
+        && bundle.compiler.hashes.atom_map_sha256 != Sha256Digest::ZERO
+        && bundle.compiler.hashes.baseline_problem_sha256 != Sha256Digest::ZERO;
+    let expected_trace_materialization = checker_accepted
+        && hashes_agree
+        && bundle.compiler.hashes.lemma_sequence_sha256
+            == bundle.compiler.hashes.materialized_lemmas_sha256;
+    let expected_compiler_checker_agree =
+        checker_accepted && hashes_agree && bundle.report.sat_calls == 0;
+    if bundle.report.integrity.baseline_unchanged != expected_baseline_unchanged
+        || bundle.report.integrity.trace_materialization_equal != expected_trace_materialization
+        || bundle.report.integrity.compiler_checker_agree != expected_compiler_checker_agree
+        || bundle.report.integrity.output_canonical != checker_accepted
+        || (bundle.report.integrity.off_path_unchanged
+            && (!matches!(bundle.compiler.status, CompilerStatus::NotRun)
+                || bundle.selector.decision == SelectorDecision::Selected))
+    {
+        return Err(EqresBundleStructureError::ReportIntegrityMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SatComponentError {
+    BundleStructure(EqresBundleStructureError),
+    ProjectionNotInternallyAccepted,
     ResultBeforeChecker,
     InvalidComponentInvariant,
     OutputComponentMismatch,
@@ -1047,6 +1653,63 @@ pub(crate) enum SatComponentError {
     KernelResultNotUnsat,
     InternalHashMismatch,
     MaterializedOutputMismatch,
+    MissingExactProjectionBundleDigest,
+    MissingExactAuditReceiptDigest,
+    ProjectionRecordDigestMismatch,
+    AuditReceiptDigestMismatch,
+    MissingExternalIdentity(HashArtifact),
+}
+
+impl fmt::Display for SatComponentError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BundleStructure(error) => {
+                write!(formatter, "invalid equality-resolution bundle: {error}")
+            }
+            Self::ProjectionNotInternallyAccepted => {
+                formatter.write_str("projection bundle is not internally accepted")
+            }
+            Self::ResultBeforeChecker => {
+                formatter.write_str("SAT result timestamp precedes checker completion")
+            }
+            Self::InvalidComponentInvariant => {
+                formatter.write_str("SAT component violates its variant invariant")
+            }
+            Self::OutputComponentMismatch => {
+                formatter.write_str("SAT component does not match the compiler output")
+            }
+            Self::NoRunnableOutput => formatter.write_str("compiler output is not runnable"),
+            Self::SatLoadMismatch => {
+                formatter.write_str("fresh SAT load does not match the sealed projection")
+            }
+            Self::KernelResultNotUnsat => {
+                formatter.write_str("fresh SAT session did not return UNSAT")
+            }
+            Self::InternalHashMismatch => {
+                formatter.write_str("internal artifact hash bindings do not agree")
+            }
+            Self::MaterializedOutputMismatch => {
+                formatter.write_str("sealed materialized output does not match compiler output")
+            }
+            Self::MissingExactProjectionBundleDigest => {
+                formatter.write_str("exact projection-bundle digest is zero")
+            }
+            Self::MissingExactAuditReceiptDigest => {
+                formatter.write_str("exact audit-receipt digest is zero")
+            }
+            Self::ProjectionRecordDigestMismatch => formatter
+                .write_str("projection-record digest does not bind the exact projection bundle"),
+            Self::AuditReceiptDigestMismatch => {
+                formatter.write_str("checker-record digest does not bind the exact audit receipt")
+            }
+            Self::MissingExternalIdentity(artifact) => {
+                write!(
+                    formatter,
+                    "required external identity is zero: {artifact:?}"
+                )
+            }
+        }
+    }
 }
 
 /// Exact no-SAT-session component for a checked theory-empty result.
@@ -1054,7 +1717,7 @@ pub(crate) enum SatComponentError {
 /// The zero-valued fields are private and can only be created by `new`, making
 /// `false/0/0/0/0` a representational invariant rather than a convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct TheoryEmptySatComponent {
     sat_session: bool,
     sat_calls: u64,
@@ -1113,6 +1776,40 @@ impl TheoryEmptySatComponent {
     }
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for TheoryEmptySatComponent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct TheoryEmptySatComponentWire {
+            sat_session: bool,
+            sat_calls: u64,
+            sat_variables_loaded: u64,
+            sat_clauses_loaded: u64,
+            load_solve_ns: u64,
+            checker_completed_ns: u64,
+            result_timestamp_ns: u64,
+        }
+
+        let wire = TheoryEmptySatComponentWire::deserialize(deserializer)?;
+        if wire.sat_session
+            || wire.sat_calls != 0
+            || wire.sat_variables_loaded != 0
+            || wire.sat_clauses_loaded != 0
+            || wire.load_solve_ns != 0
+        {
+            return Err(serde::de::Error::custom(
+                "theory-empty SAT component must contain exactly false/0/0/0/0",
+            ));
+        }
+        Self::new(wire.checker_completed_ns, wire.result_timestamp_ns)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
@@ -1125,7 +1822,7 @@ pub(crate) enum SatKernelResult {
 
 /// Exact fresh-session component for a nonempty checked lemma sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct FreshSatComponent {
     sat_session: bool,
     sat_calls: u64,
@@ -1194,10 +1891,47 @@ impl FreshSatComponent {
     }
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for FreshSatComponent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct FreshSatComponentWire {
+            sat_session: bool,
+            sat_calls: u64,
+            sat_variables_loaded: u64,
+            sat_clauses_loaded: u64,
+            load_solve_ns: u64,
+            result: SatKernelResult,
+            checker_completed_ns: u64,
+            result_timestamp_ns: u64,
+        }
+
+        let wire = FreshSatComponentWire::deserialize(deserializer)?;
+        if !wire.sat_session || wire.sat_calls != 1 {
+            return Err(serde::de::Error::custom(
+                "fresh SAT component must contain exactly true/1 session fields",
+            ));
+        }
+        Self::new(
+            wire.sat_variables_loaded,
+            wire.sat_clauses_loaded,
+            wire.load_solve_ns,
+            wire.result,
+            wire.checker_completed_ns,
+            wire.result_timestamp_ns,
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Disjoint SAT-layer states; neither variant contains nullable component
 /// values. Stage records must choose the variant matching `EqresOutput`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "sat_layer", content = "component", rename_all = "snake_case")
@@ -1207,36 +1941,176 @@ pub(crate) enum SatComponent {
     FreshSession(FreshSatComponent),
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for SatComponent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(
+            deny_unknown_fields,
+            tag = "sat_layer",
+            content = "component",
+            rename_all = "snake_case"
+        )]
+        enum SatComponentWire {
+            TheoryEmpty(TheoryEmptySatComponent),
+            FreshSession(FreshSatComponent),
+        }
+
+        match SatComponentWire::deserialize(deserializer)? {
+            SatComponentWire::TheoryEmpty(component) => Ok(Self::TheoryEmpty(component)),
+            SatComponentWire::FreshSession(component) => Ok(Self::FreshSession(component)),
+        }
+    }
+}
+
+/// Exact pre-run artifact identities and auditor-carried hash recomputation.
+///
+/// These fields provide structural binding only; artifact authenticity is an
+/// external publication and audit responsibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EqresRunBindings {
+    exact_projection_bundle_sha256: Sha256Digest,
+    exact_audit_receipt_sha256: Sha256Digest,
+    auditor_recomputed_hashes: HashBindings,
+}
+
+impl EqresRunBindings {
+    pub(crate) const fn new(
+        exact_projection_bundle_sha256: Sha256Digest,
+        exact_audit_receipt_sha256: Sha256Digest,
+        auditor_recomputed_hashes: HashBindings,
+    ) -> Self {
+        Self {
+            exact_projection_bundle_sha256,
+            exact_audit_receipt_sha256,
+            auditor_recomputed_hashes,
+        }
+    }
+}
+
+// Keep stale test-only call sites type-checking while making the old loose
+// binding path unconditionally fail validation. Production callers must pass
+// `EqresRunBindings` explicitly.
+#[cfg(test)]
+impl From<HashBindings> for EqresRunBindings {
+    fn from(auditor_recomputed_hashes: HashBindings) -> Self {
+        Self::new(
+            Sha256Digest::ZERO,
+            Sha256Digest::ZERO,
+            auditor_recomputed_hashes,
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct EqresRunRecord {
     bundle: EqresBundle,
     sat_component: SatComponent,
+    exact_projection_bundle_sha256: Sha256Digest,
+    exact_audit_receipt_sha256: Sha256Digest,
     hashes: HashBindings,
 }
 
 impl EqresRunRecord {
-    pub(crate) fn new(
+    pub(crate) fn new<B>(
         bundle: EqresBundle,
         sat_component: SatComponent,
-        hashes: HashBindings,
-    ) -> Result<Self, SatComponentError> {
+        bindings: B,
+    ) -> Result<Self, SatComponentError>
+    where
+        B: Into<EqresRunBindings>,
+    {
+        let bindings = bindings.into();
         let record = Self {
             bundle,
             sat_component,
-            hashes,
+            exact_projection_bundle_sha256: bindings.exact_projection_bundle_sha256,
+            exact_audit_receipt_sha256: bindings.exact_audit_receipt_sha256,
+            hashes: bindings.auditor_recomputed_hashes,
         };
         record.validate()?;
         Ok(record)
     }
 
     pub(crate) fn validate(&self) -> Result<(), SatComponentError> {
-        if !internal_hashes_match(self.hashes, self.bundle.compiler.hashes)
-            || self.bundle.compiler.hashes != self.bundle.checker.recomputed_hashes
-            || self.bundle.report.hashes != self.bundle.compiler.hashes
+        self.bundle
+            .validate_structure()
+            .map_err(SatComponentError::BundleStructure)?;
+
+        let expected_integrity = IntegrityReport {
+            baseline_unchanged: true,
+            trace_materialization_equal: true,
+            compiler_checker_agree: true,
+            output_canonical: true,
+            external_audit_accepted: false,
+            off_path_unchanged: false,
+        };
+        if self.bundle.selector.mode != EqresMode::CliqueErAuto
+            || self.bundle.selector.decision != SelectorDecision::Selected
+            || self.bundle.report.sat_calls != 0
+            || self.bundle.report.cap_attempt.is_some()
+            || self.bundle.report.forbidden_growth != ForbiddenGrowthCounters::default()
+            || self.bundle.report.integrity != expected_integrity
+            || self
+                .bundle
+                .compiler
+                .counters
+                .output
+                .emitted_with_missing_equality_congruence
+                == 0
             || !matches!(self.bundle.checker.status, CheckerStatus::Accepted)
+            || self.bundle.checker.counters.replay_failures != 0
+        {
+            return Err(SatComponentError::ProjectionNotInternallyAccepted);
+        }
+
+        if self.exact_projection_bundle_sha256 == Sha256Digest::ZERO {
+            return Err(SatComponentError::MissingExactProjectionBundleDigest);
+        }
+        if self.exact_audit_receipt_sha256 == Sha256Digest::ZERO {
+            return Err(SatComponentError::MissingExactAuditReceiptDigest);
+        }
+        if !internal_hashes_match(self.hashes, self.bundle.compiler.hashes)
+            || !internal_hashes_match(self.hashes, self.bundle.checker.recomputed_hashes)
+            || !internal_hashes_match(self.hashes, self.bundle.report.hashes)
+            || !internal_hashes_nonzero(self.hashes)
         {
             return Err(SatComponentError::InternalHashMismatch);
+        }
+        for (artifact, digest) in [
+            (
+                HashArtifact::CandidateBinary,
+                self.hashes.candidate_binary_sha256,
+            ),
+            (HashArtifact::Revision, self.hashes.revision_sha256),
+            (
+                HashArtifact::CorpusManifest,
+                self.hashes.corpus_manifest_sha256,
+            ),
+            (
+                HashArtifact::ProjectionRecord,
+                self.hashes.projection_record_sha256,
+            ),
+            (
+                HashArtifact::CheckerRecord,
+                self.hashes.checker_record_sha256,
+            ),
+        ] {
+            if digest == Sha256Digest::ZERO {
+                return Err(SatComponentError::MissingExternalIdentity(artifact));
+            }
+        }
+        // Observation and DRAT identities may depend on the completed run and
+        // are intentionally not mandatory at this construction boundary.
+        if self.hashes.projection_record_sha256 != self.exact_projection_bundle_sha256 {
+            return Err(SatComponentError::ProjectionRecordDigestMismatch);
+        }
+        if self.hashes.checker_record_sha256 != self.exact_audit_receipt_sha256 {
+            return Err(SatComponentError::AuditReceiptDigestMismatch);
         }
 
         match (&self.bundle.compiler.status, self.sat_component) {
@@ -1319,22 +2193,72 @@ impl EqresRunRecord {
         self.sat_component
     }
 
+    pub(crate) const fn exact_projection_bundle_sha256(&self) -> Sha256Digest {
+        self.exact_projection_bundle_sha256
+    }
+
+    pub(crate) const fn exact_audit_receipt_sha256(&self) -> Sha256Digest {
+        self.exact_audit_receipt_sha256
+    }
+
     pub(crate) const fn hashes(&self) -> HashBindings {
         self.hashes
     }
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for EqresRunRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct EqresRunRecordWire {
+            bundle: EqresBundle,
+            sat_component: SatComponent,
+            exact_projection_bundle_sha256: Sha256Digest,
+            exact_audit_receipt_sha256: Sha256Digest,
+            hashes: HashBindings,
+        }
+
+        let wire = EqresRunRecordWire::deserialize(deserializer)?;
+        Self::new(
+            wire.bundle,
+            wire.sat_component,
+            EqresRunBindings::new(
+                wire.exact_projection_bundle_sha256,
+                wire.exact_audit_receipt_sha256,
+                wire.hashes,
+            ),
+        )
+        .map_err(serde::de::Error::custom)
+    }
+}
+
 fn internal_hashes_match(left: HashBindings, right: HashBindings) -> bool {
-    left.source_sha256 == right.source_sha256
-        && left.root_cnf_mode_sha256 == right.root_cnf_mode_sha256
-        && left.term_dag_sha256 == right.term_dag_sha256
-        && left.atom_map_sha256 == right.atom_map_sha256
-        && left.baseline_cnf_sha256 == right.baseline_cnf_sha256
-        && left.baseline_problem_sha256 == right.baseline_problem_sha256
-        && left.trace_sha256 == right.trace_sha256
-        && left.lemma_sequence_sha256 == right.lemma_sequence_sha256
-        && left.materialized_lemmas_sha256 == right.materialized_lemmas_sha256
-        && left.materialized_candidate_sha256 == right.materialized_candidate_sha256
+    internal_hashes(left) == internal_hashes(right)
+}
+
+fn internal_hashes_nonzero(hashes: HashBindings) -> bool {
+    internal_hashes(hashes)
+        .into_iter()
+        .all(|digest| digest != Sha256Digest::ZERO)
+}
+
+fn internal_hashes(hashes: HashBindings) -> [Sha256Digest; 10] {
+    [
+        hashes.source_sha256,
+        hashes.root_cnf_mode_sha256,
+        hashes.term_dag_sha256,
+        hashes.atom_map_sha256,
+        hashes.baseline_cnf_sha256,
+        hashes.baseline_problem_sha256,
+        hashes.trace_sha256,
+        hashes.lemma_sequence_sha256,
+        hashes.materialized_lemmas_sha256,
+        hashes.materialized_candidate_sha256,
+    ]
 }
 
 #[cfg(test)]
@@ -1355,6 +2279,178 @@ mod tests {
             source: None,
             parents: Box::new([]),
         }
+    }
+
+    fn digest(byte: u8) -> Sha256Digest {
+        Sha256Digest::new([byte; 32])
+    }
+
+    fn internal_bindings() -> HashBindings {
+        let internal = digest(1);
+        HashBindings {
+            source_sha256: internal,
+            root_cnf_mode_sha256: internal,
+            term_dag_sha256: internal,
+            atom_map_sha256: internal,
+            baseline_cnf_sha256: internal,
+            baseline_problem_sha256: internal,
+            trace_sha256: internal,
+            lemma_sequence_sha256: internal,
+            materialized_lemmas_sha256: internal,
+            materialized_candidate_sha256: internal,
+            ..HashBindings::default()
+        }
+    }
+
+    fn selected_selector() -> SelectorReport {
+        SelectorReport {
+            mode: EqresMode::CliqueErAuto,
+            facts: SelectorFacts {
+                finite_added_clauses: 0,
+                covered_finite_terms: 0,
+                closed_table_functions: 0,
+                all_different_clique_lower_bound: 0,
+                disequality_graph_edges: 0,
+                equality_graph_vertices: 0,
+                equality_graph_edges: 0,
+                applications: 0,
+                boolean_valued_application_pairs: 0,
+                backend: SolverBackend::Kissat,
+            },
+            decision: SelectorDecision::Selected,
+        }
+    }
+
+    fn accepted_bundle(theory_empty: bool) -> EqresBundle {
+        let source_clause_id = ClauseId::new(11);
+        let output_clause = if theory_empty {
+            CanonicalClause::empty()
+        } else {
+            clause(&[2])
+        };
+        let trace: Box<[TraceRecord]> = Box::new([
+            TraceRecord::Equality(EqualityTraceRecord {
+                event_id: EventId::new(0),
+                node_id: NodeId::new(0),
+                depth: ProofDepth::new(0),
+                conclusion: EqualityKey::from_normalized(0, 0).unwrap(),
+                side_clause: CanonicalClause::empty(),
+                rule: EqualityRuleRecord::Reflexivity(ReflexivityRecord { term: 0 }),
+            }),
+            TraceRecord::Conflict(ConflictTraceRecord {
+                event_id: EventId::new(1),
+                clause_id: source_clause_id,
+                depth: ProofDepth::new(0),
+                clause: output_clause.clone(),
+                rule: ConflictRecord {
+                    equality_parent: NodeId::new(0),
+                    negative_source: ClausePivot {
+                        clause: ClauseRef {
+                            id: ClauseId::new(0),
+                            origin: ClauseOrigin::Baseline,
+                        },
+                        literal_offset: LiteralOffset::new(0),
+                    },
+                },
+            }),
+        ]);
+        let output = if theory_empty {
+            EqresOutput::TheoryEmpty {
+                terminal_event_id: EventId::new(1),
+                lemma: EmittedLemma {
+                    source_clause_id,
+                    clause: output_clause.clone(),
+                },
+            }
+        } else {
+            EqresOutput::Lemmas(Box::new([EmittedLemma {
+                source_clause_id,
+                clause: output_clause.clone(),
+            }]))
+        };
+        let width = u64::try_from(output_clause.len()).unwrap();
+        let mut counters = DeterministicCounters::default();
+        counters.input.baseline_variables = 7;
+        counters.input.baseline_clauses = 11;
+        counters.search.accepted_events.reflexivity = 1;
+        counters.search.accepted_events.conflict = 1;
+        counters.search.events_popped = 2;
+        counters.search.accepted_equality_nodes = 1;
+        counters.search.accepted_conflict_clauses = 1;
+        counters.search.proof_parent_references = 1;
+        counters.search.accepted_trace_literal_slots = width;
+        counters.output = OutputCounters {
+            emitted_lemmas: 1,
+            emitted_literal_slots: width,
+            emitted_p95_width: width,
+            emitted_maximum_width: width,
+            emitted_with_missing_equality_congruence: 1,
+        };
+        let hashes = internal_bindings();
+        let selector = selected_selector();
+        let compiler = CompilerResult {
+            variant: CompilerVariant::Ordinary,
+            status: CompilerStatus::Completed(output),
+            trace,
+            counters,
+            hashes,
+        };
+        let checker = CheckerResult {
+            status: CheckerStatus::Accepted,
+            counters: CheckerCounters {
+                replayed_equality_nodes: 1,
+                replayed_conflict_clauses: 1,
+                replayed_emitted_lemmas: 1,
+                replay_failures: 0,
+            },
+            recomputed_hashes: hashes,
+        };
+        let materialized_lemmas = MaterializedClauseStore::from_parts(
+            vec![0, u32::try_from(output_clause.len()).unwrap()],
+            output_clause.as_slice().to_vec(),
+        )
+        .unwrap();
+        let report = EqresReport {
+            schema_version: EQRES_SCHEMA_VERSION,
+            selector,
+            compiler_variant: compiler.variant,
+            outcome: if theory_empty {
+                ReportOutcome::TheoryEmpty
+            } else {
+                ReportOutcome::Lemmas
+            },
+            counters,
+            checker_counters: checker.counters,
+            cap_attempt: None,
+            forbidden_growth: ForbiddenGrowthCounters::default(),
+            integrity: IntegrityReport {
+                baseline_unchanged: true,
+                trace_materialization_equal: true,
+                compiler_checker_agree: true,
+                output_canonical: true,
+                external_audit_accepted: false,
+                off_path_unchanged: false,
+            },
+            sat_calls: 0,
+            hashes,
+        };
+        EqresBundle::new(selector, compiler, materialized_lemmas, checker, report)
+    }
+
+    fn run_bindings(bundle: &EqresBundle) -> EqresRunBindings {
+        let exact_projection_bundle_sha256 = digest(101);
+        let exact_audit_receipt_sha256 = digest(102);
+        let mut hashes = bundle.compiler.hashes;
+        hashes.candidate_binary_sha256 = digest(103);
+        hashes.revision_sha256 = digest(104);
+        hashes.corpus_manifest_sha256 = digest(105);
+        hashes.projection_record_sha256 = exact_projection_bundle_sha256;
+        hashes.checker_record_sha256 = exact_audit_receipt_sha256;
+        EqresRunBindings::new(
+            exact_projection_bundle_sha256,
+            exact_audit_receipt_sha256,
+            hashes,
+        )
     }
 
     #[test]
@@ -1408,6 +2504,10 @@ mod tests {
         assert_eq!(
             CanonicalClause::from_sorted(vec![-2, 0, 3]),
             Err(CanonicalClauseError::ZeroLiteral)
+        );
+        assert_eq!(
+            CanonicalClause::from_sorted(vec![i32::MIN]),
+            Err(CanonicalClauseError::InvalidLiteral)
         );
         assert_eq!(
             CanonicalClause::from_sorted(vec![2, 1]),
@@ -1512,6 +2612,283 @@ mod tests {
             MaterializedClauseStore::from_parts(vec![0, 2], vec![1]),
             Err(MaterializedClauseStoreError::FinalOffsetMismatch)
         );
+    }
+
+    #[test]
+    fn bundle_structure_accepts_sealed_success_variants() {
+        assert_eq!(accepted_bundle(true).validate_structure(), Ok(()));
+        assert_eq!(accepted_bundle(false).validate_structure(), Ok(()));
+    }
+
+    #[test]
+    fn bundle_structure_rejects_malformed_sealed_state() {
+        let mut malformed_store = accepted_bundle(false);
+        malformed_store.materialized_lemmas =
+            MaterializedClauseStore::from_parts_unchecked_for_test(vec![1, 1], vec![2]);
+        assert_eq!(
+            malformed_store.validate_structure(),
+            Err(EqresBundleStructureError::InvalidMaterializedStore(
+                MaterializedClauseStoreError::MissingInitialOffset
+            ))
+        );
+
+        let mut stale_report = accepted_bundle(false);
+        stale_report.report.counters.search.events_popped += 1;
+        assert_eq!(
+            stale_report.validate_structure(),
+            Err(EqresBundleStructureError::ReportCounterMismatch)
+        );
+
+        let mut stale_checker = accepted_bundle(false);
+        stale_checker.checker.counters.replayed_conflict_clauses = 0;
+        stale_checker.report.checker_counters = stale_checker.checker.counters;
+        assert_eq!(
+            stale_checker.validate_structure(),
+            Err(EqresBundleStructureError::CheckerReplayCountMismatch)
+        );
+
+        let mut noncanonical_trace = accepted_bundle(false);
+        let TraceRecord::Conflict(record) = &mut noncanonical_trace.compiler.trace[1] else {
+            panic!("fixture conflict record missing");
+        };
+        record.clause = CanonicalClause(vec![2, 1].into_boxed_slice());
+        assert_eq!(
+            noncanonical_trace.validate_structure(),
+            Err(EqresBundleStructureError::NonCanonicalTrace)
+        );
+    }
+
+    #[test]
+    fn run_record_requires_exact_external_and_auditor_bindings() {
+        let bundle = accepted_bundle(true);
+        let bindings = run_bindings(&bundle);
+        let component = SatComponent::TheoryEmpty(TheoryEmptySatComponent::new(100, 101).unwrap());
+        let record = EqresRunRecord::new(bundle.clone(), component, bindings).unwrap();
+        assert_eq!(record.bundle(), &bundle);
+        assert_eq!(record.sat_component(), component);
+        assert_eq!(record.exact_projection_bundle_sha256(), digest(101));
+        assert_eq!(record.exact_audit_receipt_sha256(), digest(102));
+        assert_eq!(record.hashes(), bindings.auditor_recomputed_hashes);
+
+        assert_eq!(
+            EqresRunRecord::new(bundle.clone(), component, bundle.compiler.hashes),
+            Err(SatComponentError::MissingExactProjectionBundleDigest)
+        );
+
+        let mut missing_identity = run_bindings(&bundle);
+        missing_identity
+            .auditor_recomputed_hashes
+            .candidate_binary_sha256 = Sha256Digest::ZERO;
+        assert_eq!(
+            EqresRunRecord::new(bundle.clone(), component, missing_identity),
+            Err(SatComponentError::MissingExternalIdentity(
+                HashArtifact::CandidateBinary
+            ))
+        );
+
+        let mut stale_auditor = run_bindings(&bundle);
+        stale_auditor.auditor_recomputed_hashes.trace_sha256 = digest(77);
+        assert_eq!(
+            EqresRunRecord::new(bundle.clone(), component, stale_auditor),
+            Err(SatComponentError::InternalHashMismatch)
+        );
+
+        let mut wrong_exact_bundle = run_bindings(&bundle);
+        wrong_exact_bundle.exact_projection_bundle_sha256 = digest(88);
+        assert_eq!(
+            EqresRunRecord::new(bundle, component, wrong_exact_bundle),
+            Err(SatComponentError::ProjectionRecordDigestMismatch)
+        );
+    }
+
+    #[test]
+    fn run_record_preserves_disjoint_sat_load_invariants() {
+        let theory_empty_bundle = accepted_bundle(true);
+        let fresh_component = FreshSatComponent::new(
+            theory_empty_bundle
+                .compiler
+                .counters
+                .input
+                .baseline_variables,
+            theory_empty_bundle.compiler.counters.input.baseline_clauses + 1,
+            1,
+            SatKernelResult::Unsat,
+            100,
+            101,
+        )
+        .unwrap();
+        assert_eq!(
+            EqresRunRecord::new(
+                theory_empty_bundle.clone(),
+                SatComponent::FreshSession(fresh_component),
+                run_bindings(&theory_empty_bundle),
+            ),
+            Err(SatComponentError::OutputComponentMismatch)
+        );
+
+        let lemmas_bundle = accepted_bundle(false);
+        let fresh_component = FreshSatComponent::new(
+            lemmas_bundle.compiler.counters.input.baseline_variables,
+            lemmas_bundle.compiler.counters.input.baseline_clauses + 1,
+            1,
+            SatKernelResult::Unsat,
+            100,
+            101,
+        )
+        .unwrap();
+        EqresRunRecord::new(
+            lemmas_bundle.clone(),
+            SatComponent::FreshSession(fresh_component),
+            run_bindings(&lemmas_bundle),
+        )
+        .unwrap();
+        assert_eq!(
+            EqresRunRecord::new(
+                lemmas_bundle.clone(),
+                SatComponent::TheoryEmpty(TheoryEmptySatComponent::new(100, 101).unwrap()),
+                run_bindings(&lemmas_bundle),
+            ),
+            Err(SatComponentError::OutputComponentMismatch)
+        );
+
+        let wrong_load = FreshSatComponent::new(
+            lemmas_bundle.compiler.counters.input.baseline_variables,
+            lemmas_bundle.compiler.counters.input.baseline_clauses,
+            1,
+            SatKernelResult::Unsat,
+            100,
+            101,
+        )
+        .unwrap();
+        assert_eq!(
+            EqresRunRecord::new(
+                lemmas_bundle.clone(),
+                SatComponent::FreshSession(wrong_load),
+                run_bindings(&lemmas_bundle),
+            ),
+            Err(SatComponentError::SatLoadMismatch)
+        );
+
+        let sat_result = FreshSatComponent::new(
+            lemmas_bundle.compiler.counters.input.baseline_variables,
+            lemmas_bundle.compiler.counters.input.baseline_clauses + 1,
+            1,
+            SatKernelResult::Sat,
+            100,
+            101,
+        )
+        .unwrap();
+        assert_eq!(
+            EqresRunRecord::new(
+                lemmas_bundle.clone(),
+                SatComponent::FreshSession(sat_result),
+                run_bindings(&lemmas_bundle),
+            ),
+            Err(SatComponentError::KernelResultNotUnsat)
+        );
+
+        let mut externally_marked = lemmas_bundle.clone();
+        externally_marked.report.integrity.external_audit_accepted = true;
+        assert_eq!(
+            EqresRunRecord::new(
+                externally_marked,
+                SatComponent::FreshSession(fresh_component),
+                run_bindings(&lemmas_bundle),
+            ),
+            Err(SatComponentError::ProjectionNotInternallyAccepted)
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn invariant_deserializers_reject_noncanonical_and_unknown_data() {
+        let key: EqualityKey = serde_json::from_str(r#"{"left":3,"right":7}"#).unwrap();
+        assert_eq!(key.endpoints(), (3, 7));
+        assert!(serde_json::from_str::<EqualityKey>(r#"{"left":7,"right":3}"#).is_err());
+        assert!(serde_json::from_str::<EqualityKey>(r#"{"left":3,"right":7,"extra":0}"#).is_err());
+
+        for invalid in ["[0]", "[-2147483648]", "[2,1]", "[1,1]", "[-2,2]"] {
+            assert!(serde_json::from_str::<CanonicalClause>(invalid).is_err());
+        }
+        let decoded: CanonicalClause = serde_json::from_str("[-3,2]").unwrap();
+        assert_eq!(decoded.as_slice(), &[-3, 2]);
+
+        assert!(
+            serde_json::from_str::<MaterializedClauseStore>(r#"{"end_offsets":[1],"literals":[]}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<MaterializedClauseStore>(
+                r#"{"end_offsets":[0],"literals":[],"extra":0}"#
+            )
+            .is_err()
+        );
+
+        let theory_empty = r#"{"sat_session":false,"sat_calls":0,"sat_variables_loaded":0,"sat_clauses_loaded":0,"load_solve_ns":0,"checker_completed_ns":100,"result_timestamp_ns":101}"#;
+        serde_json::from_str::<TheoryEmptySatComponent>(theory_empty).unwrap();
+        assert!(
+            serde_json::from_str::<TheoryEmptySatComponent>(
+                &theory_empty.replace("\"sat_calls\":0", "\"sat_calls\":1")
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<TheoryEmptySatComponent>(
+                &theory_empty.replace("\"result_timestamp_ns\":101", "\"result_timestamp_ns\":99")
+            )
+            .is_err()
+        );
+
+        let fresh = r#"{"sat_session":true,"sat_calls":1,"sat_variables_loaded":7,"sat_clauses_loaded":12,"load_solve_ns":1,"result":"unsat","checker_completed_ns":100,"result_timestamp_ns":101}"#;
+        serde_json::from_str::<FreshSatComponent>(fresh).unwrap();
+        assert!(
+            serde_json::from_str::<FreshSatComponent>(
+                &fresh.replace("\"sat_session\":true", "\"sat_session\":false")
+            )
+            .is_err()
+        );
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn bundle_and_run_record_deserialization_revalidate_structure() {
+        let bundle = accepted_bundle(false);
+        let encoded = serde_json::to_value(&bundle).unwrap();
+        let decoded: EqresBundle = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(decoded, bundle);
+
+        let mut stale_report = encoded.clone();
+        stale_report["report"]["counters"]["search"]["events_popped"] = serde_json::json!(3);
+        let stale_report: EqresBundle = serde_json::from_value(stale_report).unwrap();
+        assert_eq!(
+            stale_report.validate_structure(),
+            Err(EqresBundleStructureError::ReportCounterMismatch)
+        );
+
+        let fresh_component =
+            FreshSatComponent::new(7, 12, 1, SatKernelResult::Unsat, 100, 101).unwrap();
+        let record = EqresRunRecord::new(
+            bundle,
+            SatComponent::FreshSession(fresh_component),
+            run_bindings(&decoded),
+        )
+        .unwrap();
+        let encoded = serde_json::to_value(&record).unwrap();
+        let decoded_record: EqresRunRecord = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(decoded_record, record);
+
+        let mut zero_identity = encoded.clone();
+        zero_identity["hashes"]["candidate_binary_sha256"] =
+            serde_json::json!(Sha256Digest::ZERO.to_string());
+        assert!(serde_json::from_value::<EqresRunRecord>(zero_identity).is_err());
+
+        let mut invalid_component = encoded.clone();
+        invalid_component["sat_component"]["component"]["sat_calls"] = serde_json::json!(2);
+        assert!(serde_json::from_value::<EqresRunRecord>(invalid_component).is_err());
+
+        let mut unknown_record = encoded;
+        unknown_record["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<EqresRunRecord>(unknown_record).is_err());
     }
 
     #[cfg(feature = "certificates")]

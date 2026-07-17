@@ -6,12 +6,12 @@
 
 use super::t11_eqres_types::{
     ApplicationId, ArgumentIndex, CanonicalClause, CapAttempt, CapBoundary, CapReason,
-    CheckerStatus, ClauseId, ClauseOrigin, ClausePivot, ClauseRef, CompilerFailure, CompilerStatus,
-    CompilerVariant, ConflictRecord, ConflictTraceRecord, CongruenceArgumentParent,
-    CongruenceRecord, DeterministicCounters, EQRES_SCHEMA_VERSION, EmittedLemma, EqresBundle,
-    EqresInput, EqresOutput, EqualityKey, EqualityRuleRecord, EqualityTraceRecord, EventId,
-    EventKey, HashArtifact, HashBindings, InputCounters, InputFailure, Limits, LiteralOffset,
-    LogicalMemoryWeights, MaterializedClauseStore, NodeId, ProofDepth, ReflexivityRecord,
+    CheckerCounters, CheckerStatus, ClauseId, ClauseOrigin, ClausePivot, ClauseRef,
+    CompilerFailure, CompilerStatus, CompilerVariant, ConflictRecord, ConflictTraceRecord,
+    CongruenceArgumentParent, CongruenceRecord, DeterministicCounters, EQRES_SCHEMA_VERSION,
+    EmittedLemma, EqresBundle, EqresInput, EqresOutput, EqualityKey, EqualityRuleRecord,
+    EqualityTraceRecord, EventId, EventKey, HashArtifact, HashBindings, InputCounters,
+    InputFailure, LiteralOffset, MaterializedClauseStore, NodeId, ProofDepth, ReflexivityRecord,
     ReportOutcome, RuleCounters, RuleKind, SeedRecord, SelectorDecision, Sha256Digest, TraceRecord,
     TransitivityRecord,
 };
@@ -21,6 +21,49 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 
 pub(crate) const EQRES_AUDIT_RECEIPT_SCHEMA_VERSION: u32 = 1;
+
+// These literals are the preregistered v1 table, deliberately independent of
+// the similarly named schema constants.
+const LIMIT_TERMS: u64 = 16_384;
+const LIMIT_BASELINE_VARIABLES: u64 = 50_000;
+const LIMIT_BASELINE_CLAUSES: u64 = 131_072;
+const LIMIT_BASELINE_LITERAL_SLOTS: u64 = 1_048_576;
+const LIMIT_APPLICATIONS: u64 = 256;
+const LIMIT_APPLICATION_PAIRS: u64 = 5_000;
+const LIMIT_MAXIMUM_ARITY: u64 = 64;
+const LIMIT_APPLICATION_ARGUMENT_SLOTS: u64 = 16_384;
+const LIMIT_EQUALITY_PROOF_NODES: u64 = 100_000;
+const LIMIT_PROOF_PARENT_REFERENCES: u64 = 300_000;
+const LIMIT_PROOF_DEPTH: u64 = 256;
+const LIMIT_UNIQUE_DERIVED_CLAUSES: u64 = 25_000;
+const LIMIT_RETAINED_SIDE_CLAUSES_PER_EQUALITY: u64 = 8;
+const LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE: u64 = 2_000_000;
+const LIMIT_WORKLIST_PUSHES: u64 = 250_000;
+const LIMIT_LIVE_WORKLIST_ENTRIES: u64 = 65_536;
+const LIMIT_ALL_DERIVED_LITERAL_SLOTS: u64 = 150_000;
+const LIMIT_EMITTED_LEMMAS: u64 = 8_192;
+const LIMIT_EMITTED_LEMMA_LITERAL_SLOTS: u64 = 65_536;
+const LIMIT_EMITTED_P95_WIDTH: u64 = 8;
+const LIMIT_EMITTED_MAXIMUM_WIDTH: u64 = 32;
+const LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
+
+const MEMORY_EQUALITY_NODE: u64 = 64;
+const MEMORY_CONFLICT_CLAUSE: u64 = 32;
+const MEMORY_PARENT_REFERENCE: u64 = 4;
+const MEMORY_TRACE_LITERAL_SLOT: u64 = 4;
+const MEMORY_DISTINCT_EVENT_KEY: u64 = 64;
+const MEMORY_RETAINED_ANTICHAIN_ENTRY: u64 = 16;
+const MEMORY_NEGATIVE_OCCURRENCE: u64 = 16;
+const MEMORY_APPLICATION_PAIR: u64 = 32;
+const MEMORY_APPLICATION_ARGUMENT_SLOT: u64 = 4;
+
+const RULE_RANK_SEED: u8 = 0;
+const RULE_RANK_REFLEXIVITY: u8 = 1;
+const RULE_RANK_TRANSITIVITY: u8 = 2;
+const RULE_RANK_CONGRUENCE: u8 = 3;
+const RULE_RANK_CONFLICT: u8 = 4;
+const ORIGIN_RANK_BASELINE: u8 = 0;
+const ORIGIN_RANK_DERIVED: u8 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
@@ -50,6 +93,17 @@ pub(crate) enum AuditFailureKind {
     ReportCounterMismatch,
     ReportCapMismatch,
     ReportHashMismatch,
+    CheckerEqualityCountMismatch,
+    CheckerConflictCountMismatch,
+    CheckerEmittedLemmaCountMismatch,
+    CheckerReplayFailuresNonzero,
+    ReportCheckerEqualityCountMismatch,
+    ReportCheckerConflictCountMismatch,
+    ReportCheckerEmittedLemmaCountMismatch,
+    ReportCheckerReplayFailuresNonzero,
+    CapReached,
+    NoUsefulOutput,
+    MissingEqualityCongruenceEvidence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -112,6 +166,7 @@ pub(crate) enum AuditStatus {
 pub(crate) struct AuditResult {
     pub(crate) status: AuditStatus,
     pub(crate) counters: DeterministicCounters,
+    pub(crate) checker_counters: CheckerCounters,
     pub(crate) cap_attempt: Option<CapAttempt>,
     pub(crate) recomputed_hashes: HashBindings,
 }
@@ -127,6 +182,7 @@ pub(crate) struct EqresAuditReceipt {
     pub(crate) lemma_sequence_sha256: Sha256Digest,
     pub(crate) materialized_lemmas_sha256: Sha256Digest,
     pub(crate) materialized_candidate_sha256: Sha256Digest,
+    pub(crate) hashes: HashBindings,
     pub(crate) result: AuditResult,
 }
 
@@ -146,6 +202,7 @@ impl EqresAuditReceipt {
             lemma_sequence_sha256: hashes.lemma_sequence_sha256,
             materialized_lemmas_sha256: hashes.materialized_lemmas_sha256,
             materialized_candidate_sha256: hashes.materialized_candidate_sha256,
+            hashes,
             result,
         }
     }
@@ -159,23 +216,84 @@ impl EqresAuditReceipt {
             || self.exact_bundle_sha256 == Sha256Digest::ZERO
             || self.exact_bundle_sha256 != exact_bundle_sha256
             || !matches!(self.result.status, AuditStatus::Accepted)
+            || self.result.cap_attempt.is_some()
             || self.result.counters != bundle.compiler.counters
             || self.result.counters != bundle.report.counters
-            || self.result.cap_attempt != bundle.report.cap_attempt
+            || bundle.report.cap_attempt.is_some()
+            || bundle.selector.decision != SelectorDecision::Selected
+            || bundle.report.schema_version != EQRES_SCHEMA_VERSION
+            || bundle.report.selector != bundle.selector
+            || bundle.report.compiler_variant != bundle.compiler.variant
+            || !matches!(bundle.checker.status, CheckerStatus::Accepted)
+            || bundle.report.sat_calls != 0
+            || bundle.report.forbidden_growth != Default::default()
+            || !bundle.report.integrity.baseline_unchanged
+            || !bundle.report.integrity.trace_materialization_equal
+            || !bundle.report.integrity.compiler_checker_agree
+            || !bundle.report.integrity.output_canonical
+            || bundle.report.integrity.external_audit_accepted
+            || bundle.report.integrity.off_path_unchanged
         {
             return false;
         }
 
-        let compiler_cap = match &bundle.compiler.status {
-            CompilerStatus::Rejected(CompilerFailure::Cap(attempt)) => Some(attempt),
-            CompilerStatus::Completed(_) => None,
-            CompilerStatus::NotRun | CompilerStatus::Rejected(_) => return false,
+        let output = match (&bundle.compiler.status, bundle.report.outcome) {
+            (
+                CompilerStatus::Completed(output @ EqresOutput::Lemmas(lemmas)),
+                ReportOutcome::Lemmas,
+            ) if !lemmas.is_empty() => output,
+            (
+                CompilerStatus::Completed(output @ EqresOutput::TheoryEmpty { .. }),
+                ReportOutcome::TheoryEmpty,
+            ) => output,
+            _ => return false,
         };
-        if self.result.cap_attempt.as_ref() != compiler_cap {
+        if self
+            .result
+            .counters
+            .output
+            .emitted_with_missing_equality_congruence
+            == 0
+        {
             return false;
         }
 
-        let receipt = [
+        let expected_checker =
+            match expected_checker_counters(bundle.compiler.trace.as_ref(), Some(output)) {
+                Ok(counters) => counters,
+                Err(_) => return false,
+            };
+        let Some(replayed_trace_records) = expected_checker
+            .replayed_equality_nodes
+            .checked_add(expected_checker.replayed_conflict_clauses)
+        else {
+            return false;
+        };
+        if self.result.checker_counters != expected_checker
+            || bundle.checker.counters != expected_checker
+            || bundle.report.checker_counters != expected_checker
+            || u64::try_from(bundle.compiler.trace.len()).ok() != Some(replayed_trace_records)
+            || self.result.counters.search.accepted_equality_nodes
+                != expected_checker.replayed_equality_nodes
+            || self.result.counters.search.accepted_conflict_clauses
+                != expected_checker.replayed_conflict_clauses
+            || self.result.counters.output.emitted_lemmas
+                != expected_checker.replayed_emitted_lemmas
+        {
+            return false;
+        }
+
+        let materialized = bundle.materialized_lemmas();
+        let Ok((offsets, literals)) = expected_materialization(Some(output)) else {
+            return false;
+        };
+        if offsets.as_slice() != materialized.end_offsets()
+            || literals.as_slice() != materialized.literals()
+        {
+            return false;
+        }
+
+        let named_bindings = [
             self.source_sha256,
             self.baseline_problem_sha256,
             self.trace_sha256,
@@ -183,56 +301,23 @@ impl EqresAuditReceipt {
             self.materialized_lemmas_sha256,
             self.materialized_candidate_sha256,
         ];
-        let compiler = [
-            bundle.compiler.hashes.source_sha256,
-            bundle.compiler.hashes.baseline_problem_sha256,
-            bundle.compiler.hashes.trace_sha256,
-            bundle.compiler.hashes.lemma_sequence_sha256,
-            bundle.compiler.hashes.materialized_lemmas_sha256,
-            bundle.compiler.hashes.materialized_candidate_sha256,
+        let complete_bindings = [
+            self.hashes.source_sha256,
+            self.hashes.baseline_problem_sha256,
+            self.hashes.trace_sha256,
+            self.hashes.lemma_sequence_sha256,
+            self.hashes.materialized_lemmas_sha256,
+            self.hashes.materialized_candidate_sha256,
         ];
-        let checker = [
-            bundle.checker.recomputed_hashes.source_sha256,
-            bundle.checker.recomputed_hashes.baseline_problem_sha256,
-            bundle.checker.recomputed_hashes.trace_sha256,
-            bundle.checker.recomputed_hashes.lemma_sequence_sha256,
-            bundle.checker.recomputed_hashes.materialized_lemmas_sha256,
-            bundle
-                .checker
-                .recomputed_hashes
-                .materialized_candidate_sha256,
-        ];
-        let report = [
-            bundle.report.hashes.source_sha256,
-            bundle.report.hashes.baseline_problem_sha256,
-            bundle.report.hashes.trace_sha256,
-            bundle.report.hashes.lemma_sequence_sha256,
-            bundle.report.hashes.materialized_lemmas_sha256,
-            bundle.report.hashes.materialized_candidate_sha256,
-        ];
-        let reconstructed = [
-            self.result.recomputed_hashes.source_sha256,
-            self.result.recomputed_hashes.baseline_problem_sha256,
-            self.result.recomputed_hashes.trace_sha256,
-            self.result.recomputed_hashes.lemma_sequence_sha256,
-            self.result.recomputed_hashes.materialized_lemmas_sha256,
-            self.result.recomputed_hashes.materialized_candidate_sha256,
-        ];
-        receipt
-            .iter()
-            .zip(compiler)
-            .zip(checker)
-            .zip(report)
-            .zip(reconstructed)
-            .all(
-                |((((receipt, compiler), checker), report), reconstructed)| {
-                    *receipt != Sha256Digest::ZERO
-                        && *receipt == compiler
-                        && *receipt == checker
-                        && *receipt == report
-                        && *receipt == reconstructed
-                },
-            )
+        named_bindings
+            .into_iter()
+            .zip(complete_bindings)
+            .all(|(named, complete)| named != Sha256Digest::ZERO && named == complete)
+            && hash_bindings_are_source_only(&self.hashes)
+            && self.hashes == bundle.compiler.hashes
+            && self.hashes == bundle.checker.recomputed_hashes
+            && self.hashes == bundle.report.hashes
+            && self.hashes == self.result.recomputed_hashes
     }
 }
 
@@ -246,6 +331,13 @@ struct PreparedInput {
     counters: InputCounters,
     application_pairs: Vec<ApplicationPair>,
     initial_logical_memory: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ApplicationShape {
+    pair_count: u64,
+    maximum_arity: u64,
+    argument_slots: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,6 +401,73 @@ struct QueuedEvent {
     pending: PendingEvent,
 }
 
+const fn local_rule_rank(rule: RuleKind) -> u8 {
+    match rule {
+        RuleKind::Seed => RULE_RANK_SEED,
+        RuleKind::Reflexivity => RULE_RANK_REFLEXIVITY,
+        RuleKind::Transitivity => RULE_RANK_TRANSITIVITY,
+        RuleKind::Congruence => RULE_RANK_CONGRUENCE,
+        RuleKind::Conflict => RULE_RANK_CONFLICT,
+    }
+}
+
+const fn local_origin_rank(origin: ClauseOrigin) -> u8 {
+    match origin {
+        ClauseOrigin::Baseline => ORIGIN_RANK_BASELINE,
+        ClauseOrigin::Derived => ORIGIN_RANK_DERIVED,
+    }
+}
+
+fn compare_optional_equality(left: Option<EqualityKey>, right: Option<EqualityKey>) -> Ordering {
+    match (left, right) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(left), Some(right)) => left
+            .left()
+            .cmp(&right.left())
+            .then_with(|| left.right().cmp(&right.right())),
+    }
+}
+
+fn compare_optional_pivot(left: Option<ClausePivot>, right: Option<ClausePivot>) -> Ordering {
+    match (left, right) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Greater,
+        (Some(left), Some(right)) => left
+            .clause
+            .id
+            .get()
+            .cmp(&right.clause.id.get())
+            .then_with(|| {
+                local_origin_rank(left.clause.origin).cmp(&local_origin_rank(right.clause.origin))
+            })
+            .then_with(|| left.literal_offset.get().cmp(&right.literal_offset.get())),
+    }
+}
+
+fn compare_event_keys(left: &EventKey, right: &EventKey) -> Ordering {
+    left.resulting_clause_width
+        .cmp(&right.resulting_clause_width)
+        .then_with(|| left.proof_depth.get().cmp(&right.proof_depth.get()))
+        .then_with(|| local_rule_rank(left.rule).cmp(&local_rule_rank(right.rule)))
+        .then_with(|| compare_optional_equality(left.conclusion, right.conclusion))
+        .then_with(|| {
+            left.clause
+                .as_slice()
+                .iter()
+                .cmp(right.clause.as_slice().iter())
+        })
+        .then_with(|| compare_optional_pivot(left.source, right.source))
+        .then_with(|| {
+            left.parents
+                .iter()
+                .map(|parent| parent.get())
+                .cmp(right.parents.iter().map(|parent| parent.get()))
+        })
+}
+
 impl PartialEq for QueuedEvent {
     fn eq(&self, other: &Self) -> bool {
         self.key == other.key
@@ -325,7 +484,7 @@ impl PartialOrd for QueuedEvent {
 
 impl Ord for QueuedEvent {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.key.cmp(&other.key)
+        compare_event_keys(&self.key, &other.key)
     }
 }
 
@@ -352,10 +511,7 @@ enum ReconstructionError {
 
 enum ReconstructionStatus {
     Completed(EqresOutput),
-    Cap {
-        attempt: CapAttempt,
-        hashes_recorded: bool,
-    },
+    Cap(CapAttempt),
     Fatal(ReconstructionError),
 }
 
@@ -392,10 +548,7 @@ fn reconstruct(input: EqresInput<'_>, variant: CompilerVariant) -> Reconstructio
         Ok(prepared) => prepared,
         Err(ReconstructionError::Cap(attempt)) => {
             return Reconstruction {
-                status: ReconstructionStatus::Cap {
-                    attempt,
-                    hashes_recorded: false,
-                },
+                status: ReconstructionStatus::Cap(attempt),
                 trace: Vec::new(),
                 counters,
             };
@@ -421,10 +574,7 @@ fn reconstruct(input: EqresInput<'_>, variant: CompilerVariant) -> Reconstructio
     };
     let status = match auditor.run() {
         Ok(output) => ReconstructionStatus::Completed(output),
-        Err(ReconstructionError::Cap(attempt)) => ReconstructionStatus::Cap {
-            attempt,
-            hashes_recorded: true,
-        },
+        Err(ReconstructionError::Cap(attempt)) => ReconstructionStatus::Cap(attempt),
         Err(error) => ReconstructionStatus::Fatal(error),
     };
     Reconstruction {
@@ -463,26 +613,26 @@ fn validate_and_prepare(
     counters.input.applications = application_count;
 
     // Frozen static-cap precedence is part of the certificate contract.
-    check_static_cap(CapReason::Terms, term_count, Limits::TERMS)?;
+    check_static_cap(CapReason::Terms, term_count, LIMIT_TERMS)?;
     check_static_cap(
         CapReason::BaselineVariables,
         variable_count,
-        Limits::BASELINE_VARIABLES,
+        LIMIT_BASELINE_VARIABLES,
     )?;
     check_static_cap(
         CapReason::BaselineClauses,
         clause_count,
-        Limits::BASELINE_CLAUSES,
+        LIMIT_BASELINE_CLAUSES,
     )?;
     check_static_cap(
         CapReason::BaselineLiteralSlots,
         literal_slots,
-        Limits::BASELINE_LITERAL_SLOTS,
+        LIMIT_BASELINE_LITERAL_SLOTS,
     )?;
     check_static_cap(
         CapReason::Applications,
         application_count,
-        Limits::APPLICATIONS,
+        LIMIT_APPLICATIONS,
     )?;
 
     validate_clause_store(input)?;
@@ -491,10 +641,59 @@ fn validate_and_prepare(
     validate_atom_maps(input)?;
     validate_clause_literals(input)?;
 
-    let mut application_pairs = Vec::new();
-    application_pairs
-        .try_reserve(input.ordered_applications.len())
-        .map_err(|_| allocation(None))?;
+    let shape = summarize_application_shape(input)?;
+    counters.input.application_pairs = shape.pair_count;
+    counters.input.maximum_arity = shape.maximum_arity;
+    counters.input.application_argument_slots = shape.argument_slots;
+    check_static_cap(
+        CapReason::ApplicationPairs,
+        shape.pair_count,
+        LIMIT_APPLICATION_PAIRS,
+    )?;
+    check_static_cap(
+        CapReason::MaximumArity,
+        shape.maximum_arity,
+        LIMIT_MAXIMUM_ARITY,
+    )?;
+    check_static_cap(
+        CapReason::ApplicationArgumentSlots,
+        shape.argument_slots,
+        LIMIT_APPLICATION_ARGUMENT_SLOTS,
+    )?;
+
+    let initial_logical_memory = logical_memory(
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        shape.pair_count,
+        shape.argument_slots,
+        None,
+    )?;
+    check_static_cap(
+        CapReason::LogicalIncrementalMemoryBytes,
+        initial_logical_memory,
+        LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES,
+    )?;
+
+    let application_pairs = materialize_application_pairs(input, shape.pair_count)?;
+    if to_u64(application_pairs.len(), None)? != shape.pair_count {
+        return Err(internal(None));
+    }
+    Ok(PreparedInput {
+        counters: counters.input,
+        application_pairs,
+        initial_logical_memory,
+    })
+}
+
+fn summarize_application_shape(
+    input: EqresInput<'_>,
+) -> Result<ApplicationShape, ReconstructionError> {
+    let mut pair_count = 0u64;
     let mut maximum_arity = 0u64;
     let mut argument_slots = 0u64;
     for (left_position, &left_id) in input.ordered_applications.iter().enumerate() {
@@ -517,10 +716,52 @@ fn validate_and_prepare(
             if left.sort == BOOL_SORT {
                 return Err(malformed(InputFailure::UnsupportedBooleanApplicationPair));
             }
+            let requirement_count = left
+                .args
+                .iter()
+                .zip(&right.args)
+                .filter(|(left_arg, right_arg)| left_arg != right_arg)
+                .count();
+            if requirement_count == 0 {
+                return Err(malformed(InputFailure::InvalidTerm));
+            }
+            pair_count = checked_add(pair_count, 1, None)?;
+            argument_slots = checked_add(argument_slots, to_u64(requirement_count, None)?, None)?;
+        }
+    }
+    Ok(ApplicationShape {
+        pair_count,
+        maximum_arity,
+        argument_slots,
+    })
+}
 
+fn materialize_application_pairs(
+    input: EqresInput<'_>,
+    pair_count: u64,
+) -> Result<Vec<ApplicationPair>, ReconstructionError> {
+    let pair_capacity = usize::try_from(pair_count).map_err(|_| arithmetic(None))?;
+    let mut application_pairs = Vec::new();
+    application_pairs
+        .try_reserve_exact(pair_capacity)
+        .map_err(|_| allocation(None))?;
+
+    for (left_position, &left_id) in input.ordered_applications.iter().enumerate() {
+        let left = input.term_dag.get(left_id).ok_or_else(|| internal(None))?;
+        for &right_id in &input.ordered_applications[(left_position + 1)..] {
+            let right = input.term_dag.get(right_id).ok_or_else(|| internal(None))?;
+            if left.fun != right.fun {
+                continue;
+            }
+            let requirement_count = left
+                .args
+                .iter()
+                .zip(&right.args)
+                .filter(|(left_arg, right_arg)| left_arg != right_arg)
+                .count();
             let mut requirements = Vec::new();
             requirements
-                .try_reserve(left.args.len())
+                .try_reserve_exact(requirement_count)
                 .map_err(|_| allocation(None))?;
             for (index, (&left_arg, &right_arg)) in left.args.iter().zip(&right.args).enumerate() {
                 if left_arg == right_arg {
@@ -531,52 +772,16 @@ fn validate_and_prepare(
                     normalized_equality(left_arg, right_arg)?,
                 ));
             }
-            if requirements.is_empty() {
-                return Err(malformed(InputFailure::InvalidTerm));
+            if requirements.len() != requirement_count || requirements.is_empty() {
+                return Err(internal(None));
             }
-            argument_slots = checked_add(argument_slots, to_u64(requirements.len(), None)?, None)?;
-            application_pairs
-                .try_reserve(1)
-                .map_err(|_| allocation(None))?;
             application_pairs.push(ApplicationPair {
                 applications: [ApplicationId::new(left_id), ApplicationId::new(right_id)],
                 requirements,
             });
         }
     }
-
-    let pair_count = to_u64(application_pairs.len(), None)?;
-    counters.input.application_pairs = pair_count;
-    counters.input.maximum_arity = maximum_arity;
-    counters.input.application_argument_slots = argument_slots;
-    check_static_cap(
-        CapReason::ApplicationPairs,
-        pair_count,
-        Limits::APPLICATION_PAIRS,
-    )?;
-    check_static_cap(
-        CapReason::MaximumArity,
-        maximum_arity,
-        Limits::MAXIMUM_ARITY,
-    )?;
-    check_static_cap(
-        CapReason::ApplicationArgumentSlots,
-        argument_slots,
-        Limits::APPLICATION_ARGUMENT_SLOTS,
-    )?;
-
-    let initial_logical_memory =
-        logical_memory(0, 0, 0, 0, 0, 0, 0, pair_count, argument_slots, None)?;
-    check_static_cap(
-        CapReason::LogicalIncrementalMemoryBytes,
-        initial_logical_memory,
-        Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES,
-    )?;
-    Ok(PreparedInput {
-        counters: counters.input,
-        application_pairs,
-        initial_logical_memory,
-    })
+    Ok(application_pairs)
 }
 
 fn validate_clause_store(input: EqresInput<'_>) -> Result<(), ReconstructionError> {
@@ -1266,13 +1471,13 @@ impl<'a> Auditor<'a> {
         parent_event: Option<EventId>,
     ) -> Result<(), ReconstructionError> {
         let boundary = CapBoundary::ChildInsertion { parent_event, rule };
-        if u64::from(depth.get()) > Limits::PROOF_DEPTH {
+        if u64::from(depth.get()) > LIMIT_PROOF_DEPTH {
             return Err(cap(
                 CapReason::ProofDepth,
                 boundary,
                 self.counters.search.maximum_proof_depth,
                 u64::from(depth.get()),
-                Limits::PROOF_DEPTH,
+                LIMIT_PROOF_DEPTH,
             ));
         }
         let prospective_work = checked_add(
@@ -1280,13 +1485,13 @@ impl<'a> Auditor<'a> {
             proof_work_charge,
             parent_event,
         )?;
-        if prospective_work > Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE {
+        if prospective_work > LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE {
             return Err(cap(
                 CapReason::CanonicalProofWorkLiteralCharge,
                 boundary,
                 self.counters.search.canonical_proof_work_literal_charge,
                 prospective_work,
-                Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE,
+                LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE,
             ));
         }
 
@@ -1323,24 +1528,24 @@ impl<'a> Auditor<'a> {
         }
         let prospective_pushes =
             checked_add(self.counters.search.worklist_pushes, 1, parent_event)?;
-        if prospective_pushes > Limits::WORKLIST_PUSHES {
+        if prospective_pushes > LIMIT_WORKLIST_PUSHES {
             return Err(cap(
                 CapReason::WorklistPushes,
                 boundary,
                 self.counters.search.worklist_pushes,
                 prospective_pushes,
-                Limits::WORKLIST_PUSHES,
+                LIMIT_WORKLIST_PUSHES,
             ));
         }
         let prospective_live =
             checked_add(self.counters.search.live_worklist_entries, 1, parent_event)?;
-        if prospective_live > Limits::LIVE_WORKLIST_ENTRIES {
+        if prospective_live > LIMIT_LIVE_WORKLIST_ENTRIES {
             return Err(cap(
                 CapReason::LiveWorklistEntries,
                 boundary,
                 self.counters.search.live_worklist_entries,
                 prospective_live,
-                Limits::LIVE_WORKLIST_ENTRIES,
+                LIMIT_LIVE_WORKLIST_ENTRIES,
             ));
         }
         let prospective_keys = checked_add(
@@ -1360,13 +1565,13 @@ impl<'a> Auditor<'a> {
                 .registered_negative_equality_occurrences,
             parent_event,
         )?;
-        if prospective_memory > Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES {
+        if prospective_memory > LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES {
             return Err(cap(
                 CapReason::LogicalIncrementalMemoryBytes,
                 boundary,
                 self.counters.search.logical_incremental_memory_bytes,
                 prospective_memory,
-                Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES,
+                LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES,
             ));
         }
 
@@ -1481,13 +1686,13 @@ impl<'a> Auditor<'a> {
         )?;
         let boundary = CapBoundary::PoppedEventAcceptance(event_id);
         if existing_subset {
-            if prospective_work > Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE {
+            if prospective_work > LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE {
                 return Err(cap(
                     CapReason::CanonicalProofWorkLiteralCharge,
                     boundary,
                     self.counters.search.canonical_proof_work_literal_charge,
                     prospective_work,
-                    Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE,
+                    LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE,
                 ));
             }
             self.counters.search.canonical_proof_work_literal_charge = prospective_work;
@@ -1503,15 +1708,15 @@ impl<'a> Auditor<'a> {
             .checked_sub(removed.len())
             .ok_or_else(|| internal(Some(event_id)))?;
         if to_u64(retained_after_removal, Some(event_id))?
-            >= Limits::RETAINED_SIDE_CLAUSES_PER_EQUALITY
+            >= LIMIT_RETAINED_SIDE_CLAUSES_PER_EQUALITY
         {
-            if prospective_work > Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE {
+            if prospective_work > LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE {
                 return Err(cap(
                     CapReason::CanonicalProofWorkLiteralCharge,
                     boundary,
                     self.counters.search.canonical_proof_work_literal_charge,
                     prospective_work,
-                    Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE,
+                    LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE,
                 ));
             }
             self.counters.search.canonical_proof_work_literal_charge = prospective_work;
@@ -1529,13 +1734,13 @@ impl<'a> Auditor<'a> {
             1,
             Some(event_id),
         )?;
-        if prospective_nodes > Limits::EQUALITY_PROOF_NODES {
+        if prospective_nodes > LIMIT_EQUALITY_PROOF_NODES {
             return Err(cap(
                 CapReason::EqualityProofNodes,
                 boundary,
                 self.counters.search.accepted_equality_nodes,
                 prospective_nodes,
-                Limits::EQUALITY_PROOF_NODES,
+                LIMIT_EQUALITY_PROOF_NODES,
             ));
         }
         let prospective_parents = checked_add(
@@ -1543,13 +1748,13 @@ impl<'a> Auditor<'a> {
             parent_references,
             Some(event_id),
         )?;
-        if prospective_parents > Limits::PROOF_PARENT_REFERENCES {
+        if prospective_parents > LIMIT_PROOF_PARENT_REFERENCES {
             return Err(cap(
                 CapReason::ProofParentReferences,
                 boundary,
                 self.counters.search.proof_parent_references,
                 prospective_parents,
-                Limits::PROOF_PARENT_REFERENCES,
+                LIMIT_PROOF_PARENT_REFERENCES,
             ));
         }
         let prospective_depth = self
@@ -1557,22 +1762,22 @@ impl<'a> Auditor<'a> {
             .search
             .maximum_proof_depth
             .max(u64::from(key.proof_depth.get()));
-        if prospective_depth > Limits::PROOF_DEPTH {
+        if prospective_depth > LIMIT_PROOF_DEPTH {
             return Err(cap(
                 CapReason::ProofDepth,
                 boundary,
                 self.counters.search.maximum_proof_depth,
                 prospective_depth,
-                Limits::PROOF_DEPTH,
+                LIMIT_PROOF_DEPTH,
             ));
         }
-        if prospective_work > Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE {
+        if prospective_work > LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE {
             return Err(cap(
                 CapReason::CanonicalProofWorkLiteralCharge,
                 boundary,
                 self.counters.search.canonical_proof_work_literal_charge,
                 prospective_work,
-                Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE,
+                LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE,
             ));
         }
         let prospective_slots = checked_add(
@@ -1580,13 +1785,13 @@ impl<'a> Auditor<'a> {
             to_u64(key.clause.len(), Some(event_id))?,
             Some(event_id),
         )?;
-        if prospective_slots > Limits::ALL_DERIVED_LITERAL_SLOTS {
+        if prospective_slots > LIMIT_ALL_DERIVED_LITERAL_SLOTS {
             return Err(cap(
                 CapReason::AllDerivedLiteralSlots,
                 boundary,
                 self.counters.search.accepted_trace_literal_slots,
                 prospective_slots,
-                Limits::ALL_DERIVED_LITERAL_SLOTS,
+                LIMIT_ALL_DERIVED_LITERAL_SLOTS,
             ));
         }
         let prospective_retained = checked_add(
@@ -1615,13 +1820,13 @@ impl<'a> Auditor<'a> {
                 .registered_negative_equality_occurrences,
             Some(event_id),
         )?;
-        if prospective_memory > Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES {
+        if prospective_memory > LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES {
             return Err(cap(
                 CapReason::LogicalIncrementalMemoryBytes,
                 boundary,
                 self.counters.search.logical_incremental_memory_bytes,
                 prospective_memory,
-                Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES,
+                LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES,
             ));
         }
 
@@ -1768,13 +1973,13 @@ impl<'a> Auditor<'a> {
             1,
             Some(event_id),
         )?;
-        if prospective_parents > Limits::PROOF_PARENT_REFERENCES {
+        if prospective_parents > LIMIT_PROOF_PARENT_REFERENCES {
             return Err(cap(
                 CapReason::ProofParentReferences,
                 boundary,
                 self.counters.search.proof_parent_references,
                 prospective_parents,
-                Limits::PROOF_PARENT_REFERENCES,
+                LIMIT_PROOF_PARENT_REFERENCES,
             ));
         }
         let prospective_depth = self
@@ -1782,13 +1987,13 @@ impl<'a> Auditor<'a> {
             .search
             .maximum_proof_depth
             .max(u64::from(key.proof_depth.get()));
-        if prospective_depth > Limits::PROOF_DEPTH {
+        if prospective_depth > LIMIT_PROOF_DEPTH {
             return Err(cap(
                 CapReason::ProofDepth,
                 boundary,
                 self.counters.search.maximum_proof_depth,
                 prospective_depth,
-                Limits::PROOF_DEPTH,
+                LIMIT_PROOF_DEPTH,
             ));
         }
         let prospective_clauses = checked_add(
@@ -1796,13 +2001,13 @@ impl<'a> Auditor<'a> {
             1,
             Some(event_id),
         )?;
-        if prospective_clauses > Limits::UNIQUE_DERIVED_CLAUSES {
+        if prospective_clauses > LIMIT_UNIQUE_DERIVED_CLAUSES {
             return Err(cap(
                 CapReason::UniqueDerivedClauses,
                 boundary,
                 self.counters.search.accepted_conflict_clauses,
                 prospective_clauses,
-                Limits::UNIQUE_DERIVED_CLAUSES,
+                LIMIT_UNIQUE_DERIVED_CLAUSES,
             ));
         }
         let index_charge = if is_empty {
@@ -1815,13 +2020,13 @@ impl<'a> Auditor<'a> {
             index_charge,
             Some(event_id),
         )?;
-        if prospective_work > Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE {
+        if prospective_work > LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE {
             return Err(cap(
                 CapReason::CanonicalProofWorkLiteralCharge,
                 boundary,
                 self.counters.search.canonical_proof_work_literal_charge,
                 prospective_work,
-                Limits::CANONICAL_PROOF_WORK_LITERAL_CHARGE,
+                LIMIT_CANONICAL_PROOF_WORK_LITERAL_CHARGE,
             ));
         }
         let prospective_slots = checked_add(
@@ -1829,13 +2034,13 @@ impl<'a> Auditor<'a> {
             to_u64(key.clause.len(), Some(event_id))?,
             Some(event_id),
         )?;
-        if prospective_slots > Limits::ALL_DERIVED_LITERAL_SLOTS {
+        if prospective_slots > LIMIT_ALL_DERIVED_LITERAL_SLOTS {
             return Err(cap(
                 CapReason::AllDerivedLiteralSlots,
                 boundary,
                 self.counters.search.accepted_trace_literal_slots,
                 prospective_slots,
-                Limits::ALL_DERIVED_LITERAL_SLOTS,
+                LIMIT_ALL_DERIVED_LITERAL_SLOTS,
             ));
         }
         let prospective_memory = self.logical_memory_with(
@@ -1850,13 +2055,13 @@ impl<'a> Auditor<'a> {
                 .registered_negative_equality_occurrences,
             Some(event_id),
         )?;
-        if prospective_memory > Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES {
+        if prospective_memory > LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES {
             return Err(cap(
                 CapReason::LogicalIncrementalMemoryBytes,
                 boundary,
                 self.counters.search.logical_incremental_memory_bytes,
                 prospective_memory,
-                Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES,
+                LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES,
             ));
         }
 
@@ -1992,13 +2197,13 @@ impl<'a> Auditor<'a> {
             prospective_occurrences,
             parent_event,
         )?;
-        if prospective_memory > Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES {
+        if prospective_memory > LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES {
             return Err(cap(
                 CapReason::LogicalIncrementalMemoryBytes,
                 CapBoundary::NegativeRegistration(source),
                 self.counters.search.logical_incremental_memory_bytes,
                 prospective_memory,
-                Limits::LOGICAL_INCREMENTAL_MEMORY_BYTES,
+                LIMIT_LOGICAL_INCREMENTAL_MEMORY_BYTES,
             ));
         }
         ensure_vec_map_entry(&mut self.negative_index, equality, parent_event)?;
@@ -2510,40 +2715,40 @@ impl<'a> Auditor<'a> {
         maximum: u64,
     ) -> Result<(), ReconstructionError> {
         let boundary = CapBoundary::FinalOutput;
-        if emitted > Limits::EMITTED_LEMMAS {
+        if emitted > LIMIT_EMITTED_LEMMAS {
             return Err(cap(
                 CapReason::EmittedLemmas,
                 boundary,
                 0,
                 emitted,
-                Limits::EMITTED_LEMMAS,
+                LIMIT_EMITTED_LEMMAS,
             ));
         }
-        if slots > Limits::EMITTED_LEMMA_LITERAL_SLOTS {
+        if slots > LIMIT_EMITTED_LEMMA_LITERAL_SLOTS {
             return Err(cap(
                 CapReason::EmittedLemmaLiteralSlots,
                 boundary,
                 0,
                 slots,
-                Limits::EMITTED_LEMMA_LITERAL_SLOTS,
+                LIMIT_EMITTED_LEMMA_LITERAL_SLOTS,
             ));
         }
-        if p95 > Limits::EMITTED_P95_WIDTH {
+        if p95 > LIMIT_EMITTED_P95_WIDTH {
             return Err(cap(
                 CapReason::EmittedP95Width,
                 boundary,
                 0,
                 p95,
-                Limits::EMITTED_P95_WIDTH,
+                LIMIT_EMITTED_P95_WIDTH,
             ));
         }
-        if maximum > Limits::EMITTED_MAXIMUM_WIDTH {
+        if maximum > LIMIT_EMITTED_MAXIMUM_WIDTH {
             return Err(cap(
                 CapReason::EmittedMaximumWidth,
                 boundary,
                 0,
                 maximum,
-                Limits::EMITTED_MAXIMUM_WIDTH,
+                LIMIT_EMITTED_MAXIMUM_WIDTH,
             ));
         }
         Ok(())
@@ -2823,33 +3028,17 @@ fn logical_memory(
     event_id: Option<EventId>,
 ) -> Result<u64, ReconstructionError> {
     let terms = [
-        checked_mul(nodes, LogicalMemoryWeights::EQUALITY_NODE, event_id)?,
-        checked_mul(conflicts, LogicalMemoryWeights::CONFLICT_CLAUSE, event_id)?,
-        checked_mul(parents, LogicalMemoryWeights::PARENT_REFERENCE, event_id)?,
-        checked_mul(slots, LogicalMemoryWeights::TRACE_LITERAL_SLOT, event_id)?,
-        checked_mul(
-            event_keys,
-            LogicalMemoryWeights::DISTINCT_EVENT_KEY,
-            event_id,
-        )?,
-        checked_mul(
-            retained_peak,
-            LogicalMemoryWeights::RETAINED_ANTICHAIN_ENTRY,
-            event_id,
-        )?,
-        checked_mul(
-            negative_occurrences,
-            LogicalMemoryWeights::NEGATIVE_OCCURRENCE,
-            event_id,
-        )?,
-        checked_mul(
-            application_pairs,
-            LogicalMemoryWeights::APPLICATION_PAIR,
-            event_id,
-        )?,
+        checked_mul(nodes, MEMORY_EQUALITY_NODE, event_id)?,
+        checked_mul(conflicts, MEMORY_CONFLICT_CLAUSE, event_id)?,
+        checked_mul(parents, MEMORY_PARENT_REFERENCE, event_id)?,
+        checked_mul(slots, MEMORY_TRACE_LITERAL_SLOT, event_id)?,
+        checked_mul(event_keys, MEMORY_DISTINCT_EVENT_KEY, event_id)?,
+        checked_mul(retained_peak, MEMORY_RETAINED_ANTICHAIN_ENTRY, event_id)?,
+        checked_mul(negative_occurrences, MEMORY_NEGATIVE_OCCURRENCE, event_id)?,
+        checked_mul(application_pairs, MEMORY_APPLICATION_PAIR, event_id)?,
         checked_mul(
             application_argument_slots,
-            LogicalMemoryWeights::APPLICATION_ARGUMENT_SLOT,
+            MEMORY_APPLICATION_ARGUMENT_SLOT,
             event_id,
         )?,
     ];
@@ -3043,6 +3232,10 @@ impl Encoder {
         }
     }
 
+    fn bytes(&mut self, bytes: &[u8]) -> bool {
+        self.usize(bytes.len()) && self.raw(bytes)
+    }
+
     fn finish(self) -> Option<Sha256Digest> {
         self.valid.then_some(self.hash)?.finalize()
     }
@@ -3069,6 +3262,90 @@ fn encode_atom(encoder: &mut Encoder, atom: &BoolAtomKey) -> bool {
         }
         BoolAtomKey::BoolTerm(term) => encoder.u8(2) && encoder.usize(*term),
     }
+}
+
+fn digest_term_dag(input: EqresInput<'_>) -> Result<Sha256Digest, ReconstructionError> {
+    let mut sort_ids = Vec::new();
+    sort_ids
+        .try_reserve_exact(input.sorts.ids.len())
+        .map_err(|_| allocation(None))?;
+    sort_ids.extend(
+        input
+            .sorts
+            .ids
+            .iter()
+            .map(|(&symbol, &sort)| (symbol, sort.0)),
+    );
+    sort_ids.sort_unstable();
+
+    digest_with(|encoder| {
+        if !encoder.raw(b"euf-viper-t11-term-dag-v1\0") || !encoder.usize(input.sorts.names.len()) {
+            return false;
+        }
+        for name in &input.sorts.names {
+            if !encoder.bytes(name.as_bytes()) {
+                return false;
+            }
+        }
+        if !encoder.usize(sort_ids.len()) {
+            return false;
+        }
+        for &(symbol, sort) in &sort_ids {
+            if !encoder.u32(symbol) || !encoder.u32(sort) {
+                return false;
+            }
+        }
+        if !encoder.usize(input.declarations.slots.len()) {
+            return false;
+        }
+        for declaration in &input.declarations.slots {
+            match declaration {
+                None => {
+                    if !encoder.u8(0) {
+                        return false;
+                    }
+                }
+                Some(declaration) => {
+                    if !encoder.u8(1)
+                        || !encoder.u32(declaration.result_sort.0)
+                        || !encoder.usize(declaration.arg_sorts.len())
+                    {
+                        return false;
+                    }
+                    for sort in &declaration.arg_sorts {
+                        if !encoder.u32(sort.0) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        if !encoder.usize(input.term_dag.len()) {
+            return false;
+        }
+        for (term_id, term) in input.term_dag.iter().enumerate() {
+            if !encoder.usize(term_id)
+                || !encoder.u32(term.fun)
+                || !encoder.u32(term.sort.0)
+                || !encoder.usize(term.args.len())
+            {
+                return false;
+            }
+            for &argument in &term.args {
+                if !encoder.usize(argument) {
+                    return false;
+                }
+            }
+        }
+        if !encoder.usize(input.ordered_applications.len()) {
+            return false;
+        }
+        input
+            .ordered_applications
+            .iter()
+            .all(|&application| encoder.usize(application))
+    })
+    .ok_or_else(|| arithmetic(None))
 }
 
 fn encode_atom_map_payload(encoder: &mut Encoder, input: EqresInput<'_>) -> bool {
@@ -3145,10 +3422,7 @@ fn encode_clause(encoder: &mut Encoder, clause: &[i32]) -> bool {
 
 fn encode_pivot(encoder: &mut Encoder, pivot: ClausePivot) -> bool {
     encoder.u32(pivot.clause.id.get())
-        && encoder.u8(match pivot.clause.origin {
-            ClauseOrigin::Baseline => 0,
-            ClauseOrigin::Derived => 1,
-        })
+        && encoder.u8(local_origin_rank(pivot.clause.origin))
         && encoder.u32(pivot.literal_offset.get())
 }
 
@@ -3174,21 +3448,19 @@ fn encode_trace(encoder: &mut Encoder, trace: &[TraceRecord]) -> bool {
                 }
                 match &record.rule {
                     EqualityRuleRecord::Seed(seed) => {
-                        if !encoder.u8(RuleKind::Seed as u8)
+                        if !encoder.u8(RULE_RANK_SEED)
                             || !encode_pivot(encoder, seed.positive_source)
                         {
                             return false;
                         }
                     }
                     EqualityRuleRecord::Reflexivity(reflexivity) => {
-                        if !encoder.u8(RuleKind::Reflexivity as u8)
-                            || !encoder.usize(reflexivity.term)
-                        {
+                        if !encoder.u8(RULE_RANK_REFLEXIVITY) || !encoder.usize(reflexivity.term) {
                             return false;
                         }
                     }
                     EqualityRuleRecord::Transitivity(transitivity) => {
-                        if !encoder.u8(RuleKind::Transitivity as u8)
+                        if !encoder.u8(RULE_RANK_TRANSITIVITY)
                             || !encoder.u32(transitivity.parents[0].get())
                             || !encoder.u32(transitivity.parents[1].get())
                             || !encoder.usize(transitivity.intermediate)
@@ -3197,7 +3469,7 @@ fn encode_trace(encoder: &mut Encoder, trace: &[TraceRecord]) -> bool {
                         }
                     }
                     EqualityRuleRecord::Congruence(congruence) => {
-                        if !encoder.u8(RuleKind::Congruence as u8)
+                        if !encoder.u8(RULE_RANK_CONGRUENCE)
                             || !encoder.usize(congruence.applications[0].term())
                             || !encoder.usize(congruence.applications[1].term())
                             || !encoder.usize(congruence.arguments.len())
@@ -3220,6 +3492,7 @@ fn encode_trace(encoder: &mut Encoder, trace: &[TraceRecord]) -> bool {
                     || !encoder.u32(record.clause_id.get())
                     || !encoder.u32(record.depth.get())
                     || !encode_clause(encoder, record.clause.as_slice())
+                    || !encoder.u8(RULE_RANK_CONFLICT)
                     || !encoder.u32(record.rule.equality_parent.get())
                     || !encode_pivot(encoder, record.rule.negative_source)
                 {
@@ -3280,42 +3553,57 @@ fn recompute_hashes(
     trace: &[TraceRecord],
     output: Option<&EqresOutput>,
     materialized: &MaterializedClauseStore,
-) -> HashBindings {
-    let source_sha256 = digest_raw(input.source_bytes).unwrap_or(Sha256Digest::ZERO);
+) -> Result<HashBindings, ReconstructionError> {
+    let source_sha256 = digest_raw(input.source_bytes).ok_or_else(|| arithmetic(None))?;
+    let root_cnf_mode_sha256 = digest_raw(input.root_cnf_mode).ok_or_else(|| arithmetic(None))?;
+    let term_dag_sha256 = digest_term_dag(input)?;
+    let atom_map_sha256 = digest_with(|encoder| {
+        encoder.raw(b"euf-viper-t10-baseline-atom-map-v1\0")
+            && encode_atom_map_payload(encoder, input)
+    })
+    .ok_or_else(|| arithmetic(None))?;
+    let baseline_cnf_sha256 = digest_with(|encoder| {
+        encoder.raw(b"euf-viper-t10-baseline-cnf-v1\0") && encode_flat_clause_store(encoder, input)
+    })
+    .ok_or_else(|| arithmetic(None))?;
     let baseline_problem_sha256 = digest_with(|encoder| {
         encoder.raw(b"euf-viper-t10-baseline-problem-v1\0")
             && encode_flat_clause_store(encoder, input)
             && encode_atom_map_payload(encoder, input)
     })
-    .unwrap_or(Sha256Digest::ZERO);
+    .ok_or_else(|| arithmetic(None))?;
     let trace_sha256 =
-        digest_with(|encoder| encode_trace(encoder, trace)).unwrap_or(Sha256Digest::ZERO);
+        digest_with(|encoder| encode_trace(encoder, trace)).ok_or_else(|| arithmetic(None))?;
     let lemma_sequence_sha256 = digest_with(|encoder| {
         encoder.raw(b"euf-viper-t11-lemma-clause-sequence-v1\0")
             && encode_output_payload(encoder, output)
     })
-    .unwrap_or(Sha256Digest::ZERO);
+    .ok_or_else(|| arithmetic(None))?;
     let materialized_lemmas_sha256 = digest_with(|encoder| {
         encoder.raw(b"euf-viper-t11-lemma-clause-sequence-v1\0")
             && encode_materialized_payload(encoder, materialized)
     })
-    .unwrap_or(Sha256Digest::ZERO);
+    .ok_or_else(|| arithmetic(None))?;
     let materialized_candidate_sha256 = digest_with(|encoder| {
         encoder.raw(b"euf-viper-t11-materialized-candidate-v1\0")
             && encode_flat_clause_store(encoder, input)
             && encode_materialized_payload(encoder, materialized)
             && encode_atom_map_payload(encoder, input)
     })
-    .unwrap_or(Sha256Digest::ZERO);
-    HashBindings {
+    .ok_or_else(|| arithmetic(None))?;
+    Ok(HashBindings {
         source_sha256,
+        root_cnf_mode_sha256,
+        term_dag_sha256,
+        atom_map_sha256,
+        baseline_cnf_sha256,
         baseline_problem_sha256,
         trace_sha256,
         lemma_sequence_sha256,
         materialized_lemmas_sha256,
         materialized_candidate_sha256,
         ..HashBindings::default()
-    }
+    })
 }
 
 struct FailureSink {
@@ -3426,47 +3714,125 @@ fn compare_hash_bindings(
     expected: &HashBindings,
     actual: &HashBindings,
 ) {
-    let comparisons = [
-        (
-            HashArtifact::Source,
-            expected.source_sha256,
-            actual.source_sha256,
-        ),
-        (
-            HashArtifact::BaselineProblem,
-            expected.baseline_problem_sha256,
-            actual.baseline_problem_sha256,
-        ),
-        (
-            HashArtifact::Trace,
-            expected.trace_sha256,
-            actual.trace_sha256,
-        ),
-        (
-            HashArtifact::LemmaSequence,
-            expected.lemma_sequence_sha256,
-            actual.lemma_sequence_sha256,
-        ),
-        (
-            HashArtifact::MaterializedLemmas,
-            expected.materialized_lemmas_sha256,
-            actual.materialized_lemmas_sha256,
-        ),
-        (
-            HashArtifact::MaterializedCandidate,
-            expected.materialized_candidate_sha256,
-            actual.materialized_candidate_sha256,
-        ),
-    ];
-    for (artifact, expected, actual) in comparisons {
+    for ((artifact, expected), (_, actual)) in hash_binding_entries(expected)
+        .into_iter()
+        .zip(hash_binding_entries(actual))
+    {
         if expected != actual {
             failures.hash(kind, artifact);
         }
     }
 }
 
-fn zero_audited_hashes() -> HashBindings {
-    HashBindings::default()
+fn hash_binding_entries(bindings: &HashBindings) -> [(HashArtifact, Sha256Digest); 19] {
+    [
+        (HashArtifact::Source, bindings.source_sha256),
+        (HashArtifact::RootCnfMode, bindings.root_cnf_mode_sha256),
+        (HashArtifact::TermDag, bindings.term_dag_sha256),
+        (HashArtifact::AtomMap, bindings.atom_map_sha256),
+        (HashArtifact::BaselineCnf, bindings.baseline_cnf_sha256),
+        (
+            HashArtifact::BaselineProblem,
+            bindings.baseline_problem_sha256,
+        ),
+        (HashArtifact::Trace, bindings.trace_sha256),
+        (HashArtifact::LemmaSequence, bindings.lemma_sequence_sha256),
+        (
+            HashArtifact::MaterializedLemmas,
+            bindings.materialized_lemmas_sha256,
+        ),
+        (
+            HashArtifact::MaterializedCandidate,
+            bindings.materialized_candidate_sha256,
+        ),
+        (
+            HashArtifact::CandidateBinary,
+            bindings.candidate_binary_sha256,
+        ),
+        (HashArtifact::Revision, bindings.revision_sha256),
+        (
+            HashArtifact::CorpusManifest,
+            bindings.corpus_manifest_sha256,
+        ),
+        (
+            HashArtifact::ProjectionRecord,
+            bindings.projection_record_sha256,
+        ),
+        (HashArtifact::CheckerRecord, bindings.checker_record_sha256),
+        (
+            HashArtifact::ObservationRecord,
+            bindings.observation_record_sha256,
+        ),
+        (HashArtifact::Dimacs, bindings.dimacs_sha256),
+        (HashArtifact::Invocation, bindings.invocation_sha256),
+        (HashArtifact::Drat, bindings.drat_sha256),
+    ]
+}
+
+fn hash_bindings_are_source_only(bindings: &HashBindings) -> bool {
+    let entries = hash_binding_entries(bindings);
+    entries[..10]
+        .iter()
+        .all(|(_, digest)| *digest != Sha256Digest::ZERO)
+        && entries[10..]
+            .iter()
+            .all(|(_, digest)| *digest == Sha256Digest::ZERO)
+}
+
+fn expected_checker_counters(
+    trace: &[TraceRecord],
+    output: Option<&EqresOutput>,
+) -> Result<CheckerCounters, ReconstructionError> {
+    let mut counters = CheckerCounters::default();
+    for record in trace {
+        match record {
+            TraceRecord::Equality(_) => {
+                counters.replayed_equality_nodes =
+                    checked_add(counters.replayed_equality_nodes, 1, None)?;
+            }
+            TraceRecord::Conflict(_) => {
+                counters.replayed_conflict_clauses =
+                    checked_add(counters.replayed_conflict_clauses, 1, None)?;
+            }
+        }
+    }
+    counters.replayed_emitted_lemmas = to_u64(output_lemmas(output).len(), None)?;
+    Ok(counters)
+}
+
+fn compare_checker_counters(
+    failures: &mut FailureSink,
+    expected: CheckerCounters,
+    actual: CheckerCounters,
+    report_copy: bool,
+) {
+    let kinds = if report_copy {
+        [
+            AuditFailureKind::ReportCheckerEqualityCountMismatch,
+            AuditFailureKind::ReportCheckerConflictCountMismatch,
+            AuditFailureKind::ReportCheckerEmittedLemmaCountMismatch,
+            AuditFailureKind::ReportCheckerReplayFailuresNonzero,
+        ]
+    } else {
+        [
+            AuditFailureKind::CheckerEqualityCountMismatch,
+            AuditFailureKind::CheckerConflictCountMismatch,
+            AuditFailureKind::CheckerEmittedLemmaCountMismatch,
+            AuditFailureKind::CheckerReplayFailuresNonzero,
+        ]
+    };
+    if actual.replayed_equality_nodes != expected.replayed_equality_nodes {
+        failures.plain(kinds[0]);
+    }
+    if actual.replayed_conflict_clauses != expected.replayed_conflict_clauses {
+        failures.plain(kinds[1]);
+    }
+    if actual.replayed_emitted_lemmas != expected.replayed_emitted_lemmas {
+        failures.plain(kinds[2]);
+    }
+    if actual.replay_failures != 0 {
+        failures.plain(kinds[3]);
+    }
 }
 
 /// Reconstruct and audit one selected T11 bundle without compiler/checker calls
@@ -3487,13 +3853,29 @@ pub(crate) fn audit(input: EqresInput<'_>, bundle: &EqresBundle) -> AuditResult 
         failures.plain(AuditFailureKind::ReportVariantMismatch);
     }
 
-    let (output, cap_attempt, hashes_recorded, expected_outcome) = match &reconstruction.status {
+    let (output, cap_attempt, expected_outcome) = match &reconstruction.status {
         ReconstructionStatus::Completed(output) => {
             let outcome = match output {
-                EqresOutput::Lemmas(_) => ReportOutcome::Lemmas,
+                EqresOutput::Lemmas(lemmas) => {
+                    if lemmas.is_empty() {
+                        failures.plain(AuditFailureKind::NoUsefulOutput);
+                    }
+                    ReportOutcome::Lemmas
+                }
                 EqresOutput::TheoryEmpty { .. } => ReportOutcome::TheoryEmpty,
-                EqresOutput::NoLemmas => ReportOutcome::NoLemmas,
+                EqresOutput::NoLemmas => {
+                    failures.plain(AuditFailureKind::NoUsefulOutput);
+                    ReportOutcome::NoLemmas
+                }
             };
+            if reconstruction
+                .counters
+                .output
+                .emitted_with_missing_equality_congruence
+                == 0
+            {
+                failures.plain(AuditFailureKind::MissingEqualityCongruenceEvidence);
+            }
             match &bundle.compiler.status {
                 CompilerStatus::Completed(actual) if actual == output => {}
                 CompilerStatus::Completed(_) => failures.plain(AuditFailureKind::OutputMismatch),
@@ -3504,12 +3886,10 @@ pub(crate) fn audit(input: EqresInput<'_>, bundle: &EqresBundle) -> AuditResult 
                     failures.plain(AuditFailureKind::CompilerStatusMismatch)
                 }
             }
-            (Some(output), None, true, outcome)
+            (Some(output), None, outcome)
         }
-        ReconstructionStatus::Cap {
-            attempt,
-            hashes_recorded,
-        } => {
+        ReconstructionStatus::Cap(attempt) => {
+            failures.plain(AuditFailureKind::CapReached);
             match &bundle.compiler.status {
                 CompilerStatus::Rejected(CompilerFailure::Cap(actual)) if actual == attempt => {}
                 CompilerStatus::Rejected(CompilerFailure::Cap(_)) => {
@@ -3521,16 +3901,11 @@ pub(crate) fn audit(input: EqresInput<'_>, bundle: &EqresBundle) -> AuditResult 
                     failures.plain(AuditFailureKind::CompilerStatusMismatch)
                 }
             }
-            (
-                None,
-                Some(attempt.clone()),
-                *hashes_recorded,
-                ReportOutcome::Rejected,
-            )
+            (None, Some(attempt.clone()), ReportOutcome::Rejected)
         }
         ReconstructionStatus::Fatal(error) => {
             failures.fatal(error);
-            (None, None, false, ReportOutcome::Rejected)
+            (None, None, ReportOutcome::Rejected)
         }
     };
 
@@ -3566,39 +3941,65 @@ pub(crate) fn audit(input: EqresInput<'_>, bundle: &EqresBundle) -> AuditResult 
         Err(error) => failures.fatal(&error),
     }
 
-    let recomputed_hashes = recompute_hashes(input, &reconstruction.trace, output, materialized);
-    let expected_recorded_hashes = if hashes_recorded {
-        recomputed_hashes
-    } else {
-        zero_audited_hashes()
+    let checker_counters = match expected_checker_counters(&reconstruction.trace, output) {
+        Ok(counters) => counters,
+        Err(error) => {
+            failures.fatal(&error);
+            CheckerCounters::default()
+        }
     };
+    compare_checker_counters(
+        &mut failures,
+        checker_counters,
+        bundle.checker.counters,
+        false,
+    );
+    compare_checker_counters(
+        &mut failures,
+        checker_counters,
+        bundle.report.checker_counters,
+        true,
+    );
+
+    let recomputed_hashes =
+        match recompute_hashes(input, &reconstruction.trace, output, materialized) {
+            Ok(hashes) => hashes,
+            Err(error) => {
+                failures.fatal(&error);
+                HashBindings::default()
+            }
+        };
+    if matches!(&reconstruction.status, ReconstructionStatus::Completed(_))
+        && !hash_bindings_are_source_only(&recomputed_hashes)
+    {
+        failures.plain(AuditFailureKind::InternalInvariant);
+    }
     compare_hash_bindings(
         &mut failures,
         AuditFailureKind::CompilerHashMismatch,
-        &expected_recorded_hashes,
+        &recomputed_hashes,
         &bundle.compiler.hashes,
     );
     compare_hash_bindings(
         &mut failures,
         AuditFailureKind::ReportHashMismatch,
-        &expected_recorded_hashes,
+        &recomputed_hashes,
         &bundle.report.hashes,
     );
-    if matches!(&reconstruction.status, ReconstructionStatus::Completed(_)) {
-        if !matches!(bundle.checker.status, CheckerStatus::Accepted) {
-            failures.plain(AuditFailureKind::CheckerStatusMismatch);
-        }
-        compare_hash_bindings(
-            &mut failures,
-            AuditFailureKind::CheckerHashMismatch,
-            &recomputed_hashes,
-            &bundle.checker.recomputed_hashes,
-        );
+    if !matches!(bundle.checker.status, CheckerStatus::Accepted) {
+        failures.plain(AuditFailureKind::CheckerStatusMismatch);
     }
+    compare_hash_bindings(
+        &mut failures,
+        AuditFailureKind::CheckerHashMismatch,
+        &recomputed_hashes,
+        &bundle.checker.recomputed_hashes,
+    );
 
     AuditResult {
         status: failures.status(),
         counters: reconstruction.counters,
+        checker_counters,
         cap_attempt,
         recomputed_hashes,
     }
@@ -3609,12 +4010,18 @@ mod tests {
     use super::*;
     use crate::t11_eqres_compiler;
     use crate::t11_eqres_types::{
-        CheckerCounters, CheckerResult, EqresMode, EqresReport, ForbiddenGrowthCounters,
-        IntegrityReport, SelectorFacts, SelectorReport, SolverBackend,
+        CheckerCounters, CheckerResult, CompilerResult, EqresMode, EqresReport,
+        ForbiddenGrowthCounters, IntegrityReport, OutputCounters, PruningCounters, SearchCounters,
+        SelectorFacts, SelectorReport, SolverBackend,
     };
     use crate::{FlatClauses, FunDecl, FunDeclTable, SortId, SortTable, Term};
 
     const DATA_SORT: SortId = SortId(1);
+    const GOLDEN_TRACE_SHA256: Sha256Digest = Sha256Digest::new([
+        0x59, 0x06, 0x48, 0x69, 0xc0, 0xa8, 0x95, 0x51, 0x71, 0xf9, 0x02, 0xec, 0xd1, 0x9e, 0x6c,
+        0xc1, 0xbe, 0xc2, 0x25, 0x53, 0x94, 0x80, 0xa9, 0x92, 0x94, 0x94, 0x27, 0x36, 0xdb, 0x71,
+        0x2c, 0xd9,
+    ]);
 
     struct FixtureBuilder {
         sorts: SortTable,
@@ -3683,6 +4090,29 @@ mod tests {
                 sort: DATA_SORT,
             });
             self.applications.push(right);
+        }
+
+        fn unary_pair(
+            &mut self,
+            left_argument: TermId,
+            right_argument: TermId,
+        ) -> (TermId, TermId) {
+            let function = self.declaration(vec![DATA_SORT]);
+            let left = self.terms.len();
+            self.terms.push(Term {
+                fun: function,
+                args: vec![left_argument],
+                sort: DATA_SORT,
+            });
+            self.applications.push(left);
+            let right = self.terms.len();
+            self.terms.push(Term {
+                fun: function,
+                args: vec![right_argument],
+                sort: DATA_SORT,
+            });
+            self.applications.push(right);
+            (left, right)
         }
 
         fn equality(&mut self, left: TermId, right: TermId) -> i32 {
@@ -3794,9 +4224,15 @@ mod tests {
         assert!(matches!(compiler.status, CompilerStatus::Completed(_)));
         let materialized = materialize(&compiler);
         let selector = selected_selector(fixture.applications.len());
+        let output = match &compiler.status {
+            CompilerStatus::Completed(output) => Some(output),
+            CompilerStatus::NotRun | CompilerStatus::Rejected(_) => None,
+        };
+        let checker_counters = expected_checker_counters(&compiler.trace, output)
+            .expect("fixture checker counters should fit");
         let checker = CheckerResult {
             status: CheckerStatus::Accepted,
-            counters: CheckerCounters::default(),
+            counters: checker_counters,
             recomputed_hashes: compiler.hashes,
         };
         let outcome = match &compiler.status {
@@ -3841,6 +4277,213 @@ mod tests {
         (builder.build(), guard)
     }
 
+    fn useful_fixture() -> (Fixture, i32) {
+        let mut builder = FixtureBuilder::new();
+        let a = builder.constant();
+        let b = builder.constant();
+        let (fa, fb) = builder.unary_pair(a, b);
+        let (hfa, hfb) = builder.unary_pair(fa, fb);
+        let argument_equality = builder.equality(a, b);
+        let output_equality = builder.equality(hfa, hfb);
+        builder.clause(vec![argument_equality]);
+        builder.clause(vec![-output_equality]);
+        (builder.build(), output_equality)
+    }
+
+    fn equality(left: TermId, right: TermId) -> EqualityKey {
+        EqualityKey::from_normalized(left, right).expect("golden equality is normalized")
+    }
+
+    fn baseline_pivot(clause: u32) -> ClausePivot {
+        ClausePivot {
+            clause: ClauseRef {
+                id: ClauseId::new(clause),
+                origin: ClauseOrigin::Baseline,
+            },
+            literal_offset: LiteralOffset::new(0),
+        }
+    }
+
+    fn golden_useful_bundle(fixture: &Fixture) -> EqresBundle {
+        let mut trace = Vec::new();
+        trace.push(TraceRecord::Equality(EqualityTraceRecord {
+            event_id: EventId::new(0),
+            node_id: NodeId::new(0),
+            depth: ProofDepth::new(0),
+            conclusion: equality(0, 1),
+            side_clause: CanonicalClause::empty(),
+            rule: EqualityRuleRecord::Seed(SeedRecord {
+                positive_source: baseline_pivot(0),
+            }),
+        }));
+        for term in 0..6 {
+            trace.push(TraceRecord::Equality(EqualityTraceRecord {
+                event_id: EventId::new(term as u32 + 1),
+                node_id: NodeId::new(term as u32 + 1),
+                depth: ProofDepth::new(0),
+                conclusion: equality(term, term),
+                side_clause: CanonicalClause::empty(),
+                rule: EqualityRuleRecord::Reflexivity(ReflexivityRecord { term }),
+            }));
+        }
+        trace.push(TraceRecord::Equality(EqualityTraceRecord {
+            event_id: EventId::new(17),
+            node_id: NodeId::new(7),
+            depth: ProofDepth::new(1),
+            conclusion: equality(2, 3),
+            side_clause: CanonicalClause::empty(),
+            rule: EqualityRuleRecord::Congruence(CongruenceRecord {
+                applications: [ApplicationId::new(2), ApplicationId::new(3)],
+                arguments: vec![CongruenceArgumentParent {
+                    argument_index: ArgumentIndex::new(0),
+                    parent: NodeId::new(0),
+                }]
+                .into_boxed_slice(),
+            }),
+        }));
+        trace.push(TraceRecord::Equality(EqualityTraceRecord {
+            event_id: EventId::new(22),
+            node_id: NodeId::new(8),
+            depth: ProofDepth::new(2),
+            conclusion: equality(4, 5),
+            side_clause: CanonicalClause::empty(),
+            rule: EqualityRuleRecord::Congruence(CongruenceRecord {
+                applications: [ApplicationId::new(4), ApplicationId::new(5)],
+                arguments: vec![CongruenceArgumentParent {
+                    argument_index: ArgumentIndex::new(0),
+                    parent: NodeId::new(7),
+                }]
+                .into_boxed_slice(),
+            }),
+        }));
+        trace.push(TraceRecord::Conflict(ConflictTraceRecord {
+            event_id: EventId::new(27),
+            clause_id: ClauseId::new(2),
+            depth: ProofDepth::new(3),
+            clause: CanonicalClause::empty(),
+            rule: ConflictRecord {
+                equality_parent: NodeId::new(8),
+                negative_source: baseline_pivot(1),
+            },
+        }));
+
+        let counters = DeterministicCounters {
+            input: InputCounters {
+                terms: 6,
+                baseline_variables: 2,
+                baseline_atom_entries: 2,
+                baseline_clauses: 2,
+                baseline_literal_slots: 2,
+                applications: 4,
+                application_pairs: 2,
+                maximum_arity: 1,
+                application_argument_slots: 2,
+            },
+            search: SearchCounters {
+                attempted_events: RuleCounters {
+                    seed: 1,
+                    reflexivity: 6,
+                    transitivity: 18,
+                    congruence: 2,
+                    conflict: 1,
+                },
+                accepted_events: RuleCounters {
+                    seed: 1,
+                    reflexivity: 6,
+                    transitivity: 0,
+                    congruence: 2,
+                    conflict: 1,
+                },
+                events_popped: 28,
+                distinct_event_keys_inserted: 28,
+                duplicate_event_keys: 0,
+                worklist_pushes: 28,
+                live_worklist_entries: 0,
+                peak_live_worklist_entries: 11,
+                queued_events_discarded_at_theory_empty: 0,
+                accepted_equality_nodes: 9,
+                accepted_conflict_clauses: 1,
+                proof_parent_references: 3,
+                maximum_proof_depth: 3,
+                accepted_trace_literal_slots: 0,
+                canonical_proof_work_literal_charge: 3,
+                retained_antichain_entries: 9,
+                peak_retained_antichain_entries: 9,
+                registered_negative_equality_occurrences: 1,
+                logical_incremental_memory_bytes: 2_644,
+                suppressed_missing_equality_congruence_events: 0,
+            },
+            pruning: PruningCounters {
+                support_subset_discards: 18,
+                support_capacity_discards: 0,
+                support_removed_supersets: 0,
+                duplicate_derived_clauses: 0,
+                tautological_derived_clauses: 0,
+                final_base_subsumption_discards: 0,
+                final_output_subsumption_discards: 0,
+            },
+            output: OutputCounters {
+                emitted_lemmas: 1,
+                emitted_literal_slots: 0,
+                emitted_p95_width: 0,
+                emitted_maximum_width: 0,
+                emitted_with_missing_equality_congruence: 1,
+            },
+        };
+        let output = EqresOutput::TheoryEmpty {
+            terminal_event_id: EventId::new(27),
+            lemma: EmittedLemma {
+                source_clause_id: ClauseId::new(2),
+                clause: CanonicalClause::empty(),
+            },
+        };
+        let materialized = MaterializedClauseStore::from_parts(vec![0, 0], Vec::new())
+            .expect("golden materialization is valid");
+        let hashes = recompute_hashes(fixture.input(), &trace, Some(&output), &materialized)
+            .expect("golden hashes fit");
+        assert_eq!(hashes.trace_sha256, GOLDEN_TRACE_SHA256);
+        let checker_counters = CheckerCounters {
+            replayed_equality_nodes: 9,
+            replayed_conflict_clauses: 1,
+            replayed_emitted_lemmas: 1,
+            replay_failures: 0,
+        };
+        let selector = selected_selector(4);
+        let compiler = CompilerResult {
+            variant: CompilerVariant::Ordinary,
+            status: CompilerStatus::Completed(output),
+            trace: trace.into_boxed_slice(),
+            counters,
+            hashes,
+        };
+        let checker = CheckerResult {
+            status: CheckerStatus::Accepted,
+            counters: checker_counters,
+            recomputed_hashes: hashes,
+        };
+        let report = EqresReport {
+            schema_version: EQRES_SCHEMA_VERSION,
+            selector,
+            compiler_variant: CompilerVariant::Ordinary,
+            outcome: ReportOutcome::TheoryEmpty,
+            counters,
+            checker_counters,
+            cap_attempt: None,
+            forbidden_growth: ForbiddenGrowthCounters::default(),
+            integrity: IntegrityReport {
+                baseline_unchanged: true,
+                trace_materialization_equal: true,
+                compiler_checker_agree: true,
+                output_canonical: true,
+                external_audit_accepted: false,
+                off_path_unchanged: false,
+            },
+            sat_calls: 0,
+            hashes,
+        };
+        EqresBundle::new(selector, compiler, materialized, checker, report)
+    }
+
     fn assert_failure(result: &AuditResult, kind: AuditFailureKind) {
         let AuditStatus::Rejected(failures) = &result.status else {
             panic!("audit unexpectedly accepted mutation");
@@ -3853,14 +4496,28 @@ mod tests {
         );
     }
 
+    fn assert_hash_failure(result: &AuditResult, kind: AuditFailureKind, artifact: HashArtifact) {
+        let AuditStatus::Rejected(failures) = &result.status else {
+            panic!("audit unexpectedly accepted hash mutation");
+        };
+        assert!(
+            failures
+                .as_slice()
+                .iter()
+                .any(|failure| { failure.kind == kind && failure.artifact == Some(artifact) })
+        );
+    }
+
     #[test]
     fn accepts_synthetic_compiler_bundle() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         let result = audit(fixture.input(), &bundle);
         assert_eq!(result.status, AuditStatus::Accepted);
         assert_eq!(result.counters, bundle.compiler.counters);
+        assert_eq!(result.checker_counters, bundle.checker.counters);
         assert_eq!(result.cap_attempt, None);
+        assert_eq!(result.recomputed_hashes, bundle.compiler.hashes);
         assert_eq!(
             result.recomputed_hashes.trace_sha256,
             bundle.compiler.hashes.trace_sha256
@@ -3872,8 +4529,142 @@ mod tests {
     }
 
     #[test]
+    fn accepts_hand_assembled_golden_bundle() {
+        let (fixture, _) = useful_fixture();
+        let bundle = golden_useful_bundle(&fixture);
+        let result = audit(fixture.input(), &bundle);
+        assert_eq!(result.status, AuditStatus::Accepted);
+        assert_eq!(result.counters, bundle.compiler.counters);
+        assert_eq!(result.checker_counters, bundle.checker.counters);
+        assert_eq!(result.recomputed_hashes, bundle.compiler.hashes);
+        assert_eq!(result.recomputed_hashes.trace_sha256, GOLDEN_TRACE_SHA256);
+    }
+
+    #[test]
+    fn rejects_non_useful_and_not_run_outputs() {
+        let (plain_fixture, _) = lemma_fixture();
+        let plain_bundle = compiled_bundle(&plain_fixture, CompilerVariant::Ordinary);
+        let plain_result = audit(plain_fixture.input(), &plain_bundle);
+        assert_failure(
+            &plain_result,
+            AuditFailureKind::MissingEqualityCongruenceEvidence,
+        );
+
+        let (useful_fixture, _) = useful_fixture();
+        let mut not_run = compiled_bundle(&useful_fixture, CompilerVariant::Ordinary);
+        not_run.compiler.status = CompilerStatus::NotRun;
+        not_run.report.outcome = ReportOutcome::Rejected;
+        let not_run_result = audit(useful_fixture.input(), &not_run);
+        assert_failure(&not_run_result, AuditFailureKind::CompilerStatusMismatch);
+    }
+
+    #[test]
+    fn matching_static_cap_is_rejection_evidence_only() {
+        let mut builder = FixtureBuilder::new();
+        let function = builder.declaration(Vec::new());
+        builder
+            .terms
+            .try_reserve_exact((LIMIT_TERMS + 1) as usize)
+            .expect("cap fixture allocation");
+        for _ in 0..=LIMIT_TERMS {
+            builder.terms.push(Term {
+                fun: function,
+                args: Vec::new(),
+                sort: DATA_SORT,
+            });
+        }
+        let fixture = builder.build();
+        let attempt = CapAttempt {
+            reason: CapReason::Terms,
+            boundary: CapBoundary::StaticInput,
+            pre_event_value: 0,
+            prospective_value: LIMIT_TERMS + 1,
+            limit: LIMIT_TERMS,
+        };
+        let mut counters = DeterministicCounters::default();
+        counters.input.terms = LIMIT_TERMS + 1;
+        let selector = selected_selector(0);
+        let compiler = CompilerResult {
+            variant: CompilerVariant::Ordinary,
+            status: CompilerStatus::Rejected(CompilerFailure::Cap(attempt.clone())),
+            trace: Box::new([]),
+            counters,
+            hashes: HashBindings::default(),
+        };
+        let checker = CheckerResult {
+            status: CheckerStatus::Rejected(Box::new([])),
+            counters: CheckerCounters::default(),
+            recomputed_hashes: HashBindings::default(),
+        };
+        let report = EqresReport {
+            schema_version: EQRES_SCHEMA_VERSION,
+            selector,
+            compiler_variant: CompilerVariant::Ordinary,
+            outcome: ReportOutcome::Rejected,
+            counters,
+            checker_counters: CheckerCounters::default(),
+            cap_attempt: Some(attempt.clone()),
+            forbidden_growth: ForbiddenGrowthCounters::default(),
+            integrity: IntegrityReport {
+                baseline_unchanged: false,
+                trace_materialization_equal: false,
+                compiler_checker_agree: false,
+                output_canonical: false,
+                external_audit_accepted: false,
+                off_path_unchanged: false,
+            },
+            sat_calls: 0,
+            hashes: HashBindings::default(),
+        };
+        let bundle = EqresBundle::new(
+            selector,
+            compiler,
+            MaterializedClauseStore::empty(),
+            checker,
+            report,
+        );
+
+        let result = audit(fixture.input(), &bundle);
+        assert_eq!(result.cap_attempt, Some(attempt));
+        assert_eq!(result.counters, counters);
+        assert_failure(&result, AuditFailureKind::CapReached);
+    }
+
+    #[test]
+    fn application_shape_cap_precedes_pair_materialization() {
+        let mut builder = FixtureBuilder::new();
+        let arguments = (0..101).map(|_| builder.constant()).collect::<Vec<_>>();
+        let function = builder.declaration(vec![DATA_SORT]);
+        for argument in arguments {
+            let application = builder.terms.len();
+            builder.terms.push(Term {
+                fun: function,
+                args: vec![argument],
+                sort: DATA_SORT,
+            });
+            builder.applications.push(application);
+        }
+        let fixture = builder.build();
+        let mut counters = DeterministicCounters::default();
+        let error = match validate_and_prepare(fixture.input(), &mut counters) {
+            Ok(_) => panic!("5,050 application pairs should exceed the frozen cap"),
+            Err(error) => error,
+        };
+        let ReconstructionError::Cap(attempt) = error else {
+            panic!("application shape should fail at its static pair cap");
+        };
+        assert_eq!(attempt.reason, CapReason::ApplicationPairs);
+        assert_eq!(attempt.boundary, CapBoundary::StaticInput);
+        assert_eq!(attempt.prospective_value, 5_050);
+        assert_eq!(attempt.limit, LIMIT_APPLICATION_PAIRS);
+        assert_eq!(counters.input.application_pairs, 5_050);
+        assert_eq!(counters.input.maximum_arity, 1);
+        assert_eq!(counters.input.application_argument_slots, 5_050);
+    }
+
+    #[test]
     fn rejects_counter_mutation() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         bundle.compiler.counters.search.events_popped += 1;
         let result = audit(fixture.input(), &bundle);
@@ -3882,7 +4673,7 @@ mod tests {
 
     #[test]
     fn rejects_trace_order_mutation() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         assert!(bundle.compiler.trace.len() >= 2);
         bundle.compiler.trace.swap(0, 1);
@@ -3892,7 +4683,7 @@ mod tests {
 
     #[test]
     fn rejects_output_mutation() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         bundle.compiler.status = CompilerStatus::Completed(EqresOutput::NoLemmas);
         let result = audit(fixture.input(), &bundle);
@@ -3901,10 +4692,11 @@ mod tests {
 
     #[test]
     fn rejects_exact_materialized_byte_mutation() {
-        let (fixture, guard) = lemma_fixture();
+        let (fixture, output_equality) = useful_fixture();
         let bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
-        assert_eq!(bundle.materialized_lemmas().literals(), [guard]);
-        let materialized = MaterializedClauseStore::from_parts(vec![0, 1], vec![-guard])
+        assert_eq!(bundle.materialized_lemmas().end_offsets(), [0, 0]);
+        assert!(bundle.materialized_lemmas().literals().is_empty());
+        let materialized = MaterializedClauseStore::from_parts(vec![0, 1], vec![output_equality])
             .expect("mutated store remains structurally valid");
         let mutated = EqresBundle::new(
             bundle.selector,
@@ -3916,6 +4708,75 @@ mod tests {
         let result = audit(fixture.input(), &mutated);
         assert_failure(&result, AuditFailureKind::MaterializedLiteralsMismatch);
         assert_failure(&result, AuditFailureKind::CompilerHashMismatch);
+    }
+
+    #[test]
+    fn rejects_consistently_omitted_internal_hash() {
+        let (fixture, _) = useful_fixture();
+        let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
+        bundle.compiler.hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        bundle.checker.recomputed_hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        bundle.report.hashes.term_dag_sha256 = Sha256Digest::ZERO;
+
+        let result = audit(fixture.input(), &bundle);
+        assert_ne!(result.recomputed_hashes.term_dag_sha256, Sha256Digest::ZERO);
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::CompilerHashMismatch,
+            HashArtifact::TermDag,
+        );
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::CheckerHashMismatch,
+            HashArtifact::TermDag,
+        );
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::ReportHashMismatch,
+            HashArtifact::TermDag,
+        );
+    }
+
+    #[test]
+    fn rejects_consistently_nonzero_external_binding() {
+        let (fixture, _) = useful_fixture();
+        let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
+        let forged = Sha256Digest::new([0x91; 32]);
+        bundle.compiler.hashes.candidate_binary_sha256 = forged;
+        bundle.checker.recomputed_hashes.candidate_binary_sha256 = forged;
+        bundle.report.hashes.candidate_binary_sha256 = forged;
+
+        let result = audit(fixture.input(), &bundle);
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::CompilerHashMismatch,
+            HashArtifact::CandidateBinary,
+        );
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::CheckerHashMismatch,
+            HashArtifact::CandidateBinary,
+        );
+        assert_hash_failure(
+            &result,
+            AuditFailureKind::ReportHashMismatch,
+            HashArtifact::CandidateBinary,
+        );
+    }
+
+    #[test]
+    fn rejects_nonzero_checker_replay_failures_in_both_copies() {
+        let (fixture, _) = useful_fixture();
+        let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
+        bundle.checker.counters.replay_failures = 1;
+        bundle.report.checker_counters.replay_failures = 1;
+
+        let result = audit(fixture.input(), &bundle);
+        assert_failure(&result, AuditFailureKind::CheckerReplayFailuresNonzero);
+        assert_failure(
+            &result,
+            AuditFailureKind::ReportCheckerReplayFailuresNonzero,
+        );
     }
 
     #[test]
@@ -3941,7 +4802,7 @@ mod tests {
         let fixture = builder.build();
         let bundle = compiled_bundle(&fixture, CompilerVariant::SuppressMissingEqualityCongruence);
         let result = audit(fixture.input(), &bundle);
-        assert_eq!(result.status, AuditStatus::Accepted);
+        assert_failure(&result, AuditFailureKind::NoUsefulOutput);
         assert_eq!(
             result
                 .counters
@@ -3966,54 +4827,158 @@ mod tests {
 
     #[test]
     fn transitivity_join_identity_keeps_both_intermediates() {
-        let mut builder = FixtureBuilder::new();
-        let a = builder.constant();
-        let b = builder.constant();
-        let equality = builder.equality(a, b);
-        let left_guard = builder.auxiliary();
-        let right_guard = builder.auxiliary();
-        builder.clause(vec![equality, left_guard]);
-        builder.clause(vec![equality, right_guard]);
-        let fixture = builder.build();
-        let mut counters = DeterministicCounters::default();
-        let prepared =
-            validate_and_prepare(fixture.input(), &mut counters).expect("join fixture validates");
-        let mut auditor = Auditor::new(fixture.input(), CompilerVariant::Ordinary, prepared)
-            .expect("join auditor initializes");
-        auditor.run().expect("join fixture reconstructs");
-        let mut seed_nodes = Vec::new();
-        for record in &auditor.trace {
-            if let TraceRecord::Equality(record) = record
-                && record.conclusion
-                    == EqualityKey::from_normalized(a, b).expect("ordered fixture terms")
-                && matches!(record.rule, EqualityRuleRecord::Seed(_))
-            {
-                seed_nodes.push(record.node_id);
-            }
+        let parents = [NodeId::new(4), NodeId::new(9)];
+        let mut joins = FxHashSet::default();
+        assert!(joins.insert(TransitivityJoinKey {
+            parents,
+            intermediate: 0,
+        }));
+        assert!(joins.insert(TransitivityJoinKey {
+            parents,
+            intermediate: 1,
+        }));
+        assert_eq!(joins.len(), 2);
+        assert!(!joins.insert(TransitivityJoinKey {
+            parents,
+            intermediate: 0,
+        }));
+    }
+
+    #[test]
+    fn local_event_comparator_pins_every_field_precedence() {
+        assert_eq!(
+            [
+                local_rule_rank(RuleKind::Seed),
+                local_rule_rank(RuleKind::Reflexivity),
+                local_rule_rank(RuleKind::Transitivity),
+                local_rule_rank(RuleKind::Congruence),
+                local_rule_rank(RuleKind::Conflict),
+            ],
+            [0, 1, 2, 3, 4]
+        );
+        assert_eq!(local_origin_rank(ClauseOrigin::Baseline), 0);
+        assert_eq!(local_origin_rank(ClauseOrigin::Derived), 1);
+
+        let base = EventKey {
+            resulting_clause_width: 0,
+            proof_depth: ProofDepth::new(0),
+            rule: RuleKind::Seed,
+            conclusion: None,
+            clause: CanonicalClause::empty(),
+            source: None,
+            parents: Box::new([]),
+        };
+        let assert_less = |left: &EventKey, right: &EventKey| {
+            assert_eq!(compare_event_keys(left, right), Ordering::Less);
+            assert_eq!(compare_event_keys(right, left), Ordering::Greater);
+        };
+
+        let left = base.clone();
+        let mut right = base.clone();
+        right.resulting_clause_width = 1;
+        assert_less(&left, &right);
+
+        let left = base.clone();
+        let mut right = base.clone();
+        right.proof_depth = ProofDepth::new(1);
+        assert_less(&left, &right);
+
+        for rules in [
+            RuleKind::Seed,
+            RuleKind::Reflexivity,
+            RuleKind::Transitivity,
+            RuleKind::Congruence,
+            RuleKind::Conflict,
+        ]
+        .windows(2)
+        {
+            let mut left = base.clone();
+            let mut right = base.clone();
+            left.rule = rules[0];
+            right.rule = rules[1];
+            assert_less(&left, &right);
         }
-        seed_nodes.sort_unstable();
-        assert_eq!(seed_nodes.len(), 2);
-        let parents = [seed_nodes[0], seed_nodes[1]];
-        let mut intermediates = auditor
-            .transitivity_joins
-            .iter()
-            .filter_map(|join| (join.parents == parents).then_some(join.intermediate))
-            .collect::<Vec<_>>();
-        intermediates.sort_unstable();
-        intermediates.dedup();
-        assert_eq!(intermediates, vec![a, b]);
+
+        let left = base.clone();
+        let mut right = base.clone();
+        right.conclusion = Some(equality(0, 0));
+        assert_less(&left, &right);
+
+        let mut left = base.clone();
+        let mut right = base.clone();
+        left.conclusion = Some(equality(0, 1));
+        right.conclusion = Some(equality(0, 2));
+        assert_less(&left, &right);
+
+        let left = base.clone();
+        let mut right = base.clone();
+        right.clause = CanonicalClause::from_sorted(vec![1]).expect("canonical comparator clause");
+        assert_less(&left, &right);
+
+        let left = base.clone();
+        let mut right = base.clone();
+        right.source = Some(baseline_pivot(0));
+        assert_less(&left, &right);
+
+        let mut left = base.clone();
+        let mut right = base.clone();
+        left.source = Some(baseline_pivot(2));
+        right.source = Some(baseline_pivot(3));
+        assert_less(&left, &right);
+
+        let mut left = base.clone();
+        let mut right = base.clone();
+        left.source = Some(ClausePivot {
+            clause: ClauseRef {
+                id: ClauseId::new(3),
+                origin: ClauseOrigin::Baseline,
+            },
+            literal_offset: LiteralOffset::new(0),
+        });
+        right.source = Some(ClausePivot {
+            clause: ClauseRef {
+                id: ClauseId::new(3),
+                origin: ClauseOrigin::Derived,
+            },
+            literal_offset: LiteralOffset::new(0),
+        });
+        assert_less(&left, &right);
+
+        let mut left = base.clone();
+        let mut right = base.clone();
+        left.source = Some(ClausePivot {
+            clause: ClauseRef {
+                id: ClauseId::new(3),
+                origin: ClauseOrigin::Derived,
+            },
+            literal_offset: LiteralOffset::new(4),
+        });
+        right.source = Some(ClausePivot {
+            clause: ClauseRef {
+                id: ClauseId::new(3),
+                origin: ClauseOrigin::Derived,
+            },
+            literal_offset: LiteralOffset::new(5),
+        });
+        assert_less(&left, &right);
+
+        let mut left = base.clone();
+        let mut right = base;
+        left.parents = vec![NodeId::new(1), NodeId::new(2)].into_boxed_slice();
+        right.parents = vec![NodeId::new(1), NodeId::new(3)].into_boxed_slice();
+        assert_less(&left, &right);
     }
 
     #[test]
     fn rejects_cap_mismatch() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         let fake = CapAttempt {
             reason: CapReason::Terms,
             boundary: CapBoundary::StaticInput,
             pre_event_value: 0,
-            prospective_value: Limits::TERMS + 1,
-            limit: Limits::TERMS,
+            prospective_value: LIMIT_TERMS + 1,
+            limit: LIMIT_TERMS,
         };
         bundle.compiler.status = CompilerStatus::Rejected(CompilerFailure::Cap(fake.clone()));
         bundle.report.cap_attempt = Some(fake);
@@ -4025,7 +4990,7 @@ mod tests {
     #[cfg(feature = "certificates")]
     #[test]
     fn receipt_round_trips_and_binds_exact_bundle_digest() {
-        let (fixture, _) = lemma_fixture();
+        let (fixture, _) = useful_fixture();
         let bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
         let result = audit(fixture.input(), &bundle);
         let exact = Sha256Digest::new([0x5a; 32]);
@@ -4039,7 +5004,49 @@ mod tests {
         assert!(!decoded.accepted_for(&bundle, Sha256Digest::new([0x6b; 32])));
 
         let mut zeroed = decoded;
-        zeroed.trace_sha256 = Sha256Digest::ZERO;
+        zeroed.hashes.trace_sha256 = Sha256Digest::ZERO;
         assert!(!zeroed.accepted_for(&bundle, exact));
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn receipt_rejects_consistently_omitted_hash_forgery() {
+        let (fixture, _) = useful_fixture();
+        let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
+        let result = audit(fixture.input(), &bundle);
+        assert_eq!(result.status, AuditStatus::Accepted);
+        let exact = Sha256Digest::new([0x71; 32]);
+        let mut receipt = EqresAuditReceipt::new(&bundle, exact, result);
+
+        bundle.compiler.hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        bundle.checker.recomputed_hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        bundle.report.hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        receipt.hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        receipt.result.recomputed_hashes.term_dag_sha256 = Sha256Digest::ZERO;
+        assert!(!receipt.accepted_for(&bundle, exact));
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn receipt_rejects_fabricated_matching_cap_acceptance() {
+        let (fixture, _) = useful_fixture();
+        let mut bundle = compiled_bundle(&fixture, CompilerVariant::Ordinary);
+        let mut result = audit(fixture.input(), &bundle);
+        assert_eq!(result.status, AuditStatus::Accepted);
+        let fake = CapAttempt {
+            reason: CapReason::Terms,
+            boundary: CapBoundary::StaticInput,
+            pre_event_value: LIMIT_TERMS,
+            prospective_value: LIMIT_TERMS + 1,
+            limit: LIMIT_TERMS,
+        };
+        bundle.compiler.status = CompilerStatus::Rejected(CompilerFailure::Cap(fake.clone()));
+        bundle.report.outcome = ReportOutcome::Rejected;
+        bundle.report.cap_attempt = Some(fake.clone());
+        result.cap_attempt = Some(fake);
+
+        let exact = Sha256Digest::new([0x72; 32]);
+        let receipt = EqresAuditReceipt::new(&bundle, exact, result);
+        assert!(!receipt.accepted_for(&bundle, exact));
     }
 }

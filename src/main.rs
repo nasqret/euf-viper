@@ -7595,23 +7595,364 @@ fn read_project_t10_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, 
     Ok(input)
 }
 
-fn read_project_t11_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
-    if path != "-" {
-        return fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"));
-    }
-    let mut input = String::new();
-    stdin
-        .read_to_string(&mut input)
-        .map_err(|error| format!("failed to read T11 projection stdin: {error}"))?;
-    Ok(input)
-}
-
 #[cfg(feature = "certificates")]
 const T11_BUNDLE_MAX_BYTES: u64 = 256 * 1024 * 1024;
 #[cfg(feature = "certificates")]
 const T11_PROJECTION_REJECTED_EXIT: i32 = 3;
 #[cfg(feature = "certificates")]
 const T11_EXTERNAL_AUDIT_REQUIRED_EXIT: i32 = 4;
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum T11FileIdentity {
+    #[cfg(unix)]
+    Unix { device: u64, inode: u64 },
+    #[cfg(windows)]
+    Windows {
+        volume_serial_number: u32,
+        file_index: u64,
+    },
+}
+
+#[cfg(feature = "certificates")]
+fn t11_file_identity(metadata: &fs::Metadata) -> Option<T11FileIdentity> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        return Some(T11FileIdentity::Unix {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        return metadata
+            .volume_serial_number()
+            .zip(metadata.file_index())
+            .map(
+                |(volume_serial_number, file_index)| T11FileIdentity::Windows {
+                    volume_serial_number,
+                    file_index,
+                },
+            );
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+#[cfg(feature = "certificates")]
+fn required_t11_file_identity(
+    metadata: &fs::Metadata,
+    artifact: &str,
+) -> Result<T11FileIdentity, String> {
+    t11_file_identity(metadata).ok_or_else(|| {
+        format!("this platform does not expose a stable identity for T11 {artifact}")
+    })
+}
+
+#[cfg(feature = "certificates")]
+struct T11HeldFile {
+    file: fs::File,
+    identity: T11FileIdentity,
+    label: String,
+}
+
+#[cfg(feature = "certificates")]
+impl T11HeldFile {
+    fn from_file(file: fs::File, label: String) -> Result<Self, String> {
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("failed to inspect T11 {label}: {error}"))?;
+        let identity = required_t11_file_identity(&metadata, &label)?;
+        Ok(Self {
+            file,
+            identity,
+            label,
+        })
+    }
+
+    fn open(path: &str, artifact: &str) -> Result<Self, String> {
+        let file = fs::File::open(path)
+            .map_err(|error| format!("failed to open T11 {artifact} {path}: {error}"))?;
+        Self::from_file(file, format!("{artifact} {path}"))
+    }
+
+    fn read_source_to_string(&mut self) -> Result<String, String> {
+        let mut input = String::new();
+        self.file
+            .read_to_string(&mut input)
+            .map_err(|error| format!("failed to read T11 {}: {error}", self.label))?;
+        let metadata = self
+            .file
+            .metadata()
+            .map_err(|error| format!("failed to re-inspect T11 {}: {error}", self.label))?;
+        let identity = required_t11_file_identity(&metadata, &self.label)?;
+        if identity != self.identity {
+            return Err(format!(
+                "T11 {} identity changed while being read",
+                self.label
+            ));
+        }
+        Ok(input)
+    }
+}
+
+#[cfg(all(feature = "certificates", unix))]
+fn duplicate_t11_stdin() -> Result<fs::File, String> {
+    use std::os::fd::AsFd;
+
+    let stdin = io::stdin();
+    let owned = stdin
+        .as_fd()
+        .try_clone_to_owned()
+        .map_err(|error| format!("failed to hold T11 source stdin: {error}"))?;
+    Ok(owned.into())
+}
+
+#[cfg(all(feature = "certificates", windows))]
+fn duplicate_t11_stdin() -> Result<fs::File, String> {
+    use std::os::windows::io::AsHandle;
+
+    let stdin = io::stdin();
+    let owned = stdin
+        .as_handle()
+        .try_clone_to_owned()
+        .map_err(|error| format!("failed to hold T11 source stdin: {error}"))?;
+    Ok(owned.into())
+}
+
+#[cfg(all(feature = "certificates", not(any(unix, windows))))]
+fn duplicate_t11_stdin() -> Result<fs::File, String> {
+    Err("this platform cannot duplicate and hold T11 source stdin".to_owned())
+}
+
+#[cfg(feature = "certificates")]
+fn open_t11_source(path: &str) -> Result<T11HeldFile, String> {
+    if path == "-" {
+        return T11HeldFile::from_file(duplicate_t11_stdin()?, "source stdin".to_owned());
+    }
+    T11HeldFile::open(path, "source")
+}
+
+#[cfg(feature = "certificates")]
+struct T11PublicationTarget {
+    requested_parent: PathBuf,
+    canonical_parent: PathBuf,
+    destination: PathBuf,
+    parent: fs::File,
+    parent_identity: T11FileIdentity,
+}
+
+#[cfg(feature = "certificates")]
+impl T11PublicationTarget {
+    fn prepare(destination: &Path, artifact: &str) -> Result<Self, String> {
+        let file_name = destination.file_name().ok_or_else(|| {
+            format!(
+                "T11 {artifact} path has no file name: {}",
+                destination.display()
+            )
+        })?;
+        let requested_parent = destination
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let canonical_parent = fs::canonicalize(&requested_parent).map_err(|error| {
+            format!(
+                "failed to resolve T11 {artifact} parent {}: {error}",
+                requested_parent.display()
+            )
+        })?;
+        let parent = fs::File::open(&canonical_parent).map_err(|error| {
+            format!(
+                "failed to hold T11 {artifact} parent {}: {error}",
+                canonical_parent.display()
+            )
+        })?;
+        let metadata = parent.metadata().map_err(|error| {
+            format!(
+                "failed to inspect T11 {artifact} parent {}: {error}",
+                canonical_parent.display()
+            )
+        })?;
+        if !metadata.is_dir() {
+            return Err(format!(
+                "T11 {artifact} parent is not a directory: {}",
+                canonical_parent.display()
+            ));
+        }
+        let parent_identity = required_t11_file_identity(&metadata, "publication parent")?;
+        let target = Self {
+            requested_parent,
+            destination: canonical_parent.join(file_name),
+            canonical_parent,
+            parent,
+            parent_identity,
+        };
+        target.revalidate_parent(artifact, "while preparing publication")?;
+        Ok(target)
+    }
+
+    fn revalidate_parent(&self, artifact: &str, phase: &str) -> Result<(), String> {
+        let requested_now = fs::canonicalize(&self.requested_parent).map_err(|error| {
+            format!(
+                "T11 {artifact} parent drifted {phase} ({}): {error}",
+                self.requested_parent.display()
+            )
+        })?;
+        if requested_now != self.canonical_parent {
+            return Err(format!(
+                "T11 {artifact} parent drifted {phase}: {} no longer resolves to {}",
+                self.requested_parent.display(),
+                self.canonical_parent.display()
+            ));
+        }
+        let metadata = fs::metadata(&self.canonical_parent).map_err(|error| {
+            format!(
+                "T11 {artifact} canonical parent drifted {phase} ({}): {error}",
+                self.canonical_parent.display()
+            )
+        })?;
+        if !metadata.is_dir()
+            || required_t11_file_identity(&metadata, "publication parent")? != self.parent_identity
+        {
+            return Err(format!(
+                "T11 {artifact} canonical parent identity drifted {phase}: {}",
+                self.canonical_parent.display()
+            ));
+        }
+        Ok(())
+    }
+
+    fn reject_existing(
+        &self,
+        artifact: &str,
+        forbidden: &[(T11FileIdentity, &str)],
+    ) -> Result<(), String> {
+        self.revalidate_parent(artifact, "before freshness check")?;
+        let metadata = match fs::symlink_metadata(&self.destination) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect T11 {artifact} destination {}: {error}",
+                    self.destination.display()
+                ));
+            }
+        };
+        let actual_metadata = if metadata.file_type().is_symlink() {
+            fs::metadata(&self.destination).ok()
+        } else {
+            Some(metadata)
+        };
+        if let Some(identity) = actual_metadata
+            .as_ref()
+            .and_then(t11_file_identity)
+            .and_then(|identity| {
+                forbidden
+                    .iter()
+                    .find_map(|(candidate, label)| (identity == *candidate).then_some(*label))
+            })
+        {
+            return Err(format!(
+                "T11 {artifact} destination aliases the held T11 {identity}: {}",
+                self.destination.display()
+            ));
+        }
+        Err(format!(
+            "T11 {artifact} output must be a fresh path: {}",
+            self.destination.display()
+        ))
+    }
+
+    fn revalidate_created_destination(
+        &self,
+        artifact: &str,
+        phase: &str,
+        expected_identity: T11FileIdentity,
+    ) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(&self.destination).map_err(|error| {
+            format!(
+                "T11 {artifact} destination drifted {phase} ({}): {error}",
+                self.destination.display()
+            )
+        })?;
+        if !metadata.file_type().is_file()
+            || required_t11_file_identity(&metadata, artifact)? != expected_identity
+        {
+            return Err(format!(
+                "T11 {artifact} destination identity drifted {phase}: {}",
+                self.destination.display()
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "certificates")]
+#[derive(Debug, PartialEq, Eq)]
+enum T11CleanupResult {
+    Removed,
+    AlreadyAbsent,
+    Retained(String),
+}
+
+#[cfg(feature = "certificates")]
+fn cleanup_created_t11_artifact(
+    target: &T11PublicationTarget,
+    artifact: &str,
+    created_identity: T11FileIdentity,
+) -> T11CleanupResult {
+    if let Err(error) = target.revalidate_parent(artifact, "before partial-file cleanup") {
+        return T11CleanupResult::Retained(error);
+    }
+    let metadata = match fs::symlink_metadata(&target.destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return T11CleanupResult::AlreadyAbsent;
+        }
+        Err(error) => {
+            return T11CleanupResult::Retained(format!(
+                "failed to inspect partial path {}: {error}",
+                target.destination.display()
+            ));
+        }
+    };
+    if !metadata.file_type().is_file() {
+        return T11CleanupResult::Retained(format!(
+            "partial path is no longer the created regular file: {}",
+            target.destination.display()
+        ));
+    }
+    let Some(current_identity) = t11_file_identity(&metadata) else {
+        return T11CleanupResult::Retained(format!(
+            "partial path identity is unavailable: {}",
+            target.destination.display()
+        ));
+    };
+    if current_identity != created_identity {
+        return T11CleanupResult::Retained(format!(
+            "partial path was replaced before cleanup: {}",
+            target.destination.display()
+        ));
+    }
+    if let Err(error) = fs::remove_file(&target.destination) {
+        return T11CleanupResult::Retained(format!(
+            "failed to remove partial file {}: {error}",
+            target.destination.display()
+        ));
+    }
+    if let Err(error) = target.parent.sync_all() {
+        return T11CleanupResult::Retained(format!(
+            "removed partial file but failed to sync parent {}: {error}",
+            target.canonical_parent.display()
+        ));
+    }
+    T11CleanupResult::Removed
+}
 
 #[cfg(feature = "certificates")]
 fn t11_sha256_digest(bytes: &[u8]) -> t11_eqres_types::Sha256Digest {
@@ -7621,41 +7962,48 @@ fn t11_sha256_digest(bytes: &[u8]) -> t11_eqres_types::Sha256Digest {
 
 #[cfg(feature = "certificates")]
 fn read_t11_bundle_strict(
-    bundle_path: &str,
+    bundle_file: &mut fs::File,
+    bundle_label: &str,
 ) -> Result<(t11_eqres_types::EqresBundle, Vec<u8>), String> {
-    let file = fs::File::open(bundle_path)
-        .map_err(|error| format!("failed to open T11 bundle {bundle_path}: {error}"))?;
-    let metadata = file
+    let metadata = bundle_file
         .metadata()
-        .map_err(|error| format!("failed to inspect T11 bundle {bundle_path}: {error}"))?;
+        .map_err(|error| format!("failed to inspect T11 {bundle_label}: {error}"))?;
     if !metadata.is_file() {
-        return Err(format!("T11 bundle is not a regular file: {bundle_path}"));
+        return Err(format!("T11 {bundle_label} is not a regular file"));
     }
+    let initial_identity = required_t11_file_identity(&metadata, bundle_label)?;
     if metadata.len() > T11_BUNDLE_MAX_BYTES {
         return Err(format!(
-            "T11 bundle exceeds {T11_BUNDLE_MAX_BYTES} bytes: {bundle_path}"
+            "T11 {bundle_label} exceeds {T11_BUNDLE_MAX_BYTES} bytes"
         ));
     }
     let expected_len = usize::try_from(metadata.len())
-        .map_err(|_| format!("T11 bundle size does not fit usize: {bundle_path}"))?;
+        .map_err(|_| format!("T11 {bundle_label} size does not fit usize"))?;
     let mut bytes = Vec::new();
     bytes
         .try_reserve_exact(expected_len)
-        .map_err(|_| format!("failed to allocate T11 bundle buffer: {bundle_path}"))?;
+        .map_err(|_| format!("failed to allocate T11 bundle buffer: {bundle_label}"))?;
     bytes.resize(expected_len, 0);
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(bundle_file);
     reader
         .read_exact(&mut bytes)
-        .map_err(|error| format!("failed to read T11 bundle {bundle_path}: {error}"))?;
+        .map_err(|error| format!("failed to read T11 {bundle_label}: {error}"))?;
     let mut extra = [0u8; 1];
     if reader
         .read(&mut extra)
-        .map_err(|error| format!("failed to finish reading T11 bundle {bundle_path}: {error}"))?
+        .map_err(|error| format!("failed to finish reading T11 {bundle_label}: {error}"))?
         != 0
     {
-        return Err(format!(
-            "T11 bundle changed while being read: {bundle_path}"
-        ));
+        return Err(format!("T11 {bundle_label} grew while being read"));
+    }
+    let final_metadata = reader
+        .get_ref()
+        .metadata()
+        .map_err(|error| format!("failed to re-inspect T11 {bundle_label}: {error}"))?;
+    if final_metadata.len() != metadata.len()
+        || required_t11_file_identity(&final_metadata, bundle_label)? != initial_identity
+    {
+        return Err(format!("T11 {bundle_label} changed while being read"));
     }
     let Some(body) = bytes.strip_suffix(b"\n") else {
         return Err("T11 bundle must end in exactly one newline".to_owned());
@@ -7670,6 +8018,9 @@ fn read_t11_bundle_strict(
     if canonical != body {
         return Err("T11 bundle is not in the exact canonical JSON encoding".to_owned());
     }
+    bundle
+        .validate_structure()
+        .map_err(|error| format!("invalid T11 bundle structure: {error}"))?;
     Ok((bundle, bytes))
 }
 
@@ -7703,25 +8054,7 @@ fn parse_audit_t11_args(args: &[String]) -> Result<(&str, &str, &str), String> {
     Ok((&args[2], &args[4], &args[6]))
 }
 
-#[cfg(feature = "certificates")]
-fn prospective_canonical_path(path: &Path) -> Result<PathBuf, String> {
-    if path.exists() {
-        return fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve {}: {error}", path.display()));
-    }
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| format!("path has no file name: {}", path.display()))?;
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let parent = fs::canonicalize(parent)
-        .map_err(|error| format!("failed to resolve {}: {error}", parent.display()))?;
-    Ok(parent.join(file_name))
-}
-
-#[cfg(feature = "certificates")]
+#[cfg(all(feature = "certificates", test))]
 fn write_t11_bundle_atomic(
     bundle: &t11_eqres_types::EqresBundle,
     bundle_path: &str,
@@ -7729,75 +8062,134 @@ fn write_t11_bundle_atomic(
     write_t11_json_record_atomic(bundle, Path::new(bundle_path), "bundle")
 }
 
-#[cfg(feature = "certificates")]
+#[cfg(all(feature = "certificates", test))]
 fn write_t11_json_record_atomic<T: Serialize>(
     record: &T,
     destination: &Path,
     artifact: &str,
 ) -> Result<(), String> {
-    let file_name = destination.file_name().ok_or_else(|| {
-        format!(
-            "T11 {artifact} path has no file name: {}",
-            destination.display()
-        )
-    })?;
-    let parent = destination
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let temporary = parent.join(format!(
-        ".{}.tmp-{}",
-        file_name.to_string_lossy(),
-        process::id()
-    ));
-    let result = (|| {
-        let file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|error| {
+    let target = T11PublicationTarget::prepare(destination, artifact)?;
+    write_t11_json_record_to_target(record, &target, artifact, &[])
+}
+
+#[cfg(feature = "certificates")]
+fn write_t11_json_record_to_target<T: Serialize>(
+    record: &T,
+    target: &T11PublicationTarget,
+    artifact: &str,
+    forbidden: &[(T11FileIdentity, &str)],
+) -> Result<(), String> {
+    target.reject_existing(artifact, forbidden)?;
+    target.revalidate_parent(artifact, "immediately before creation")?;
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target.destination)
+        .map_err(|error| {
+            if error.kind() == io::ErrorKind::AlreadyExists {
                 format!(
-                    "failed to create temporary T11 {artifact} {}: {error}",
-                    temporary.display()
+                    "T11 {artifact} output must be a fresh path: {}",
+                    target.destination.display()
                 )
-            })?;
-        let mut output = BufWriter::new(file);
+            } else {
+                format!(
+                    "failed to create fresh T11 {artifact} {}: {error}",
+                    target.destination.display()
+                )
+            }
+        })?;
+    let metadata = match file.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            drop(file);
+            return Err(format!(
+                "failed to inspect created T11 {artifact} {}; retained the path because its identity is unavailable: {error}",
+                target.destination.display()
+            ));
+        }
+    };
+    let created_identity = match required_t11_file_identity(&metadata, artifact) {
+        Ok(identity) => identity,
+        Err(error) => {
+            drop(file);
+            return Err(format!(
+                "{error}; retained the created T11 {artifact} path because cleanup cannot verify its identity: {}",
+                target.destination.display()
+            ));
+        }
+    };
+    let mut output = BufWriter::new(file);
+    let result = (|| {
+        if !metadata.is_file() {
+            return Err(format!(
+                "created T11 {artifact} is not a regular file: {}",
+                target.destination.display()
+            ));
+        }
+        if let Some((_, label)) = forbidden
+            .iter()
+            .find(|(identity, _)| *identity == created_identity)
+        {
+            return Err(format!(
+                "created T11 {artifact} aliases the held T11 {label}: {}",
+                target.destination.display()
+            ));
+        }
+        target.revalidate_parent(artifact, "immediately after creation")?;
+        target.revalidate_created_destination(
+            artifact,
+            "immediately after creation",
+            created_identity,
+        )?;
         serde_json::to_writer(&mut output, record).map_err(|error| {
             format!(
-                "failed to write temporary T11 {artifact} {}: {error}",
-                temporary.display()
+                "failed to write T11 {artifact} {}: {error}",
+                target.destination.display()
             )
         })?;
         output.write_all(b"\n").map_err(|error| {
             format!(
-                "failed to terminate temporary T11 {artifact} {}: {error}",
-                temporary.display()
+                "failed to terminate T11 {artifact} {}: {error}",
+                target.destination.display()
             )
         })?;
         output.flush().map_err(|error| {
             format!(
-                "failed to flush temporary T11 {artifact} {}: {error}",
-                temporary.display()
+                "failed to flush T11 {artifact} {}: {error}",
+                target.destination.display()
             )
         })?;
         output.get_ref().sync_all().map_err(|error| {
             format!(
-                "failed to sync temporary T11 {artifact} {}: {error}",
-                temporary.display()
+                "failed to sync T11 {artifact} {}: {error}",
+                target.destination.display()
             )
         })?;
-        drop(output);
-        fs::rename(&temporary, destination).map_err(|error| {
+        target.revalidate_created_destination(
+            artifact,
+            "before directory sync",
+            created_identity,
+        )?;
+        target.revalidate_parent(artifact, "before directory sync")?;
+        target.parent.sync_all().map_err(|error| {
             format!(
-                "failed to publish T11 {artifact} {}: {error}",
-                destination.display()
+                "failed to sync T11 {artifact} parent {}: {error}",
+                target.canonical_parent.display()
             )
-        })
+        })?;
+        target.revalidate_parent(artifact, "after directory sync")?;
+        target.revalidate_created_destination(artifact, "after directory sync", created_identity)
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+    drop(output);
+    if let Err(error) = result {
+        return match cleanup_created_t11_artifact(target, artifact, created_identity) {
+            T11CleanupResult::Removed | T11CleanupResult::AlreadyAbsent => Err(error),
+            T11CleanupResult::Retained(cleanup_error) => Err(format!(
+                "{error}; retained the T11 {artifact} path to avoid deleting a replaced inode: {cleanup_error}"
+            )),
+        };
     }
-    result
+    Ok(())
 }
 
 fn project_t10_source(input: &str) -> Result<t10_ackermann::ProjectionReport, String> {
@@ -7924,35 +8316,35 @@ fn audit_t11_source_bundle(
 
 #[cfg(feature = "certificates")]
 fn audit_t11_file(source_path: &str, bundle_path: &str, receipt_path: &str) -> Result<i32, String> {
-    if Path::new(receipt_path).exists() {
-        return Err("T11 audit receipt output must be a fresh path".to_owned());
-    }
-    let bundle_canonical = fs::canonicalize(bundle_path)
-        .map_err(|error| format!("failed to resolve T11 bundle {bundle_path}: {error}"))?;
-    let receipt_canonical = prospective_canonical_path(Path::new(receipt_path))?;
-    if bundle_canonical == receipt_canonical {
-        return Err("T11 audit receipt must not alias the projection bundle".to_owned());
-    }
-    if source_path != "-" {
-        let source_canonical = fs::canonicalize(source_path)
-            .map_err(|error| format!("failed to resolve T11 source {source_path}: {error}"))?;
-        if source_canonical == bundle_canonical || source_canonical == receipt_canonical {
-            return Err("T11 audit artifacts must not alias the source".to_owned());
-        }
-    }
+    let source = open_t11_source(source_path)?;
+    let bundle = T11HeldFile::open(bundle_path, "projection bundle")?;
+    let receipt = T11PublicationTarget::prepare(Path::new(receipt_path), "audit receipt")?;
+    audit_t11_opened(source, bundle, &receipt)
+}
 
-    let source = if source_path == "-" {
-        read_project_t11_input(source_path, &mut io::stdin().lock())?
-    } else {
-        read_project_t11_input(source_path, &mut io::empty())?
-    };
-    let (bundle, exact_bundle_bytes) = read_t11_bundle_strict(bundle_path)?;
+#[cfg(feature = "certificates")]
+fn audit_t11_opened(
+    mut source_file: T11HeldFile,
+    mut bundle_file: T11HeldFile,
+    receipt_target: &T11PublicationTarget,
+) -> Result<i32, String> {
+    if source_file.identity == bundle_file.identity {
+        return Err("T11 source and projection bundle alias the same file".to_owned());
+    }
+    let forbidden = [
+        (source_file.identity, "source"),
+        (bundle_file.identity, "projection bundle"),
+    ];
+    receipt_target.reject_existing("audit receipt", &forbidden)?;
+    let source = source_file.read_source_to_string()?;
+    let (bundle, exact_bundle_bytes) =
+        read_t11_bundle_strict(&mut bundle_file.file, &bundle_file.label)?;
     let exact_bundle_sha256 = t11_sha256_digest(&exact_bundle_bytes);
     let result = audit_t11_source_bundle(&source, &bundle)?;
     let receipt = t11_eqres_auditor::EqresAuditReceipt::new(&bundle, exact_bundle_sha256, result);
     let accepted = t11_eqres::internally_accepted_projection(&bundle)
         && receipt.accepted_for(&bundle, exact_bundle_sha256);
-    write_t11_json_record_atomic(&receipt, Path::new(receipt_path), "audit receipt")?;
+    write_t11_json_record_to_target(&receipt, receipt_target, "audit receipt", &forbidden)?;
     Ok(if accepted {
         0
     } else {
@@ -7962,23 +8354,22 @@ fn audit_t11_file(source_path: &str, bundle_path: &str, receipt_path: &str) -> R
 
 #[cfg(feature = "certificates")]
 fn project_t11_file(path: &str, bundle_path: &str) -> Result<i32, String> {
-    if path != "-" {
-        let source = fs::canonicalize(path)
-            .map_err(|error| format!("failed to resolve T11 source {path}: {error}"))?;
-        let output = prospective_canonical_path(Path::new(bundle_path))?;
-        if output == source {
-            return Err("T11 bundle output must not alias the source".to_owned());
-        }
-    }
+    let source = open_t11_source(path)?;
+    let bundle = T11PublicationTarget::prepare(Path::new(bundle_path), "bundle")?;
+    project_t11_opened(source, &bundle)
+}
 
-    let input = if path == "-" {
-        read_project_t11_input(path, &mut io::stdin().lock())?
-    } else {
-        read_project_t11_input(path, &mut io::empty())?
-    };
+#[cfg(feature = "certificates")]
+fn project_t11_opened(
+    mut source_file: T11HeldFile,
+    bundle_target: &T11PublicationTarget,
+) -> Result<i32, String> {
+    let forbidden = [(source_file.identity, "source")];
+    bundle_target.reject_existing("bundle", &forbidden)?;
+    let input = source_file.read_source_to_string()?;
     let bundle = project_t11_source(&input)?;
     let accepted = t11_eqres::internally_accepted_projection(&bundle);
-    write_t11_bundle_atomic(&bundle, bundle_path)?;
+    write_t11_json_record_to_target(&bundle, bundle_target, "bundle", &forbidden)?;
     Ok(if accepted {
         T11_EXTERNAL_AUDIT_REQUIRED_EXIT
     } else {
@@ -11566,15 +11957,25 @@ mod tests {
         assert_eq!(stdin.position(), source.len() as u64);
     }
 
-    #[test]
-    fn project_t11_dash_reads_the_supplied_stdin_bytes() {
-        let source = b"(set-logic QF_UF)\n(assert true)\n(check-sat)\n";
-        let mut stdin = std::io::Cursor::new(source);
-        assert_eq!(
-            read_project_t11_input("-", &mut stdin).unwrap().as_bytes(),
-            source
-        );
-        assert_eq!(stdin.position(), source.len() as u64);
+    #[cfg(feature = "certificates")]
+    fn t11_test_directory(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("euf-viper-t11-{label}-{}-{nonce}", process::id()));
+        fs::create_dir(&directory).unwrap();
+        directory
+    }
+
+    #[cfg(feature = "certificates")]
+    fn read_t11_bundle_path_for_test(
+        path: &Path,
+    ) -> Result<(t11_eqres_types::EqresBundle, Vec<u8>), String> {
+        let path = path.to_str().unwrap();
+        let mut held = T11HeldFile::open(path, "test bundle")?;
+        read_t11_bundle_strict(&mut held.file, &held.label)
     }
 
     #[cfg(feature = "certificates")]
@@ -11654,68 +12055,361 @@ mod tests {
 
     #[cfg(feature = "certificates")]
     #[test]
-    fn project_t11_bundle_publish_is_atomic_and_alias_aware() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory =
-            std::env::temp_dir().join(format!("euf-viper-t11-artifact-{}-{nonce}", process::id()));
-        fs::create_dir(&directory).unwrap();
+    fn t11_publication_is_fresh_preserves_existing_output_and_leaves_no_temp_path() {
+        let directory = t11_test_directory("fresh-publication");
+        let source = "(set-logic QF_UF) (assert true) (check-sat)";
         let source_path = directory.join("source.smt2");
-        fs::write(&source_path, "(set-logic QF_UF) (assert true) (check-sat)").unwrap();
-        assert_eq!(
-            prospective_canonical_path(&directory.join(".").join("source.smt2")).unwrap(),
-            fs::canonicalize(&source_path).unwrap()
-        );
-
-        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        fs::write(&source_path, source).unwrap();
         let bundle_path = directory.join("bundle.json");
-        write_t11_bundle_atomic(&bundle, bundle_path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            project_t11_file(source_path.to_str().unwrap(), bundle_path.to_str().unwrap()).unwrap(),
+            T11_PROJECTION_REJECTED_EXIT
+        );
         let value: serde_json::Value =
             serde_json::from_slice(&fs::read(&bundle_path).unwrap()).unwrap();
         assert_eq!(value["report"]["sat_calls"], 0);
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 2);
+
+        let existing_path = directory.join("existing.json");
+        fs::write(&existing_path, b"preserve me").unwrap();
+        let error = project_t11_file(
+            source_path.to_str().unwrap(),
+            existing_path.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("fresh path"));
+        assert_eq!(fs::read(&existing_path).unwrap(), b"preserve me");
+
+        let receipt_path = directory.join("existing-receipt.json");
+        fs::write(&receipt_path, b"preserve receipt").unwrap();
+        let error = audit_t11_file(
+            source_path.to_str().unwrap(),
+            bundle_path.to_str().unwrap(),
+            receipt_path.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("fresh path"));
+        assert_eq!(fs::read(&receipt_path).unwrap(), b"preserve receipt");
+        assert!(fs::read_dir(&directory).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")
+        }));
 
         fs::remove_dir_all(&directory).unwrap();
     }
 
     #[cfg(feature = "certificates")]
     #[test]
-    fn t11_bundle_reader_rejects_noncanonical_or_multiple_records() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "euf-viper-t11-strict-bundle-{}-{nonce}",
-            process::id()
-        ));
-        fs::create_dir(&directory).unwrap();
-        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+    fn t11_hardlink_aliases_are_rejected_without_modifying_any_input() {
+        let directory = t11_test_directory("hardlink-aliases");
+        let source = b"(set-logic QF_UF) (assert true) (check-sat)";
+        let source_path = directory.join("source.smt2");
+        fs::write(&source_path, source).unwrap();
+
+        let aliased_output = directory.join("source-hardlink.json");
+        fs::hard_link(&source_path, &aliased_output).unwrap();
+        let error = project_t11_file(
+            source_path.to_str().unwrap(),
+            aliased_output.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("aliases the held T11 source"));
+        assert_eq!(fs::read(&source_path).unwrap(), source);
+        assert_eq!(fs::read(&aliased_output).unwrap(), source);
+
+        let source_bundle_alias = directory.join("source-bundle-hardlink.json");
+        fs::hard_link(&source_path, &source_bundle_alias).unwrap();
+        let receipt_path = directory.join("receipt.json");
+        let error = audit_t11_file(
+            source_path.to_str().unwrap(),
+            source_bundle_alias.to_str().unwrap(),
+            receipt_path.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("source and projection bundle alias"));
+        assert!(!receipt_path.exists());
+
+        let bundle = project_t11_source(std::str::from_utf8(source).unwrap()).unwrap();
+        let bundle_path = directory.join("bundle.json");
+        write_t11_bundle_atomic(&bundle, bundle_path.to_str().unwrap()).unwrap();
+        let receipt_alias = directory.join("receipt-hardlink.json");
+        fs::hard_link(&bundle_path, &receipt_alias).unwrap();
+        let exact_bundle = fs::read(&bundle_path).unwrap();
+        let error = audit_t11_file(
+            source_path.to_str().unwrap(),
+            bundle_path.to_str().unwrap(),
+            receipt_alias.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("aliases the held T11 projection bundle"));
+        assert_eq!(fs::read(&bundle_path).unwrap(), exact_bundle);
+        assert_eq!(fs::read(&receipt_alias).unwrap(), exact_bundle);
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn t11_bundle_reader_rejects_noncanonical_and_malformed_canonical_state() {
+        let directory = t11_test_directory("strict-bundle");
+        let source = "(set-logic QF_UF) (assert true) (check-sat)";
+        let bundle = project_t11_source(source).unwrap();
         let canonical_path = directory.join("canonical.json");
         write_t11_bundle_atomic(&bundle, canonical_path.to_str().unwrap()).unwrap();
-        let (decoded, exact_bytes) =
-            read_t11_bundle_strict(canonical_path.to_str().unwrap()).unwrap();
+        let (decoded, exact_bytes) = read_t11_bundle_path_for_test(&canonical_path).unwrap();
         assert_eq!(decoded, bundle);
 
         let mut whitespace = exact_bytes.clone();
         whitespace.insert(1, b' ');
         let whitespace_path = directory.join("whitespace.json");
         fs::write(&whitespace_path, whitespace).unwrap();
-        assert!(read_t11_bundle_strict(whitespace_path.to_str().unwrap()).is_err());
+        assert!(read_t11_bundle_path_for_test(&whitespace_path).is_err());
 
         let mut unknown = b"{\"unknown\":0,".to_vec();
         unknown.extend_from_slice(&exact_bytes[1..]);
         let unknown_path = directory.join("unknown.json");
         fs::write(&unknown_path, unknown).unwrap();
-        assert!(read_t11_bundle_strict(unknown_path.to_str().unwrap()).is_err());
+        assert!(read_t11_bundle_path_for_test(&unknown_path).is_err());
 
         let mut multiple = exact_bytes;
         multiple.push(b'\n');
         let multiple_path = directory.join("multiple.json");
         fs::write(&multiple_path, multiple).unwrap();
-        assert!(read_t11_bundle_strict(multiple_path.to_str().unwrap()).is_err());
+        assert!(read_t11_bundle_path_for_test(&multiple_path).is_err());
+
+        let mut malformed = bundle;
+        malformed.report.selector.mode = t11_eqres_types::EqresMode::Off;
+        assert!(malformed.validate_structure().is_err());
+        let mut malformed_bytes = serde_json::to_vec(&malformed).unwrap();
+        malformed_bytes.push(b'\n');
+        let malformed_path = directory.join("malformed-canonical.json");
+        fs::write(&malformed_path, malformed_bytes).unwrap();
+        let error = read_t11_bundle_path_for_test(&malformed_path).unwrap_err();
+        assert!(
+            error.contains("failed to decode T11 bundle")
+                || error.contains("invalid T11 bundle structure"),
+            "{error}"
+        );
+
+        let source_path = directory.join("source.smt2");
+        fs::write(&source_path, source).unwrap();
+        let receipt_path = directory.join("malformed-receipt.json");
+        let error = audit_t11_file(
+            source_path.to_str().unwrap(),
+            malformed_path.to_str().unwrap(),
+            receipt_path.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("failed to decode T11 bundle")
+                || error.contains("invalid T11 bundle structure"),
+            "{error}"
+        );
+        assert!(!receipt_path.exists());
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn t11_source_and_bundle_reads_stay_on_the_single_held_handles() {
+        let directory = t11_test_directory("held-handles");
+        let source = "(set-logic QF_UF) (assert true) (check-sat)";
+        let replacement = "(set-logic QF_UF) (assert false) (check-sat)";
+        let source_path = directory.join("source.smt2");
+        let bundle_path = directory.join("bundle.json");
+        fs::write(&source_path, source).unwrap();
+        let expected_bundle = project_t11_source(source).unwrap();
+        write_t11_bundle_atomic(&expected_bundle, bundle_path.to_str().unwrap()).unwrap();
+
+        let mut held_source = T11HeldFile::open(source_path.to_str().unwrap(), "source").unwrap();
+        let mut held_bundle =
+            T11HeldFile::open(bundle_path.to_str().unwrap(), "projection bundle").unwrap();
+        let opened_source_path = directory.join("opened-source.smt2");
+        let opened_bundle_path = directory.join("opened-bundle.json");
+        fs::rename(&source_path, &opened_source_path).unwrap();
+        fs::rename(&bundle_path, &opened_bundle_path).unwrap();
+        fs::write(&source_path, replacement).unwrap();
+        fs::write(&bundle_path, b"{}\n").unwrap();
+
+        assert_eq!(held_source.read_source_to_string().unwrap(), source);
+        let (actual_bundle, _) =
+            read_t11_bundle_strict(&mut held_bundle.file, &held_bundle.label).unwrap();
+        assert_eq!(actual_bundle, expected_bundle);
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), replacement);
+        assert_eq!(fs::read(&bundle_path).unwrap(), b"{}\n");
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(all(feature = "certificates", unix))]
+    #[test]
+    fn t11_publication_fails_closed_on_parent_and_symlink_drift() {
+        use std::os::unix::fs::symlink;
+
+        let directory = t11_test_directory("parent-drift");
+        let parent = directory.join("parent");
+        let moved_parent = directory.join("moved-parent");
+        fs::create_dir(&parent).unwrap();
+        let target = T11PublicationTarget::prepare(&parent.join("bundle.json"), "bundle").unwrap();
+        fs::rename(&parent, &moved_parent).unwrap();
+        fs::create_dir(&parent).unwrap();
+        let error = write_t11_json_record_to_target(
+            &serde_json::json!({"record": "parent"}),
+            &target,
+            "bundle",
+            &[],
+        )
+        .unwrap_err();
+        assert!(error.contains("identity drifted"));
+        assert!(!parent.join("bundle.json").exists());
+        assert!(!moved_parent.join("bundle.json").exists());
+        drop(target);
+
+        let first = directory.join("first");
+        let second = directory.join("second");
+        let link = directory.join("linked-parent");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        symlink(&first, &link).unwrap();
+        let symlink_target =
+            T11PublicationTarget::prepare(&link.join("receipt.json"), "audit receipt").unwrap();
+        fs::remove_file(&link).unwrap();
+        symlink(&second, &link).unwrap();
+        let error = write_t11_json_record_to_target(
+            &serde_json::json!({"record": "symlink"}),
+            &symlink_target,
+            "audit receipt",
+            &[],
+        )
+        .unwrap_err();
+        assert!(error.contains("no longer resolves"));
+        assert!(!first.join("receipt.json").exists());
+        assert!(!second.join("receipt.json").exists());
+        drop(symlink_target);
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn t11_failed_write_cleanup_has_no_temp_and_preserves_replacements_and_directories() {
+        struct FailingRecord;
+
+        impl serde::Serialize for FailingRecord {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(<S::Error as serde::ser::Error>::custom(
+                    "intentional serialization failure",
+                ))
+            }
+        }
+
+        let directory = t11_test_directory("cleanup");
+        let failed_path = directory.join("failed.json");
+        let error =
+            write_t11_json_record_atomic(&FailingRecord, &failed_path, "bundle").unwrap_err();
+        assert!(error.contains("intentional serialization failure"));
+        assert!(!failed_path.exists());
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 0);
+
+        let replaced_path = directory.join("replaced.json");
+        let replaced_target = T11PublicationTarget::prepare(&replaced_path, "bundle").unwrap();
+        let created = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&replaced_target.destination)
+            .unwrap();
+        let created_identity =
+            required_t11_file_identity(&created.metadata().unwrap(), "test output").unwrap();
+        drop(created);
+        fs::remove_file(&replaced_path).unwrap();
+        fs::write(&replaced_path, b"replacement").unwrap();
+        assert!(matches!(
+            cleanup_created_t11_artifact(&replaced_target, "bundle", created_identity),
+            T11CleanupResult::Retained(_)
+        ));
+        assert_eq!(fs::read(&replaced_path).unwrap(), b"replacement");
+
+        let directory_path = directory.join("directory.json");
+        let directory_target =
+            T11PublicationTarget::prepare(&directory_path, "audit receipt").unwrap();
+        let created = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&directory_target.destination)
+            .unwrap();
+        let created_identity =
+            required_t11_file_identity(&created.metadata().unwrap(), "test output").unwrap();
+        drop(created);
+        fs::remove_file(&directory_path).unwrap();
+        fs::create_dir(&directory_path).unwrap();
+        assert!(matches!(
+            cleanup_created_t11_artifact(&directory_target, "audit receipt", created_identity),
+            T11CleanupResult::Retained(_)
+        ));
+        assert!(directory_path.is_dir());
+
+        drop(replaced_target);
+        drop(directory_target);
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(all(feature = "certificates", unix))]
+    #[test]
+    fn t11_publication_detects_destination_replacement_without_deleting_it() {
+        struct ReplacingRecord {
+            path: PathBuf,
+            replacement_is_directory: bool,
+        }
+
+        impl serde::Serialize for ReplacingRecord {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                fs::remove_file(&self.path).unwrap();
+                if self.replacement_is_directory {
+                    fs::create_dir(&self.path).unwrap();
+                } else {
+                    fs::write(&self.path, b"replacement inode").unwrap();
+                }
+                serde::Serialize::serialize(&true, serializer)
+            }
+        }
+
+        let directory = t11_test_directory("destination-replacement");
+        let replaced_path = directory.join("replaced.json");
+        let error = write_t11_json_record_atomic(
+            &ReplacingRecord {
+                path: replaced_path.clone(),
+                replacement_is_directory: false,
+            },
+            &replaced_path,
+            "bundle",
+        )
+        .unwrap_err();
+        assert!(error.contains("destination identity drifted"));
+        assert!(error.contains("avoid deleting a replaced inode"));
+        assert_eq!(fs::read(&replaced_path).unwrap(), b"replacement inode");
+
+        let directory_path = directory.join("directory.json");
+        let error = write_t11_json_record_atomic(
+            &ReplacingRecord {
+                path: directory_path.clone(),
+                replacement_is_directory: true,
+            },
+            &directory_path,
+            "audit receipt",
+        )
+        .unwrap_err();
+        assert!(error.contains("destination identity drifted"));
+        assert!(directory_path.is_dir());
 
         fs::remove_dir_all(&directory).unwrap();
     }

@@ -1041,21 +1041,15 @@ impl<'a> Checker<'a> {
     }
 
     fn verify_reflexivity_sequence(&mut self) {
-        if self.reflexivity_records.len() != self.input.term_dag.len() {
-            self.failures.input(CheckerFailureKind::ReflexivityOrder);
-        }
-        let maximum = self
-            .reflexivity_records
-            .len()
-            .max(self.input.term_dag.len());
-        for index in 0..maximum {
-            match self.reflexivity_records.get(index) {
-                Some(&(event_id, term)) if term == index && index < self.input.term_dag.len() => {}
-                Some(&(event_id, _)) => self
-                    .failures
-                    .event(CheckerFailureKind::ReflexivityOrder, event_id),
-                None => self.failures.input(CheckerFailureKind::ReflexivityOrder),
+        let mut previous = None;
+        for &(event_id, term) in &self.reflexivity_records {
+            if term >= self.input.term_dag.len()
+                || previous.is_some_and(|previous| previous >= term)
+            {
+                self.failures
+                    .event(CheckerFailureKind::ReflexivityOrder, event_id);
             }
+            previous = Some(term);
         }
     }
 
@@ -2137,6 +2131,7 @@ fn encode_compiler_trace(encoder: &mut Encoder, trace: &[TraceRecord]) -> bool {
                     || !encoder.u32(record.clause_id.get())
                     || !encoder.u32(record.depth.get())
                     || !encode_clause(encoder, record.clause.as_slice())
+                    || !encoder.u8(4)
                     || !encoder.u32(record.rule.equality_parent.get())
                     || !encode_pivot(encoder, record.rule.negative_source)
                 {
@@ -2761,11 +2756,75 @@ mod tests {
 
     #[test]
     fn accepts_independently_replayed_fixture() {
-        let result = fixture().run();
+        let fixture = fixture();
+        assert_eq!(
+            fixture.compiler.hashes.trace_sha256.to_string(),
+            "d224d4d1a3a7d8dfb714020b0448363d77e46cc76f822a2e250a02c5129be180"
+        );
+        let result = fixture.run();
         assert_eq!(result.status, CheckerStatus::Accepted);
         assert_eq!(result.counters.replayed_equality_nodes, 9);
         assert_eq!(result.counters.replayed_conflict_clauses, 2);
         assert_eq!(result.counters.replayed_emitted_lemmas, 2);
+        assert_eq!(result.counters.replay_failures, 0);
+    }
+
+    #[test]
+    fn accepts_unit_reflexive_seed_that_prunes_reflexivity() {
+        let sorts = SortTable {
+            ids: FxHashMap::from_iter([(50, DATA_SORT)]),
+            names: vec!["Bool".to_owned(), "U".to_owned()],
+        };
+        let mut declarations = FunDeclTable::default();
+        declarations.insert(
+            0,
+            FunDecl {
+                arg_sorts: Vec::new(),
+                result_sort: DATA_SORT,
+            },
+        );
+        let terms = vec![Term {
+            fun: 0,
+            args: Vec::new(),
+            sort: DATA_SORT,
+        }];
+        let mut clauses = FlatClauses::new();
+        clauses.push(vec![1]);
+        let equality_atom = BoolAtomKey::Eq(0, 0);
+        let variable_atoms = vec![None, Some(equality_atom.clone())];
+        let atom_variables = FxHashMap::from_iter([(equality_atom, 1)]);
+        let input = EqresInput {
+            source_bytes: b"unit-reflexive-seed",
+            root_cnf_mode: ROOT_CNF_MODE,
+            sorts: &sorts,
+            declarations: &declarations,
+            term_dag: &terms,
+            ordered_applications: &[],
+            baseline_clauses: &clauses,
+            variable_atoms: &variable_atoms,
+            atom_variables: &atom_variables,
+            true_literal: None,
+            finite_equalities_complete: false,
+            finite_predicate_congruence_complete: false,
+        };
+        let compiler = crate::t11_eqres_compiler::compile(input, CompilerVariant::Ordinary);
+        assert!(matches!(
+            compiler.status,
+            CompilerStatus::Completed(EqresOutput::NoLemmas)
+        ));
+        assert_eq!(compiler.trace.len(), 1);
+        assert!(matches!(
+            &compiler.trace[0],
+            TraceRecord::Equality(EqualityTraceRecord {
+                rule: EqualityRuleRecord::Seed(_),
+                ..
+            })
+        ));
+        assert_eq!(compiler.counters.search.accepted_events.reflexivity, 0);
+
+        let result = check(input, &compiler, &MaterializedClauseStore::empty());
+        assert_eq!(result.status, CheckerStatus::Accepted);
+        assert_eq!(result.counters.replayed_equality_nodes, 1);
         assert_eq!(result.counters.replay_failures, 0);
     }
 
@@ -3017,12 +3076,6 @@ mod tests {
             reflexivity.term = term;
         }
         fixture.reseal();
-        assert_rejects_with(
-            &fixture,
-            CheckerFailureKind::ReflexivityOrder,
-            Some(0),
-            None,
-        );
         assert_rejects_with(
             &fixture,
             CheckerFailureKind::ReflexivityOrder,
