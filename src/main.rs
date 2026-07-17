@@ -29,6 +29,10 @@ mod smt2_stream;
 mod stabilizer_order;
 mod t10_ackermann;
 mod t11_eqres;
+#[cfg(feature = "certificates")]
+mod t11_eqres_auditor;
+mod t11_eqres_checker;
+mod t11_eqres_compiler;
 mod t11_eqres_types;
 mod t9_ackermann;
 
@@ -7603,6 +7607,73 @@ fn read_project_t11_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, 
 }
 
 #[cfg(feature = "certificates")]
+const T11_BUNDLE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+#[cfg(feature = "certificates")]
+const T11_PROJECTION_REJECTED_EXIT: i32 = 3;
+#[cfg(feature = "certificates")]
+const T11_EXTERNAL_AUDIT_REQUIRED_EXIT: i32 = 4;
+
+#[cfg(feature = "certificates")]
+fn t11_sha256_digest(bytes: &[u8]) -> t11_eqres_types::Sha256Digest {
+    let digest: [u8; 32] = Sha256::digest(bytes).into();
+    t11_eqres_types::Sha256Digest::new(digest)
+}
+
+#[cfg(feature = "certificates")]
+fn read_t11_bundle_strict(
+    bundle_path: &str,
+) -> Result<(t11_eqres_types::EqresBundle, Vec<u8>), String> {
+    let file = fs::File::open(bundle_path)
+        .map_err(|error| format!("failed to open T11 bundle {bundle_path}: {error}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect T11 bundle {bundle_path}: {error}"))?;
+    if !metadata.is_file() {
+        return Err(format!("T11 bundle is not a regular file: {bundle_path}"));
+    }
+    if metadata.len() > T11_BUNDLE_MAX_BYTES {
+        return Err(format!(
+            "T11 bundle exceeds {T11_BUNDLE_MAX_BYTES} bytes: {bundle_path}"
+        ));
+    }
+    let expected_len = usize::try_from(metadata.len())
+        .map_err(|_| format!("T11 bundle size does not fit usize: {bundle_path}"))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(expected_len)
+        .map_err(|_| format!("failed to allocate T11 bundle buffer: {bundle_path}"))?;
+    bytes.resize(expected_len, 0);
+    let mut reader = BufReader::new(file);
+    reader
+        .read_exact(&mut bytes)
+        .map_err(|error| format!("failed to read T11 bundle {bundle_path}: {error}"))?;
+    let mut extra = [0u8; 1];
+    if reader
+        .read(&mut extra)
+        .map_err(|error| format!("failed to finish reading T11 bundle {bundle_path}: {error}"))?
+        != 0
+    {
+        return Err(format!(
+            "T11 bundle changed while being read: {bundle_path}"
+        ));
+    }
+    let Some(body) = bytes.strip_suffix(b"\n") else {
+        return Err("T11 bundle must end in exactly one newline".to_owned());
+    };
+    if body.is_empty() || body.contains(&b'\n') || body.contains(&b'\r') {
+        return Err("T11 bundle must contain exactly one compact JSON record".to_owned());
+    }
+    let bundle: t11_eqres_types::EqresBundle = serde_json::from_slice(body)
+        .map_err(|error| format!("failed to decode T11 bundle: {error}"))?;
+    let canonical = serde_json::to_vec(&bundle)
+        .map_err(|error| format!("failed to canonicalize T11 bundle: {error}"))?;
+    if canonical != body {
+        return Err("T11 bundle is not in the exact canonical JSON encoding".to_owned());
+    }
+    Ok((bundle, bytes))
+}
+
+#[cfg(feature = "certificates")]
 fn parse_project_t11_args(args: &[String]) -> Result<(&str, &str), String> {
     if args.len() != 5 || args[1] != "project-t11" || args[3] != "--bundle-out" {
         return Err("usage: euf-viper project-t11 FILE|- --bundle-out PATH".to_owned());
@@ -7611,6 +7682,122 @@ fn parse_project_t11_args(args: &[String]) -> Result<(&str, &str), String> {
         return Err("usage: euf-viper project-t11 FILE|- --bundle-out PATH".to_owned());
     }
     Ok((&args[2], &args[4]))
+}
+
+#[cfg(feature = "certificates")]
+fn parse_audit_t11_args(args: &[String]) -> Result<(&str, &str, &str), String> {
+    if args.len() != 7
+        || args[1] != "audit-t11"
+        || args[3] != "--bundle"
+        || args[5] != "--receipt-out"
+        || args[2].is_empty()
+        || args[4].is_empty()
+        || args[4] == "-"
+        || args[6].is_empty()
+        || args[6] == "-"
+    {
+        return Err(
+            "usage: euf-viper audit-t11 FILE|- --bundle PATH --receipt-out PATH".to_owned(),
+        );
+    }
+    Ok((&args[2], &args[4], &args[6]))
+}
+
+#[cfg(feature = "certificates")]
+fn prospective_canonical_path(path: &Path) -> Result<PathBuf, String> {
+    if path.exists() {
+        return fs::canonicalize(path)
+            .map_err(|error| format!("failed to resolve {}: {error}", path.display()));
+    }
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| format!("path has no file name: {}", path.display()))?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = fs::canonicalize(parent)
+        .map_err(|error| format!("failed to resolve {}: {error}", parent.display()))?;
+    Ok(parent.join(file_name))
+}
+
+#[cfg(feature = "certificates")]
+fn write_t11_bundle_atomic(
+    bundle: &t11_eqres_types::EqresBundle,
+    bundle_path: &str,
+) -> Result<(), String> {
+    write_t11_json_record_atomic(bundle, Path::new(bundle_path), "bundle")
+}
+
+#[cfg(feature = "certificates")]
+fn write_t11_json_record_atomic<T: Serialize>(
+    record: &T,
+    destination: &Path,
+    artifact: &str,
+) -> Result<(), String> {
+    let file_name = destination.file_name().ok_or_else(|| {
+        format!(
+            "T11 {artifact} path has no file name: {}",
+            destination.display()
+        )
+    })?;
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let temporary = parent.join(format!(
+        ".{}.tmp-{}",
+        file_name.to_string_lossy(),
+        process::id()
+    ));
+    let result = (|| {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| {
+                format!(
+                    "failed to create temporary T11 {artifact} {}: {error}",
+                    temporary.display()
+                )
+            })?;
+        let mut output = BufWriter::new(file);
+        serde_json::to_writer(&mut output, record).map_err(|error| {
+            format!(
+                "failed to write temporary T11 {artifact} {}: {error}",
+                temporary.display()
+            )
+        })?;
+        output.write_all(b"\n").map_err(|error| {
+            format!(
+                "failed to terminate temporary T11 {artifact} {}: {error}",
+                temporary.display()
+            )
+        })?;
+        output.flush().map_err(|error| {
+            format!(
+                "failed to flush temporary T11 {artifact} {}: {error}",
+                temporary.display()
+            )
+        })?;
+        output.get_ref().sync_all().map_err(|error| {
+            format!(
+                "failed to sync temporary T11 {artifact} {}: {error}",
+                temporary.display()
+            )
+        })?;
+        drop(output);
+        fs::rename(&temporary, destination).map_err(|error| {
+            format!(
+                "failed to publish T11 {artifact} {}: {error}",
+                destination.display()
+            )
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn project_t10_source(input: &str) -> Result<t10_ackermann::ProjectionReport, String> {
@@ -7638,6 +7825,165 @@ fn project_t10_file(path: &str) -> Result<i32, String> {
         .write_to(&mut output)
         .map_err(|error| format!("failed to write T10 projection: {error}"))?;
     Ok(if selected { 0 } else { 3 })
+}
+
+fn project_t11_problem_without_sat_measurement(
+    source: &[u8],
+    problem: &Problem,
+    variant: t11_eqres_types::CompilerVariant,
+) -> Result<t11_eqres_types::EqresBundle, String> {
+    if !problem.terms_are_well_sorted() {
+        return Err("T11 projection encountered an unsupported sort configuration".to_owned());
+    }
+
+    let mode = t11_eqres_types::EqresMode::CliqueErAuto;
+    if !routes_to_boolean_sat(problem) {
+        let cnf = CnfProblem::new();
+        let selector = t11_eqres::fallback_selector_report(mode, &cnf, &problem.arena);
+        let input = t11_eqres::input_view(source, problem, &cnf);
+        return t11_eqres::execute_projection(selector, input, variant);
+    }
+
+    let bool_problem = problem
+        .bool_problem
+        .as_ref()
+        .expect("checked Boolean SAT route above");
+    let (cnf, analysis, finite_added, pinned_auto_uses_cadical) =
+        build_pinned_projection_baseline(problem, bool_problem);
+    let backend = t9_backend_route("auto", pinned_auto_uses_cadical);
+    let selector =
+        t11_eqres::selector_report(mode, &cnf, &problem.arena, &analysis, finite_added, backend);
+    let input = t11_eqres::input_view(source, problem, &cnf);
+    t11_eqres::execute_projection(selector, input, variant)
+}
+
+fn project_t11_source(input: &str) -> Result<t11_eqres_types::EqresBundle, String> {
+    let (result, sat_calls) = measure_sat_dispatches(|| {
+        let problem = parse_problem_with_scoped_let_mode(input, ScopedLetMode::Auto)?;
+        project_t11_problem_without_sat_measurement(
+            input.as_bytes(),
+            &problem,
+            t11_eqres_types::CompilerVariant::Ordinary,
+        )
+    });
+    let mut bundle = result?;
+    t11_eqres::record_observed_sat_calls(&mut bundle, sat_calls);
+    Ok(bundle)
+}
+
+#[cfg(feature = "certificates")]
+fn audit_t11_source_bundle(
+    source: &str,
+    bundle: &t11_eqres_types::EqresBundle,
+) -> Result<t11_eqres_auditor::AuditResult, String> {
+    let (result, sat_calls) = measure_sat_dispatches(|| {
+        let problem = parse_problem_with_scoped_let_mode(source, ScopedLetMode::Auto)?;
+        if !problem.terms_are_well_sorted() {
+            return Err("T11 audit encountered an unsupported sort configuration".to_owned());
+        }
+
+        let mode = t11_eqres_types::EqresMode::CliqueErAuto;
+        if !routes_to_boolean_sat(&problem) {
+            let cnf = CnfProblem::new();
+            let selector = t11_eqres::fallback_selector_report(mode, &cnf, &problem.arena);
+            if selector != bundle.selector {
+                return Err("T11 audit selector does not match the projection bundle".to_owned());
+            }
+            let input = t11_eqres::input_view(source.as_bytes(), &problem, &cnf);
+            return Ok(t11_eqres_auditor::audit(input, bundle));
+        }
+
+        let bool_problem = problem
+            .bool_problem
+            .as_ref()
+            .expect("checked Boolean SAT route above");
+        let (cnf, analysis, finite_added, pinned_auto_uses_cadical) =
+            build_pinned_projection_baseline(&problem, bool_problem);
+        let backend = t9_backend_route("auto", pinned_auto_uses_cadical);
+        let selector = t11_eqres::selector_report(
+            mode,
+            &cnf,
+            &problem.arena,
+            &analysis,
+            finite_added,
+            backend,
+        );
+        if selector != bundle.selector {
+            return Err("T11 audit selector does not match the projection bundle".to_owned());
+        }
+        let input = t11_eqres::input_view(source.as_bytes(), &problem, &cnf);
+        Ok(t11_eqres_auditor::audit(input, bundle))
+    });
+    if sat_calls != 0 {
+        return Err(format!(
+            "T11 external audit dispatched SAT {sat_calls} time(s)"
+        ));
+    }
+    result
+}
+
+#[cfg(feature = "certificates")]
+fn audit_t11_file(source_path: &str, bundle_path: &str, receipt_path: &str) -> Result<i32, String> {
+    if Path::new(receipt_path).exists() {
+        return Err("T11 audit receipt output must be a fresh path".to_owned());
+    }
+    let bundle_canonical = fs::canonicalize(bundle_path)
+        .map_err(|error| format!("failed to resolve T11 bundle {bundle_path}: {error}"))?;
+    let receipt_canonical = prospective_canonical_path(Path::new(receipt_path))?;
+    if bundle_canonical == receipt_canonical {
+        return Err("T11 audit receipt must not alias the projection bundle".to_owned());
+    }
+    if source_path != "-" {
+        let source_canonical = fs::canonicalize(source_path)
+            .map_err(|error| format!("failed to resolve T11 source {source_path}: {error}"))?;
+        if source_canonical == bundle_canonical || source_canonical == receipt_canonical {
+            return Err("T11 audit artifacts must not alias the source".to_owned());
+        }
+    }
+
+    let source = if source_path == "-" {
+        read_project_t11_input(source_path, &mut io::stdin().lock())?
+    } else {
+        read_project_t11_input(source_path, &mut io::empty())?
+    };
+    let (bundle, exact_bundle_bytes) = read_t11_bundle_strict(bundle_path)?;
+    let exact_bundle_sha256 = t11_sha256_digest(&exact_bundle_bytes);
+    let result = audit_t11_source_bundle(&source, &bundle)?;
+    let receipt = t11_eqres_auditor::EqresAuditReceipt::new(&bundle, exact_bundle_sha256, result);
+    let accepted = t11_eqres::internally_accepted_projection(&bundle)
+        && receipt.accepted_for(&bundle, exact_bundle_sha256);
+    write_t11_json_record_atomic(&receipt, Path::new(receipt_path), "audit receipt")?;
+    Ok(if accepted {
+        0
+    } else {
+        T11_PROJECTION_REJECTED_EXIT
+    })
+}
+
+#[cfg(feature = "certificates")]
+fn project_t11_file(path: &str, bundle_path: &str) -> Result<i32, String> {
+    if path != "-" {
+        let source = fs::canonicalize(path)
+            .map_err(|error| format!("failed to resolve T11 source {path}: {error}"))?;
+        let output = prospective_canonical_path(Path::new(bundle_path))?;
+        if output == source {
+            return Err("T11 bundle output must not alias the source".to_owned());
+        }
+    }
+
+    let input = if path == "-" {
+        read_project_t11_input(path, &mut io::stdin().lock())?
+    } else {
+        read_project_t11_input(path, &mut io::empty())?
+    };
+    let bundle = project_t11_source(&input)?;
+    let accepted = t11_eqres::internally_accepted_projection(&bundle);
+    write_t11_bundle_atomic(&bundle, bundle_path)?;
+    Ok(if accepted {
+        T11_EXTERNAL_AUDIT_REQUIRED_EXIT
+    } else {
+        T11_PROJECTION_REJECTED_EXIT
+    })
 }
 
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
@@ -7944,6 +8290,8 @@ fn usage() -> &'static str {
   euf-viper project-bool-dag FILE
   euf-viper project-t9 FILE|-
   euf-viper project-t10 FILE|-
+  euf-viper project-t11 FILE|- --bundle-out PATH
+  euf-viper audit-t11 FILE|- --bundle PATH --receipt-out PATH
   euf-viper parse-check FILE|-
   euf-viper dump-eager-cnf FILE --out PATH
   euf-viper solve-dimacs FILE
@@ -7999,6 +8347,16 @@ fn run() -> Result<i32, String> {
                 return Err("usage: euf-viper project-t10 FILE|-".to_owned());
             }
             project_t10_file(file)
+        }
+        #[cfg(feature = "certificates")]
+        "project-t11" => {
+            let (file, bundle_path) = parse_project_t11_args(&args)?;
+            project_t11_file(file, bundle_path)
+        }
+        #[cfg(feature = "certificates")]
+        "audit-t11" => {
+            let (file, bundle_path, receipt_path) = parse_audit_t11_args(&args)?;
+            audit_t11_file(file, bundle_path, receipt_path)
         }
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
@@ -11240,6 +11598,172 @@ mod tests {
         let mut extra = valid.to_vec();
         extra.push("--unexpected".to_owned());
         assert!(parse_project_t11_args(&extra).is_err());
+
+        let audit = [
+            "euf-viper",
+            "audit-t11",
+            "source.smt2",
+            "--bundle",
+            "bundle.json",
+            "--receipt-out",
+            "receipt.json",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            parse_audit_t11_args(&audit),
+            Ok(("source.smt2", "bundle.json", "receipt.json"))
+        );
+        let mut stdout_receipt = audit;
+        stdout_receipt[6] = "-".to_owned();
+        assert!(parse_audit_t11_args(&stdout_receipt).is_err());
+    }
+
+    #[test]
+    fn project_t11_rejection_never_dispatches_sat_or_runs_proof_engines() {
+        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        assert!(matches!(
+            bundle.selector.decision,
+            t11_eqres_types::SelectorDecision::Rejected(_)
+        ));
+        assert!(matches!(
+            bundle.compiler.status,
+            t11_eqres_types::CompilerStatus::NotRun
+        ));
+        assert!(matches!(
+            bundle.checker.status,
+            t11_eqres_types::CheckerStatus::NotRun
+        ));
+        assert_eq!(bundle.report.sat_calls, 0);
+        assert_eq!(
+            bundle.report.outcome,
+            t11_eqres_types::ReportOutcome::Rejected
+        );
+        assert!(!t11_eqres::internally_accepted_projection(&bundle));
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn project_t11_bundle_serialization_is_one_strict_json_record() {
+        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        let mut encoded = Vec::new();
+        t11_eqres::write_bundle(&bundle, &mut encoded).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(value["report"]["sat_calls"], 0);
+        assert_eq!(encoded.iter().filter(|&&byte| byte == b'\n').count(), 1);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn project_t11_bundle_publish_is_atomic_and_alias_aware() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("euf-viper-t11-artifact-{}-{nonce}", process::id()));
+        fs::create_dir(&directory).unwrap();
+        let source_path = directory.join("source.smt2");
+        fs::write(&source_path, "(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        assert_eq!(
+            prospective_canonical_path(&directory.join(".").join("source.smt2")).unwrap(),
+            fs::canonicalize(&source_path).unwrap()
+        );
+
+        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        let bundle_path = directory.join("bundle.json");
+        write_t11_bundle_atomic(&bundle, bundle_path.to_str().unwrap()).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&bundle_path).unwrap()).unwrap();
+        assert_eq!(value["report"]["sat_calls"], 0);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 2);
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn t11_bundle_reader_rejects_noncanonical_or_multiple_records() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "euf-viper-t11-strict-bundle-{}-{nonce}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let bundle = project_t11_source("(set-logic QF_UF) (assert true) (check-sat)").unwrap();
+        let canonical_path = directory.join("canonical.json");
+        write_t11_bundle_atomic(&bundle, canonical_path.to_str().unwrap()).unwrap();
+        let (decoded, exact_bytes) =
+            read_t11_bundle_strict(canonical_path.to_str().unwrap()).unwrap();
+        assert_eq!(decoded, bundle);
+
+        let mut whitespace = exact_bytes.clone();
+        whitespace.insert(1, b' ');
+        let whitespace_path = directory.join("whitespace.json");
+        fs::write(&whitespace_path, whitespace).unwrap();
+        assert!(read_t11_bundle_strict(whitespace_path.to_str().unwrap()).is_err());
+
+        let mut unknown = b"{\"unknown\":0,".to_vec();
+        unknown.extend_from_slice(&exact_bytes[1..]);
+        let unknown_path = directory.join("unknown.json");
+        fs::write(&unknown_path, unknown).unwrap();
+        assert!(read_t11_bundle_strict(unknown_path.to_str().unwrap()).is_err());
+
+        let mut multiple = exact_bytes;
+        multiple.push(b'\n');
+        let multiple_path = directory.join("multiple.json");
+        fs::write(&multiple_path, multiple).unwrap();
+        assert!(read_t11_bundle_strict(multiple_path.to_str().unwrap()).is_err());
+
+        fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn audit_t11_rejected_bundle_writes_a_bound_rejection_receipt() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "euf-viper-t11-rejected-audit-{}-{nonce}",
+            process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source = "(set-logic QF_UF) (assert true) (check-sat)";
+        let source_path = directory.join("source.smt2");
+        let bundle_path = directory.join("bundle.json");
+        let receipt_path = directory.join("receipt.json");
+        fs::write(&source_path, source).unwrap();
+
+        let bundle = project_t11_source(source).unwrap();
+        write_t11_bundle_atomic(&bundle, bundle_path.to_str().unwrap()).unwrap();
+        let exact_bundle_bytes = fs::read(&bundle_path).unwrap();
+        let exact_bundle_sha256 = t11_sha256_digest(&exact_bundle_bytes);
+
+        assert_eq!(
+            audit_t11_file(
+                source_path.to_str().unwrap(),
+                bundle_path.to_str().unwrap(),
+                receipt_path.to_str().unwrap(),
+            )
+            .unwrap(),
+            T11_PROJECTION_REJECTED_EXIT
+        );
+        let receipt_bytes = fs::read(&receipt_path).unwrap();
+        let body = receipt_bytes.strip_suffix(b"\n").unwrap();
+        assert!(!body.contains(&b'\n'));
+        let receipt: t11_eqres_auditor::EqresAuditReceipt = serde_json::from_slice(body).unwrap();
+        assert_eq!(receipt.exact_bundle_sha256, exact_bundle_sha256);
+        assert!(matches!(
+            receipt.result.status,
+            t11_eqres_auditor::AuditStatus::Rejected(_)
+        ));
+        assert!(!receipt.accepted_for(&bundle, exact_bundle_sha256));
+
+        fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]

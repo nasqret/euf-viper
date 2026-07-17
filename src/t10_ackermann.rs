@@ -1519,6 +1519,20 @@ fn canonical_problem_sha256(cnf: &CnfProblem) -> String {
     digest_hex(hash)
 }
 
+#[cfg(test)]
+pub(crate) fn canonical_baseline_hashes_for_test(cnf: &CnfProblem) -> (String, String, String) {
+    (
+        canonical_atom_map_sha256(cnf),
+        canonical_cnf_sha256(cnf),
+        canonical_problem_sha256(cnf),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn raw_sha256_for_test(bytes: &[u8]) -> String {
+    sha256_hex(bytes)
+}
+
 fn hash_clause_sequence<'a>(
     hash: &mut Sha256,
     count: usize,

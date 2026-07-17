@@ -37,7 +37,7 @@ macro_rules! define_u32_id {
     ($name:ident) => {
         #[repr(transparent)]
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-        #[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+        #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
         #[cfg_attr(feature = "certificates", serde(transparent))]
         pub(crate) struct $name(u32);
 
@@ -63,7 +63,7 @@ define_u32_id!(ProofDepth);
 /// An application ID is the existing term ID of an application node.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(transparent))]
 pub(crate) struct ApplicationId(TermId);
 
@@ -83,7 +83,7 @@ impl ApplicationId {
 /// keeps normalization inside the compiler and checker independently while
 /// making every stored key satisfy `left <= right`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EqualityKey {
     left: TermId,
     right: TermId,
@@ -127,7 +127,7 @@ pub(crate) enum CanonicalClauseError {
 /// The boxed slice prevents capacity or insertion-order details from becoming
 /// part of the shared representation. Construction validates but never sorts.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(transparent))]
 pub(crate) struct CanonicalClause(Box<[i32]>);
 
@@ -228,7 +228,7 @@ impl LogicalMemoryWeights {
 /// Rule discriminants are the frozen event-key ranks.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum RuleKind {
     Seed = 0,
@@ -239,7 +239,7 @@ pub(crate) enum RuleKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum ClauseOrigin {
     Baseline,
@@ -248,14 +248,14 @@ pub(crate) enum ClauseOrigin {
 
 /// A clause ID is global; `origin` records which topological rule applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ClauseRef {
     pub(crate) id: ClauseId,
     pub(crate) origin: ClauseOrigin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ClausePivot {
     pub(crate) clause: ClauseRef,
     pub(crate) literal_offset: LiteralOffset,
@@ -265,7 +265,7 @@ pub(crate) struct ClausePivot {
 /// and are stored in ascending order; Congruence's argument associations live
 /// in its trace record and are deliberately not substituted for this sequence.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EventKey {
     pub(crate) resulting_clause_width: u32,
     pub(crate) proof_depth: ProofDepth,
@@ -277,19 +277,19 @@ pub(crate) struct EventKey {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct SeedRecord {
     pub(crate) positive_source: ClausePivot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ReflexivityRecord {
     pub(crate) term: TermId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct TransitivityRecord {
     /// Sorted ascending for the event key; endpoint orientation is recovered
     /// independently from the conclusions and `intermediate`.
@@ -298,14 +298,14 @@ pub(crate) struct TransitivityRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CongruenceArgumentParent {
     pub(crate) argument_index: ArgumentIndex,
     pub(crate) parent: NodeId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CongruenceRecord {
     pub(crate) applications: [ApplicationId; 2],
     /// One entry for every differing argument, in increasing argument-index
@@ -314,14 +314,14 @@ pub(crate) struct CongruenceRecord {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ConflictRecord {
     pub(crate) equality_parent: NodeId,
     pub(crate) negative_source: ClausePivot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "rule", content = "premises", rename_all = "snake_case")
@@ -334,7 +334,7 @@ pub(crate) enum EqualityRuleRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EqualityTraceRecord {
     pub(crate) event_id: EventId,
     pub(crate) node_id: NodeId,
@@ -345,7 +345,7 @@ pub(crate) struct EqualityTraceRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ConflictTraceRecord {
     pub(crate) event_id: EventId,
     pub(crate) clause_id: ClauseId,
@@ -355,7 +355,7 @@ pub(crate) struct ConflictTraceRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "record_kind", content = "record", rename_all = "snake_case")
@@ -366,7 +366,7 @@ pub(crate) enum TraceRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EmittedLemma {
     pub(crate) source_clause_id: ClauseId,
     pub(crate) clause: CanonicalClause,
@@ -376,7 +376,7 @@ pub(crate) struct EmittedLemma {
 /// clause; `TheoryEmpty` contains exactly the terminal empty Conflict lemma;
 /// `NoLemmas` contains no lemma. The checker enforces those shape invariants.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "outcome", content = "output", rename_all = "snake_case")
@@ -390,8 +390,79 @@ pub(crate) enum EqresOutput {
     NoLemmas,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MaterializedClauseStoreError {
+    MissingInitialOffset,
+    NonMonotoneOffsets,
+    FinalOffsetMismatch,
+}
+
+/// Exact clause bytes exported by projection and consumed by a later SAT
+/// loader. Construction validates the flat-store shape but deliberately does
+/// not canonicalize, reorder, or deduplicate clauses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+pub(crate) struct MaterializedClauseStore {
+    end_offsets: Box<[u32]>,
+    literals: Box<[i32]>,
+}
+
+impl MaterializedClauseStore {
+    pub(crate) fn from_parts(
+        end_offsets: Vec<u32>,
+        literals: Vec<i32>,
+    ) -> Result<Self, MaterializedClauseStoreError> {
+        if end_offsets.first() != Some(&0) {
+            return Err(MaterializedClauseStoreError::MissingInitialOffset);
+        }
+        if end_offsets.windows(2).any(|bounds| bounds[0] > bounds[1]) {
+            return Err(MaterializedClauseStoreError::NonMonotoneOffsets);
+        }
+        if end_offsets.last().copied().map(u64::from) != u64::try_from(literals.len()).ok() {
+            return Err(MaterializedClauseStoreError::FinalOffsetMismatch);
+        }
+        Ok(Self {
+            end_offsets: end_offsets.into_boxed_slice(),
+            literals: literals.into_boxed_slice(),
+        })
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            end_offsets: Box::new([0]),
+            literals: Box::new([]),
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.end_offsets.len().saturating_sub(1)
+    }
+
+    pub(crate) fn end_offsets(&self) -> &[u32] {
+        &self.end_offsets
+    }
+
+    pub(crate) fn literals(&self) -> &[i32] {
+        &self.literals
+    }
+
+    pub(crate) fn clause(&self, index: usize) -> Option<&[i32]> {
+        let start = *self.end_offsets.get(index)? as usize;
+        let end = *self.end_offsets.get(index.checked_add(1)?)? as usize;
+        self.literals.get(start..end)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts_unchecked_for_test(end_offsets: Vec<u32>, literals: Vec<i32>) -> Self {
+        Self {
+            end_offsets: end_offsets.into_boxed_slice(),
+            literals: literals.into_boxed_slice(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct RuleCounters {
     pub(crate) seed: u64,
     pub(crate) reflexivity: u64,
@@ -401,7 +472,7 @@ pub(crate) struct RuleCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct InputCounters {
     pub(crate) terms: u64,
     pub(crate) baseline_variables: u64,
@@ -415,7 +486,7 @@ pub(crate) struct InputCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct SearchCounters {
     pub(crate) attempted_events: RuleCounters,
     pub(crate) accepted_events: RuleCounters,
@@ -440,7 +511,7 @@ pub(crate) struct SearchCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct PruningCounters {
     pub(crate) support_subset_discards: u64,
     pub(crate) support_capacity_discards: u64,
@@ -452,7 +523,7 @@ pub(crate) struct PruningCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct OutputCounters {
     pub(crate) emitted_lemmas: u64,
     pub(crate) emitted_literal_slots: u64,
@@ -462,7 +533,7 @@ pub(crate) struct OutputCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct DeterministicCounters {
     pub(crate) input: InputCounters,
     pub(crate) search: SearchCounters,
@@ -475,7 +546,7 @@ pub(crate) struct DeterministicCounters {
 /// rejecting the projection.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum CapReason {
     Terms = 0,
@@ -502,7 +573,7 @@ pub(crate) enum CapReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "boundary", content = "context", rename_all = "snake_case")
@@ -519,7 +590,7 @@ pub(crate) enum CapBoundary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CapAttempt {
     pub(crate) reason: CapReason,
     pub(crate) boundary: CapBoundary,
@@ -529,7 +600,7 @@ pub(crate) struct CapAttempt {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum InputFailure {
     InvalidClauseStore,
@@ -545,7 +616,7 @@ pub(crate) enum InputFailure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum HashArtifact {
     Source,
@@ -557,6 +628,7 @@ pub(crate) enum HashArtifact {
     Trace,
     LemmaSequence,
     MaterializedLemmas,
+    MaterializedCandidate,
     CandidateBinary,
     Revision,
     CorpusManifest,
@@ -569,7 +641,7 @@ pub(crate) enum HashArtifact {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "failure", content = "detail", rename_all = "snake_case")
@@ -584,7 +656,7 @@ pub(crate) enum CompilerFailure {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "status", content = "detail", rename_all = "snake_case")
@@ -596,7 +668,7 @@ pub(crate) enum CompilerStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum CompilerVariant {
     Ordinary,
@@ -648,10 +720,61 @@ impl serde::Serialize for Sha256Digest {
     }
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for Sha256Digest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct DigestVisitor;
+
+        impl serde::de::Visitor<'_> for DigestVisitor {
+            type Value = Sha256Digest;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("exactly 64 lowercase hexadecimal SHA-256 digits")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                if value.len() != 64
+                    || !value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    return Err(E::custom(
+                        "SHA-256 digest must contain 64 lowercase hexadecimal digits",
+                    ));
+                }
+                let mut bytes = [0u8; 32];
+                for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+                    let high = decode_lower_hex(pair[0]);
+                    let low = decode_lower_hex(pair[1]);
+                    bytes[index] = (high << 4) | low;
+                }
+                Ok(Sha256Digest::new(bytes))
+            }
+        }
+
+        deserializer.deserialize_str(DigestVisitor)
+    }
+}
+
+#[cfg(feature = "certificates")]
+const fn decode_lower_hex(byte: u8) -> u8 {
+    match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        _ => 0,
+    }
+}
+
 /// Required hash bindings use concrete digests rather than `Option`, so
 /// theory-empty and no-lemma records still hash their exact empty byte streams.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct HashBindings {
     pub(crate) source_sha256: Sha256Digest,
     pub(crate) root_cnf_mode_sha256: Sha256Digest,
@@ -675,7 +798,7 @@ pub(crate) struct HashBindings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CompilerResult {
     pub(crate) variant: CompilerVariant,
     pub(crate) status: CompilerStatus,
@@ -686,7 +809,7 @@ pub(crate) struct CompilerResult {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CheckerCounters {
     pub(crate) replayed_equality_nodes: u64,
     pub(crate) replayed_conflict_clauses: u64,
@@ -695,7 +818,7 @@ pub(crate) struct CheckerCounters {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum CheckerFailureKind {
     BaselineClauseReference,
@@ -729,7 +852,7 @@ pub(crate) enum CheckerFailureKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CheckerFailure {
     pub(crate) kind: CheckerFailureKind,
     pub(crate) event_id: Option<EventId>,
@@ -737,7 +860,7 @@ pub(crate) struct CheckerFailure {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "status", content = "failures", rename_all = "snake_case")
@@ -749,7 +872,7 @@ pub(crate) enum CheckerStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct CheckerResult {
     pub(crate) status: CheckerStatus,
     pub(crate) counters: CheckerCounters,
@@ -757,7 +880,7 @@ pub(crate) struct CheckerResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "kebab-case"))]
 pub(crate) enum EqresMode {
     Off,
@@ -765,7 +888,7 @@ pub(crate) enum EqresMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum SolverBackend {
     Kissat,
@@ -779,7 +902,7 @@ pub(crate) enum SolverBackend {
 /// Selector facts intentionally contain no source/path/family/result/timing
 /// fields, preserving the preregistered information boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct SelectorFacts {
     pub(crate) finite_added_clauses: u64,
     pub(crate) covered_finite_terms: u64,
@@ -794,7 +917,7 @@ pub(crate) struct SelectorFacts {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum SelectorRejection {
     ModeOff,
@@ -814,7 +937,7 @@ pub(crate) enum SelectorRejection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "decision", content = "reason", rename_all = "snake_case")
@@ -825,7 +948,7 @@ pub(crate) enum SelectorDecision {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct SelectorReport {
     pub(crate) mode: EqresMode,
     pub(crate) facts: SelectorFacts,
@@ -833,7 +956,7 @@ pub(crate) struct SelectorReport {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct ForbiddenGrowthCounters {
     pub(crate) added_terms: u64,
     pub(crate) added_atoms: u64,
@@ -843,7 +966,7 @@ pub(crate) struct ForbiddenGrowthCounters {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct IntegrityReport {
     pub(crate) baseline_unchanged: bool,
     pub(crate) trace_materialization_equal: bool,
@@ -854,7 +977,7 @@ pub(crate) struct IntegrityReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum ReportOutcome {
     Off,
@@ -865,7 +988,7 @@ pub(crate) enum ReportOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EqresReport {
     pub(crate) schema_version: u32,
     pub(crate) selector: SelectorReport,
@@ -883,17 +1006,47 @@ pub(crate) struct EqresReport {
 /// Compiler output and independent replay are kept side by side rather than
 /// allowing the checker to mutate or replace compiler-owned records.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EqresBundle {
     pub(crate) selector: SelectorReport,
     pub(crate) compiler: CompilerResult,
+    materialized_lemmas: MaterializedClauseStore,
     pub(crate) checker: CheckerResult,
     pub(crate) report: EqresReport,
+}
+
+impl EqresBundle {
+    pub(crate) fn new(
+        selector: SelectorReport,
+        compiler: CompilerResult,
+        materialized_lemmas: MaterializedClauseStore,
+        checker: CheckerResult,
+        report: EqresReport,
+    ) -> Self {
+        Self {
+            selector,
+            compiler,
+            materialized_lemmas,
+            checker,
+            report,
+        }
+    }
+
+    pub(crate) fn materialized_lemmas(&self) -> &MaterializedClauseStore {
+        &self.materialized_lemmas
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SatComponentError {
     ResultBeforeChecker,
+    InvalidComponentInvariant,
+    OutputComponentMismatch,
+    NoRunnableOutput,
+    SatLoadMismatch,
+    KernelResultNotUnsat,
+    InternalHashMismatch,
+    MaterializedOutputMismatch,
 }
 
 /// Exact no-SAT-session component for a checked theory-empty result.
@@ -901,7 +1054,7 @@ pub(crate) enum SatComponentError {
 /// The zero-valued fields are private and can only be created by `new`, making
 /// `false/0/0/0/0` a representational invariant rather than a convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct TheoryEmptySatComponent {
     sat_session: bool,
     sat_calls: u64,
@@ -961,7 +1114,7 @@ impl TheoryEmptySatComponent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "certificates", serde(rename_all = "snake_case"))]
 pub(crate) enum SatKernelResult {
     Sat,
@@ -972,16 +1125,16 @@ pub(crate) enum SatKernelResult {
 
 /// Exact fresh-session component for a nonempty checked lemma sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct FreshSatComponent {
     sat_session: bool,
     sat_calls: u64,
-    pub(crate) sat_variables_loaded: u64,
-    pub(crate) sat_clauses_loaded: u64,
-    pub(crate) load_solve_ns: u64,
-    pub(crate) result: SatKernelResult,
-    pub(crate) checker_completed_ns: u64,
-    pub(crate) result_timestamp_ns: u64,
+    sat_variables_loaded: u64,
+    sat_clauses_loaded: u64,
+    load_solve_ns: u64,
+    result: SatKernelResult,
+    checker_completed_ns: u64,
+    result_timestamp_ns: u64,
 }
 
 impl FreshSatComponent {
@@ -1015,12 +1168,36 @@ impl FreshSatComponent {
     pub(crate) const fn sat_calls(self) -> u64 {
         self.sat_calls
     }
+
+    pub(crate) const fn sat_variables_loaded(self) -> u64 {
+        self.sat_variables_loaded
+    }
+
+    pub(crate) const fn sat_clauses_loaded(self) -> u64 {
+        self.sat_clauses_loaded
+    }
+
+    pub(crate) const fn load_solve_ns(self) -> u64 {
+        self.load_solve_ns
+    }
+
+    pub(crate) const fn result(self) -> SatKernelResult {
+        self.result
+    }
+
+    pub(crate) const fn checker_completed_ns(self) -> u64 {
+        self.checker_completed_ns
+    }
+
+    pub(crate) const fn result_timestamp_ns(self) -> u64 {
+        self.result_timestamp_ns
+    }
 }
 
 /// Disjoint SAT-layer states; neither variant contains nullable component
 /// values. Stage records must choose the variant matching `EqresOutput`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
     serde(tag = "sat_layer", content = "component", rename_all = "snake_case")
@@ -1031,11 +1208,133 @@ pub(crate) enum SatComponent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) struct EqresRunRecord {
-    pub(crate) bundle: EqresBundle,
-    pub(crate) sat_component: SatComponent,
-    pub(crate) hashes: HashBindings,
+    bundle: EqresBundle,
+    sat_component: SatComponent,
+    hashes: HashBindings,
+}
+
+impl EqresRunRecord {
+    pub(crate) fn new(
+        bundle: EqresBundle,
+        sat_component: SatComponent,
+        hashes: HashBindings,
+    ) -> Result<Self, SatComponentError> {
+        let record = Self {
+            bundle,
+            sat_component,
+            hashes,
+        };
+        record.validate()?;
+        Ok(record)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), SatComponentError> {
+        if !internal_hashes_match(self.hashes, self.bundle.compiler.hashes)
+            || self.bundle.compiler.hashes != self.bundle.checker.recomputed_hashes
+            || self.bundle.report.hashes != self.bundle.compiler.hashes
+            || !matches!(self.bundle.checker.status, CheckerStatus::Accepted)
+        {
+            return Err(SatComponentError::InternalHashMismatch);
+        }
+
+        match (&self.bundle.compiler.status, self.sat_component) {
+            (
+                CompilerStatus::Completed(EqresOutput::TheoryEmpty { lemma, .. }),
+                SatComponent::TheoryEmpty(component),
+            ) => {
+                if component.sat_session()
+                    || component.sat_calls() != 0
+                    || component.sat_variables_loaded() != 0
+                    || component.sat_clauses_loaded() != 0
+                    || component.load_solve_ns() != 0
+                    || component.result_timestamp_ns() < component.checker_completed_ns()
+                {
+                    return Err(SatComponentError::InvalidComponentInvariant);
+                }
+                if !lemma.clause.is_empty()
+                    || self.bundle.materialized_lemmas().len() != 1
+                    || self.bundle.materialized_lemmas().clause(0) != Some(lemma.clause.as_slice())
+                {
+                    return Err(SatComponentError::MaterializedOutputMismatch);
+                }
+            }
+            (
+                CompilerStatus::Completed(EqresOutput::Lemmas(lemmas)),
+                SatComponent::FreshSession(component),
+            ) => {
+                if !component.sat_session()
+                    || component.sat_calls() != 1
+                    || component.result_timestamp_ns() < component.checker_completed_ns()
+                {
+                    return Err(SatComponentError::InvalidComponentInvariant);
+                }
+                if component.result() != SatKernelResult::Unsat {
+                    return Err(SatComponentError::KernelResultNotUnsat);
+                }
+                let expected_clauses = self
+                    .bundle
+                    .compiler
+                    .counters
+                    .input
+                    .baseline_clauses
+                    .checked_add(
+                        u64::try_from(lemmas.len())
+                            .map_err(|_| SatComponentError::SatLoadMismatch)?,
+                    )
+                    .ok_or(SatComponentError::SatLoadMismatch)?;
+                if lemmas.is_empty()
+                    || component.sat_variables_loaded()
+                        != self.bundle.compiler.counters.input.baseline_variables
+                    || component.sat_clauses_loaded() != expected_clauses
+                {
+                    return Err(SatComponentError::SatLoadMismatch);
+                }
+                if lemmas.len() != self.bundle.materialized_lemmas().len()
+                    || !lemmas.iter().enumerate().all(|(index, lemma)| {
+                        self.bundle.materialized_lemmas().clause(index)
+                            == Some(lemma.clause.as_slice())
+                    })
+                {
+                    return Err(SatComponentError::MaterializedOutputMismatch);
+                }
+            }
+            (CompilerStatus::Completed(EqresOutput::NoLemmas), _) => {
+                return Err(SatComponentError::NoRunnableOutput);
+            }
+            (CompilerStatus::NotRun | CompilerStatus::Rejected(_), _) => {
+                return Err(SatComponentError::NoRunnableOutput);
+            }
+            _ => return Err(SatComponentError::OutputComponentMismatch),
+        }
+        Ok(())
+    }
+
+    pub(crate) fn bundle(&self) -> &EqresBundle {
+        &self.bundle
+    }
+
+    pub(crate) const fn sat_component(&self) -> SatComponent {
+        self.sat_component
+    }
+
+    pub(crate) const fn hashes(&self) -> HashBindings {
+        self.hashes
+    }
+}
+
+fn internal_hashes_match(left: HashBindings, right: HashBindings) -> bool {
+    left.source_sha256 == right.source_sha256
+        && left.root_cnf_mode_sha256 == right.root_cnf_mode_sha256
+        && left.term_dag_sha256 == right.term_dag_sha256
+        && left.atom_map_sha256 == right.atom_map_sha256
+        && left.baseline_cnf_sha256 == right.baseline_cnf_sha256
+        && left.baseline_problem_sha256 == right.baseline_problem_sha256
+        && left.trace_sha256 == right.trace_sha256
+        && left.lemma_sequence_sha256 == right.lemma_sequence_sha256
+        && left.materialized_lemmas_sha256 == right.materialized_lemmas_sha256
+        && left.materialized_candidate_sha256 == right.materialized_candidate_sha256
 }
 
 #[cfg(test)]
@@ -1153,6 +1452,21 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn sha256_digest_deserialization_is_exact_and_lowercase() {
+        let encoded = serde_json::to_string(&Sha256Digest::EMPTY_BYTES).unwrap();
+        let decoded: Sha256Digest = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, Sha256Digest::EMPTY_BYTES);
+        assert!(serde_json::from_str::<Sha256Digest>("\"ABCDEF\"").is_err());
+        assert!(
+            serde_json::from_str::<Sha256Digest>(
+                "\"E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855\""
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn theory_empty_component_cannot_claim_a_sat_session() {
         let component = TheoryEmptySatComponent::new(100, 101).unwrap();
@@ -1180,6 +1494,24 @@ mod tests {
             },
         };
         assert_ne!(no_lemmas, theory_empty);
+    }
+
+    #[test]
+    fn materialized_store_preserves_empty_clause_identity() {
+        let no_lemmas = MaterializedClauseStore::empty();
+        let one_empty = MaterializedClauseStore::from_parts(vec![0, 0], Vec::new()).unwrap();
+        assert_eq!(no_lemmas.len(), 0);
+        assert_eq!(one_empty.len(), 1);
+        assert_eq!(one_empty.clause(0), Some(&[][..]));
+        assert_ne!(no_lemmas, one_empty);
+        assert_eq!(
+            MaterializedClauseStore::from_parts(vec![1], Vec::new()),
+            Err(MaterializedClauseStoreError::MissingInitialOffset)
+        );
+        assert_eq!(
+            MaterializedClauseStore::from_parts(vec![0, 2], vec![1]),
+            Err(MaterializedClauseStoreError::FinalOffsetMismatch)
+        );
     }
 
     #[cfg(feature = "certificates")]
