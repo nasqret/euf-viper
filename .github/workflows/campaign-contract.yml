@@ -120,7 +120,7 @@ jobs:
             test -x /bin/sh
 
             run_with_sealed_userns_policy() {
-              test "$#" -ge 8
+              test "$#" -ge 9
               readonly SEALED_USERNS_POLICY="$1"
               readonly SEALED_USERNS_SUDO="$2"
               readonly SEALED_USERNS_SYSCTL="$3"
@@ -128,15 +128,18 @@ jobs:
               readonly SEALED_USERNS_PS="$5"
               readonly SEALED_USERNS_SLEEP="$6"
               readonly SEALED_USERNS_SHELL="$7"
-              shift 7
+              readonly SEALED_USERNS_SUPERVISOR_STATUS="$8"
+              shift 8
               local active_userns_policy=""
               local attempt="0"
               local command_status="0"
+              local supervisor_status=""
               SEALED_USERNS_ORIGINAL=""
-              SEALED_USERNS_CHILD_PID=""
-              SEALED_USERNS_CHILD_PGID=""
-              SEALED_USERNS_CHILD_REAPED="1"
-              SEALED_USERNS_CHILD_STARTING="0"
+              SEALED_USERNS_SUPERVISOR_PID=""
+              SEALED_USERNS_SUPERVISOR_PGID=""
+              SEALED_USERNS_SUPERVISOR_REAPED="1"
+              SEALED_USERNS_SUPERVISOR_STARTING="0"
+              SEALED_USERNS_FINALIZING="0"
               SEALED_USERNS_PENDING_SIGNAL=""
 
               if ! IFS= builtin read -r SEALED_USERNS_ORIGINAL < "$SEALED_USERNS_POLICY"; then
@@ -152,6 +155,11 @@ jobs:
                   ;;
               esac
               readonly SEALED_USERNS_ORIGINAL
+              if ! : > "$SEALED_USERNS_SUPERVISOR_STATUS"; then
+                printf 'sealed userns supervisor status could not be initialized\n' \
+                  >&2
+                return 1
+              fi
 
               restore_userns_policy() {
                 local current_policy=""
@@ -187,27 +195,27 @@ jobs:
                 return "$restore_status"
               }
 
-              userns_child_is_owned() {
+              userns_supervisor_is_owned() {
                 local job_pid=""
-                test -n "$SEALED_USERNS_CHILD_PID" || return 1
+                test -n "$SEALED_USERNS_SUPERVISOR_PID" || return 1
                 for job_pid in $(builtin jobs -p); do
-                  if test "$job_pid" = "$SEALED_USERNS_CHILD_PID"; then
+                  if test "$job_pid" = "$SEALED_USERNS_SUPERVISOR_PID"; then
                     return 0
                   fi
                 done
                 return 1
               }
 
-              userns_child_matches_group() {
+              userns_supervisor_matches_group() {
                 local expected_pgid="$1"
                 local require_stopped="$2"
                 local process_record=""
                 local observed_pgid=""
                 local observed_state=""
-                userns_child_is_owned || return 1
+                userns_supervisor_is_owned || return 1
                 if ! process_record="$(
                   "$SEALED_USERNS_PS" -o pgid=,stat= \
-                    -p "$SEALED_USERNS_CHILD_PID" 2>/dev/null
+                    -p "$SEALED_USERNS_SUPERVISOR_PID" 2>/dev/null
                 )"; then
                   return 1
                 fi
@@ -229,44 +237,82 @@ jobs:
                 return 0
               }
 
-              userns_child_group_exists() {
+              userns_supervisor_group_exists() {
                 local pgid="$1"
                 test -n "$pgid" || return 1
                 builtin kill -0 -- "-$pgid" 2>/dev/null
               }
 
-              terminate_userns_child() {
+              terminate_userns_supervisor() {
                 local attempt="0"
-                if test "$SEALED_USERNS_CHILD_REAPED" = "1" || \
-                  test -z "$SEALED_USERNS_CHILD_PID"
+                if test "$SEALED_USERNS_SUPERVISOR_REAPED" = "1" || \
+                  test -z "$SEALED_USERNS_SUPERVISOR_PID"
                 then
                   return 0
                 fi
-                if test -n "$SEALED_USERNS_CHILD_PGID"; then
-                  builtin kill -TERM -- "-$SEALED_USERNS_CHILD_PGID" \
-                    2>/dev/null || :
-                  builtin kill -CONT -- "-$SEALED_USERNS_CHILD_PGID" \
-                    2>/dev/null || :
-                  for attempt in 1 2 3 4 5 6 7 8 9 10; do
-                    userns_child_group_exists \
-                      "$SEALED_USERNS_CHILD_PGID" || break
-                    "$SEALED_USERNS_SLEEP" 0.02 || :
-                  done
-                  if userns_child_group_exists \
-                    "$SEALED_USERNS_CHILD_PGID"
+                if test -n "$SEALED_USERNS_SUPERVISOR_PGID"; then
+                  if ! userns_supervisor_matches_group \
+                    "$SEALED_USERNS_SUPERVISOR_PGID" "0"
                   then
-                    builtin kill -KILL -- "-$SEALED_USERNS_CHILD_PGID" \
-                      2>/dev/null || :
+                    printf 'sealed userns verified supervisor ownership lost\n' \
+                      >&2
+                    return 1
                   fi
-                elif userns_child_is_owned; then
-                  builtin kill -TERM "$SEALED_USERNS_CHILD_PID" \
+                  if ! builtin kill -STOP "$SEALED_USERNS_SUPERVISOR_PID" \
+                    2>/dev/null
+                  then
+                    printf 'sealed userns supervisor could not be pinned\n' >&2
+                    builtin wait "$SEALED_USERNS_SUPERVISOR_PID" \
+                      2>/dev/null || :
+                    return 1
+                  fi
+                  if ! userns_supervisor_matches_group \
+                    "$SEALED_USERNS_SUPERVISOR_PGID" "1"
+                  then
+                    builtin kill -CONT "$SEALED_USERNS_SUPERVISOR_PID" \
+                      2>/dev/null || :
+                    printf 'sealed userns stopped supervisor ownership lost\n' \
+                      >&2
+                    return 1
+                  fi
+                elif ! userns_supervisor_is_owned; then
+                  printf 'sealed userns unverified supervisor ownership lost\n' \
+                    >&2
+                  builtin wait "$SEALED_USERNS_SUPERVISOR_PID" \
                     2>/dev/null || :
-                  "$SEALED_USERNS_SLEEP" 0.02 || :
-                  builtin kill -KILL "$SEALED_USERNS_CHILD_PID" \
-                    2>/dev/null || :
+                  return 1
                 fi
-                builtin wait "$SEALED_USERNS_CHILD_PID" 2>/dev/null || :
-                if test -n "$SEALED_USERNS_CHILD_PGID"; then
+
+                # The supervisor anchors the group and performs group signalling
+                # itself, so no numeric PGID is used after its lifetime.
+                if ! builtin kill -TERM "$SEALED_USERNS_SUPERVISOR_PID" \
+                  2>/dev/null
+                then
+                  printf 'sealed userns supervisor cleanup could not be requested\n' \
+                    >&2
+                  builtin wait "$SEALED_USERNS_SUPERVISOR_PID" \
+                    2>/dev/null || :
+                  return 1
+                fi
+                builtin kill -CONT "$SEALED_USERNS_SUPERVISOR_PID" \
+                  2>/dev/null || :
+                for attempt in 1 2 3; do
+                  builtin wait "$SEALED_USERNS_SUPERVISOR_PID" \
+                    2>/dev/null || :
+                  userns_supervisor_is_owned || break
+                done
+                if userns_supervisor_is_owned; then
+                  if test -z "$SEALED_USERNS_SUPERVISOR_PGID"; then
+                    builtin kill -KILL "$SEALED_USERNS_SUPERVISOR_PID" \
+                      2>/dev/null || :
+                    builtin wait "$SEALED_USERNS_SUPERVISOR_PID" \
+                      2>/dev/null || :
+                  else
+                    printf 'sealed userns supervisor did not finish cleanup\n' >&2
+                    return 1
+                  fi
+                fi
+                if test -n "$SEALED_USERNS_SUPERVISOR_PGID"; then
                   for attempt in \
                     1 2 3 4 5 6 7 8 9 10 \
                     11 12 13 14 15 16 17 18 19 20 \
@@ -274,21 +320,21 @@ jobs:
                     31 32 33 34 35 36 37 38 39 40 \
                     41 42 43 44 45 46 47 48 49 50
                   do
-                    userns_child_group_exists \
-                      "$SEALED_USERNS_CHILD_PGID" || break
+                    userns_supervisor_group_exists \
+                      "$SEALED_USERNS_SUPERVISOR_PGID" || break
                     "$SEALED_USERNS_SLEEP" 0.01 || :
                   done
-                  if userns_child_group_exists \
-                    "$SEALED_USERNS_CHILD_PGID"
+                  if userns_supervisor_group_exists \
+                    "$SEALED_USERNS_SUPERVISOR_PGID"
                   then
-                    printf 'sealed userns child process group survived cleanup\n' \
+                    printf 'sealed userns supervisor group survived cleanup\n' \
                       >&2
                     return 1
                   fi
                 fi
-                SEALED_USERNS_CHILD_REAPED="1"
-                SEALED_USERNS_CHILD_PID=""
-                SEALED_USERNS_CHILD_PGID=""
+                SEALED_USERNS_SUPERVISOR_REAPED="1"
+                SEALED_USERNS_SUPERVISOR_PID=""
+                SEALED_USERNS_SUPERVISOR_PGID=""
                 return 0
               }
 
@@ -296,7 +342,7 @@ jobs:
                 local status="${1-$?}"
                 trap - EXIT
                 trap '' HUP INT TERM
-                if ! terminate_userns_child; then
+                if ! terminate_userns_supervisor; then
                   status="1"
                 fi
                 if ! restore_userns_policy; then
@@ -307,7 +353,9 @@ jobs:
 
               signal_userns_policy() {
                 local -r status="$1"
-                if test "$SEALED_USERNS_CHILD_STARTING" = "1"; then
+                if test "$SEALED_USERNS_SUPERVISOR_STARTING" = "1" || \
+                  test "$SEALED_USERNS_FINALIZING" = "1"
+                then
                   if test -z "$SEALED_USERNS_PENDING_SIGNAL"; then
                     SEALED_USERNS_PENDING_SIGNAL="$status"
                   fi
@@ -315,8 +363,8 @@ jobs:
                 fi
                 trap - EXIT
                 trap '' HUP INT TERM
-                if ! terminate_userns_child; then
-                  printf 'sealed userns child process-group cleanup failed\n' >&2
+                if ! terminate_userns_supervisor; then
+                  printf 'sealed userns supervisor cleanup failed\n' >&2
                 fi
                 if ! restore_userns_policy; then
                   printf 'sealed userns policy signal restoration failed\n' >&2
@@ -353,20 +401,49 @@ jobs:
                 finish_userns_policy 1
               fi
 
-              # Record the stopped session leader before execution; waiting on
-              # that background job lets Bash dispatch catchable signals.
+              # The verified session leader remains a supervisor until it has
+              # terminated its complete group and reported the worker status.
               case "$-" in
                 *m*)
                   printf 'sealed userns policy requires disabled job control\n' >&2
                   finish_userns_policy 1
                   ;;
               esac
-              SEALED_USERNS_CHILD_STARTING="1"
+              SEALED_USERNS_SUPERVISOR_STARTING="1"
               "$SEALED_USERNS_SETSID" "$SEALED_USERNS_SHELL" -c \
-                'trap - HUP INT TERM; kill -STOP "$$"; exec "$@"' \
-                sealed-userns-child "$@" &
-              SEALED_USERNS_CHILD_PID="$!"
-              SEALED_USERNS_CHILD_REAPED="0"
+                '
+                  status_path="$1"
+                  sleep_path="$2"
+                  shift 2
+                  supervisor_cleanup() {
+                    trap "" HUP INT TERM
+                    kill -TERM -- "-$$" 2>/dev/null || :
+                    "$sleep_path" 0.20 || :
+                    kill -KILL -- "-$$" 2>/dev/null || :
+                    exit 125
+                  }
+                  trap supervisor_cleanup HUP INT TERM
+                  kill -STOP "$$"
+                  "$@" &
+                  worker_pid="$!"
+                  if wait "$worker_pid"; then
+                    worker_status="0"
+                  else
+                    worker_status="$?"
+                  fi
+                  if ! printf "%s\n" "$worker_status" > "$status_path"; then
+                    supervisor_cleanup
+                  fi
+                  while :; do
+                    kill -STOP "$$"
+                  done
+                ' \
+                sealed-userns-supervisor \
+                "$SEALED_USERNS_SUPERVISOR_STATUS" \
+                "$SEALED_USERNS_SLEEP" \
+                "$@" &
+              SEALED_USERNS_SUPERVISOR_PID="$!"
+              SEALED_USERNS_SUPERVISOR_REAPED="0"
               for attempt in \
                 1 2 3 4 5 6 7 8 9 10 \
                 11 12 13 14 15 16 17 18 19 20 \
@@ -374,37 +451,67 @@ jobs:
                 31 32 33 34 35 36 37 38 39 40 \
                 41 42 43 44 45 46 47 48 49 50
               do
-                if userns_child_matches_group \
-                  "$SEALED_USERNS_CHILD_PID" "1"
+                if userns_supervisor_matches_group \
+                  "$SEALED_USERNS_SUPERVISOR_PID" "1"
                 then
-                  SEALED_USERNS_CHILD_PGID="$SEALED_USERNS_CHILD_PID"
+                  SEALED_USERNS_SUPERVISOR_PGID="$SEALED_USERNS_SUPERVISOR_PID"
                   break
                 fi
-                userns_child_is_owned || break
+                userns_supervisor_is_owned || break
                 "$SEALED_USERNS_SLEEP" 0.01 || :
               done
-              SEALED_USERNS_CHILD_STARTING="0"
+              SEALED_USERNS_SUPERVISOR_STARTING="0"
               if test -n "$SEALED_USERNS_PENDING_SIGNAL"; then
                 signal_userns_policy "$SEALED_USERNS_PENDING_SIGNAL"
               fi
-              if test -z "$SEALED_USERNS_CHILD_PGID"; then
-                printf 'sealed userns child process-group setup failed\n' >&2
+              if test -z "$SEALED_USERNS_SUPERVISOR_PGID"; then
+                printf 'sealed userns supervisor process-group setup failed\n' >&2
                 finish_userns_policy 1
               fi
-              if ! builtin kill -CONT -- "-$SEALED_USERNS_CHILD_PGID" \
+              if ! builtin kill -CONT "$SEALED_USERNS_SUPERVISOR_PID" \
                 2>/dev/null
               then
-                printf 'sealed userns child could not be started\n' >&2
+                printf 'sealed userns supervisor could not be started\n' >&2
                 finish_userns_policy 1
               fi
-              if builtin wait "$SEALED_USERNS_CHILD_PID"; then
-                command_status="0"
-              else
-                command_status="$?"
+              while :; do
+                supervisor_status=""
+                if IFS= builtin read -r supervisor_status \
+                  < "$SEALED_USERNS_SUPERVISOR_STATUS" && \
+                  test -n "$supervisor_status" && \
+                  userns_supervisor_matches_group \
+                    "$SEALED_USERNS_SUPERVISOR_PGID" "1"
+                then
+                  break
+                fi
+                if ! userns_supervisor_is_owned; then
+                  printf 'sealed userns supervisor exited before status\n' >&2
+                  finish_userns_policy 1
+                fi
+                "$SEALED_USERNS_SLEEP" 0.01 || :
+              done
+              case "$supervisor_status" in
+                [0-9]|[0-9][0-9]|[0-9][0-9][0-9]) ;;
+                *)
+                  printf 'sealed userns supervisor status is invalid: %s\n' \
+                    "$supervisor_status" >&2
+                  finish_userns_policy 1
+                  ;;
+              esac
+              if test "$supervisor_status" -gt 255; then
+                printf 'sealed userns supervisor status is out of range: %s\n' \
+                  "$supervisor_status" >&2
+                finish_userns_policy 1
               fi
-              SEALED_USERNS_CHILD_REAPED="1"
-              SEALED_USERNS_CHILD_PID=""
-              SEALED_USERNS_CHILD_PGID=""
+              command_status="$supervisor_status"
+              SEALED_USERNS_FINALIZING="1"
+              if ! terminate_userns_supervisor; then
+                command_status="1"
+              fi
+              SEALED_USERNS_FINALIZING="0"
+              if test -n "$SEALED_USERNS_PENDING_SIGNAL"; then
+                signal_userns_policy "$SEALED_USERNS_PENDING_SIGNAL"
+              fi
               if ! restore_userns_policy; then
                 command_status="1"
                 finish_userns_policy "$command_status"
@@ -421,6 +528,7 @@ jobs:
               /usr/bin/ps \
               /usr/bin/sleep \
               /bin/sh \
+              "$SEALED_ROOT/userns-supervisor-status" \
               python3 -B scripts/wmi/sealed_linux_build.py build \
               --repository . \
               --revision "$(git rev-parse HEAD)" \

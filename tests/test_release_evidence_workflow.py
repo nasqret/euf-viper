@@ -304,7 +304,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             self.assertEqual(step.count(item), 1, item)
             positions.append(step.index(item))
         self.assertEqual(positions, sorted(positions))
-        self.assertEqual(step.count("IFS= builtin read -r"), 4)
+        self.assertEqual(step.count("IFS= builtin read -r"), 5)
         self.assertNotIn("cat ", step)
         self.assertEqual(
             step.count("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"),
@@ -329,45 +329,55 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         )
         self.assertIn("trap '' HUP INT TERM", step)
         self.assertIn("trap - EXIT HUP INT TERM", step)
-        self.assertIn('SEALED_USERNS_CHILD_PID="$!"', step)
+        self.assertIn('SEALED_USERNS_SUPERVISOR_PID="$!"', step)
         self.assertIn("for job_pid in $(builtin jobs -p)", step)
         self.assertIn(
-            'if test "$SEALED_USERNS_CHILD_STARTING" = "1"', step
+            'test "$SEALED_USERNS_FINALIZING" = "1"', step
         )
         self.assertIn('SEALED_USERNS_PENDING_SIGNAL="$status"', step)
-        self.assertIn('builtin wait "$SEALED_USERNS_CHILD_PID"', step)
         self.assertIn(
-            'builtin kill -TERM -- "-$SEALED_USERNS_CHILD_PGID"', step
+            'builtin kill -TERM "$SEALED_USERNS_SUPERVISOR_PID"', step
         )
         self.assertIn(
-            'builtin kill -KILL -- "-$SEALED_USERNS_CHILD_PGID"', step
+            'builtin kill -CONT "$SEALED_USERNS_SUPERVISOR_PID"', step
         )
-        termination_start = step.index("              terminate_userns_child() {")
+        termination_start = step.index(
+            "              terminate_userns_supervisor() {"
+        )
         termination_end = step.index(
             "              finish_userns_policy() {", termination_start
         )
         termination = step[termination_start:termination_end]
         self.assertIn('builtin kill -0 -- "-$pgid"', step)
-        self.assertNotIn("userns_child_matches_group", termination)
+        self.assertNotIn('kill -TERM -- "-$SEALED_USERNS_', termination)
+        self.assertNotIn('kill -KILL -- "-$SEALED_USERNS_', termination)
         self.assertLess(
             termination.index(
-                'builtin kill -KILL -- "-$SEALED_USERNS_CHILD_PGID"'
+                'builtin kill -STOP "$SEALED_USERNS_SUPERVISOR_PID"'
             ),
-            termination.index('builtin wait "$SEALED_USERNS_CHILD_PID"'),
+            termination.index(
+                'builtin kill -TERM "$SEALED_USERNS_SUPERVISOR_PID"'
+            ),
         )
         self.assertLess(
-            termination.index('builtin wait "$SEALED_USERNS_CHILD_PID"'),
-            termination.rindex("userns_child_group_exists"),
+            termination.rindex("userns_supervisor_group_exists"),
+            termination.index('SEALED_USERNS_SUPERVISOR_REAPED="1"'),
         )
-        self.assertLess(
-            termination.rindex("userns_child_group_exists"),
-            termination.index('SEALED_USERNS_CHILD_REAPED="1"'),
+        supervisor_start = step.index("                  supervisor_cleanup() {")
+        supervisor_end = step.index(
+            "                sealed-userns-supervisor ", supervisor_start
         )
-        self.assertIn(
-            "'trap - HUP INT TERM; kill -STOP \"$$\"; exec \"$@\"'",
-            step,
-        )
-        self.assertIn('sealed-userns-child "$@" &', step)
+        supervisor = step[supervisor_start:supervisor_end]
+        self.assertIn('kill -TERM -- "-$$"', supervisor)
+        self.assertIn('kill -KILL -- "-$$"', supervisor)
+        self.assertIn('"$@" &', supervisor)
+        self.assertNotIn('exec "$@"', supervisor)
+        finalizing_start = step.rindex('SEALED_USERNS_FINALIZING="1"')
+        normal_termination = step.rindex("terminate_userns_supervisor")
+        finalizing_end = step.rindex('SEALED_USERNS_FINALIZING="0"')
+        self.assertLess(finalizing_start, normal_termination)
+        self.assertLess(normal_termination, finalizing_end)
+        self.assertIn('"$SEALED_ROOT/userns-supervisor-status"', step)
         self.assertIn('--unshare "$(command -v unshare)"', step)
         self.assertNotIn("unsealed", step.lower())
         self.assertIn(
@@ -388,8 +398,10 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         behavior: str = "ok",
         build_command: str = "exit 0",
         build_shell: str = "/bin/sh",
+        supervisor_shell: str = "/bin/sh",
         setsid_signal: int | None = None,
         shell_exit_status: int | None = None,
+        signal_during_supervisor_cleanup: int | None = None,
     ) -> tuple[str, dict[str, str], Path, Path, Path]:
         policy = root / "userns-policy"
         policy.write_text(f"{original}\n", encoding="ascii")
@@ -397,9 +409,12 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         sysctl_log.touch()
         cat_marker = root / "path-cat-ran"
         setsid_pid = root / "setsid.pid"
+        supervisor_status = root / "supervisor-status"
+        finalization_signal_marker = root / "finalization-signal"
         fake_sudo = root / "sudo"
         fake_sysctl = root / "sysctl"
         fake_setsid = root / "setsid"
+        fake_sleep = root / "sleep"
         self._write_executable(
             fake_sudo,
             "#!/bin/sh\n"
@@ -439,6 +454,22 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "    os.kill(os.getppid(), signal_number)\n"
             "os.execv(sys.argv[1], sys.argv[1:])\n",
         )
+        if signal_during_supervisor_cleanup is not None:
+            self._write_executable(
+                fake_sleep,
+                "#!/bin/sh\n"
+                "set -eu\n"
+                'if test "${1:-}" = "0.20" && '
+                'test ! -e "$FAKE_FINALIZATION_SIGNAL_MARKER"; then\n'
+                '  : > "$FAKE_FINALIZATION_SIGNAL_MARKER"\n'
+                '  kill -"$FAKE_FINALIZATION_SIGNAL" '
+                '"$FAKE_USERNS_WRAPPER_PID"\n'
+                "fi\n"
+                'exec /bin/sleep "$@"\n',
+            )
+            sleep_path = fake_sleep
+        else:
+            sleep_path = Path("/bin/sleep")
         spoof_bin = root / "spoof-bin"
         spoof_bin.mkdir()
         self._write_executable(
@@ -454,9 +485,16 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                 "FAKE_CAT_MARKER": str(cat_marker),
                 "FAKE_SETSID_PID": str(setsid_pid),
                 "FAKE_SETSID_SIGNAL": str(setsid_signal or 0),
+                "FAKE_SUPERVISOR_STATUS": str(supervisor_status),
                 "FAKE_SYSCTL_BEHAVIOR": behavior,
                 "FAKE_SYSCTL_LOG": str(sysctl_log),
                 "FAKE_USERNS_POLICY": str(policy),
+                "FAKE_FINALIZATION_SIGNAL": str(
+                    signal_during_supervisor_cleanup or 0
+                ),
+                "FAKE_FINALIZATION_SIGNAL_MARKER": str(
+                    finalization_signal_marker
+                ),
                 "PATH": f"{spoof_bin}:{environment.get('PATH', '')}",
                 "RUNNER_ENVIRONMENT": "github-hosted",
                 "RUNNER_OS": "Linux",
@@ -468,13 +506,14 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
         else:
             build_fixture = f"trap 'exit {shell_exit_status}' USR1\n"
             environment["FAKE_BUILD_COMMAND"] = (
-                'kill -USR1 "$PPID"; exec /bin/sleep 30'
+                'kill -USR1 "$FAKE_USERNS_WRAPPER_PID"; exec /bin/sleep 30'
             )
         build_invocation = f'  "{build_shell}" -c "$FAKE_BUILD_COMMAND"\n'
         script = (
             "set -euo pipefail\n"
             f"{sealed_userns_function_text()}\n"
             f"{build_fixture}"
+            'export FAKE_USERNS_WRAPPER_PID="$$"\n'
             "run_with_sealed_userns_policy "
             "\\\n"
             '  "$FAKE_USERNS_POLICY" '
@@ -487,9 +526,11 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             "\\\n"
             '  "/bin/ps" '
             "\\\n"
-            '  "/bin/sleep" '
+            f'  "{sleep_path}" '
             "\\\n"
-            '  "/bin/sh" '
+            f'  "{supervisor_shell}" '
+            "\\\n"
+            '  "$FAKE_SUPERVISOR_STATUS" '
             "\\\n"
             f"{build_invocation}"
         )
@@ -530,6 +571,34 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                     expected_policy=original,
                     expected_writes=writes,
                 )
+
+    @unittest.skipUnless(Path("/bin/dash").is_file(), "dash is required")
+    def test_sealed_userns_supervisor_is_dash_compatible(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root,
+                    original="1",
+                    supervisor_shell="/bin/dash",
+                )
+            )
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+                timeout=2.25,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
 
     def test_sealed_userns_shell_restores_after_build_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -667,7 +736,7 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             self.assertFalse(self._process_exists(child_pid))
 
     @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
-    def test_sealed_userns_shell_kills_group_after_term_exits_leader(self) -> None:
+    def test_sealed_userns_supervisor_pins_group_after_workload_exit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             started = root / "build-started"
@@ -730,13 +799,16 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
                     recorded_descendant_pid,
                     int(descendant_pid.read_text(encoding="ascii").strip()),
                 )
+                supervisor_pid = int(
+                    Path(environment["FAKE_SETSID_PID"])
+                    .read_text(encoding="ascii")
+                    .strip()
+                )
+                self.assertNotEqual(leader_pid, supervisor_pid)
+                self.assertEqual(os.getpgid(supervisor_pid), supervisor_pid)
+                self.assertEqual(os.getpgid(leader_pid), supervisor_pid)
                 self.assertEqual(
-                    leader_pid,
-                    int(
-                        Path(environment["FAKE_SETSID_PID"])
-                        .read_text(encoding="ascii")
-                        .strip()
-                    ),
+                    os.getpgid(recorded_descendant_pid), supervisor_pid
                 )
                 signal_started = time.monotonic()
                 os.kill(process.pid, signal.SIGTERM)
@@ -759,10 +831,134 @@ class ReleaseEvidenceWorkflowTests(unittest.TestCase):
             )
             remaining = [
                 pid
-                for pid in (leader_pid, recorded_descendant_pid)
+                for pid in (
+                    supervisor_pid,
+                    leader_pid,
+                    recorded_descendant_pid,
+                )
                 if self._process_exists(pid)
             ]
             self.assertEqual(remaining, [], "sealed child processes survived")
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
+    def test_sealed_userns_signal_at_normal_finalization_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root,
+                    original="1",
+                    signal_during_supervisor_cleanup=signal.SIGTERM,
+                )
+            )
+            started = time.monotonic()
+            process = subprocess.Popen(
+                ["/bin/bash", "-c", script],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=2.25)
+            finally:
+                if process.poll() is None:
+                    self._kill_sealed_userns_fixture(process, environment)
+                    process.communicate()
+            self.assertEqual(process.returncode, 143, stderr)
+            self.assertLess(time.monotonic() - started, 2.25)
+            self.assertEqual(
+                Path(environment["FAKE_SUPERVISOR_STATUS"])
+                .read_text(encoding="ascii")
+                .strip(),
+                "0",
+            )
+            self.assertTrue(
+                Path(environment["FAKE_FINALIZATION_SIGNAL_MARKER"]).exists()
+            )
+            self.assertIn("sealed-userns-policy phase=restored", stdout)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
+            supervisor_pid = int(
+                Path(environment["FAKE_SETSID_PID"])
+                .read_text(encoding="ascii")
+                .strip()
+            )
+            self.assertFalse(self._process_exists(supervisor_pid))
+
+    @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
+    def test_sealed_userns_fails_closed_before_stale_group_reuse_attempt(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            anchor_killed = root / "anchor-killed"
+            script, environment, policy, sysctl_log, cat_marker = (
+                self._sealed_userns_fixture(
+                    root,
+                    original="1",
+                    build_command=(
+                        'supervisor="$PPID"; '
+                        'kill -KILL "$supervisor"; '
+                        'printf killed > "$FAKE_ANCHOR_KILLED"; '
+                        "exit 0"
+                    ),
+                )
+            )
+            environment["FAKE_ANCHOR_KILLED"] = str(anchor_killed)
+            completed = subprocess.run(
+                ["/bin/bash", "-c", script],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+                timeout=1.5,
+            )
+            self.assertEqual(completed.returncode, 1, completed.stderr)
+            self.assertTrue(anchor_killed.exists())
+            self.assertIn("verified supervisor ownership lost", completed.stderr)
+            self.assertNotIn("supervisor group survived cleanup", completed.stderr)
+            self._assert_userns_fixture_state(
+                policy,
+                sysctl_log,
+                cat_marker,
+                expected_policy="1",
+                expected_writes=["0", "1"],
+            )
+            supervisor_pid = int(
+                Path(environment["FAKE_SETSID_PID"])
+                .read_text(encoding="ascii")
+                .strip()
+            )
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(supervisor_pid, 0)
+            reuse_attempt = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os, sys\n"
+                        "old_pgid = int(sys.argv[1])\n"
+                        "try:\n"
+                        "    os.setpgid(0, old_pgid)\n"
+                        "except OSError as error:\n"
+                        "    print(error.errno)\n"
+                        "    raise SystemExit(0)\n"
+                        "raise SystemExit(1)\n"
+                    ),
+                    str(supervisor_pid),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(reuse_attempt.returncode, 0, reuse_attempt.stderr)
+            self.assertTrue(reuse_attempt.stdout.strip())
 
     @unittest.skipUnless(hasattr(os, "killpg"), "POSIX process groups required")
     def test_sealed_userns_shell_restores_on_catchable_signals(self) -> None:
