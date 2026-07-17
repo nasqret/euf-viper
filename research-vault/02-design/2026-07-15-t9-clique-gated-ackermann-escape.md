@@ -2,7 +2,7 @@
 
 Date: 2026-07-15
 
-Status: preregistered before implementation or candidate timing
+Status: rejected by audited Stage 1 evidence on 2026-07-17
 
 ## Decision Boundary
 
@@ -124,6 +124,31 @@ The Yices2 gate is mandatory. A solve below two seconds or a full-coverage
 count does not compensate for losing it. If Stage 1 passes, repeat the same
 binary on the frozen `sample-40` and `hot-400` controls before any full-corpus
 campaign.
+
+## Stage 1 Result
+
+Stage 0 completed with no SAT calls at revision
+`7e5f690a0f4a044c8f77e2bdfa04a82cdf1a7aca`, selecting only the frozen target.
+The hardened Stage 1 harness is revision
+`37aeefef7ad8fdcc82752c4dc71e5bce0e906223`; exact-head hosted Linux run
+`29548321207` passed before WMI timing. WMI job `148142` then produced 456
+observations over 24 distinct sources on one pinned logical CPU. Its independent
+audit is `verified`, with scientific decision `fail`.
+
+The selected target was converted correctly: the baseline timed out in all four
+timing repeats, while `clique-auto` returned `unsat` with median
+`547,702,323ns`. Same-node Yices2 returned `unsat` with median `25,280,921ns`.
+The registered Yices speedup was therefore only `0.0456194x`, or a `21.9205x`
+T9 slowdown, against the required `1.05x` speedup. Anti-target p95 overhead was
+`1.006033` and passed. Zero wrong answers, execution errors, missing groups, or
+baseline-only solves were observed. Eleven nonselected hard Goel controls also
+timed out under the frozen two-second candidate gate, so the all-required
+correctness checks failed independently.
+
+Artifacts are preserved under `results/wmi/t9-stage1-148142/`. T9 is a valid
+narrow coverage repair and a failed competitive representation. The stop rule
+is final: do not run sample-40, hot-400, a broad corpus campaign, or a 1,200s
+follow-up for this route.
 
 ## Promotion Boundary
 

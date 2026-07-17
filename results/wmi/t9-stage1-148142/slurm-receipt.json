@@ -1,0 +1,62 @@
+{
+  "artifact_hashes": {
+    "affinity_probe_148138": "848fd97f692140325e48bb38c9d306f5f4bd3ac3ff10c3f6cf681d683c338162",
+    "environment_probe_148135": "3c97fdc1166697421a04b712a44ea9a1dda508a55bb6252a8d80923adbc391e0",
+    "preflight_148126": "8eb8634df6b34ebf65690886fc6bcb31c397b14ade77d0b08ca967c099a575c0",
+    "preflight_148137": "f91acae9f5c4a37af0eb155aa327e8acce278b40457b2dcefde798102b254372",
+    "srun_probe_148140": "c14196f132c1e9be0508ae80ab52fcb3e1d3fc05880415f3dc980971df207c9e"
+  },
+  "harness": {
+    "revision": "37aeefef7ad8fdcc82752c4dc71e5bce0e906223",
+    "tree": "01372c901e964270d2f06c23d76fb9d235e694d2"
+  },
+  "preflight_failures": [
+    {
+      "elapsed_seconds": 1,
+      "exit_code": "2:0",
+      "job_id": 148126,
+      "reason": "compute-node Python SHA-256 mismatch",
+      "state": "FAILED"
+    },
+    {
+      "elapsed_seconds": 1,
+      "exit_code": "2:0",
+      "job_id": 148137,
+      "reason": "batch affinity was [0,1], not one logical CPU",
+      "state": "FAILED"
+    }
+  ],
+  "probes": [
+    {
+      "job_id": 148135,
+      "result": "Python 3.10.12 SHA-256 7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86",
+      "state": "COMPLETED"
+    },
+    {
+      "job_id": 148138,
+      "result": "--hint=nomultithread still exposed [0,1]",
+      "state": "COMPLETED"
+    },
+    {
+      "job_id": 148140,
+      "result": "srun --cpu-bind=map_cpu:0 exposed [0]",
+      "state": "COMPLETED"
+    }
+  ],
+  "schema": "euf-viper.t9-stage1-slurm-receipt.v1",
+  "scientific_job": {
+    "allocated_cpus": 1,
+    "batch_max_rss": "5392K",
+    "elapsed_seconds": 336,
+    "end": "2026-07-17T04:05:01+02:00",
+    "exit_code": "3:0",
+    "job_id": 148142,
+    "node": "g1n4",
+    "partition": "gpu_idle",
+    "start": "2026-07-17T03:59:25+02:00",
+    "state": "FAILED",
+    "step_max_rss": "423280K"
+  },
+  "submission_binding": "srun --ntasks=1 --cpus-per-task=1 --cpu-bind=map_cpu:0",
+  "test_only_hypothetical_job": 148141
+}

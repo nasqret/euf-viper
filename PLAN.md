@@ -870,15 +870,17 @@ fallback can be an operational portfolio but never a standalone victory.
     only if its independently replayable guard can beat the syntactic control
     and pass all original qg7/Goel/PEQ thresholds. No novelty claim is allowed
     before pinned prior-art review.
-12. Execute T9 only under
-    `research-vault/02-design/2026-07-15-t9-clique-gated-ackermann-escape.md`.
-    First port only the allocation-independent budget planner into an isolated
-    default-off branch, then run the no-solve 7,503-source projection census.
-    The sole terminal timeout must be selected; `frogs.1`, `frogs.4`, and every
-    QG source must be rejected structurally. No candidate timing precedes that
-    census. A later same-binary ABBA gate must preserve nonselected CNF bytes,
-    keep anti-target p95 overhead at most 1%, and beat same-node Yices2 by at
-    least 1.05x on the complete selected population. Closing coverage alone is
+12. Preserve T9 as a completed rejection. Stage 0 job `147952` inspected all
+    7,503 sources without SAT, selected only the sole terminal timeout, and
+    passed its independent audit. Hardened Stage 1 revision `37aeefe` passed
+    exact-head hosted run `29548321207`; audited WMI job `148142` converted the
+    target from four baseline timeouts to correct `unsat` at a `547.70ms`
+    median and kept anti-target p95 overhead to `1.006033`. It nevertheless
+    lost to same-node Yices2's `25.28ms` median by `21.9205x`, and eleven
+    nonselected hard Goel controls timed out under the frozen candidate gate.
+    The scientific decision is `fail`. Preserve
+    `results/wmi/t9-stage1-148142/`; do not run sample-40, hot-400, broad
+    corpus timing, or a 1,200-second T9 follow-up. Coverage closure alone is
     not promotion evidence.
 
 No result enters promotion because it was submitted, queued, or partially

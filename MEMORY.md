@@ -1193,6 +1193,16 @@
   keep anti-target p95 overhead at most 1%, and beat same-node Yices2 by at
   least 1.05x on the complete selected population. Coverage closure alone is
   insufficient.
+- Supersede the preregistration-only T9 checkpoint with its terminal rejection.
+  Stage 0 job `147952` passed a no-SAT 7,503-source audit and selected only the
+  frozen sole timeout. Exact harness revision `37aeefe` passed hosted Linux run
+  `29548321207`; independently audited WMI job `148142` then converted that
+  source at a `547,702,323ns` median but lost to same-node Yices2's
+  `25,280,921ns` median by `21.9205x`. Anti-target p95 overhead passed at
+  `1.006033`, with zero wrong answers or execution errors, but eleven
+  nonselected hard Goel controls timed out and the mandatory Yices/correctness
+  gates failed. Preserve `results/wmi/t9-stage1-148142/` and stop T9 before any
+  sample-40, hot-400, broad, merge, or promotion run.
 - Exact certificate review closes the symlink-plus-parent defect in `f07ecff`
   but finds a low nonexistent-component-plus-`..` normalization regression.
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
