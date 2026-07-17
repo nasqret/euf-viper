@@ -1203,19 +1203,22 @@
   nonselected hard Goel controls timed out and the mandatory Yices/correctness
   gates failed. Preserve `results/wmi/t9-stage1-148142/` and stop T9 before any
   sample-40, hot-400, broad, merge, or promotion run.
-- T10 is preregistered before code or projection as the closed-atom Ackermann
-  kernel. It reuses T9's audited one-source structural selector but keeps only
-  theory-valid Ackermann clauses whose atoms already exist in the baseline CNF.
-  The route may add no atom, variable, fill edge, or transitivity clause; UNSAT
-  is trusted, while SAT still requires complete validation or fallback. A
-  7,503-source no-SAT census must independently prove the exact selected set,
-  1..4096 clauses, at most 16,384 literal slots, and exact materialization
-  before any timing. Existing T9 evidence puts tree parsing at `32.390952ms`,
-  above the final `24.077067ms` end-to-end ceiling. Stage 1 must prove
-  kernel-first UNSAT at `<=50ms` with the tree parser and at most 1%
-  nonselected p95 overhead. Only then may the all-source parity-checked
-  streaming parser be integrated; Stage 2 requires parse `<=8ms`, total
-  `<=24.077067ms`, `1.25x` over Stage 1, and `1.05x` over same-node Yices2.
+- Supersede the T10 preregistration checkpoint with its terminal target
+  preflight rejection. Exact core commit `898df6d` selected the frozen sole T9
+  target, enumerated 3,686 full Ackermann clauses with 7,958 literal slots and
+  maximum width three, but retained zero clauses over the baseline atom map.
+  The projection made zero SAT calls and left CNF and atom-map hashes unchanged.
+  A separate Z3 4.16 AST computation reproduced 138 applications, all 3,686
+  pairs, and zero existing result-equality atoms. This falsifies the mandatory
+  `1..4096` selected-row bound before a full census; do not describe it as a
+  completed 7,503-row Stage 0. Preserve branches `perf-t10-closed-atom` and
+  `perf-t10-projection-harness` plus
+  `results/local/t10-target-preflight-898df6d/`. T10 Stage 1, WMI timing,
+  streaming-parser integration, and broader campaigns are forbidden.
+- The equality-resolution compiler is now the next hypothesis, not yet an
+  authorized experiment. Its separate preregistration must resolve the
+  empty-clause-versus-bounded-lemma-set gate and freeze proof replay, work,
+  width, memory, selector, and fallback contracts before implementation.
 - Exact certificate review closes the symlink-plus-parent defect in `f07ecff`
   but finds a low nonexistent-component-plus-`..` normalization regression.
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
