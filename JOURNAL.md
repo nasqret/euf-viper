@@ -1763,6 +1763,38 @@
   component followed by `..`. An isolated normalization repair is active; no
   push, hosted claim, or WMI action is authorized.
 
+## 2026-07-17 - T9 Stage 1 terminal rejection
+
+- Stage 0 job `147952` inspected all 7,503 sources without a SAT call, selected
+  only `QF_UF_sokoban.2.prop1_ab_br_max.smt2`, and passed independent audit.
+- Four rounds of adversarial harness review replaced synthetic alarm timeouts
+  with fork-to-reap pidfd supervision, `waitid` evidence, syscall-level process
+  creation denial, exact output sentinels and rlimits, Stage0 binary binding,
+  global schedule validation, and isolated Python. Exact revision
+  `37aeefef7ad8fdcc82752c4dc71e5bce0e906223` passed GitHub Actions run
+  `29548321207`, including six Linux-only containment tests.
+- The WMI CPU lane was under servicing. Job `148126` failed closed before any
+  observation on a compute-node Python hash mismatch. Probe `148135` pinned
+  `/usr/bin/python3` SHA-256 `7d51cd6b...5bd4a86`. Replacement `148137` failed
+  closed on affinity `[0,1]`; probes `148138` and `148140` established that
+  `--hint=nomultithread` was insufficient and an inner
+  `srun --cpu-bind=map_cpu:0` produced affinity `[0]`.
+- Job `148142` ran 456 observations over 24 distinct frozen sources on `g1n4`
+  and exited `3` after 336 seconds. The independent receipt is `verified` and
+  the scientific decision is `fail`. Raw, summary, receipt, metadata, Slurm
+  logs, and preflight lineage are preserved in
+  `results/wmi/t9-stage1-148142/`.
+- T9 converted the selected baseline timeout to correct `unsat` with median
+  `547,702,323ns`; baseline remained four-for-four timeout. Same-node Yices2
+  median was `25,280,921ns`, so T9's registered speedup was `0.0456194x`, a
+  `21.9205x` slowdown rather than the required `1.05x` win. Anti-target p95
+  overhead passed at `1.006033`; wrong answers, execution errors, missing
+  groups, and baseline-only solves were all zero. Eleven nonselected hard Goel
+  controls also timed out under the candidate's frozen two-second gate.
+- Stop T9. Do not run sample-40, hot-400, broad corpus, 1,200-second follow-up,
+  merge, or promotion. The experiment establishes a narrow coverage repair and
+  falsifies this eager transitivity materialization as a competitive route.
+
 ## Next Entry Template
 
 - Benchmark corpus:

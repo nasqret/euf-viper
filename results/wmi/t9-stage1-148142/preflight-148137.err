@@ -1,0 +1,2 @@
+T9 Stage1 rejected: Stage1 requires exactly one CPU in affinity, observed [0, 1]
+Stage1 runner failed its execution contract: 2

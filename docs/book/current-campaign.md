@@ -695,6 +695,47 @@ Every opportunity artifact is source-only, deterministic, hash chained, and
 forbidden from reporting SAT or UNSAT. Passing a structural gate permits an
 isolated implementation; it does not establish speed.
 
+## T9 clique completion: coverage repaired, performance rejected
+
+T9 tested a source-structural disequality-clique selector for bounded
+Ackermannization and chordal transitivity completion before the first SAT call.
+Its no-solve Stage 0 census inspected all 7,503 sources and selected only the
+sole terminal euf-viper timeout. This made T9 a precise experiment rather than
+a family or pathname portfolio.
+
+Stage 1 used four balanced same-node repeats at a two-second wall limit. For
+the selected source, let
+
+\[
+S_{Y/C}=\frac{\operatorname{median}(t_{\mathrm{Yices}})}
+               {\operatorname{median}(t_{\mathrm{candidate}})}.
+\]
+
+Audited WMI job `148142` measured
+
+\[
+\operatorname{median}(t_{\mathrm{candidate}})=547{,}702{,}323\ \mathrm{ns},
+\qquad
+\operatorname{median}(t_{\mathrm{Yices}})=25{,}280{,}921\ \mathrm{ns},
+\]
+
+and therefore
+
+\[
+S_{Y/C}=0.0456194.
+\]
+
+The candidate correctly converted all four baseline timeouts, and anti-target
+p95 overhead passed at `1.006033 <= 1.01`. It was nevertheless `21.9205x`
+slower than Yices2, far from the required `S_{Y/C} >= 1.05`. Eleven
+nonselected hard Goel controls also timed out under the frozen candidate gate.
+There were zero wrong answers or execution errors.
+
+The independent receipt marks the scientific decision `fail`. T9 demonstrates
+that eager transitivity materialization can close this tail, but not at a
+competitive cost. The route stops before sample-40, hot-400, broad timing, or
+promotion. Complete evidence is in `results/wmi/t9-stage1-148142/`.
+
 ## Victory Conditions
 
 The project closes only when one frozen standalone release:
