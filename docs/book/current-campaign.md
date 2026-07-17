@@ -795,17 +795,61 @@ WMI, SAT-enabled timing, parser integration, or a broader campaign. Evidence is
 preserved in `results/local/t10-target-preflight-898df6d/`; the exact core and
 unused census harness remain on public experimental branches.
 
-## T11: equality resolution remains preregistration-only
+## T11: bounded clause-level equality resolution
 
-The next credible hypothesis is to eliminate missing intermediate equality
-atoms by bounded, proof-producing equality resolution rather than materialize
-global triangle constraints. This is not yet an authorized implementation.
-The next exact design commit must decide whether its no-SAT projection gate
-requires a checked empty clause or a bounded set of independently replayable
-lemmas, then freeze work, width, memory, selector, and fallback limits. Existing
-equality-resolution, positive-equality, RTC, and Minimal-E results remain prior
-art; any project novelty must lie in a separately demonstrated architecture and
-ablation, not in renaming those techniques.
+T11 is preregistered as a static clause compiler, not an all-positive
+congruence closure. Relative to the exact baseline formula (F_0), an equality
+proof node carries a side clause (C) and a typed conclusion (s=t), meaning
+
+\[
+F_0\models_{\mathrm{EUF}} C\lor s=t.
+\]
+
+Seed nodes remove a positive equality pivot from an exact base or derived
+clause. Transitivity and congruence union the side clauses of their premises.
+Conflict resolves the resulting equality against an exact negative equality
+literal and exports the remaining clause. Missing equalities are allowed only
+as proof-internal conclusions; all exported literals are existing baseline CNF
+variables. This avoids T9's global graph and directly addresses T10's missing
+result atoms.
+
+The compiler and checker are separate implementations. The checker rebuilds
+side-clause unions, term endpoints, sorts, functions, argument proofs, pivots,
+and output bytes. It shares no canonicalization, scheduling, subsumption, or
+proof-building helpers with the compiler.
+
+The first gate is a no-SAT projection of the sole frozen target. Any hard
+resource cap hit rejects the complete projection; the eight-support antichain
+bound is a deterministic pruning threshold with explicit discard counts. No
+truncated prefix can pass. It accepts a checked empty clause as a strong
+outcome, but does not require one: a bounded theory lemma set can still need
+Kissat for Boolean resolution. The ordinary path requires 1..8192 checked,
+non-subsumed lemmas. The empty proof DAG, or at least one ordinary-path lemma
+DAG, must contain a Congruence that directly produces or consumes an equality
+absent from the baseline atom map. Search is capped at 25,000 resolvents,
+100,000 proof nodes, 150,000 derived literal slots, two million canonical
+proof-work charges, p95 width eight, maximum width 32, and a logical 16 MiB
+charge. Failure stops before a full census or WMI.
+
+Only a target pass authorizes the exact 7,503-row no-SAT selector census. Only
+that census authorizes tree-parser timing. Stage 1 requires untimed baseline
+Boolean and internal-congruence-ablation kernels to return disposable SAT, the
+checked T11 kernel to return UNSAT,
+compiler plus checker at most 8ms, kernel load plus solve at most 8ms, total at
+most 50ms, and nonselected p95 overhead at most 1%. Stage 2 uses a frozen
+four-arm, 12-order Latin schedule over streaming-off, streaming-candidate,
+tree-candidate, and Yices2 on the exact T9 WMI lane. It keeps the 8ms parser,
+24.077067ms total, 1.25x tree-to-stream, and exact-integer 1.05x Yices2 median
+and geometric gates. A source-level ablation suppresses only Congruence events
+that directly produce or consume missing equalities; all remaining checked T11
+lemmas must still leave fresh Kissat SAT.
+
+The proof rule and its main ingredients are prior art. The bounded-size
+explanation decision problem is NP-complete, so smallest-explanation
+optimization is NP-hard; greedy small-proof algorithms already exist; and a
+2026 cvc5 study reports smaller explanations together with substantial
+aggregate runtime overhead. The possible contribution is the complete bounded
+static architecture and its evidence, not a renamed known rule.
 
 ## Victory Conditions
 
