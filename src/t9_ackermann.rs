@@ -1,6 +1,6 @@
 use super::{
-    BOOL_SORT, BoolAtomKey, CnfProblem, FlatClauses, SymId, TermArena, TermId,
-    finite_analysis::FiniteAnalysis, normalized_pair,
+    finite_analysis::FiniteAnalysis, normalized_pair, BoolAtomKey, CnfProblem, FlatClauses, SymId,
+    TermArena, TermId, BOOL_SORT,
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::cmp::Reverse;
@@ -1015,6 +1015,44 @@ fn baseline_identity(cnf: &CnfProblem) -> BaselineIdentity {
         literals: cnf.clauses.literals.len(),
         variables: cnf.var_count(),
         atoms: cnf.atom_vars.len(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SelectorDecision {
+    selected: bool,
+    reason: &'static str,
+}
+
+impl SelectorDecision {
+    pub(crate) fn selected(self) -> bool {
+        self.selected
+    }
+
+    pub(crate) fn reason(self) -> &'static str {
+        self.reason
+    }
+}
+
+/// Evaluates the reviewed T9 selector without planning or materializing a
+/// candidate. Successor experiments call this API so the threshold order has a
+/// single implementation.
+pub(crate) fn structural_selector_decision(
+    mode: Mode,
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    facts: StructuralFacts,
+) -> SelectorDecision {
+    let report = ProjectionReport::new(mode, cnf, arena, facts);
+    match selector_rejection(&report) {
+        Some(rejection) => SelectorDecision {
+            selected: false,
+            reason: rejection.as_str(),
+        },
+        None => SelectorDecision {
+            selected: true,
+            reason: "selected",
+        },
     }
 }
 
@@ -2342,8 +2380,8 @@ fn materialize_candidate(
 mod tests {
     use super::*;
     use crate::{
-        ScopedLetMode, add_full_ackermann_axioms, atomize_bool_data_terms,
-        equality_transitivity_clauses, parse_problem_with_scoped_let_mode,
+        add_full_ackermann_axioms, atomize_bool_data_terms, equality_transitivity_clauses,
+        parse_problem_with_scoped_let_mode, ScopedLetMode,
     };
 
     fn eligible_facts(applications: usize) -> StructuralFacts {
@@ -3153,6 +3191,24 @@ mod tests {
         assert!(output.contains(&format!("materialized_candidate_sha256 {ZERO_SHA256}\n")));
         assert!(output.contains("sat_calls 0\n"));
         assert!(output.ends_with("materialized_added_literal_slots_state not_computed\n"));
+    }
+
+    #[test]
+    fn structural_selector_api_matches_attempt_selector() {
+        let (problem, cnf) = mixed_ackermann_problem();
+        let facts = eligible_facts(problem.arena.apps.len());
+        let decision = structural_selector_decision(Mode::CliqueAuto, &cnf, &problem.arena, facts);
+        let report = attempt(Mode::CliqueAuto, &cnf, &problem.arena, facts).report;
+        assert_eq!(decision.selected(), report.selector_selected);
+        assert_eq!(decision.reason(), "selected");
+
+        let mut rejected_facts = facts;
+        rejected_facts.backend = BackendRoute::Varisat;
+        let decision =
+            structural_selector_decision(Mode::CliqueAuto, &cnf, &problem.arena, rejected_facts);
+        let report = attempt(Mode::CliqueAuto, &cnf, &problem.arena, rejected_facts).report;
+        assert_eq!(decision.selected(), report.selector_selected);
+        assert_eq!(decision.reason(), report.reason.as_str());
     }
 
     #[test]

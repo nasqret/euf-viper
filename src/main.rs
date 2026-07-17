@@ -28,6 +28,7 @@ mod smt2_stream;
 #[cfg(test)]
 mod stabilizer_order;
 mod t10_ackermann;
+mod t11_eqres_types;
 mod t9_ackermann;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
