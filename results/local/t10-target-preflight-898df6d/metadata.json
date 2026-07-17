@@ -1,0 +1,28 @@
+{
+  "schema": "euf-viper.t10-target-preflight.v1",
+  "decision": "reject_before_full_stage0",
+  "design_commit": "05de7841ac005e2a251d71e1a2394f8980cbdd17",
+  "core_commit": "898df6d916c313baefd3baae6e820db85e678cce",
+  "core_tree": "95443fbaf3911c0f55ec0b37ab5271e98407842a",
+  "core_parent": "37aeefef7ad8fdcc82752c4dc71e5bce0e906223",
+  "harness_commit_unexecuted": "50ed9155700012354a8db6d97472dd3fec70f3f5",
+  "target_path": "QF_UF/2018-Goel-hwbench/QF_UF_sokoban.2.prop1_ab_br_max.smt2",
+  "target_sha256": "cfe0e5e611139004e7f8a06461c4cbf3066bb604786377db1a94d40e797f3112",
+  "local_binary_sha256": "10e4a9b9554347a6f6abe877bb6584a9ed239f3d7cac5c266dac819cd2f3ec7d",
+  "independent_rebuild_binary_sha256": "b41bbcda93752d2ca9f664a6fcda5250a990d992001c78150f9dbae662eddedc",
+  "projection_record_sha256": "1458b9036c2879a5f5e04f646182737a76effc59a4167ce0ced890e552f468ce",
+  "projector_exit_status": 3,
+  "full_stage0_census_run": false,
+  "wmi_run": false,
+  "independent_ast_audit": {
+    "z3_version": "4.16",
+    "applications": 138,
+    "same_function_pairs": 3686,
+    "differing_argument_positions": 4272,
+    "literal_slots": 7958,
+    "max_width": 3,
+    "pairs_with_all_argument_atoms": 203,
+    "pairs_with_required_result_atom": 0,
+    "closed_clauses": 0
+  }
+}

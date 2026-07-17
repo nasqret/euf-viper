@@ -770,6 +770,43 @@ Stage 2 gate requires at most `8ms` parse, at most `24.077067ms` total, `1.25x`
 over Stage 1, and `1.05x` over same-node Yices2. Reducing formula size or parser
 microtime is not itself a success.
 
+### T10 outcome
+
+The sole frozen selected target falsified the representation before the full
+census. Exact core commit `898df6d` enumerated 3,686 Ackermann clauses with
+7,958 literal slots and maximum width three, but none was closed over the
+baseline atom map:
+
+\[
+|C_{\mathrm{full}}|=3686,
+\qquad
+|C_{\mathrm{closed}}|=0.
+\]
+
+The projection made zero SAT calls and left the CNF and atom map byte-identical.
+An independent Z3 4.16 AST audit reproduced all 138 applications and 3,686
+same-function pairs. Only 203 pairs had every argument-equality atom; zero had
+the required result-equality atom. Thus the registered lower bound
+`|C_closed| >= 1` fails by two computations.
+
+This is a selected-target preflight rejection, not a completed 7,503-source
+Stage 0 census. The necessary condition is already false, so T10 stops without
+WMI, SAT-enabled timing, parser integration, or a broader campaign. Evidence is
+preserved in `results/local/t10-target-preflight-898df6d/`; the exact core and
+unused census harness remain on public experimental branches.
+
+## T11: equality resolution remains preregistration-only
+
+The next credible hypothesis is to eliminate missing intermediate equality
+atoms by bounded, proof-producing equality resolution rather than materialize
+global triangle constraints. This is not yet an authorized implementation.
+The next exact design commit must decide whether its no-SAT projection gate
+requires a checked empty clause or a bounded set of independently replayable
+lemmas, then freeze work, width, memory, selector, and fallback limits. Existing
+equality-resolution, positive-equality, RTC, and Minimal-E results remain prior
+art; any project novelty must lie in a separately demonstrated architecture and
+ablation, not in renaming those techniques.
+
 ## Victory Conditions
 
 The project closes only when one frozen standalone release:

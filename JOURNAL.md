@@ -1821,6 +1821,35 @@
   parity-checked streaming parser run; Stage 2 requires parse at most `8ms`,
   total at most `24.077067ms`, `1.25x` over Stage 1, and `1.05x` over Yices2.
 
+## 2026-07-17 - T10 target preflight rejection
+
+- T10 core commit `898df6d916c313baefd3baae6e820db85e678cce`
+  (tree `95443fbaf3911c0f55ec0b37ab5271e98407842a`) implements the strict
+  option, frozen T9 selector, immutable atom-map lookup, independent typed
+  integer-clause replay, deterministic projection hashes, and an UNSAT-only
+  fresh-Kissat route. Focused T10 tests passed 19/19; the independent review
+  found no clause-soundness or fallback defect relevant to projection.
+- The frozen target SHA-256 is
+  `cfe0e5e611139004e7f8a06461c4cbf3066bb604786377db1a94d40e797f3112`.
+  `project-t10` exited `3` with `selector_selected=true`,
+  `reason=no_closed_atom_clauses`, 138 applications, 3,686 full clauses,
+  7,958 full literal slots, maximum width three, zero closed clauses, and
+  `sat_calls=0`. Before/after CNF, atom-map, and combined-problem hashes match.
+- A separate Z3 4.16 AST computation reproduced function-group pair counts
+  `210 + 3321 + 6 + 28 + 55 + 66 = 3686`, 4,272 differing argument
+  positions, and 7,958 literal slots. Only 203 pairs had all argument equality
+  atoms and zero had the required result-equality atom, independently proving
+  `closed_clause_count=0`.
+- The full 7,503-source Stage 0 census was not run. The sole frozen selected
+  row already violates the necessary `1..4096` clause gate, so the registered
+  stop rule applies. No WMI job, SAT-enabled target run, Stage 1 timing, parser
+  integration, or broader T10 campaign is authorized.
+- The exact core and unused full-census harness are preserved on public
+  branches `perf-t10-closed-atom` and `perf-t10-projection-harness`. Local
+  projection evidence is in `results/local/t10-target-preflight-898df6d/`.
+  The next action is a separate equality-resolution compiler preregistration,
+  not implementation or timing.
+
 ## Next Entry Template
 
 - Benchmark corpus:
