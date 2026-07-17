@@ -28,6 +28,7 @@ mod smt2_stream;
 #[cfg(test)]
 mod stabilizer_order;
 mod t10_ackermann;
+mod t11_eqres;
 mod t11_eqres_types;
 mod t9_ackermann;
 
@@ -7538,23 +7539,8 @@ fn project_t10_problem_without_sat_measurement(
         .report);
     }
     let bool_problem = bool_problem.expect("checked above");
-
-    let mut cnf = CnfProblem::new();
-    atomize_bool_data_terms(&mut cnf, bool_problem);
-    for assertion in &bool_problem.assertions {
-        // Stage 0 pins current default root-CNF behavior and ignores solve-path env vars.
-        cnf.add_direct_assertion_with_negated_root(assertion, false);
-    }
-    let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
-    let finite_added = add_finite_domain_axioms_with_pinned_defaults(
-        &mut cnf,
-        &problem.arena,
-        bool_problem,
-        &mut finite_context,
-    );
-    let analysis = finite_context.analyze(&problem.arena, bool_problem).clone();
-    let pinned_auto_uses_cadical =
-        auto_prefers_cadical(problem.arena.apps.len(), finite_added, 1_000);
+    let (cnf, analysis, finite_added, pinned_auto_uses_cadical) =
+        build_pinned_projection_baseline(problem, bool_problem);
     let backend = t10_backend_route("auto", pinned_auto_uses_cadical);
     let facts = t10_ackermann::StructuralFacts::from_analysis(
         &analysis,
@@ -7571,6 +7557,29 @@ fn project_t10_problem_without_sat_measurement(
     .report)
 }
 
+fn build_pinned_projection_baseline(
+    problem: &Problem,
+    bool_problem: &BoolProblem,
+) -> (CnfProblem, finite_analysis::FiniteAnalysis, usize, bool) {
+    let mut cnf = CnfProblem::new();
+    atomize_bool_data_terms(&mut cnf, bool_problem);
+    for assertion in &bool_problem.assertions {
+        // Stage 0 pins current default root-CNF behavior and ignores solve-path env vars.
+        cnf.add_direct_assertion_with_negated_root(assertion, false);
+    }
+    let mut finite_context = finite_analysis::FiniteAnalysisContext::default();
+    let finite_added = add_finite_domain_axioms_with_pinned_defaults(
+        &mut cnf,
+        &problem.arena,
+        bool_problem,
+        &mut finite_context,
+    );
+    let analysis = finite_context.analyze(&problem.arena, bool_problem).clone();
+    let pinned_auto_uses_cadical =
+        auto_prefers_cadical(problem.arena.apps.len(), finite_added, 1_000);
+    (cnf, analysis, finite_added, pinned_auto_uses_cadical)
+}
+
 fn read_project_t10_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
     if path != "-" {
         return fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"));
@@ -7580,6 +7589,28 @@ fn read_project_t10_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, 
         .read_to_string(&mut input)
         .map_err(|error| format!("failed to read T10 projection stdin: {error}"))?;
     Ok(input)
+}
+
+fn read_project_t11_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
+    if path != "-" {
+        return fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"));
+    }
+    let mut input = String::new();
+    stdin
+        .read_to_string(&mut input)
+        .map_err(|error| format!("failed to read T11 projection stdin: {error}"))?;
+    Ok(input)
+}
+
+#[cfg(feature = "certificates")]
+fn parse_project_t11_args(args: &[String]) -> Result<(&str, &str), String> {
+    if args.len() != 5 || args[1] != "project-t11" || args[3] != "--bundle-out" {
+        return Err("usage: euf-viper project-t11 FILE|- --bundle-out PATH".to_owned());
+    }
+    if args[2].is_empty() || args[4].is_empty() {
+        return Err("usage: euf-viper project-t11 FILE|- --bundle-out PATH".to_owned());
+    }
+    Ok((&args[2], &args[4]))
 }
 
 fn project_t10_source(input: &str) -> Result<t10_ackermann::ProjectionReport, String> {
@@ -11175,6 +11206,40 @@ mod tests {
             source
         );
         assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    #[test]
+    fn project_t11_dash_reads_the_supplied_stdin_bytes() {
+        let source = b"(set-logic QF_UF)\n(assert true)\n(check-sat)\n";
+        let mut stdin = std::io::Cursor::new(source);
+        assert_eq!(
+            read_project_t11_input("-", &mut stdin).unwrap().as_bytes(),
+            source
+        );
+        assert_eq!(stdin.position(), source.len() as u64);
+    }
+
+    #[cfg(feature = "certificates")]
+    #[test]
+    fn project_t11_cli_requires_the_exact_bundle_contract() {
+        let valid = [
+            "euf-viper",
+            "project-t11",
+            "source.smt2",
+            "--bundle-out",
+            "bundle.json",
+        ]
+        .map(str::to_owned);
+        assert_eq!(
+            parse_project_t11_args(&valid),
+            Ok(("source.smt2", "bundle.json"))
+        );
+
+        let missing_output = valid[..4].to_vec();
+        assert!(parse_project_t11_args(&missing_output).is_err());
+        let mut extra = valid.to_vec();
+        extra.push("--unexpected".to_owned());
+        assert!(parse_project_t11_args(&extra).is_err());
     }
 
     #[test]

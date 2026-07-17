@@ -19,6 +19,8 @@ pub(crate) const EQRES_ENV: &str = "EUF_VIPER_T11_EQRES";
 /// reciprocal baseline maps and therefore carry the baseline variable IDs.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EqresInput<'a> {
+    pub(crate) source_bytes: &'a [u8],
+    pub(crate) root_cnf_mode: &'a [u8],
     pub(crate) sorts: &'a SortTable,
     pub(crate) declarations: &'a FunDeclTable,
     pub(crate) term_dag: &'a [Term],
@@ -26,6 +28,9 @@ pub(crate) struct EqresInput<'a> {
     pub(crate) baseline_clauses: &'a FlatClauses,
     pub(crate) variable_atoms: &'a [Option<BoolAtomKey>],
     pub(crate) atom_variables: &'a FxHashMap<BoolAtomKey, i32>,
+    pub(crate) true_literal: Option<i32>,
+    pub(crate) finite_equalities_complete: bool,
+    pub(crate) finite_predicate_congruence_complete: bool,
 }
 
 macro_rules! define_u32_id {
@@ -585,6 +590,7 @@ pub(crate) enum CompilerFailure {
     serde(tag = "status", content = "detail", rename_all = "snake_case")
 )]
 pub(crate) enum CompilerStatus {
+    NotRun,
     Completed(EqresOutput),
     Rejected(CompilerFailure),
 }
@@ -737,6 +743,7 @@ pub(crate) struct CheckerFailure {
     serde(tag = "status", content = "failures", rename_all = "snake_case")
 )]
 pub(crate) enum CheckerStatus {
+    NotRun,
     Accepted,
     Rejected(Box<[CheckerFailure]>),
 }
