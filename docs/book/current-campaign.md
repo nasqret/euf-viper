@@ -736,6 +736,40 @@ that eager transitivity materialization can close this tail, but not at a
 competitive cost. The route stops before sample-40, hot-400, broad timing, or
 promotion. Complete evidence is in `results/wmi/t9-stage1-148142/`.
 
+## T10: an atom-preserving congruence kernel
+
+T10 isolates a smaller hypothesis from T9. For same-function applications it
+enumerates the usual Ackermann implication, but retains the clause only when
+every equality or Boolean atom already exists in the baseline CNF. If \(A_0\)
+is the baseline atom map and \(\operatorname{atoms}(C)\) is the atom set of a
+candidate congruence clause, the admission rule is
+
+\[
+\operatorname{atoms}(C)\subseteq A_0.
+\]
+
+The test is deliberately asymmetric. Admitted clauses are valid EUF lemmas,
+so kernel UNSAT is sound. Kernel SAT is incomplete and must still pass the
+existing theory validator or escalate. Because membership checks may not
+intern atoms, the representation adds exactly zero SAT variables, equality
+edges, chordal fill edges, and transitivity clauses.
+
+The experiment was preregistered before implementation or projection. Its
+first gate is an independently replayed 7,503-source census with no SAT calls.
+Only the exact T9 structural selection may be eligible; the selected plan must
+contain at most 4,096 clauses and 16,384 literal slots. Timing remains forbidden
+until projection and materialization match exactly.
+
+The sealed T9 profile also gives a non-negotiable parser bound. Tree parsing
+alone took `32.390952ms`, but a `1.05x` win over the `25.280921ms` Yices2 median
+requires at most `24.077067ms` end to end. Stage 1 therefore isolates the
+kernel: with the unchanged tree parser it must derive UNSAT before generic
+transitivity and finish within `50ms`, improving T9 by `10.95x`. Only then may
+the independently parity-checked streaming parser be introduced. Its separate
+Stage 2 gate requires at most `8ms` parse, at most `24.077067ms` total, `1.25x`
+over Stage 1, and `1.05x` over same-node Yices2. Reducing formula size or parser
+microtime is not itself a success.
+
 ## Victory Conditions
 
 The project closes only when one frozen standalone release:
