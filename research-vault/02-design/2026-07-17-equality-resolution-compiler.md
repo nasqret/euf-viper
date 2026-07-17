@@ -2,7 +2,13 @@
 
 Date: 2026-07-17
 
-Status: literature-backed successor hypothesis; not preregistered or authorized
+Status: superseded by the exact T11 preregistration
+
+The resolved contract is
+`2026-07-17-t11-bounded-equality-resolution-compiler.md`. In particular, an
+empty clause is now an optional strong outcome rather than a mandatory
+projection gate, and T11 implements clause-level equality resolution with exact
+side clauses rather than an all-positive congruence explanation.
 
 ## Motivation
 

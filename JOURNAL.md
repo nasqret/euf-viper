@@ -1850,6 +1850,59 @@
   The next action is a separate equality-resolution compiler preregistration,
   not implementation or timing.
 
+## 2026-07-17 - T11 bounded equality-resolution preregistration
+
+- T11 is frozen before code or projection in
+  `research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md`.
+  It must descend from T10 core `898df6d`, because `main` does not contain the
+  audited experimental selector or fresh-Kissat kernel.
+- The earlier all-positive support sketch was rejected as too weak and easy to
+  misdescribe. T11 implements clause-level equality resolution: relative to
+  the exact baseline `F0`, each equality node proves
+  `F0 entails side_clause OR s=t`; Seed, Reflexivity, Transitivity, and
+  Congruence build such nodes, and Conflict resolves one against an exact
+  negative equality occurrence. Derived clauses may seed later pivots.
+- Missing equality pairs exist only as typed internal proof conclusions. Side
+  clauses contain existing baseline literals, including opaque auxiliaries, but
+  only mapped equality literals can pivot. T11 may add no term, atom, SAT
+  variable, fill edge, or generic transitivity clause.
+- A separate checker independently reconstructs every side clause, endpoint,
+  sort, function, argument proof, pivot, and emitted byte sequence. It may not
+  call compiler canonicalization, support-union, scheduling, or subsumption
+  helpers. Mutation, exhaustive-small, cross-solver, and exact-hash tests are
+  mandatory.
+- Stage 0A is the sole frozen target with `sat_calls=0`. It accepts an optional
+  checked empty clause or 1..8192 checked non-subsumed lemmas. The empty DAG,
+  or at least one lemma DAG, must contain a Congruence that directly produces
+  or consumes an equality absent from the baseline atom map. Hard caps include
+  25,000 resolvents, 100,000 proof nodes, 150,000 derived literal slots, two
+  million canonical proof-work charges, 250,000 queue pushes, p95 width eight,
+  maximum width 32, and a logical 16 MiB charge. Target failure stops T11.
+- Every hard cap rejects the complete projection; the eight-support antichain
+  bound is a deterministic pruning threshold whose discards are counted. No
+  truncated prefix may pass. A separate auditor must reproduce scheduling,
+  antichain admission, counters, cap precedence, final subsumption, and output
+  hashes before Stage 0A can authorize the census.
+- Only Stage 0A success authorizes an independently audited 7,503-row no-SAT
+  census. Only that census can authorize Stage 1 WMI timing. Stage 1 requires
+  disposable SAT from the baseline Boolean kernel, UNSAT from the checked T11
+  kernel, compiler plus checker at most 8ms, load plus solve at most 8ms, total
+  at most 50ms, and anti-target p95 overhead at most 1%. Stage 2 preserves the
+  8ms parser and 24.077067ms Yices-winning total gates.
+- Stage 1 uses exactly six balanced arm orders. Stage 2 uses a frozen 12-order
+  Latin schedule over streaming-off, streaming-candidate, tree-candidate, and
+  Yices2, putting each arm in each position three times. Untimed
+  baseline-Boolean and source-level missing-equality-Congruence-ablation kernels
+  must both return SAT; the latter suppresses only Congruence events that
+  directly produce or consume a missing equality, rather than merely deleting
+  the whole T11 result.
+- Primary-literature review is recorded in
+  `research-vault/01-literature/2026-07-17-congruence-explanation-frontier.md`.
+  Equality resolution, proof-producing congruence closure, positive equality,
+  RTC, Minimal-E, and greedy short-proof search are prior art. The 2026 cvc5
+  greedy-explanation study reports smaller explanations but substantial overall
+  runtime overhead, justifying T11's structural router and hard caps.
+
 ## Next Entry Template
 
 - Benchmark corpus:

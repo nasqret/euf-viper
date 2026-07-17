@@ -895,17 +895,27 @@ fallback can be an operational portfolio but never a standalone victory.
     `perf-t10-projection-harness`, and
     `results/local/t10-target-preflight-898df6d/`. Do not run T10 Stage 1,
     WMI timing, parser integration, sample-40, hot-400, or broader campaigns.
-14. Promote the proof-producing equality-resolution compiler only to the next
-    preregistration task, using
-    `research-vault/02-design/2026-07-17-equality-resolution-compiler.md` as a
-    literature-backed hypothesis rather than an authorization. Before code,
-    freeze a separate exact design commit that resolves whether projection
-    must derive the empty clause or a bounded independently replayable lemma
-    set, and pins 25,000 resolvents, 150,000 derived literal slots, two million
-    premise inspections, width, memory, selector, and fallback semantics. No
-    global triangle materialization is allowed. This is a proof-system change,
-    not another chordal ordering experiment; published equality resolution and
-    polarity reductions are prior art and must not be claimed as inventions.
+14. Execute T11 only under
+    `research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md`.
+    Descend from reviewed T10 core `898df6d`; `main` lacks the experimental
+    selector and kernel. T11 carries exact side clauses through Seed,
+    Reflexivity, Transitivity, Congruence, and Conflict rules, keeps missing
+    equalities proof-internal, and exports only clauses over baseline variables.
+    A separate checker must replay every node without compiler helpers. First
+    run the exact target with zero SAT calls. Require either a checked empty
+    clause or 1..8192 checked non-subsumed lemmas. The empty proof DAG, or at
+    least one nonempty-path lemma DAG, must contain a Congruence that directly
+    produces or consumes an equality absent from the baseline atom map. Apply
+    the frozen 25,000-resolvent, 150,000-slot, two-million proof-work-charge,
+    width, queue, and logical 16 MiB caps. Only a
+    target pass authorizes the 7,503-row no-SAT census; only that census
+    authorizes fixed-core Stage 1. Stage 1 requires baseline-Boolean SAT,
+    candidate UNSAT, compiler-plus-checker at most 8ms, kernel at most 8ms,
+    total at most 50ms, and anti-target p95 overhead at most 1%. Stage 2 uses
+    the exact four-arm Latin schedule and retains the `24.077067ms` total and
+    exact-integer `1.05x` Yices2 gates. Equality resolution,
+    proof-producing congruence closure, positive equality, RTC, Minimal-E, and
+    greedy short explanations are prior art, not novelty claims.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

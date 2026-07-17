@@ -1215,10 +1215,27 @@
   `perf-t10-projection-harness` plus
   `results/local/t10-target-preflight-898df6d/`. T10 Stage 1, WMI timing,
   streaming-parser integration, and broader campaigns are forbidden.
-- The equality-resolution compiler is now the next hypothesis, not yet an
-  authorized experiment. Its separate preregistration must resolve the
-  empty-clause-versus-bounded-lemma-set gate and freeze proof replay, work,
-  width, memory, selector, and fallback contracts before implementation.
+- T11 is preregistered in
+  `research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md`
+  before code or target projection. It is clause-level equality resolution:
+  relative to the exact baseline `F0`, proof nodes carry exact side clauses
+  through Seed, Reflexivity, Transitivity,
+  Congruence, and Conflict; missing equalities remain typed internal nodes and
+  may never become SAT atoms. A separate checker shares no compiler proof or
+  canonicalization helpers. Target projection uses zero SAT calls and passes
+  with either a checked empty clause or 1..8192 checked non-subsumed lemmas.
+  The empty DAG, or at least one lemma DAG, must contain a Congruence that
+  directly produces or consumes an equality absent from the baseline atom map.
+  Limits include 25,000 resolvents, 150,000 derived literal slots, two million
+  canonical proof-work charges, p95 width eight, maximum width 32, and a
+  logical 16 MiB charge. Every hard cap rejects the complete
+  projection; the eight-support antichain bound is explicitly a deterministic
+  pruning threshold, and no prefix can pass. Empty is optional because Boolean
+  resolution may still be needed. Only target projection can authorize the
+  7,503-row census, which alone can authorize timing. Stage 1 caps compiler plus
+  checker and kernel at 8ms each and total at 50ms. Stage 2 uses a frozen
+  four-arm, 12-order Latin schedule and retains the 24.077067ms total and exact
+  integer 1.05x Yices2 gates.
 - Exact certificate review closes the symlink-plus-parent defect in `f07ecff`
   but finds a low nonexistent-component-plus-`..` normalization regression.
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
