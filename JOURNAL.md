@@ -1795,6 +1795,32 @@
   merge, or promotion. The experiment establishes a narrow coverage repair and
   falsifies this eager transitivity materialization as a competitive route.
 
+## 2026-07-17 - T10 closed-atom kernel preregistration
+
+- T9's profile separates the useful hypothesis from its failed
+  representation. The unchanged baseline already has 186,075 equality
+  transitivity clauses; T9's full Ackermann graph then added 9,900 fill edges
+  and 1,517,715 more transitivity clauses. The next experiment must not create
+  that graph.
+- T10 retains only standard Ackermann congruence clauses whose complete atom
+  set is already present in the baseline CNF. Such clauses are valid EUF
+  lemmas and add no equality atom, SAT variable, fill edge, or transitivity
+  clause. Kernel UNSAT is sound; kernel SAT remains untrusted and follows the
+  complete validator or baseline fallback.
+- The route is frozen in
+  `research-vault/02-design/2026-07-17-t10-closed-atom-ackermann-kernel.md`
+  before implementation or clause-count inspection. An independently audited
+  no-SAT census over all 7,503 sources precedes timing. It must reproduce T9's
+  exact one-source structural selection and cap the kernel at 4,096 clauses and
+  16,384 literal slots.
+- Candidate timing is forbidden until that projection passes. The later gate
+  remains controlled. Sealed T9 evidence already measures the current parser at
+  `32.390952ms`, while beating Yices2 by `1.05x` requires no more than
+  `24.077067ms` total. Stage 1 must first isolate kernel-first UNSAT at no more
+  than `50ms`, a `10.95x` improvement over T9. Only then may the separately
+  parity-checked streaming parser run; Stage 2 requires parse at most `8ms`,
+  total at most `24.077067ms`, `1.25x` over Stage 1, and `1.05x` over Yices2.
+
 ## Next Entry Template
 
 - Benchmark corpus:

@@ -882,6 +882,30 @@ fallback can be an operational portfolio but never a standalone victory.
     `results/wmi/t9-stage1-148142/`; do not run sample-40, hot-400, broad
     corpus timing, or a 1,200-second T9 follow-up. Coverage closure alone is
     not promotion evidence.
+13. Execute T10 only under
+    `research-vault/02-design/2026-07-17-t10-closed-atom-ackermann-kernel.md`.
+    Reuse T9's audited structural selector, but admit only typed Ackermann
+    clauses whose complete atom set already exists in the baseline CNF. The
+    candidate may add no atom, SAT variable, fill edge, or transitivity clause.
+    First run an independently audited 7,503-source no-SAT projection; require
+    the exact one-source selected population, at most 4,096 clauses and 16,384
+    literal slots, and exact projection/materialization equality. Only then run
+    the frozen same-node Stage 1 falsifier with the current parser. It must
+    return kernel UNSAT before generic transitivity and reach at most `50ms`, a
+    `10.95x` improvement over T9. Only that result authorizes the separately
+    controlled streaming-parser arm, which must preserve all-source typed
+    parity, reach at most `8ms` parse and `24.077067ms` total, improve Stage 1
+    by `1.25x`, and beat Yices2 by `1.05x`. SAT remains validator-gated.
+14. Keep a proof-producing equality-resolution compiler as the conditional
+    successor documented in
+    `research-vault/02-design/2026-07-17-equality-resolution-compiler.md`.
+    Do not implement or time it while T10 remains unresolved. If T10 fails,
+    preregister a source-only projection that must derive the checked empty
+    clause within 25,000 resolvents, 150,000 literal slots, two million premise
+    inspections, and 16 MiB, with no global triangle materialization. This is
+    a proof-system change, not another chordal ordering experiment; published
+    equality resolution and polarity reductions are prior art and must not be
+    claimed as inventions.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

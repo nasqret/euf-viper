@@ -1203,6 +1203,19 @@
   nonselected hard Goel controls timed out and the mandatory Yices/correctness
   gates failed. Preserve `results/wmi/t9-stage1-148142/` and stop T9 before any
   sample-40, hot-400, broad, merge, or promotion run.
+- T10 is preregistered before code or projection as the closed-atom Ackermann
+  kernel. It reuses T9's audited one-source structural selector but keeps only
+  theory-valid Ackermann clauses whose atoms already exist in the baseline CNF.
+  The route may add no atom, variable, fill edge, or transitivity clause; UNSAT
+  is trusted, while SAT still requires complete validation or fallback. A
+  7,503-source no-SAT census must independently prove the exact selected set,
+  1..4096 clauses, at most 16,384 literal slots, and exact materialization
+  before any timing. Existing T9 evidence puts tree parsing at `32.390952ms`,
+  above the final `24.077067ms` end-to-end ceiling. Stage 1 must prove
+  kernel-first UNSAT at `<=50ms` with the tree parser and at most 1%
+  nonselected p95 overhead. Only then may the all-source parity-checked
+  streaming parser be integrated; Stage 2 requires parse `<=8ms`, total
+  `<=24.077067ms`, `1.25x` over Stage 1, and `1.05x` over same-node Yices2.
 - Exact certificate review closes the symlink-plus-parent defect in `f07ecff`
   but finds a low nonexistent-component-plus-`..` normalization regression.
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
