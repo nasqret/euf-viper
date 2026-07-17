@@ -6,22 +6,28 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import errno
 import hashlib
 import json
 import math
 import os
+import signal
 import statistics
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-SCHEMA = "euf-viper.t9-stage1.v1"
-RAW_SCHEMA = "euf-viper.t9-stage1-observation.v1"
-AUDIT_SCHEMA = "euf-viper.t9-stage1-audit.v1"
+SCHEMA = "euf-viper.t9-stage1.v2"
+RAW_SCHEMA = "euf-viper.t9-stage1-observation.v2"
+AUDIT_SCHEMA = "euf-viper.t9-stage1-audit.v2"
 REPEATS = 4
 TIMEOUT_SECONDS = 2.0
+TIMEOUT_NS = 2_000_000_000
 MAX_OUTPUT_BYTES = 64 * 1024
+OUTPUT_FILE_LIMIT_BYTES = MAX_OUTPUT_BYTES + 1
+MAX_ADDRESS_SPACE_BYTES = 6 * 1024**3
+MAX_OPEN_FILES = 64
 CONTROL_SHA256 = "85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"
 MANIFEST_SHA256 = "32aba287e33c5665847f0a0a71311da6214feb5e69f458877ba02ef96976a2d4"
 TARGET_PATH = (
@@ -32,6 +38,19 @@ CHEAP_PRECHECK_REASONS = {
     "finite_added_nonzero",
     "application_count_cap",
     "backend_not_kissat",
+}
+RUNTIME_CONTRACT = {
+    "platform": "linux-x86_64",
+    "wait": "pidfd-select-waitid-v2",
+    "launch": "fork-pidfd-preexec-supervised-v1",
+    "sigchld": "default-zombie-preserving-single-thread-v1",
+    "standard_fds": "required-open-v1",
+    "process_creation": "seccomp-kill-clone-fork-vfork-clone3-v1",
+    "address_space_bytes": MAX_ADDRESS_SPACE_BYTES,
+    "open_files": MAX_OPEN_FILES,
+    "core_file_bytes": 0,
+    "stream_bytes": MAX_OUTPUT_BYTES,
+    "stream_file_bytes": OUTPUT_FILE_LIMIT_BYTES,
 }
 OBSERVATION_KEYS = {
     "schema",
@@ -48,9 +67,20 @@ OBSERVATION_KEYS = {
     "profile_kind",
     "profile",
     "result",
+    "started_ns",
+    "deadline_ns",
+    "completed_ns",
     "elapsed_ns",
+    "process_pid",
     "exit_code",
     "timed_out",
+    "timeout_kill_sent",
+    "kill_attempt_ns",
+    "kill_errno",
+    "waitid_pid",
+    "waitid_code",
+    "waitid_status",
+    "output_limit_hit",
     "stdout_sha256",
     "stderr_sha256",
     "stdout_b64",
@@ -90,7 +120,7 @@ def decode_stream(row: dict[str, Any], stream: str) -> bytes:
     except (binascii.Error, ValueError) as error:
         raise AuditError(f"observation {stream} is not canonical base64") from error
     if (
-        len(payload) > MAX_OUTPUT_BYTES
+        len(payload) > OUTPUT_FILE_LIMIT_BYTES
         or base64.b64encode(payload).decode("ascii") != encoded
     ):
         raise AuditError(f"observation {stream} exceeds or violates its encoding contract")
@@ -99,13 +129,64 @@ def decode_stream(row: dict[str, Any], stream: str) -> bytes:
     return payload
 
 
-def derive_result(stdout: bytes, exit_code: int, timed_out: bool) -> str:
-    if timed_out:
-        if exit_code != 124:
-            raise AuditError("timeout observation does not use synthetic exit code 124")
-        return "timeout"
-    if exit_code != 0:
-        return f"exit-{exit_code}"
+def derive_result(row: dict[str, Any], stdout: bytes, stderr: bytes) -> str:
+    started_ns = row["started_ns"]
+    deadline_ns = row["deadline_ns"]
+    completed_ns = row["completed_ns"]
+    kill_attempt_ns = row["kill_attempt_ns"]
+    kill_errno = row["kill_errno"]
+    timeout_kill_sent = row["timeout_kill_sent"]
+    output_limit_hit = (
+        len(stdout) > MAX_OUTPUT_BYTES or len(stderr) > MAX_OUTPUT_BYTES
+    )
+    if row["deadline_ns"] - started_ns != TIMEOUT_NS:
+        raise AuditError("observation deadline interval drift")
+    if completed_ns - started_ns != row["elapsed_ns"]:
+        raise AuditError("observation elapsed interval is inconsistent")
+    if row["output_limit_hit"] is not output_limit_hit:
+        raise AuditError("observation output-limit marker differs from stream evidence")
+    if kill_attempt_ns is not None:
+        if type(kill_attempt_ns) is not int or kill_attempt_ns < deadline_ns:
+            raise AuditError("observation kill attempt precedes its deadline")
+        if completed_ns < kill_attempt_ns:
+            raise AuditError("observation completed before its kill attempt")
+    if (kill_attempt_ns is None) != (kill_errno is None):
+        raise AuditError("observation kill attempt and syscall result disagree")
+    if kill_errno not in {None, 0, errno.ESRCH}:
+        raise AuditError("observation kill syscall result is not permitted")
+    if timeout_kill_sent is not (kill_errno == 0):
+        raise AuditError("observation kill marker differs from syscall evidence")
+    if row["waitid_pid"] != row["process_pid"]:
+        raise AuditError("observation pidfd wait status belongs to another process")
+    if row["waitid_code"] == os.CLD_EXITED:
+        wait_return_code = row["waitid_status"]
+    elif row["waitid_code"] in {os.CLD_KILLED, os.CLD_DUMPED}:
+        wait_return_code = -row["waitid_status"]
+    else:
+        raise AuditError("observation pidfd wait status is not terminal")
+    if row["exit_code"] != wait_return_code:
+        raise AuditError("observation exit code differs from pidfd wait status")
+    expected_timed_out = (
+        timeout_kill_sent
+        and row["exit_code"] == -signal.SIGKILL
+        and not output_limit_hit
+    )
+    if row["timed_out"] is not expected_timed_out:
+        raise AuditError("observation timeout marker differs from wait evidence")
+    if output_limit_hit:
+        return "output-limit"
+    if timeout_kill_sent:
+        return (
+            "timeout"
+            if row["exit_code"] == -signal.SIGKILL
+            else "timeout-status-mismatch"
+        )
+    if completed_ns >= deadline_ns:
+        return "deadline-overrun"
+    if kill_attempt_ns is not None:
+        raise AuditError("pre-deadline observation unexpectedly attempted a kill")
+    if row["exit_code"] != 0:
+        return f"exit-{row['exit_code']}"
     tokens = [
         line.strip()
         for line in stdout.decode("utf-8", errors="replace").splitlines()
@@ -205,6 +286,24 @@ def check(passed: bool, actual: Any, relation: str, threshold: Any) -> dict[str,
         "relation": relation,
         "threshold": threshold,
     }
+
+
+def validate_stage0_binary_identity(
+    stage0_summary: dict[str, Any], actual_binary_sha256: str, summary_binary_sha256: Any
+) -> None:
+    revision = stage0_summary.get("provenance", {}).get("git_revision")
+    stage0_binary_sha256 = stage0_summary.get("binary_sha256")
+    if (
+        type(revision) is not str
+        or len(revision) != 40
+        or any(character not in "0123456789abcdef" for character in revision)
+        or type(stage0_binary_sha256) is not str
+        or len(stage0_binary_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in stage0_binary_sha256)
+        or stage0_binary_sha256 != actual_binary_sha256
+        or summary_binary_sha256 != stage0_binary_sha256
+    ):
+        raise AuditError("Stage1 binary differs from the Stage0 census binary")
 
 
 def projection_strings(projection: dict[str, Any]) -> dict[str, str]:
@@ -326,10 +425,33 @@ def validate_observations(
             row.get("expected_status") != source["status"]
             or row.get("control_class") != source["control_class"]
             or row.get("selected") is not source["selected"]
+            or type(row.get("started_ns")) is not int
+            or row["started_ns"] <= 0
+            or type(row.get("deadline_ns")) is not int
+            or row["deadline_ns"] <= row["started_ns"]
+            or type(row.get("completed_ns")) is not int
+            or row["completed_ns"] < row["started_ns"]
             or type(row.get("elapsed_ns")) is not int
             or row["elapsed_ns"] <= 0
+            or type(row.get("process_pid")) is not int
+            or row["process_pid"] <= 0
             or type(row.get("exit_code")) is not int
             or type(row.get("timed_out")) is not bool
+            or type(row.get("timeout_kill_sent")) is not bool
+            or (
+                row.get("kill_attempt_ns") is not None
+                and type(row.get("kill_attempt_ns")) is not int
+            )
+            or (
+                row.get("kill_errno") is not None
+                and type(row.get("kill_errno")) is not int
+            )
+            or type(row.get("waitid_pid")) is not int
+            or row["waitid_pid"] <= 0
+            or type(row.get("waitid_code")) is not int
+            or type(row.get("waitid_status")) is not int
+            or row["waitid_status"] < 0
+            or type(row.get("output_limit_hit")) is not bool
         ):
             raise AuditError("observation source or scalar fields mismatch")
         for field in ("stdout_sha256", "stderr_sha256"):
@@ -340,11 +462,9 @@ def validate_observations(
                 raise AuditError("observation stream hash is not canonical")
         stdout = decode_stream(row, "stdout")
         stderr = decode_stream(row, "stderr")
-        derived_result = derive_result(stdout, row["exit_code"], row["timed_out"])
+        derived_result = derive_result(row, stdout, stderr)
         if row.get("result") != derived_result:
             raise AuditError("observation result differs from complete stream evidence")
-        if row["timed_out"] and row["elapsed_ns"] < int(TIMEOUT_SECONDS * 1e9):
-            raise AuditError("timeout observation elapsed less than its wall limit")
         phase = row.get("phase")
         arm = row.get("arm")
         if phase == "preflight":
@@ -436,16 +556,10 @@ def validate_observations(
         raise AuditError("timing schedule is incomplete")
 
     paths = sorted(contract)
-    preflight_rows = [row for row in observations if row["phase"] == "preflight"]
-    preflight_cursor = 0
+    expected_schedule: list[tuple[str, str, str | None, int | None, int | None]] = []
     for relative_path in paths:
         for arm in ("off", "candidate", "yices"):
-            row = preflight_rows[preflight_cursor]
-            preflight_cursor += 1
-            if row["relative_path"] != relative_path or row["arm"] != arm:
-                raise AuditError("preflight order is not the frozen balanced warmup schedule")
-    timing_rows = [row for row in observations if row["phase"] == "timing"]
-    cursor = 0
+            expected_schedule.append((relative_path, arm, None, None, None))
     for source_index, relative_path in enumerate(paths):
         for comparison_index, (comparison, first, second) in enumerate(
             (
@@ -460,16 +574,26 @@ def validate_observations(
                     else (second, first)
                 )
                 for position, arm in enumerate(arms):
-                    row = timing_rows[cursor]
-                    cursor += 1
-                    if (
-                        row["relative_path"] != relative_path
-                        or row["comparison"] != comparison
-                        or row["repeat"] != repeat
-                        or row["position"] != position
-                        or row["arm"] != arm
-                    ):
-                        raise AuditError("timing order is not the frozen balanced ABBA schedule")
+                    expected_schedule.append(
+                        (relative_path, arm, comparison, repeat, position)
+                    )
+    previous_completed_ns: int | None = None
+    for row, (relative_path, arm, comparison, repeat, position) in zip(
+        observations, expected_schedule, strict=True
+    ):
+        expected_phase = "preflight" if comparison is None else "timing"
+        if (
+            row["phase"] != expected_phase
+            or row["relative_path"] != relative_path
+            or row["arm"] != arm
+            or row["comparison"] != comparison
+            or row["repeat"] != repeat
+            or row["position"] != position
+        ):
+            raise AuditError("observation order differs from the frozen global schedule")
+        if previous_completed_ns is not None and row["started_ns"] < previous_completed_ns:
+            raise AuditError("observation timing intervals overlap or move backwards")
+        previous_completed_ns = row["completed_ns"]
 
 
 def recompute(
@@ -666,7 +790,11 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         raise AuditError("Stage1 summary schema or status mismatch")
     if summary.get("raw_sha256") != sha256_file(args.raw):
         raise AuditError("raw evidence hash mismatch")
-    if summary.get("repeats") != REPEATS or summary.get("timeout_seconds") != TIMEOUT_SECONDS:
+    if (
+        summary.get("repeats") != REPEATS
+        or summary.get("timeout_seconds") != TIMEOUT_SECONDS
+        or summary.get("timeout_ns") != TIMEOUT_NS
+    ):
         raise AuditError("Stage1 timing contract drift")
     affinity = summary.get("cpu_affinity")
     if (
@@ -680,6 +808,8 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         raise AuditError("Stage1 observation count mismatch")
     if summary.get("environment") != {"LANG": "C", "LC_ALL": "C", "TZ": "UTC"}:
         raise AuditError("Stage1 closed environment contract drift")
+    if summary.get("runtime_contract") != RUNTIME_CONTRACT:
+        raise AuditError("Stage1 runtime containment contract drift")
     if summary.get("selected_paths") != [TARGET_PATH]:
         raise AuditError("Stage1 selected population drift")
     if summary.get("artifacts") != {
@@ -697,6 +827,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         stage0_summary.get("status") != "completed_no_sat"
         or stage0_summary.get("sat_calls") != 0
         or stage0_receipt.get("status") != "pass"
+        or stage0_receipt.get("schema") != "euf-viper.t9-projection-audit.v2"
         or stage0_receipt.get("artifacts", {}).get("records_sha256")
         != sha256_file(args.stage0_records)
         or stage0_receipt.get("artifacts", {}).get("summary_sha256")
@@ -711,6 +842,11 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "summary_sha256": stage0_receipt["artifacts"]["summary_sha256"],
         "receipt_sha256": sha256_file(args.stage0_receipt),
     }
+    validate_stage0_binary_identity(
+        stage0_summary,
+        sha256_file(args.binary),
+        summary.get("artifacts", {}).get("binary_sha256"),
+    )
     if summary.get("stage0") != expected_stage0:
         raise AuditError("Stage1 summary is not bound to exact Stage0 evidence")
     contract = source_contract(

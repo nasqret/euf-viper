@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
+import errno
 import hashlib
 import json
 import math
 import os
 import resource
+import select
 import signal
 import statistics
-import subprocess
+import sys
 import tempfile
 import time
 from collections import defaultdict
@@ -21,11 +24,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 
-SCHEMA = "euf-viper.t9-stage1.v1"
-RAW_SCHEMA = "euf-viper.t9-stage1-observation.v1"
+SCHEMA = "euf-viper.t9-stage1.v2"
+RAW_SCHEMA = "euf-viper.t9-stage1-observation.v2"
 REPEATS = 4
 TIMEOUT_SECONDS = 2.0
+TIMEOUT_NS = 2_000_000_000
 MAX_OUTPUT_BYTES = 64 * 1024
+OUTPUT_FILE_LIMIT_BYTES = MAX_OUTPUT_BYTES + 1
 MAX_ADDRESS_SPACE_BYTES = 6 * 1024**3
 MAX_OPEN_FILES = 64
 CONTROL_SHA256 = "85c18f76bc4908477e906eb0706cb06724ef23ef0536112651fe75e86ff18390"
@@ -40,6 +45,28 @@ CHEAP_PRECHECK_REASONS = {
     "backend_not_kissat",
 }
 BASE_ENVIRONMENT = {"LANG": "C", "LC_ALL": "C", "TZ": "UTC"}
+RUNTIME_CONTRACT = {
+    "platform": "linux-x86_64",
+    "wait": "pidfd-select-waitid-v2",
+    "launch": "fork-pidfd-preexec-supervised-v1",
+    "sigchld": "default-zombie-preserving-single-thread-v1",
+    "standard_fds": "required-open-v1",
+    "process_creation": "seccomp-kill-clone-fork-vfork-clone3-v1",
+    "address_space_bytes": MAX_ADDRESS_SPACE_BYTES,
+    "open_files": MAX_OPEN_FILES,
+    "core_file_bytes": 0,
+    "stream_bytes": MAX_OUTPUT_BYTES,
+    "stream_file_bytes": OUTPUT_FILE_LIMIT_BYTES,
+}
+
+PR_SET_NO_NEW_PRIVS = 38
+PR_SET_SECCOMP = 22
+SECCOMP_MODE_FILTER = 2
+SECCOMP_RET_KILL_PROCESS = 0x80000000
+SECCOMP_RET_ALLOW = 0x7FFF0000
+AUDIT_ARCH_X86_64 = 0xC000003E
+X32_SYSCALL_BIT = 0x40000000
+X86_64_PROCESS_SYSCALLS = (56, 57, 58, 435)
 
 
 class Stage1Error(RuntimeError):
@@ -136,17 +163,174 @@ def immutable_write(path: Path, payload: bytes) -> None:
         raise
 
 
+class _SockFilter(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_ushort),
+        ("jt", ctypes.c_ubyte),
+        ("jf", ctypes.c_ubyte),
+        ("k", ctypes.c_uint32),
+    ]
+
+
+class _SockFprog(ctypes.Structure):
+    _fields_ = [
+        ("length", ctypes.c_ushort),
+        ("filters", ctypes.POINTER(_SockFilter)),
+    ]
+
+
+_LIBC = ctypes.CDLL(None, use_errno=True) if sys.platform == "linux" else None
+
+
+def _bpf_statement(code: int, value: int) -> _SockFilter:
+    return _SockFilter(code=code, jt=0, jf=0, k=value)
+
+
+def _bpf_jump(code: int, value: int, true_skip: int, false_skip: int) -> _SockFilter:
+    return _SockFilter(code=code, jt=true_skip, jf=false_skip, k=value)
+
+
+def _prctl(option: int, argument: int, pointer: int = 0) -> None:
+    if _LIBC is None:
+        raise OSError("prctl is unavailable")
+    result = _LIBC.prctl(
+        ctypes.c_int(option),
+        ctypes.c_ulong(argument),
+        ctypes.c_ulong(pointer),
+        ctypes.c_ulong(0),
+        ctypes.c_ulong(0),
+    )
+    if result != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _install_single_process_filter() -> None:
+    load_word_absolute = 0x20
+    jump_equal = 0x15
+    jump_greater_equal = 0x35
+    return_constant = 0x06
+    instructions = (_SockFilter * 12)(
+        _bpf_statement(load_word_absolute, 4),
+        _bpf_jump(jump_equal, AUDIT_ARCH_X86_64, 1, 0),
+        _bpf_statement(return_constant, SECCOMP_RET_KILL_PROCESS),
+        _bpf_statement(load_word_absolute, 0),
+        _bpf_jump(jump_greater_equal, X32_SYSCALL_BIT, 0, 1),
+        _bpf_statement(return_constant, SECCOMP_RET_KILL_PROCESS),
+        _bpf_jump(jump_equal, X86_64_PROCESS_SYSCALLS[0], 4, 0),
+        _bpf_jump(jump_equal, X86_64_PROCESS_SYSCALLS[1], 3, 0),
+        _bpf_jump(jump_equal, X86_64_PROCESS_SYSCALLS[2], 2, 0),
+        _bpf_jump(jump_equal, X86_64_PROCESS_SYSCALLS[3], 1, 0),
+        _bpf_statement(return_constant, SECCOMP_RET_ALLOW),
+        _bpf_statement(return_constant, SECCOMP_RET_KILL_PROCESS),
+    )
+    program = _SockFprog(
+        length=len(instructions),
+        filters=ctypes.cast(instructions, ctypes.POINTER(_SockFilter)),
+    )
+    _prctl(PR_SET_NO_NEW_PRIVS, 1)
+    _prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, ctypes.addressof(program))
+
+
+def _validate_runtime_contract() -> None:
+    if sys.platform != "linux" or os.uname().machine != "x86_64":
+        raise Stage1Error("Stage1 requires Linux x86_64")
+    if (
+        not hasattr(os, "pidfd_open")
+        or not hasattr(os, "P_PIDFD")
+        or not hasattr(os, "waitid")
+        or not hasattr(signal, "pidfd_send_signal")
+    ):
+        raise Stage1Error("Stage1 requires pidfd_open, pidfd_send_signal, and waitid")
+    try:
+        task_count = sum(1 for _ in Path("/proc/self/task").iterdir())
+    except OSError as error:
+        raise Stage1Error(f"cannot verify Stage1 thread population: {error}") from error
+    if task_count != 1:
+        raise Stage1Error(f"Stage1 requires one thread, observed {task_count}")
+    _validate_standard_descriptors()
+    for label, which, target in (
+        ("address space", resource.RLIMIT_AS, MAX_ADDRESS_SPACE_BYTES),
+        ("open files", resource.RLIMIT_NOFILE, MAX_OPEN_FILES),
+        ("output file", resource.RLIMIT_FSIZE, OUTPUT_FILE_LIMIT_BYTES),
+    ):
+        _soft, hard = resource.getrlimit(which)
+        if hard != resource.RLIM_INFINITY and hard < target:
+            raise Stage1Error(
+                f"inherited {label} hard limit {hard} is below required {target}"
+            )
+
+
+def _validate_standard_descriptors() -> None:
+    for descriptor in (0, 1, 2):
+        try:
+            os.fstat(descriptor)
+        except OSError as error:
+            raise Stage1Error(
+                f"Stage1 requires open standard descriptor {descriptor}: {error}"
+            ) from error
+
+
+def _establish_sigchld_contract() -> None:
+    _validate_runtime_contract()
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGCHLD})
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise Stage1Error("Stage1 could not establish default SIGCHLD disposition")
+
+
 def _child_limits() -> None:
-    if os.uname().sysname == "Linux":
-        resource.setrlimit(
-            resource.RLIMIT_AS, (MAX_ADDRESS_SPACE_BYTES, MAX_ADDRESS_SPACE_BYTES)
-        )
+    resource.setrlimit(
+        resource.RLIMIT_AS, (MAX_ADDRESS_SPACE_BYTES, MAX_ADDRESS_SPACE_BYTES)
+    )
     resource.setrlimit(resource.RLIMIT_NOFILE, (MAX_OPEN_FILES, MAX_OPEN_FILES))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_OUTPUT_BYTES, MAX_OUTPUT_BYTES))
-    if hasattr(resource, "RLIMIT_NPROC"):
-        soft, hard = resource.getrlimit(resource.RLIMIT_NPROC)
-        limit = min(value for value in (64, soft, hard) if value >= 0)
-        resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
+    resource.setrlimit(
+        resource.RLIMIT_FSIZE,
+        (OUTPUT_FILE_LIMIT_BYTES, OUTPUT_FILE_LIMIT_BYTES),
+    )
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    _install_single_process_filter()
+
+
+def _close_child_fds() -> None:
+    for entry in os.listdir("/proc/self/fd"):
+        try:
+            descriptor = int(entry)
+        except ValueError:
+            continue
+        if descriptor > 2:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _child_exec(
+    argv: list[str],
+    environment: Mapping[str, str],
+    stdin_fd: int,
+    stdout_fd: int,
+    stderr_fd: int,
+) -> None:
+    try:
+        os.setsid()
+        os.dup2(stdin_fd, 0, inheritable=True)
+        os.dup2(stdout_fd, 1, inheritable=True)
+        os.dup2(stderr_fd, 2, inheritable=True)
+        _close_child_fds()
+        signal.pthread_sigmask(signal.SIG_SETMASK, set())
+        for signum in (signal.SIGPIPE, signal.SIGXFSZ):
+            signal.signal(signum, signal.SIG_DFL)
+        _child_limits()
+        os.execve(argv[0], argv, dict(environment))
+    except BaseException as error:
+        payload = f"stage1 child setup failed: {type(error).__name__}: {error}\n".encode(
+            "utf-8", errors="replace"
+        )[:4096]
+        try:
+            os.write(2, payload)
+        finally:
+            os._exit(127)
 
 
 def _parse_result(stdout: bytes, return_code: int) -> str:
@@ -162,100 +346,187 @@ def _parse_result(stdout: bytes, return_code: int) -> str:
     return "invalid-status-output"
 
 
-def _read_output(handle: Any, stream: str) -> bytes:
+def _read_output(handle: Any, stream: str) -> tuple[bytes, bool]:
     handle.flush()
     handle.seek(0, os.SEEK_END)
     size = handle.tell()
-    if size > MAX_OUTPUT_BYTES:
-        raise Stage1Error(f"{stream} exceeded {MAX_OUTPUT_BYTES} bytes")
+    if size > OUTPUT_FILE_LIMIT_BYTES:
+        raise Stage1Error(
+            f"{stream} exceeded hard file limit {OUTPUT_FILE_LIMIT_BYTES} bytes"
+        )
     handle.seek(0)
-    return handle.read()
+    return handle.read(), size > MAX_OUTPUT_BYTES
 
 
-def _signal_process_group(pid: int) -> bool:
+def _send_pidfd_kill(pidfd: int) -> int:
     try:
-        os.killpg(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return False
-    except PermissionError as error:
-        raise Stage1Error(f"cannot terminate process group {pid}: {error}") from error
-    return True
+        signal.pidfd_send_signal(pidfd, signal.SIGKILL, None, 0)
+    except ProcessLookupError as error:
+        return error.errno or errno.ESRCH
+    except OSError as error:
+        raise Stage1Error(f"pidfd SIGKILL failed: {error}") from error
+    return 0
 
 
-def _wait_process_group_gone(pid: int) -> None:
-    deadline = time.monotonic() + 1.0
-    while True:
+def _return_code_from_waitid(wait_status: Any) -> int:
+    if wait_status.si_code == os.CLD_EXITED:
+        return wait_status.si_status
+    if wait_status.si_code in {os.CLD_KILLED, os.CLD_DUMPED}:
+        return -wait_status.si_status
+    raise Stage1Error(f"unexpected waitid code {wait_status.si_code}")
+
+
+def _wait_with_deadline(
+    pid: int, pidfd: int, started_ns: int, timeout_ns: int
+) -> tuple[int, int, int | None, int | None, Any, int]:
+    deadline_ns = started_ns + timeout_ns
+    naturally_ready = False
+    kill_attempt_ns: int | None = None
+    kill_errno: int | None = None
+    try:
+        while True:
+            remaining_ns = deadline_ns - time.perf_counter_ns()
+            if remaining_ns <= 0:
+                break
+            readable, _writable, _exceptional = select.select(
+                [pidfd], [], [], remaining_ns / 1_000_000_000
+            )
+            if readable:
+                naturally_ready = True
+                break
+        if not naturally_ready:
+            readable, _writable, _exceptional = select.select([pidfd], [], [], 0)
+            if not readable:
+                kill_attempt_ns = time.perf_counter_ns()
+                if kill_attempt_ns < deadline_ns:
+                    raise Stage1Error("pidfd deadline wait returned before its deadline")
+                kill_errno = _send_pidfd_kill(pidfd)
+        wait_status = os.waitid(os.P_PIDFD, pidfd, os.WEXITED | os.WNOWAIT)
+        if wait_status is None:
+            raise Stage1Error("blocking pidfd waitid returned no status")
+        completed_ns = time.perf_counter_ns()
+        waited_pid, wait_word = os.waitpid(pid, 0)
+        if waited_pid != pid:
+            raise Stage1Error("waitpid reaped an unexpected process")
+        return_code = os.waitstatus_to_exitcode(wait_word)
+        if return_code != _return_code_from_waitid(wait_status):
+            raise Stage1Error("waitpid return code differs from pidfd waitid status")
+    except BaseException:
         try:
-            os.killpg(pid, 0)
-        except ProcessLookupError:
-            return
-        except PermissionError:
-            # SIGKILL was accepted immediately before this check. Darwin can
-            # report EPERM while its service manager reaps the dead orphan.
-            return
-        if time.monotonic() >= deadline:
-            raise Stage1Error(f"process group {pid} survived SIGKILL")
-        time.sleep(0.01)
+            _send_pidfd_kill(pidfd)
+        finally:
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+        raise
+    return (
+        deadline_ns,
+        completed_ns,
+        kill_attempt_ns,
+        kill_errno,
+        wait_status,
+        return_code,
+    )
+
+
+def _observation_result(
+    stdout: bytes,
+    exit_code: int,
+    *,
+    output_limit_hit: bool,
+    timeout_kill_sent: bool,
+    completed_ns: int,
+    deadline_ns: int,
+) -> str:
+    if output_limit_hit:
+        return "output-limit"
+    if timeout_kill_sent:
+        return "timeout" if exit_code == -signal.SIGKILL else "timeout-status-mismatch"
+    if completed_ns >= deadline_ns:
+        return "deadline-overrun"
+    return _parse_result(stdout, exit_code)
 
 
 def run_process(
-    argv: list[str], environment: Mapping[str, str]
+    argv: list[str],
+    environment: Mapping[str, str],
+    *,
+    timeout_ns: int = TIMEOUT_NS,
 ) -> tuple[dict[str, Any], str]:
-    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
-        raise Stage1Error("Stage1 refuses to replace an active process timer")
-    start = time.perf_counter_ns()
+    _establish_sigchld_contract()
+    if type(timeout_ns) is not int or timeout_ns <= 0:
+        raise Stage1Error("timeout_ns must be a positive integer")
     with (
         tempfile.TemporaryFile() as stdout_handle,
         tempfile.TemporaryFile() as stderr_handle,
+        open(os.devnull, "rb") as stdin_handle,
     ):
-        process = subprocess.Popen(
-            argv,
-            env=dict(environment),
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            start_new_session=True,
-            close_fds=True,
-            preexec_fn=_child_limits,
-        )
-        timed_out = False
-        timeout_signalled = False
-
-        def timeout_handler(_signum: int, _frame: Any) -> None:
-            nonlocal timed_out, timeout_signalled
-            timed_out = True
-            timeout_signalled = _signal_process_group(process.pid)
-
-        previous_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.setitimer(signal.ITIMER_REAL, TIMEOUT_SECONDS)
+        started_ns = time.perf_counter_ns()
         try:
+            pid = os.fork()
+        except OSError as error:
+            raise Stage1Error(f"fork failed: {error}") from error
+        if pid == 0:
+            _child_exec(
+                argv,
+                environment,
+                stdin_handle.fileno(),
+                stdout_handle.fileno(),
+                stderr_handle.fileno(),
+            )
+            os._exit(127)
+        try:
+            pidfd = os.pidfd_open(pid, 0)
+        except OSError as error:
             try:
-                process.wait()
-            finally:
-                signal.setitimer(signal.ITIMER_REAL, 0.0)
-                signal.signal(signal.SIGALRM, previous_handler)
-        except BaseException:
-            _signal_process_group(process.pid)
-            process.wait()
-            raise
-        if timed_out:
-            group_signalled = timeout_signalled
-        else:
-            # Solvers are single-process. Kill any unexpected descendants before
-            # the next observation even when the leader exited successfully.
-            group_signalled = _signal_process_group(process.pid)
-        if group_signalled:
-            _wait_process_group_gone(process.pid)
-        stdout_bytes = _read_output(stdout_handle, "stdout")
-        stderr_bytes = _read_output(stderr_handle, "stderr")
-    elapsed_ns = time.perf_counter_ns() - start
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
+            raise Stage1Error(f"pidfd_open failed: {error}") from error
+        try:
+            (
+                deadline_ns,
+                completed_ns,
+                kill_attempt_ns,
+                kill_errno,
+                wait_status,
+                return_code,
+            ) = (
+                _wait_with_deadline(pid, pidfd, started_ns, timeout_ns)
+            )
+        finally:
+            os.close(pidfd)
+        stdout_bytes, stdout_limit_hit = _read_output(stdout_handle, "stdout")
+        stderr_bytes, stderr_limit_hit = _read_output(stderr_handle, "stderr")
+    output_limit_hit = stdout_limit_hit or stderr_limit_hit
+    elapsed_ns = completed_ns - started_ns
+    timeout_kill_sent = kill_errno == 0
+    result = _observation_result(
+        stdout_bytes,
+        return_code,
+        output_limit_hit=output_limit_hit,
+        timeout_kill_sent=timeout_kill_sent,
+        completed_ns=completed_ns,
+        deadline_ns=deadline_ns,
+    )
     record = {
-        "result": (
-            "timeout" if timed_out else _parse_result(stdout_bytes, process.returncode)
-        ),
+        "result": result,
+        "started_ns": started_ns,
+        "deadline_ns": deadline_ns,
+        "completed_ns": completed_ns,
         "elapsed_ns": elapsed_ns,
-        "exit_code": 124 if timed_out else process.returncode,
-        "timed_out": timed_out,
+        "process_pid": pid,
+        "exit_code": return_code,
+        "timed_out": result == "timeout",
+        "timeout_kill_sent": timeout_kill_sent,
+        "kill_attempt_ns": kill_attempt_ns,
+        "kill_errno": kill_errno,
+        "waitid_pid": wait_status.si_pid,
+        "waitid_code": wait_status.si_code,
+        "waitid_status": wait_status.si_status,
+        "output_limit_hit": output_limit_hit,
         "stdout_sha256": sha256_bytes(stdout_bytes),
         "stderr_sha256": sha256_bytes(stderr_bytes),
         "stdout_b64": base64.b64encode(stdout_bytes).decode("ascii"),
@@ -687,6 +958,7 @@ def load_sources(
 
 
 def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
+    _establish_sigchld_contract()
     affinity = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
     if len(affinity) != 1:
         raise Stage1Error(f"Stage1 requires exactly one CPU in affinity, observed {affinity}")
@@ -741,6 +1013,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
         )
         for source in sources
     )
+    validate_input_identities(input_identities)
     selected = set(stage0_summary["selected_paths"])
     observations: list[dict[str, Any]] = []
     ordinal = 0
@@ -824,6 +1097,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
         "selected_paths": sorted(selected),
         "repeats": REPEATS,
         "timeout_seconds": TIMEOUT_SECONDS,
+        "timeout_ns": TIMEOUT_NS,
         "cpu_affinity": affinity,
         "observation_count": len(observations),
         "raw_sha256": sha256_bytes(raw_payload),
@@ -844,6 +1118,7 @@ def run_stage1(args: argparse.Namespace) -> dict[str, Any]:
             "runner_sha256": runner_sha256,
         },
         "environment": BASE_ENVIRONMENT,
+        "runtime_contract": RUNTIME_CONTRACT,
         "evaluation": evaluation,
     }
     immutable_write(args.raw_out, raw_payload)

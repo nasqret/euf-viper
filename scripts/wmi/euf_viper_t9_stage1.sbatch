@@ -10,8 +10,8 @@
 
 set -euo pipefail
 
-[ "$(uname -s)" = Linux ] || {
-  echo "T9 Stage1 requires Linux resource-limit semantics" >&2
+[ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || {
+  echo "T9 Stage1 requires Linux x86_64 semantics" >&2
   exit 2
 }
 
@@ -77,6 +77,11 @@ readonly \
   STAGE0_SUMMARY STAGE0_RECEIPT EXPECTED_RECORDS_SHA256 \
   EXPECTED_SUMMARY_SHA256 EXPECTED_RECEIPT_SHA256 MANIFEST_SHA256 CONTROL_SHA256
 
+pinned_python() {
+  /usr/bin/env -i LANG=C LC_ALL=C TZ=UTC \
+    "$PYTHON" -I -S -B "$@"
+}
+
 canonical_sha256() {
   [ "${#1}" -eq 64 ] || return 1
   case "$1" in
@@ -130,7 +135,7 @@ for artifact in "$STAGE0_RECORDS" "$STAGE0_SUMMARY" "$STAGE0_RECEIPT"; do
   }
 done
 require_sha256 "$PYTHON" "$PYTHON_SHA256" Python || exit 2
-[ "$($PYTHON --version 2>&1)" = "$PYTHON_VERSION" ] || {
+[ "$(pinned_python --version 2>&1)" = "$PYTHON_VERSION" ] || {
   echo "Python version mismatch" >&2
   exit 2
 }
@@ -143,6 +148,19 @@ require_sha256 "$BINARY" "$BINARY_SHA256" "Stage0 binary" || exit 2
 require_sha256 "$STAGE0_RECORDS" "$EXPECTED_RECORDS_SHA256" "Stage0 records" || exit 2
 require_sha256 "$STAGE0_SUMMARY" "$EXPECTED_SUMMARY_SHA256" "Stage0 summary" || exit 2
 require_sha256 "$STAGE0_RECEIPT" "$EXPECTED_RECEIPT_SHA256" "Stage0 receipt" || exit 2
+read -r STAGE0_BINARY_REVISION STAGE0_BINARY_SHA256 < <(
+  pinned_python -c \
+    'import json,sys; value=json.load(open(sys.argv[1], encoding="ascii")); print(value["provenance"]["git_revision"], value["binary_sha256"])' \
+    "$STAGE0_SUMMARY"
+)
+[ "$STAGE0_BINARY_REVISION" = "$BINARY_REVISION" ] || {
+  echo "Stage0 binary revision differs from the frozen binary revision" >&2
+  exit 2
+}
+[ "$STAGE0_BINARY_SHA256" = "$BINARY_SHA256" ] || {
+  echo "Stage0 binary hash differs from the timed binary" >&2
+  exit 2
+}
 
 cd "$REPO_ROOT"
 [ "$(git rev-parse HEAD^{commit})" = "$EXPECTED_REVISION" ] || {
@@ -173,7 +191,7 @@ require_sha256 "$MANIFEST" "$MANIFEST_SHA256" "full manifest" || exit 2
 require_sha256 "$CONTROL_MANIFEST" "$CONTROL_SHA256" "control manifest" || exit 2
 
 set +e
-"$PYTHON" -B "$RUNNER" \
+pinned_python "$RUNNER" \
   --manifest "$MANIFEST" \
   --control-manifest "$CONTROL_MANIFEST" \
   --corpus-root "$CORPUS_ROOT" \
@@ -199,7 +217,7 @@ case "$RUNNER_STATUS" in
 esac
 
 set +e
-"$PYTHON" -B "$AUDITOR" \
+pinned_python "$AUDITOR" \
   --manifest "$MANIFEST" \
   --control-manifest "$CONTROL_MANIFEST" \
   --corpus-root "$CORPUS_ROOT" \
@@ -246,12 +264,12 @@ require_sha256 "$CONTROL_MANIFEST" "$CONTROL_SHA256" "control manifest" || exit 
 chmod 400 "$RUN_ROOT/stage1.stdout" "$RUN_ROOT/audit.stdout"
 
 SCIENTIFIC_DECISION="$(
-  "$PYTHON" -B -c \
+  pinned_python -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["decision"])' \
     "$SUMMARY"
 )"
 RECEIPT_DECISION="$(
-  "$PYTHON" -B -c \
+  pinned_python -c \
     'import json,sys; print(json.load(open(sys.argv[1]))["scientific_decision"])' \
     "$RECEIPT"
 )"
@@ -267,9 +285,9 @@ case "$SCIENTIFIC_DECISION:$RUNNER_STATUS" in
     ;;
 esac
 
-"$PYTHON" -B - \
+pinned_python - \
   "$RUN_ROOT/metadata.json" "$SUMMARY" "$RECEIPT" "$EXPECTED_REVISION" \
-  "$RUNNER_STATUS" "$AUDITOR_STATUS" <<'PY'
+  "$RUNNER_STATUS" "$AUDITOR_STATUS" "$SLURM_JOB_ID" <<'PY'
 import hashlib
 import json
 import os
@@ -295,13 +313,15 @@ auditor_status = int(sys.argv[6])
 summary = json.loads(summary_path.read_text(encoding="ascii"))
 receipt = json.loads(receipt_path.read_text(encoding="ascii"))
 payload = {
-    "schema": "euf-viper.t9-stage1-wmi-run.v1",
+    "schema": "euf-viper.t9-stage1-wmi-run.v2",
     "status": f"completed_scientific_{summary['decision']}",
     "scientific_decision": summary["decision"],
-    "job_id": int(os.environ["SLURM_JOB_ID"]),
+    "job_id": int(sys.argv[7]),
     "hostname": platform.node(),
     "harness_revision": str(revision),
     "cpu_affinity": summary["cpu_affinity"],
+    "timeout_ns": summary["timeout_ns"],
+    "runtime_contract": summary["runtime_contract"],
     "summary_sha256": sha256(summary_path),
     "receipt_sha256": sha256(receipt_path),
     "receipt_status": receipt["status"],
