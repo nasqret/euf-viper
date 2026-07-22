@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "campaign_id": "viper-fabric-f0-shadow-v1",
+  "status": "prepared_not_submitted",
+  "claim": "representation_neutral_shadow_only",
+  "parent_contract": {
+    "path": "campaigns/viper-fabric-2026-07.json",
+    "sha256": "fbf6fa9aa880eb6215cdec5642305436512fef8270cfba05181fda4d39d6285e"
+  },
+  "implementation": {
+    "branch": "perf-viper-fabric",
+    "base_revision": "27b3ff4",
+    "rust": "1.93.0",
+    "cargo_features": [
+      "fabric"
+    ],
+    "command": [
+      "euf-viper",
+      "fabric-shadow",
+      "INSTANCE"
+    ],
+    "solver_result_emitted": false,
+    "default_behavior_change_authorized": false
+  },
+  "corpora": [
+    {
+      "id": "fabric-f0-smoke",
+      "manifest": "campaigns/viper-fabric-f0-smoke-v1.jsonl",
+      "manifest_sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291",
+      "rows": 2,
+      "required": true,
+      "promotion_evidence": false
+    },
+    {
+      "id": "smtlib-2025-full",
+      "manifest": "benchmarks/smtlib-2025/qf_uf_manifest.jsonl",
+      "manifest_sha256": "9c509b0ffd35a371738dbb31865f975b43350fca5f54393f7bb5014d450a08db",
+      "rows": 7503,
+      "required": true
+    },
+    {
+      "id": "smtcomp-2025-official",
+      "manifest": "benchmarks/smtcomp-2025/qf_uf_manifest.jsonl",
+      "manifest_sha256": "ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6",
+      "rows": 3521,
+      "required": false
+    }
+  ],
+  "receipt": {
+    "schema_version": 1,
+    "mode": "fabric_shadow",
+    "required_boolean": {
+      "solver_result_emitted": false
+    },
+    "required_nonnegative_integers": [
+      "source_bytes",
+      "parse_ns",
+      "projection_ns",
+      "terms",
+      "applications",
+      "atoms",
+      "assertions",
+      "root_literals",
+      "components",
+      "max_component_terms",
+      "cross_component_boolean_nodes",
+      "unsupported_fragments"
+    ],
+    "required_boolean_fields": [
+      "contradiction"
+    ]
+  },
+  "gates": {
+    "full_rows": 7503,
+    "execution_errors_allowed": 0,
+    "missing_rows_allowed": 0,
+    "duplicate_rows_allowed": 0,
+    "source_hash_mismatches_allowed": 0,
+    "malformed_receipts_allowed": 0,
+    "solver_result_claims_allowed": 0,
+    "semantic_projection_mismatches_allowed": 0,
+    "off_mode_trace": "byte_identical",
+    "off_mode_p95_overhead_ucb": 1.01
+  },
+  "artifacts": {
+    "rows": "fabric-shadow.jsonl",
+    "summary": "summary.json",
+    "slurm": "slurm.json",
+    "stdout": "stdout.log",
+    "stderr": "stderr.log"
+  }
+}

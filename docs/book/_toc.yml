@@ -2,6 +2,7 @@ format: jb-book
 root: index
 chapters:
   - file: current-campaign
+  - file: viper-fabric
   - file: theory
   - file: soundness
   - file: implementation

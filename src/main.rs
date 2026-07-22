@@ -2,6 +2,8 @@ mod bool_dag_projection;
 #[cfg(test)]
 mod bool_dag_telemetry;
 mod eq_abstraction;
+#[cfg(any(test, feature = "fabric"))]
+mod fabric;
 mod finite_analysis;
 #[cfg(test)]
 mod forbidden_orbit_probe;
@@ -6973,6 +6975,24 @@ fn project_bool_dag_file(path: &str) -> Result<i32, String> {
     }
 }
 
+#[cfg(feature = "fabric")]
+fn fabric_shadow_file(path: &str) -> Result<i32, String> {
+    let input =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    let parse_start = Instant::now();
+    let problem = parse_problem(&input)?;
+    let parse_ns = parse_start.elapsed().as_nanos();
+    let projection_start = Instant::now();
+    let projection = fabric::semantic::project(&problem)
+        .map_err(|error| format!("Fabric semantic projection failed: {error}"))?;
+    let projection_ns = projection_start.elapsed().as_nanos();
+    print!(
+        "{}",
+        fabric::semantic::render_census_json(&projection, input.len(), parse_ns, projection_ns,)
+    );
+    Ok(0)
+}
+
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
     if path != "-" {
         return fs::read_to_string(path).map_err(|e| format!("failed to read {path}: {e}"));
@@ -7245,7 +7265,7 @@ fn parse_usize(value: Option<&String>, label: &str) -> Result<usize, String> {
 }
 
 #[cfg(not(feature = "certificates"))]
-fn usage() -> &'static str {
+fn base_usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
@@ -7261,7 +7281,7 @@ fn usage() -> &'static str {
 }
 
 #[cfg(feature = "certificates")]
-fn usage() -> &'static str {
+fn base_usage() -> &'static str {
     "usage:
   euf-viper solve [--stats] FILE
   euf-viper portfolio --yices PATH [--stats] FILE
@@ -7277,6 +7297,13 @@ fn usage() -> &'static str {
   euf-viper gen pruned-or BRANCHES
   euf-viper bench [--cases N] [--size N]
   euf-viper bench-or [--cases N] [--branches N] [--depth N]"
+}
+
+fn usage() -> String {
+    #[cfg(feature = "fabric")]
+    return format!("{}\n  euf-viper fabric-shadow FILE", base_usage());
+    #[cfg(not(feature = "fabric"))]
+    base_usage().to_owned()
 }
 
 fn run() -> Result<i32, String> {
@@ -7308,6 +7335,14 @@ fn run() -> Result<i32, String> {
                 return Err("usage: euf-viper project-bool-dag FILE".to_owned());
             }
             project_bool_dag_file(file)
+        }
+        #[cfg(feature = "fabric")]
+        "fabric-shadow" => {
+            let file = args.get(2).ok_or_else(usage)?;
+            if args.len() != 3 {
+                return Err("usage: euf-viper fabric-shadow FILE".to_owned());
+            }
+            fabric_shadow_file(file)
         }
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;

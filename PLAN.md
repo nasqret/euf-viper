@@ -6,10 +6,23 @@ Build the best standalone single-core QF_UF solver overall: sound, certifying,
 faster than Z3, cvc5, Yices2, and OpenSMT, and at least as complete at 2, 60,
 and 1,200 seconds on both official and full-library benchmarks.
 
-The detailed design is in
-`research-vault/02-design/2026-07-12-best-overall-qf-uf-campaign.md`. The
-executable contract is
-`campaigns/best-overall-qf-uf-2026-07.json`.
+The measured best-overall design remains in
+`research-vault/02-design/2026-07-12-best-overall-qf-uf-campaign.md`. The active
+implementation architecture is
+`research-vault/02-design/2026-07-22-viper-fabric-execution-contract.md`, with
+machine-readable contract `campaigns/viper-fabric-2026-07.json`. Viper Fabric
+is isolated on branch `perf-viper-fabric`; migration and default behavior
+changes remain forbidden until their registered gates pass.
+
+Current Fabric stage: F0 implementation and launch machinery are locally green,
+including a two-row smoke manifest and the frozen 7,503-row shadow campaign in
+`campaigns/viper-fabric-f0-shadow-v1.json`. Direct VPN-IP access confirms
+healthy controllers, the read-only corpus under `/home`, output storage under
+`/work`, and all 308 CPU cores currently allocated. The Fabric branch is not
+yet frozen or published, so no job has been submitted. E2 now has an
+exhaustive reference search, independent SAT-model reconstruction, and an
+independent native proof-event checker; it remains non-routed while the checked
+UNSAT cover and differential gates are completed.
 
 ## Current Truth
 

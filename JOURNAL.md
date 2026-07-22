@@ -1911,3 +1911,80 @@
 - Result:
 - Discrepancies:
 - Next action:
+
+## 2026-07-22 - Viper Fabric implementation start
+
+- Preserved the dirty T11 recovery on branch `perf-t11-equality-resolution` and
+  created durable isolated worktree `output/worktrees/viper-fabric` on new
+  branch `perf-viper-fabric` from clean `main` revision `27b3ff4`.
+- Retained audited solver revision `30828a4` as the immutable performance
+  comparator. No T11 change is credited as solver progress.
+- Froze `campaigns/viper-fabric-2026-07.json` and the detailed execution
+  contract. Migration, composition, and default behavior changes remain
+  unauthorized.
+- Pinned Rust 1.93.0, matching the known-good WMI toolchain. The clean base
+  passed 242 tests with three expected ignored external probes.
+- Added the default-off `fabric` Cargo feature and the first production-safe
+  primitives: semantic watched clauses and a deterministic implication trail.
+  Their standalone exhaustive tests pass. No solve route uses them yet.
+- Next: finish strict contract validation, rollback partition state, stable
+  component decomposition, and a no-solve full-corpus semantic shadow before
+  native partition decisions or WMI timing.
+# 2026-07-22 - Fabric F0 substrate gate
+
+- Integrated one stable `u32` term namespace across semantic projection,
+  component ownership, and rollback partitions.
+- Added deterministic source atom registration, Boolean-shell projection, and
+  the feature-gated `fabric-shadow` census command. The receipt is strict JSON
+  and has `solver_result_emitted=false`; it never reports SAT or UNSAT.
+- Added native watched clauses, a reasoned implication trail, and a rollback
+  partition with explicit disequality witnesses.
+- At this substrate checkpoint, passed the sequential all-features suite: 297 tests total,
+  293 passed, and four environment-gated probes ignored. Earlier counts from
+  overlapping Cargo invocations are superseded by this result.
+- Froze the F0 campaign against the 7,503-row manifest SHA-256
+  `9c509b0f...50a08db` and official 3,521-row SHA-256
+  `ed00b0e2...a2aaa6`.
+- Ran the required WMI preflight. The gateway DNS name did not resolve, but the
+  VPN route used `utun7`; direct access to `10.71.80.3` confirmed all three
+  controllers up, the corpus under `/home`, and campaign storage under `/work`.
+  CPU nodes were allocated. Existing certificate audits `147317`/`147320` and
+  held arrays `147316`/`147319` were left untouched. No Fabric job was
+  submitted before freezing and publishing the branch.
+- Recorded novelty falsifiers: E3 is the strongest census target, X1 is the
+  cheapest trace target, X2 requires a SORB control, and X3 remains forbidden
+  at 3.74% oracle headroom.
+
+# 2026-07-22 - Fabric checked-reference and launch gate
+
+- Added deterministic native definitional CNF, rollback congruence closure,
+  causal equality explanations, and a cap-bounded exhaustive E2 reference
+  search. The reference reads source equalities from the partition and enforces
+  the exact two-value Boolean domain; it is not connected to the solve CLI.
+- Added an independent SAT checker which shares no partition or congruence
+  operations with the search engine. Every internal SAT result carries its
+  canonical typed classes and totalized observed function tables.
+- Added two independent UNSAT boundaries. `fabric-native-v1` replays stable-ID
+  equality, congruence, unit, conflict, and root events. The reference engine
+  additionally requires a complete canonical source-assignment cover whose
+  leaves are all rejected by the independent model checker. The default cover
+  cap is 18 atoms; a contradictory 19-atom test returns `abstain`, not UNSAT.
+- Checked all 27 three-term equality/disequality cubes and all 676 ordered
+  two-clause formulas over three equality atoms against direct finite-partition
+  oracles. Tampered model, proof-event, and cover artifacts fail closed.
+- Added the strict resumable F0 corpus runner and WMI wrappers. A real two-row
+  Rust handoff emitted two ordered non-attesting receipts and one complete
+  hash-bound summary. The tracked smoke manifest SHA-256 is
+  `84364115...3e291`.
+- Feature-off behavior matches clean `main@27b3ff4` exactly on ordinary usage
+  and six tracked generated solve cases: identical exit codes and output bytes.
+- Current validation: Rust all-features 339 total, 335 passed, four expected
+  ignores; Rust no-default-features 326 total, 323 passed, three expected
+  ignores; Python discovery 379 passed; focused Fabric Python 37 passed;
+  shell syntax and warning-strict Jupyter Book build passed.
+- Refreshed WMI over direct VPN IP. All 308 CPU cores are allocated; the old
+  jobs `147316`, `147317`, `147319`, and `147320` remain held or dependency
+  blocked and untouched. Pinned Rust 1.93 executables and smoke corpus bytes
+  match the launch contract. No Fabric job has yet been submitted.
+- This is correctness and campaign infrastructure, not timing evidence. The
+  audited production solver still trails Yices2; no superiority claim changed.

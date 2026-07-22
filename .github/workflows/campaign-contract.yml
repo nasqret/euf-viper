@@ -28,12 +28,17 @@ jobs:
             results/wmi/guarded-range-census-146071/p12-range-summary.json \
             --receipt \
             results/wmi/guarded-range-census-146071/receipt.json
+          python3 scripts/bench/validate_viper_fabric_contract.py \
+            campaigns/viper-fabric-2026-07.json
       - name: Test campaign validator
         run: |
           python3 -m unittest \
             tests.test_validate_campaign_spec \
             tests.test_validate_t3_m0_contract \
             tests.test_validate_t8_scalar_contract \
+            tests.test_validate_viper_fabric_contract \
+            tests.test_run_fabric_shadow \
+            tests.test_wmi_fabric_shadow \
             tests.test_typed_parser_parity \
             tests.test_wmi_typed_parser_parity \
             tests.test_t1_parity_receipt \
@@ -75,5 +80,7 @@ jobs:
           bash -n scripts/wmi/euf_viper_typed_parser_parity_array.sbatch
           bash -n scripts/wmi/euf_viper_typed_parser_parity_audit.sbatch
           bash -n scripts/wmi/submit_typed_parser_parity.sh
+          bash -n scripts/wmi/euf_viper_fabric_shadow.sbatch
+          bash -n scripts/wmi/submit_fabric_shadow.sh
       - name: Test Rust solver
         run: cargo test --all-features

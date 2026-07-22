@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "campaign_id": "viper-fabric-2026-07",
+  "status": "implementation_active_migration_forbidden",
+  "objective": "Build a standalone single-core proof-reconfigurable QF_UF solver that beats Yices2, Z3, cvc5, and OpenSMT without external fallback or benchmark-identity routing.",
+  "implementation": {
+    "branch": "perf-viper-fabric",
+    "base_revision": "27b3ff4",
+    "audited_comparator_revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+    "language": "Rust",
+    "default_behavior_change_authorized": false,
+    "migration_authorized": false
+  },
+  "reference": {
+    "full_instances": 7503,
+    "official_instances": 3521,
+    "budgets_s": [2, 60, 1200],
+    "yices2": {
+      "version": "2.7.0",
+      "full_solves": {"2": 7445, "60": 7500, "1200": 7503},
+      "official_solves": {"2": 3490, "60": 3518, "1200": 3521},
+      "full_60_median_s": 0.01714645099127665,
+      "full_60_p95_s": 0.18972565890871912
+    },
+    "euf_viper": {
+      "full_solves": {"2": 7269, "60": 7480, "1200": 7502},
+      "official_solves": {"2": 3400, "60": 3508, "1200": 3520},
+      "full_60_median_s": 0.026773738994961604,
+      "full_60_p95_s": 1.2338475229160384
+    }
+  },
+  "architecture": {
+    "stable_unit": "typed_formula_local_interference_component",
+    "shared_state": [
+      "stable_term_ids",
+      "stable_atom_ids",
+      "stable_component_ids",
+      "source_boolean_roots",
+      "typed_function_applications",
+      "representation_neutral_proof_events"
+    ],
+    "fixed_engines": [
+      {"id": "E0", "name": "sparse_eager_sat", "status": "audited_control"},
+      {"id": "E1", "name": "rollback_euf", "status": "fixed_reference_required"},
+      {"id": "E2", "name": "canonical_partition_cdcl", "status": "implementation_active"},
+      {"id": "E3", "name": "canonical_quotient_frontier", "status": "scalar_census_required"}
+    ],
+    "cross_layer_mechanisms": [
+      {"id": "X1", "name": "theory_extended_resolution", "status": "opportunity_census_required"},
+      {"id": "X2", "name": "repeated_semantic_symmetry_simplification", "status": "opportunity_census_required"},
+      {"id": "X3", "name": "component_local_proof_system_migration", "status": "forbidden_until_fixed_arm_gate"}
+    ]
+  },
+  "stages": [
+    {
+      "id": "F0",
+      "name": "semantic_substrate",
+      "deliverables": [
+        "compact_typed_ir_adapter",
+        "stable_component_decomposition",
+        "representation_neutral_telemetry",
+        "independent_event_checker"
+      ],
+      "gates": {
+        "full_shadow_sources": 7503,
+        "semantic_mismatches_allowed": 0,
+        "off_mode_trace": "byte_identical",
+        "p95_overhead_ucb": 1.01
+      }
+    },
+    {
+      "id": "F1",
+      "name": "canonical_partition_cdcl",
+      "deliverables": [
+        "canonical_existing_or_new_class_decisions",
+        "rollback_partition_and_disequality_state",
+        "watched_native_clauses",
+        "congruence_table_propagation",
+        "first_uip_native_nogood_learning",
+        "sat_model_reconstruction",
+        "unsat_partition_proof"
+      ],
+      "gates": {
+        "exhaustive_domain_max": 4,
+        "generated_differential_cases": 1000000,
+        "wrong_or_unchecked_results_allowed": 0,
+        "target_geometric_speedup_lcb": 1.20,
+        "anti_target_p95_overhead_ucb": 1.01,
+        "unique_timeout_conversions_min": 1
+      }
+    },
+    {
+      "id": "F2",
+      "name": "canonical_quotient_frontier",
+      "deliverables": [
+        "canonical_residual_state_key",
+        "memoized_frontier_transitions",
+        "checked_sat_model",
+        "checked_unsat_cover_dag"
+      ],
+      "gates": {
+        "qg7_targets_within_state_cap_min": 10,
+        "qg7_targets": 12,
+        "state_cap": 1000000,
+        "source_complete_population_min": 200,
+        "source_complete_population_total": 261,
+        "build_cost_ratio_max": 0.10,
+        "simd_lane_occupancy_before_simd_min": 0.70
+      }
+    },
+    {
+      "id": "F3",
+      "name": "theory_extended_resolution",
+      "deliverables": [
+        "repeated_explanation_motif_census",
+        "checked_extension_definitions",
+        "factored_learned_clauses",
+        "proof_elaboration"
+      ],
+      "gates": {
+        "conflict_weighted_motif_coverage_min": 0.25,
+        "projected_literal_reduction_min": 0.20,
+        "target_geometric_speedup_lcb": 1.10,
+        "anti_target_p95_overhead_ucb": 1.01,
+        "generic_factoring_control_required": true
+      }
+    },
+    {
+      "id": "F4",
+      "name": "repeated_semantic_symmetry_simplification",
+      "deliverables": [
+        "typed_semantic_automorphism_witness",
+        "connectivity_ordered_unit_binary_breaks",
+        "simplify_break_repeat_schedule",
+        "proof_replay"
+      ],
+      "gates": {
+        "all_emitted_clause_width_max": 2,
+        "target_par2_speedup_lcb": 1.10,
+        "anti_target_p95_overhead_ucb": 1.01,
+        "generic_sat_symmetry_control_required": true
+      }
+    },
+    {
+      "id": "F5",
+      "name": "component_local_migration",
+      "prerequisites": {
+        "migration_eligible_fixed_engines_min": 2,
+        "oracle_headroom_lcb_min": 0.10,
+        "balanced_accuracy_lcb_min": 0.80,
+        "telemetry_p95_overhead_ucb": 1.01
+      },
+      "deliverables": [
+        "deterministic_semantic_tick_scheduler",
+        "one_way_component_migration",
+        "checked_bridge_lemmas",
+        "fixed_arm_and_oracle_ablation"
+      ],
+      "gates": {
+        "beats_every_fixed_engine": true,
+        "bridge_replay_failures_allowed": 0,
+        "family_or_identity_features_allowed": 0
+      }
+    }
+  ],
+  "promotion_ladder": [
+    "unit_and_exhaustive",
+    "generated_differential",
+    "target_abba",
+    "anti_target_controls",
+    "hot_400",
+    "full_7503_first_cpu",
+    "full_7503_second_cpu",
+    "official_3521",
+    "sealed_holdout"
+  ],
+  "victory": {
+    "full_min_solves": {"2": 7446, "60": 7501, "1200": 7503},
+    "official_min_solves": {"2": 3491, "60": 3519, "1200": 3521},
+    "minimum_common_geometric_speedup_over_every_comparator": 1.05,
+    "minimum_common_total_speedup_over_every_comparator": 1.05,
+    "minimum_timeout_charged_speedup_over_every_comparator": 1.05,
+    "wrong_answers_allowed": 0,
+    "errors_allowed": 0,
+    "missing_rows_allowed": 0,
+    "independent_sat_model_checks_required": true,
+    "independent_unsat_proof_checks_required": true,
+    "cpu_classes_required": 2,
+    "independent_full_runs_required": 2,
+    "held_out_required": true
+  },
+  "forbidden": [
+    "external_solver_fallback_as_victory",
+    "source_path_routing",
+    "family_routing",
+    "benchmark_name_routing",
+    "content_hash_routing",
+    "expected_status_routing",
+    "prior_runtime_routing",
+    "unvalidated_sat",
+    "unchecked_unsat",
+    "partial_corpus_promotion",
+    "combining_failed_or_unmeasured_mechanisms"
+  ],
+  "user_control": {
+    "decision_packet_after_each_isolated_mechanism": true,
+    "user_approval_before_composition": true,
+    "user_approval_before_default_change": true
+  }
+}

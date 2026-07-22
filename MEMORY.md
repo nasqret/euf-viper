@@ -1,5 +1,46 @@
 # Project Memory
 
+## 2026-07-22 Viper Fabric
+
+- The active performance implementation is isolated on branch
+  `perf-viper-fabric` under `output/worktrees/viper-fabric`; the dirty T11
+  recovery remains untouched on `perf-t11-equality-resolution`.
+- Viper Fabric is a proof-reconfigurable, component-local architecture. The
+  active candidate contributions are orbit-invariant canonical partition
+  learning (E2) and source-complete quotient-frontier reuse (E3). Migration is
+  only a gated composition experiment, not an active novelty claim.
+- `campaigns/viper-fabric-2026-07.json` is the executable contract. It forbids
+  migration until two fixed engines pass and their oracle headroom lower bound
+  reaches 10%, and it requires user approval before composition or defaults.
+- Audited revision `30828a4` remains the comparator. Final full-corpus solve
+  floors are 7,446/7,501/7,503 at 2/60/1,200 seconds, plus a 1.05x timing margin
+  over every comparator, independent certificates, two CPU classes, and a
+  sealed holdout.
+- The `fabric` Cargo feature is default-off. Ordinary solver behavior must do
+  no Fabric-only work until a mechanism is promoted.
+- The F0 substrate has stable term/atom/component IDs, deterministic semantic
+  projection, native watched clauses, a reasoned implication trail, rollback
+  equality/disequality and congruence state, and exact native Boolean CNF
+  lowering. E2 has a non-routed exhaustive reference search. Internal SAT is
+  accepted only by an independent typed model reconstruction; internal UNSAT
+  requires a separately checked complete source-assignment cover and abstains
+  above the default 18-atom cover cap. `fabric-native-v1` is a second,
+  representation-neutral event replay format. The `fabric-shadow` command
+  emits no SAT/UNSAT result.
+- The strict F0 runner and WMI wrapper bind source, manifest, revision, solver,
+  toolchain, one-core allocation, and `/work` artifact paths. The two-row smoke
+  manifest has SHA-256 `84364115...3e291`; full F0 remains bound to 7,503 rows
+  and manifest SHA-256 `9c509b0f...50a08db`.
+- The pre-publication local gate is Rust 339 total/335 pass/four ignored with
+  all features, Rust 326 total/323 pass/three ignored without default features,
+  Python 379 pass, and a warning-strict Jupyter Book build. Feature-off usage
+  and six tracked solves are byte-identical to clean `main@27b3ff4`.
+- WMI DNS was broken on 2026-07-22, but the VPN route and direct gateway IP
+  worked. Controllers, the read-only `/home` corpus, and `/work` campaign root
+  were healthy; all 308 CPU cores were allocated at the latest preflight.
+  Existing jobs `147316`/`147317`/`147319`/`147320` are unrelated certificate
+  leftovers and must not be changed by the Fabric campaign.
+
 ## 2026-07-08 Bootstrap
 
 - Workspace started empty at `/Users/airbartek/codex/z3`; it was not a Z3
