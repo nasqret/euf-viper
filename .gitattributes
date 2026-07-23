@@ -1,0 +1,2 @@
+research-vault/06-results/*.csv -whitespace
+vendor/rustsat-cadical-up/** -whitespace

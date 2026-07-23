@@ -1,0 +1,9 @@
+sequence,row_index,id,relative_path,expected_status,label,repeat,order_in_repeat,result,time_s,exit_code,process_returncode,timed_out,error_kind,stdout,stderr,argv_json
+0,0,305,QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2,sat,baseline,0,0,sat,0.149635625,0,0,0,,"sat
+",,"[""/tmp/euf-viper-pre-fxhash-adjacency"",""fabric-solve"",""--engine"",""cadical-up"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2""]"
+1,0,305,QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2,sat,candidate,0,1,unknown,0.376650792,0,0,0,,"unknown
+",,"[""target/release/euf-viper"",""fabric-solve"",""--engine"",""cadical-up"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2""]"
+2,0,305,QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2,sat,candidate,1,0,unknown,0.378468541,0,0,0,,"unknown
+",,"[""target/release/euf-viper"",""fabric-solve"",""--engine"",""cadical-up"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2""]"
+3,0,305,QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2,sat,baseline,1,1,sat,0.152535250,0,0,0,,"sat
+",,"[""/tmp/euf-viper-pre-fxhash-adjacency"",""fabric-solve"",""--engine"",""cadical-up"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2""]"

@@ -1,0 +1,17 @@
+sequence,row_index,id,relative_path,expected_status,label,repeat,order_in_repeat,result,time_s,exit_code,process_returncode,timed_out,error_kind,stdout,stderr,argv_json
+0,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,baseline,0,0,unsat,0.565751292,0,0,0,,"unsat
+",,"[""/opt/homebrew/bin/z3"",""-smt2"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+1,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,candidate,0,1,unsat,3.679576209,0,0,0,,"unsat
+",,"[""target/release/euf-viper"",""solve"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+2,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,candidate,1,0,unsat,3.708835833,0,0,0,,"unsat
+",,"[""target/release/euf-viper"",""solve"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+3,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,baseline,1,1,unsat,0.573531000,0,0,0,,"unsat
+",,"[""/opt/homebrew/bin/z3"",""-smt2"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+4,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,baseline,2,0,unsat,0.576631000,0,0,0,,"unsat
+",,"[""/opt/homebrew/bin/z3"",""-smt2"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+5,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,candidate,2,1,unsat,3.702542791,0,0,0,,"unsat
+",,"[""target/release/euf-viper"",""solve"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+6,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,candidate,3,0,unsat,3.665023167,0,0,0,,"unsat
+",,"[""target/release/euf-viper"",""solve"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"
+7,0,3452,QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2,unsat,baseline,3,1,unsat,0.565278542,0,0,0,,"unsat
+",,"[""/opt/homebrew/bin/z3"",""-smt2"",""/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2""]"

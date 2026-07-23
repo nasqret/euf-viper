@@ -1,0 +1,899 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 8,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 4,
+  "arm_order": [
+    "viper-structural",
+    "z3",
+    "yices2",
+    "cvc5"
+  ],
+  "arms": {
+    "cvc5": {
+      "common_aggregate_speedup_vs_reference": 2.7375624844673223,
+      "common_geometric_speedup_vs_reference": 2.7375624844673223,
+      "common_total_time_s": 1.3408869584964123,
+      "correct_runs": 8,
+      "coverage": 0.6666666666666666,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 2,
+      "error_runs": 0,
+      "failed_runs": 4,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "timeout": 4,
+        "unsat": 4
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 4,
+      "total_time_s": 27.11638437397778,
+      "uncovered_runs": 4,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    },
+    "viper-structural": {
+      "common_aggregate_speedup_vs_reference": 1.0,
+      "common_geometric_speedup_vs_reference": 1.0,
+      "common_total_time_s": 3.6707618334912695,
+      "correct_runs": 8,
+      "coverage": 0.6666666666666666,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 2,
+      "error_runs": 0,
+      "failed_runs": 4,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "timeout": 4,
+        "unsat": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 1,
+      "timeout_runs": 4,
+      "total_time_s": 36.623667415988166,
+      "uncovered_runs": 4,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "yices2": {
+      "common_aggregate_speedup_vs_reference": 24.063442438284543,
+      "common_geometric_speedup_vs_reference": 24.063442438284547,
+      "common_total_time_s": 0.15254516650747973,
+      "correct_runs": 12,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 1,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "unsat": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 4.402792375010904,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    },
+    "z3": {
+      "common_aggregate_speedup_vs_reference": 6.492142589937283,
+      "common_geometric_speedup_vs_reference": 6.492142589937283,
+      "common_total_time_s": 0.5654160830017645,
+      "correct_runs": 12,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 1,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "unsat": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 14.70297195710009,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "cvc5": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/cvc5",
+          "--lang=smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/cvc5",
+          "requested": "third_party/solvers/pinned/bin/cvc5",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/cvc5",
+          "sha256": "76677e62998e673622edc8ad2df168cb2445177ab7a336c5a25ce149bad836e1",
+          "size_bytes": 21893352
+        },
+        "static_file_arguments": []
+      },
+      "viper-structural": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "solve",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "yices2": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/yices-smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/yices-smt2",
+          "requested": "third_party/solvers/pinned/bin/yices-smt2",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/yices-smt2",
+          "sha256": "783047ce14bfe44cfa237d217afb76ed8cd2bb22c58f37b83fec62919d7d88a0",
+          "size_bytes": 2670856
+        },
+        "static_file_arguments": []
+      },
+      "z3": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/z3",
+          "-smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "requested": "third_party/solvers/pinned/bin/z3",
+          "resolved_path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "sha256": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7",
+          "size_bytes": 15329696
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "expected_status": "sat",
+        "id": 305,
+        "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "row_index": 0,
+        "sha256": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+        "size_bytes": 1146846
+      },
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "expected_status": "unsat",
+        "id": 924,
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "row_index": 1,
+        "sha256": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+        "size_bytes": 42150
+      },
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "expected_status": "unsat",
+        "id": 7309,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "row_index": 2,
+        "sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0",
+        "size_bytes": 6013419
+      }
+    ],
+    "manifest": {
+      "path": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+      "size_bytes": 1438
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "research-vault/06-results/2026-07-22-representative-triad-top4-local.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-representative-triad-top4-local.csv",
+      "sha256": "245fd1586fed016977be1cc6431d79e0fd963fc018b183c4abfbdb2e1b3da167",
+      "size_bytes": 26637,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "research-vault/06-results/2026-07-22-representative-triad-top4-local.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "sha256": "07dd430123583b664dd7b7dfcb3f2b9e22b0601db1be1e3dfe5aa5ff49db6428",
+        "size_bytes": 37715
+      },
+      "runner": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "cvc5": [
+      "third_party/solvers/pinned/bin/cvc5",
+      "--lang=smt2",
+      "{input}"
+    ],
+    "viper-structural": [
+      "target/release/euf-viper",
+      "solve",
+      "{input}"
+    ],
+    "yices2": [
+      "third_party/solvers/pinned/bin/yices-smt2",
+      "{input}"
+    ],
+    "z3": [
+      "third_party/solvers/pinned/bin/z3",
+      "-smt2",
+      "{input}"
+    ]
+  },
+  "common_correct": 1,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2"
+  ],
+  "complete_blocks": 1,
+  "elapsed_s": 82.92861137501313,
+  "environment_overrides": {
+    "cvc5": {},
+    "viper-structural": {
+      "EUF_VIPER_CADICAL_CONFLICT_LIMIT": "1000000",
+      "EUF_VIPER_CADICAL_MODE": "unsat-safe",
+      "EUF_VIPER_CADICAL_SEARCH_MODE": "balanced",
+      "EUF_VIPER_DIRECT_NEGATED_ROOT_AUTO": "1",
+      "EUF_VIPER_FINITE_ROOK_SYMMETRY": "1"
+    },
+    "yices2": {},
+    "z3": {}
+  },
+  "executable_sha256": {
+    "cvc5": "76677e62998e673622edc8ad2df168cb2445177ab7a336c5a25ce149bad836e1",
+    "viper-structural": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "yices2": "783047ce14bfe44cfa237d217afb76ed8cd2bb22c58f37b83fec62919d7d88a0",
+    "z3": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 1,
+      "unsat": 2
+    }
+  },
+  "finished_at": "2026-07-22T05:44:22.320840+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 3,
+  "manifest": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+  "manifest_order": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+    "QF_UF/PEQ/PEQ012_size6.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2"
+  ],
+  "manifest_sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+  "measured_runs": 48,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "cvc5": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.43397410401667,
+          "results": {
+            "sat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.003917520996765,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "yices2": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.016495708492584527,
+          "results": {
+            "sat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.06178520800312981,
+          "results": {
+            "sat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 305,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "cvc5": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.003898395501892,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.4758771875058301,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "yices2": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.9311551040009363,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 3.0498915205098456,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 924,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "cvc5": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 1.3408869584964123,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 3.6707618334912695,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "yices2": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.15254516650747973,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.5654160830017645,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7309,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "row_index": 2
+    }
+  ],
+  "reference_arm": "viper-structural",
+  "repeats": 4,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schedule": {
+    "arm_count": 4,
+    "arms": [
+      "viper-structural",
+      "z3",
+      "yices2",
+      "cvc5"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "z3"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "yices2"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "cvc5"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "yices2"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "cvc5"
+          },
+          {
+            "count": 1,
+            "predecessor": "yices2",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "yices2",
+            "successor": "z3"
+          },
+          {
+            "count": 1,
+            "predecessor": "yices2",
+            "successor": "cvc5"
+          },
+          {
+            "count": 1,
+            "predecessor": "cvc5",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "cvc5",
+            "successor": "z3"
+          },
+          {
+            "count": 1,
+            "predecessor": "cvc5",
+            "successor": "yices2"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 4,
+          "integer": true,
+          "numerator": 4
+        },
+        "transitions_per_row": 3
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "viper-structural",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "z3",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "yices2",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "cvc5",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 4,
+          "integer": true,
+          "numerator": 4
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 4,
+        "expected_length": 4
+      }
+    },
+    "complete_block_rows": 4,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 4,
+    "rows": [
+      {
+        "order": [
+          "viper-structural",
+          "z3",
+          "cvc5",
+          "yices2"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "z3",
+          "yices2",
+          "viper-structural",
+          "cvc5"
+        ],
+        "repeat": 1
+      },
+      {
+        "order": [
+          "yices2",
+          "cvc5",
+          "z3",
+          "viper-structural"
+        ],
+        "repeat": 2
+      },
+      {
+        "order": [
+          "cvc5",
+          "viper-structural",
+          "yices2",
+          "z3"
+        ],
+        "repeat": 3
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "viper-structural",
+      "z3",
+      "yices2",
+      "cvc5"
+    ],
+    "complete_block_rows": 4,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "1cf32c49ab833e69165b15a4c865ce53197f292ad9813ffdaafa75b10d452c68"
+  },
+  "schedule_sha256": "1cf32c49ab833e69165b15a4c865ce53197f292ad9813ffdaafa75b10d452c68",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+    "QF_UF/PEQ/PEQ012_size6.smt2": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-22T05:42:59.406966+00:00",
+  "status": "complete",
+  "timeout_s": 5.0,
+  "timeouts": [
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 0,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 6,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 11,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 13,
+      "stderr": ""
+    },
+    {
+      "arm": "cvc5",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "cvc5",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 18,
+      "stderr": ""
+    },
+    {
+      "arm": "cvc5",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "cvc5",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 23,
+      "stderr": ""
+    },
+    {
+      "arm": "cvc5",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "cvc5",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 25,
+      "stderr": ""
+    },
+    {
+      "arm": "cvc5",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "cvc5",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 28,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

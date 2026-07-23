@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "campaign_id": "viper-pgo-goel-holdout-v1",
+  "status": "prepared_blocked_on_f0_audit_and_clean_public_revision",
+  "objective": "Test whether source-family-disjoint LLVM PGO improves Viper on the untouched official Goel family without answer, coverage, timeout, or tail regression.",
+  "target": {
+    "branch": "perf-viper-fabric-next",
+    "revision": null,
+    "clean_public_revision_required": true
+  },
+  "corpus": {
+    "logic": "QF_UF",
+    "manifest": "benchmarks/smtcomp-2025/qf_uf_manifest.jsonl",
+    "manifest_rows": 3521,
+    "manifest_sha256": "ed00b0e2105ec9579b02448d161e7f04ceceaf816919535b48734c6525a2aaa6"
+  },
+  "split": {
+    "seed": "euf-viper-pgo-v1",
+    "holdout_family": "2018-Goel-hwbench",
+    "holdout_rows": 302,
+    "training_families": [
+      "20170829-Rodin",
+      "20190906-CLEARSY",
+      "NEQ",
+      "PEQ",
+      "QG-classification",
+      "SEQ",
+      "eq_diamond"
+    ],
+    "training_rows": 101,
+    "max_training_rows_per_family": 16,
+    "max_training_source_bytes": 2000000,
+    "source_family_overlap_allowed": 0
+  },
+  "build": {
+    "language": "Rust",
+    "rust_version": "1.93.0",
+    "rust_llvm_version": "21.1.8",
+    "matching_llvm_profdata_required": true,
+    "features": [
+      "fabric"
+    ],
+    "engine": "cadical-up",
+    "profile_generation_repeats": 1,
+    "training_timeout_s": 60,
+    "unknown_training": "explicitly_allowed_but_not_credited_and_exactly_replayed",
+    "wrong_decisive_answers_allowed": 0,
+    "ambient_build_overrides_allowed": 0,
+    "incremental": false
+  },
+  "viper_environment": {
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS": "0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION": "0",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH": "1",
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION": "0",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS": "1",
+    "EUF_VIPER_FABRIC_LAZY_REASONS": "1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER": "1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT": "1",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES": "4",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT": "0"
+  },
+  "measurement": {
+    "cpu_count": 1,
+    "process_model": "cold_process_parser_inclusive",
+    "timeout_s": 2,
+    "design": "one_complete_five_arm_williams_block",
+    "arm_order": [
+      "viper-standard",
+      "viper-pgo",
+      "z3",
+      "yices2",
+      "cvc5"
+    ]
+  },
+  "adjudication": {
+    "script": "scripts/bench/adjudicate_pgo_holdout.py",
+    "bootstrap_iterations": 20000,
+    "bootstrap_seed": 0,
+    "confidence_level": 0.99,
+    "resampling_unit": "instance",
+    "minimum_common_instances": 30,
+    "minimum_aggregate_speedup_exclusive": 1.0,
+    "minimum_geometric_speedup_exclusive": 1.0,
+    "minimum_aggregate_bootstrap_lower_bound_exclusive": 1.0,
+    "minimum_geometric_bootstrap_lower_bound_exclusive": 1.0,
+    "maximum_p95_slowdown": 1.05,
+    "standard_only_solves_allowed": 0,
+    "timeout_regressions_allowed": 0,
+    "wrong_answers_allowed": 0,
+    "execution_errors_allowed": 0
+  },
+  "comparators": {
+    "bundle_receipt_sha256": "2eb96f2868de7e661855b33a41f0213f51251a694669812c25839c52cbd8525a",
+    "z3": {
+      "version": "4.16.0",
+      "wmi_binary_sha256": "a06c2a851d58c5f5a7c1e5de188fd0e1b1135e778112aee83ffd1a433685516b"
+    },
+    "yices2": {
+      "version": "2.7.0",
+      "static": true,
+      "archive_sha256": "49566b6f817692820538df78fe406878400d79810631c9372b2495bc81d3e00a",
+      "wmi_binary_sha256": "eab7efbff2a6f0cce2fcd2c25cb4a94e0e048c902d8ef9e6fd7d7989aa54c501"
+    },
+    "cvc5": {
+      "version": "1.3.4",
+      "static": true,
+      "archive_sha256": "dcdbfada0ce493ee98259c0816e0daafc561c223aadb3af298c2968e73ea39c6",
+      "wmi_binary_sha256": "7562a8b0b835e3eaad5f1a7b4616cd762350cf567b6be03d7e8ee24fa5ced5ee"
+    }
+  },
+  "wmi_tools": {
+    "cargo_sha256": "9548937d530bf439ff1ba47a3b2bd26eeb9c3aff1961c20c01798613de922578",
+    "rustc_sha256": "d32249a7c3bfcfc67b471460386e46323accae7125e344567a12d5664d99bb57",
+    "llvm_profdata_sha256": "ca4b4344f2bca8fbab8ef1f7f5527070059969f76b3838d7ccf916de4fdbb6f3",
+    "python_version": "3.10.12",
+    "python_sha256": "7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86"
+  },
+  "infrastructure": {
+    "work_root": "/work/bnaskrecki/euf-viper-fabric",
+    "corpus_root": "/home/bnaskrecki/euf-viper-finite-max-candidate/benchmarks/smtlib-2025/QF_UF",
+    "submission_script": "scripts/wmi/submit_pgo_holdout.sh",
+    "slurm_script": "scripts/wmi/euf_viper_pgo_holdout.sbatch",
+    "final_marker": "artifacts/campaign.json",
+    "decision_artifact": "artifacts/pgo-decision.json"
+  },
+  "blocked_by": [
+    "wmi_f0_smoke_169653_terminal_independent_audit",
+    "clean_local_freeze",
+    "published_exact_head",
+    "hosted_ci",
+    "explicit_user_submission_approval"
+  ],
+  "claim_boundary": "A PGO promotion is only a build replacement. Overall superiority still requires full and official 2, 60, and 1200 second campaigns on two CPU models with independent answer checking."
+}

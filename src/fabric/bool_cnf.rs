@@ -9,6 +9,8 @@
 
 use super::native_clause::{AtomId, Lit};
 use super::semantic::{RootLiteral, SemanticExpr, SemanticProblem};
+use rustc_hash::FxHashSet;
+#[cfg(test)]
 use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt;
@@ -225,7 +227,7 @@ impl Encoded {
 struct FormulaBuilder {
     source_atom_count: usize,
     atom_count: usize,
-    clauses: BTreeSet<Box<[Lit]>>,
+    clauses: FxHashSet<Box<[Lit]>>,
     literal_count: usize,
     caps: LoweringCaps,
 }
@@ -235,7 +237,7 @@ impl FormulaBuilder {
         Self {
             source_atom_count,
             atom_count: source_atom_count,
-            clauses: BTreeSet::new(),
+            clauses: FxHashSet::default(),
             literal_count: 0,
             caps,
         }
@@ -384,13 +386,11 @@ impl FormulaBuilder {
     }
 
     fn finish(self) -> NativeFormula {
+        let mut clauses = self.clauses.into_iter().collect::<Vec<_>>();
+        clauses.sort_unstable();
         NativeFormula {
             atom_count: self.atom_count,
-            clauses: self
-                .clauses
-                .into_iter()
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            clauses: clauses.into_boxed_slice(),
             source_atom_count: self.source_atom_count,
             auxiliary_atom_count: self.atom_count - self.source_atom_count,
         }

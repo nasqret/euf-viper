@@ -1,0 +1,1103 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 24,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 4,
+  "arm_order": [
+    "viper-default",
+    "viper-structural",
+    "z3",
+    "llm2smt"
+  ],
+  "arms": {
+    "llm2smt": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 4,
+      "coverage": 0.3333333333333333,
+      "coverage_delta_vs_reference": 1,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 8,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "timeout": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 8,
+      "total_time_s": 47.29149933398003,
+      "uncovered_runs": 8,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "viper-default": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 12,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "timeout": 12
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 12,
+      "total_time_s": 60.064510043070186,
+      "uncovered_runs": 12,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "viper-structural": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 8,
+      "coverage": 0.6666666666666666,
+      "coverage_delta_vs_reference": 2,
+      "covered_paths": 2,
+      "error_runs": 0,
+      "failed_runs": 4,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "timeout": 4,
+        "unsat": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 4,
+      "total_time_s": 36.660651707003126,
+      "uncovered_runs": 4,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "z3": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 12,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 3,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "unsat": 8
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 14.799388043029467,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "llm2smt": {
+        "argv_template": [
+          "third_party/solvers/llm2smt/build/bin/llm2smt",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/llm2smt/build/bin/llm2smt",
+          "requested": "third_party/solvers/llm2smt/build/bin/llm2smt",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/llm2smt/build/bin/llm2smt",
+          "sha256": "5520d1ddab12f9b3d96bbcea9318e9e6bfa2badbb02c11d3b57b79a472f9012d",
+          "size_bytes": 3476552
+        },
+        "static_file_arguments": []
+      },
+      "viper-default": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "solve",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "viper-structural": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "solve",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "z3": {
+        "argv_template": [
+          "/opt/homebrew/bin/z3",
+          "-smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "requested": "/opt/homebrew/bin/z3",
+          "resolved_path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "sha256": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7",
+          "size_bytes": 15329696
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "expected_status": "sat",
+        "id": 305,
+        "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "row_index": 0,
+        "sha256": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+        "size_bytes": 1146846
+      },
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "expected_status": "unsat",
+        "id": 924,
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "row_index": 1,
+        "sha256": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+        "size_bytes": 42150
+      },
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "expected_status": "unsat",
+        "id": 7309,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "row_index": 2,
+        "sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0",
+        "size_bytes": 6013419
+      }
+    ],
+    "manifest": {
+      "path": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+      "size_bytes": 1438
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "research-vault/06-results/2026-07-22-representative-triad-multiarm-local.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-representative-triad-multiarm-local.csv",
+      "sha256": "5ea53956cc15c3c1eb5ca8a936044aefe35d82ba9ec44510eb2d3960a7b2e01c",
+      "size_bytes": 27413,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "research-vault/06-results/2026-07-22-representative-triad-multiarm-local.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "sha256": "07dd430123583b664dd7b7dfcb3f2b9e22b0601db1be1e3dfe5aa5ff49db6428",
+        "size_bytes": 37715
+      },
+      "runner": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "llm2smt": [
+      "third_party/solvers/llm2smt/build/bin/llm2smt",
+      "{input}"
+    ],
+    "viper-default": [
+      "target/release/euf-viper",
+      "solve",
+      "{input}"
+    ],
+    "viper-structural": [
+      "target/release/euf-viper",
+      "solve",
+      "{input}"
+    ],
+    "z3": [
+      "/opt/homebrew/bin/z3",
+      "-smt2",
+      "{input}"
+    ]
+  },
+  "common_correct": 0,
+  "common_correct_paths": [],
+  "complete_blocks": 1,
+  "elapsed_s": 158.8927805830026,
+  "environment_overrides": {
+    "llm2smt": {},
+    "viper-default": {},
+    "viper-structural": {
+      "EUF_VIPER_CADICAL_CONFLICT_LIMIT": "1000000",
+      "EUF_VIPER_CADICAL_MODE": "unsat-safe",
+      "EUF_VIPER_CADICAL_SEARCH_MODE": "balanced",
+      "EUF_VIPER_DIRECT_NEGATED_ROOT_AUTO": "1",
+      "EUF_VIPER_FINITE_ROOK_SYMMETRY": "1"
+    },
+    "z3": {}
+  },
+  "executable_sha256": {
+    "llm2smt": "5520d1ddab12f9b3d96bbcea9318e9e6bfa2badbb02c11d3b57b79a472f9012d",
+    "viper-default": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "viper-structural": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "z3": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 1,
+      "unsat": 2
+    }
+  },
+  "finished_at": "2026-07-22T05:37:08.683981+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 3,
+  "manifest": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+  "manifest_order": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+    "QF_UF/PEQ/PEQ012_size6.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2"
+  ],
+  "manifest_sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+  "measured_runs": 48,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "llm2smt": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 1.783268521001446,
+          "results": {
+            "sat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-default": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.004144896010985,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.003959562513046,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.06300758349243551,
+          "results": {
+            "sat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 305,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "llm2smt": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.004991353998776,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-default": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.004428958505741,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.4722341244923882,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 3.0458695419947617,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 924,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "llm2smt": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.033092500001658,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-default": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 5.007152624995797,
+          "results": {
+            "timeout": 4
+          },
+          "timeout_repeats": 4,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "viper-structural": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 3.68538268750126,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "z3": {
+          "correct": true,
+          "correct_repeats": 4,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.5911319375154562,
+          "results": {
+            "unsat": 4
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7309,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "row_index": 2
+    }
+  ],
+  "reference_arm": "viper-default",
+  "repeats": 4,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schedule": {
+    "arm_count": 4,
+    "arms": [
+      "viper-default",
+      "viper-structural",
+      "z3",
+      "llm2smt"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "viper-default",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-default",
+            "successor": "z3"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-default",
+            "successor": "llm2smt"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "viper-default"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "z3"
+          },
+          {
+            "count": 1,
+            "predecessor": "viper-structural",
+            "successor": "llm2smt"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "viper-default"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "z3",
+            "successor": "llm2smt"
+          },
+          {
+            "count": 1,
+            "predecessor": "llm2smt",
+            "successor": "viper-default"
+          },
+          {
+            "count": 1,
+            "predecessor": "llm2smt",
+            "successor": "viper-structural"
+          },
+          {
+            "count": 1,
+            "predecessor": "llm2smt",
+            "successor": "z3"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 4,
+          "integer": true,
+          "numerator": 4
+        },
+        "transitions_per_row": 3
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "viper-default",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "viper-structural",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "z3",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "llm2smt",
+            "by_position": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 4,
+          "integer": true,
+          "numerator": 4
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 4,
+        "expected_length": 4
+      }
+    },
+    "complete_block_rows": 4,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 4,
+    "rows": [
+      {
+        "order": [
+          "viper-default",
+          "viper-structural",
+          "llm2smt",
+          "z3"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "viper-structural",
+          "z3",
+          "viper-default",
+          "llm2smt"
+        ],
+        "repeat": 1
+      },
+      {
+        "order": [
+          "z3",
+          "llm2smt",
+          "viper-structural",
+          "viper-default"
+        ],
+        "repeat": 2
+      },
+      {
+        "order": [
+          "llm2smt",
+          "viper-default",
+          "z3",
+          "viper-structural"
+        ],
+        "repeat": 3
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "viper-default",
+      "viper-structural",
+      "z3",
+      "llm2smt"
+    ],
+    "complete_block_rows": 4,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "6a33387751c3bd22424ee98b28101f4b1de99b8e0d0b6a0c2f86fca85c438527"
+  },
+  "schedule_sha256": "6a33387751c3bd22424ee98b28101f4b1de99b8e0d0b6a0c2f86fca85c438527",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+    "QF_UF/PEQ/PEQ012_size6.smt2": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-22T05:34:29.810648+00:00",
+  "status": "complete",
+  "timeout_s": 5.0,
+  "timeouts": [
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 0,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 6,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 11,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 13,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 1,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 4,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 10,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-structural",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-structural",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 15,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 16,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 22,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 27,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 29,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 18,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 23,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 25,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 28,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 32,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 38,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 43,
+      "stderr": ""
+    },
+    {
+      "arm": "viper-default",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "viper-default",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 45,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 34,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 39,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 41,
+      "stderr": ""
+    },
+    {
+      "arm": "llm2smt",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "llm2smt",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 2,
+      "sequence": 44,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

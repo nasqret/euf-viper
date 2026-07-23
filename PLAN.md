@@ -14,15 +14,20 @@ machine-readable contract `campaigns/viper-fabric-2026-07.json`. Viper Fabric
 is isolated on branch `perf-viper-fabric`; migration and default behavior
 changes remain forbidden until their registered gates pass.
 
-Current Fabric stage: F0 implementation and launch machinery are locally green,
-including a two-row smoke manifest and the frozen 7,503-row shadow campaign in
-`campaigns/viper-fabric-f0-shadow-v1.json`. Direct VPN-IP access confirms
-healthy controllers, the read-only corpus under `/home`, output storage under
-`/work`, and all 308 CPU cores currently allocated. The Fabric branch is not
-yet frozen or published, so no job has been submitted. E2 now has an
-exhaustive reference search, independent SAT-model reconstruction, and an
-independent native proof-event checker; it remains non-routed while the checked
-UNSAT cover and differential gates are completed.
+Current Fabric stage: the default-off reference is frozen at
+`51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc`, published on
+`perf-viper-fabric`, and passed hosted run `29881100724`. Its exact two-row
+WMI shadow smoke is job `169653`; it remains pending because the CPU cluster
+is saturated. No full shadow has been submitted. Continued implementation is
+isolated on `perf-viper-fabric-next`. E2 finite correctness is complete at the
+bounded gate: binary and canonical search, full-scan and rollback-signature
+congruence, and full-scan and watched clause scheduling agree exactly on the
+676-formula five-partition matrix and function/Boolean canaries. The
+incremental congruence kernel measured `236.45x` over the scan control on one
+96-pair release-mode substrate canary; this is not an end-to-end or competitor
+result. Stable theory reasons, impacted-atom scheduling, learned-clause
+insertion, and nonchronological search remain open. The branch remains
+non-routed and has no performance claim.
 
 ## Current Truth
 
@@ -74,6 +79,99 @@ audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
 overheads were `11.17x`-`32.75x` against a `1.10x` cap.
+
+## 2026-07-23 Optimization And PGO Checkpoint
+
+Two narrow source changes survived local causal ABBA gates on the frozen Goel
+canary: `Partition.separation_records` moved from `BTreeMap` to `FxHashMap`
+with deterministic API sorting, then Boolean-CNF clause deduplication moved
+from `BTreeSet` to `FxHashSet` with one final sort. The first change improved
+the median from `0.190730s` to `0.144987s`; the second improved it to
+`0.138404s`. The combined local factor is about `1.378x`. The rebuilt accepted
+binary is byte-identical to the measured artifact, SHA-256
+`96d502f6...46626`. This is one-source local evidence, not corpus promotion or
+a competitor victory.
+
+The next build experiment is a source-family-disjoint LLVM PGO gate, not a
+new solving algorithm. `scripts/bench/build_pgo_split.py` deterministically
+selects 101 training sources from the seven non-Goel official families, with
+at most 16 sources per family and no source above 2,000,000 bytes. All 302
+official `2018-Goel-hwbench` sources form the untouched holdout. The selected
+training set is 8,157,654 bytes total; its largest source is 1,144,489 bytes.
+Every path, byte count, SHA-256, family, and output manifest is checked before
+profiling.
+
+`scripts/bench/build_rust_pgo.py` builds generation and profile-use binaries
+in isolated targets, rejects ambient build overrides, binds Cargo, Rust,
+`llvm-profdata`, source, profile, and binary hashes, and publishes the report
+last. A decisive wrong answer aborts training. `unknown` may contribute profile
+data only under explicit `--allow-unknown-training`, and the optimized binary
+must replay the same outcome. A local dirty-worktree smoke exercised this path:
+instrumented `eq_diamond24` returned `unknown`, optimized replay returned
+`unknown`, and the resulting non-promotable binary has SHA-256
+`719a421d...5639f0`. Provenance review then found that the Mac had fallen back
+to Apple LLVM 17 while Rust uses LLVM 21.1.8. The builder now requires the
+numeric Rust and `llvm-profdata` LLVM versions to match exactly and rejects
+that local fallback before compilation. The smoke therefore proves only the
+`unknown` control flow, not a valid PGO build or timing result.
+
+The WMI campaign is implemented but unsubmitted. It compares standard Viper,
+PGO Viper, Z3, Yices2 2.7.0, and cvc5 1.3.4 in one complete cold-process
+Williams block on one CPU. Both Viper arms and PGO training now share the exact
+accepted ten-setting Fabric environment, and the completion marker checks the
+recorded maps independently. A frozen adjudicator emits `promote` or `reject`
+from no-regression, p95, and 99% paired-bootstrap gates before the campaign
+completion marker. The pinned static Yices2 and cvc5 binaries are
+installed under `/work/bnaskrecki/euf-viper-fabric/tools/` with binary hashes
+`eab7efbf...54c501` and `7562a8b0...ed5ee`. Frozen shadow smoke `169653`
+remains `PENDING (Priority)` with zero runtime, so the PGO job is not yet
+authorized. No result currently changes V0-V4 or the conclusion that Viper is
+not the overall leader.
+Its machine-readable preregistration is
+`campaigns/viper-pgo-goel-holdout-v1.json`; the target revision remains null
+until a clean public freeze exists.
+
+## Active Viper Fabric Execution Queue
+
+This queue is ordered. A later item cannot authorize a solve route, timing
+claim, or composition while an earlier correctness gate is open.
+
+1. **F0 smoke audit:** wait for WMI job `169653`, fetch only its immutable
+   artifact directory, verify exact revision/tool/corpus hashes, require two
+   complete rows and `solver_result_emitted=false`, and run the independent
+   offline auditor.
+2. **F0 full shadow:** only after item 1 passes, submit the frozen 7,503-row
+   manifest from clean commit `51fc7d31`; audit row identity, completeness,
+   semantic census totals, abstentions, and zero solver claims.
+3. **E2 finite correctness (complete at bounded gate):** canonical action
+   rollback, the implementation-independent typed finite-model oracle, and
+   exhaustive partitions through four terms pass. The 676-formula matrix also
+   checks all three current execution paths exactly.
+4. **E2 propagation engine (active):** native watch queues, reverse argument
+   uses, rollback signature buckets, hard semantic-work caps, and a stable
+   carried-disequality impact frontier are implemented. Replace the temporary
+   full source-atom synchronization scan with the checked reverse term-to-atom
+   index, then run generated and WMI scaling differentials. Preserve scan mode
+   as the exact control.
+5. **E2 learning:** add stable theory reasons, checked chronological nogoods,
+   first-UIP analysis, nonchronological backjumping, and relabeling-invariant
+   proof replay. No union-find root or unstable class label may enter a lemma.
+6. **Generated differential gate:** run one million deterministic typed cases
+   against the independent finite oracle and two pinned external solvers; stop
+   on the first disagreement, malformed proof, or unreproducible seed.
+7. **Fixed-arm timing gate:** expose a default-off `fabric-solve --engine e2`
+   arm only after items 3-6 pass. Run parser-inclusive ABBA trials on frozen
+   targets and anti-targets against E0, Yices2, Z3, cvc5, and OpenSMT.
+8. **Novelty censuses:** measure scalar E3 residual-key reuse, exact concrete X1
+   explanation recurrence, and second-round X2 semantic symmetry. Implement
+   behavior only for a census that clears its preregistered value and overhead
+   threshold.
+9. **Composition decision:** compute fixed-arm coverage-aware oracle headroom.
+   Component migration remains forbidden below a 10% lower confidence bound;
+   only independently checked, individually faster mechanisms may compose.
+10. **Victory campaign:** run full and official corpora at 2, 60, and 1,200
+    seconds, twice on two CPU classes, then a sealed source-family holdout.
+    Promotion requires every V0-V4 condition and every table floor below.
 
 ## Victory Contract
 
@@ -932,3 +1030,67 @@ fallback can be an operational portfolio but never a standalone victory.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.
+
+## Fabric Continuation Gate - 2026-07-22
+
+The continuation branch must execute in this order. A later item cannot weaken
+an earlier correctness boundary to obtain a timing result.
+
+1. Preserve frozen commit `51fc7d31` and audit WMI smoke `169653`. It remains
+   pending for priority; no full shadow is authorized yet.
+2. Keep the full-scan congruence and clause paths as controls. The incremental
+   signature backend, native watch scheduler, stable term-to-atom CSR index,
+   and post-update impact frontier now agree with the controls under an
+   all-atom truth oracle after every watched synchronization.
+3. Emit theory implications only as canonical clauses over stable source
+   literals. Equality and transported-disequality explanations pass focused
+   replay tests. An opaque quotient-action reason disables Boolean learning
+   transitively for that branch.
+4. Replace reconstructive Boolean-domain reasons before enabling first-UIP.
+   Every domain inference must allocate a fresh reason ID and freeze its fully
+   flattened source antecedents before the equality merge. Identical
+   `(term,value)` in replacement branches must receive distinct IDs.
+5. Add the learned-clause overlay and nonchronological unwind only after item
+   4 passes rollback, cap, malformed-namespace, and finite-model lemma replay.
+   Congruence conflict payloads remain ineligible until endpoint-alignment
+   equalities are included.
+6. Keep quotient actions outside `AtomId`/`Lit`. The isolated action-nogood
+   substrate may prune only direct, independently replayed conflicts over a
+   frozen stable frontier; recursive-UNSAT learning remains forbidden.
+7. Re-run warning-strict Rust feature matrices, Python discovery, book checks,
+   shell checks, default-off byte parity, and the local finite oracle before a
+   new frozen commit.
+8. Only an audited smoke may authorize bounded WMI canaries. Only canaries
+   beating the fixed controls may authorize the full and official paired
+   Yices2/Z3/cvc5/OpenSMT gates. No current result supports superiority.
+
+## Family-Disjoint PGO Continuation Gate - 2026-07-23
+
+1. Preserve the two accepted hash-table changes and all rejected local
+   experiments as causal artifacts. The empty-environment Goel run is a
+   configuration rejection, not evidence against the accepted source.
+2. Keep the Goel family completely absent from profile generation. The frozen
+   split must contain exactly 101 training rows from seven non-Goel families
+   and all 302 Goel rows in holdout; any family, path, inode, size, or hash
+   leak aborts before compilation.
+3. Profile the exact accepted Fabric environment. Profile generation,
+   optimized replay, standard timing, and PGO timing must record the same ten
+   settings. Competitor arms must record no Viper environment overrides.
+4. Allow training `unknown` only as a measured execution path. Any wrong
+   decisive answer, changed optimized replay, missing profile, malformed
+   output, timeout, or nonzero process error aborts publication.
+5. Freeze a clean published commit and pass hosted CI before submission. Wait
+   for F0 job `169653` to finish and pass the independent artifact audit; do
+   not treat queue time as campaign evidence.
+6. Submit `scripts/wmi/submit_pgo_holdout.sh` only after explicit user approval.
+   Require a fresh `/work` run root, exact seven-tool hashes, one CPU, the
+   official manifest hash, and `campaign.json` as the final completion marker.
+7. Promote PGO over the standard binary only with zero wrong/error/missing
+   rows, no standard-only solve, no timeout regression, and a positive paired
+   common-correct timing result whose 99% instance-bootstrap lower bound is
+   above `1.00x`. `scripts/bench/adjudicate_pgo_holdout.py` applies these frozen
+   thresholds and a `1.05x` p95 slowdown cap before `campaign.json`; a point
+   estimate alone cannot promote the build.
+8. A positive Goel holdout result authorizes, but does not replace, full and
+   official 2/60/1,200-second campaigns on two CPU models. Superiority still
+   requires V0-V4 against Yices2, Z3, cvc5, and OpenSMT in one frozen release.

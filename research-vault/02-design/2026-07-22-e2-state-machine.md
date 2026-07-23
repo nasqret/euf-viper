@@ -68,6 +68,14 @@ fresh separates the term from every earlier live representative required by
 the bounded cover. Pairwise equality/separation is the reference encoding of
 that action, not the public decision language.
 
+The simple action is the fixed correctness control. The separately
+preregistered
+`research-vault/02-design/2026-07-22-e2-domain-watch-experiment.md` tests
+set-valued pruning over the same dynamic quotient domain. Dsat is explicit
+prior art for fixed-domain set decisions, watched states, and native first-UIP;
+only the changing congruence quotient and stable replay boundary are candidate
+Fabric contributions.
+
 Unbounded irrelevant terms need no decision. Only terms that can change a live
 source atom, function collision, disequality, or model obligation enter the
 frontier.
@@ -92,12 +100,22 @@ One propagation round performs:
 7. repeat until all queues are empty.
 
 The correctness reference may scan every clause and application. The timing
-engine must replace scans with literal watch lists, argument use lists, and
-incremental signature buckets before entering a performance campaign.
+engine uses literal watch lists, rollback signature buckets, a stable
+term-to-source-atom CSR index, and a quotient impact frontier. Forward updates
+visit the endpoint classes and their post-update disequality neighbors;
+initialization and rollback conservatively mark all source terms. Tests compare
+all watched truths with a full semantic scan after every synchronization.
 
 Every implication reason is a clause over stable source or definition atoms.
 A congruence reason recursively expands to explicit equality antecedents. An
 unknown relation is never used as a negative antecedent.
+
+Boolean-domain causes are frozen before mutation. Every inference allocates a
+fresh monotonic proof ID containing already-flattened source antecedents;
+reconstructing the cause from the post-merge partition is forbidden because it
+can cycle through its own equality and can alias replacement-branch proofs.
+Opaque canonical-action provenance disables first-UIP transitively for that
+branch. It is never encoded as a fake Boolean literal.
 
 ## Conflict Analysis
 
@@ -118,6 +136,13 @@ clause must satisfy all of these checks before insertion:
 
 Tautologies are discarded. Empty learned clauses authorize UNSAT only when the
 complete root proof replays.
+
+Quotient-action learning is a separate finite-domain system. Its learned object
+is a forbidden tuple over frozen `ActionDomainKey` and `ActionValue` values,
+plus stable relation conditions and independently replayed evidence. The first
+eligible implementation learns only from a direct congruence conflict caused
+by the current action. Recursive UNSAT, Boolean conflict analysis, model
+failure, and abstention cannot create an action nogood.
 
 ## SAT Completion
 

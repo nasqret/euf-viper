@@ -1,0 +1,605 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 0,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 144,
+      "coverage": 1.0,
+      "covered_paths": 9,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 9,
+      "result_counts": {
+        "sat": 48,
+        "unsat": 96
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 144,
+      "coverage": 1.0,
+      "covered_paths": 9,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 9,
+      "result_counts": {
+        "sat": 48,
+        "unsat": 96
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/tmp/euf-viper-pre-fxhash-semantic-atoms",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-pre-fxhash-semantic-atoms",
+          "requested": "/tmp/euf-viper-pre-fxhash-semantic-atoms",
+          "resolved_path": "/private/tmp/euf-viper-pre-fxhash-semantic-atoms",
+          "sha256": "96d502f60f95a5e4ded5c2ba0fcf422120431e1833be808b35cdf6509dc46626",
+          "size_bytes": 3523296
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "/tmp/euf-viper-pgo-use/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-pgo-use/release/euf-viper",
+          "requested": "/tmp/euf-viper-pgo-use/release/euf-viper",
+          "resolved_path": "/private/tmp/euf-viper-pgo-use/release/euf-viper",
+          "sha256": "a99deb53adbf1072a00420deeedf07a985d9839569a64154a223845879ddfa9f",
+          "size_bytes": 3245184
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": "basic-sat",
+        "path": "tests/fixtures/basic_sat.smt2",
+        "relative_path": "tests/fixtures/basic_sat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/basic_sat.smt2",
+        "row_index": 0,
+        "sha256": "2cf356bb641a53dc480738d7c0e95650ece9f85bfb239aee581aef5c490b3574",
+        "size_bytes": 145
+      },
+      {
+        "id": "basic-unsat",
+        "path": "tests/fixtures/basic_unsat.smt2",
+        "relative_path": "tests/fixtures/basic_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/basic_unsat.smt2",
+        "row_index": 1,
+        "sha256": "e34934cddbdd901821f415350f2e4fcd0156a8f0ba01518fc6c423e9212edb36",
+        "size_bytes": 162
+      },
+      {
+        "id": "bool-data-pigeonhole-unsat",
+        "path": "tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+        "relative_path": "tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+        "row_index": 2,
+        "sha256": "51a54a5d65d5eca85bdbc5409fefa30166c3350017062e28c7f2d080781e17d1",
+        "size_bytes": 184
+      },
+      {
+        "id": "eq-diamond-unsat",
+        "path": "tests/fixtures/eq_diamond_unsat.smt2",
+        "relative_path": "tests/fixtures/eq_diamond_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/eq_diamond_unsat.smt2",
+        "row_index": 3,
+        "sha256": "b2e587ccd1f71ca946477582b6a1c74ba8b31a34b9e55eb1bcd890906681cee2",
+        "size_bytes": 244
+      },
+      {
+        "id": "predicate-congruence-unsat",
+        "path": "tests/fixtures/predicate_congruence_unsat.smt2",
+        "relative_path": "tests/fixtures/predicate_congruence_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/predicate_congruence_unsat.smt2",
+        "row_index": 4,
+        "sha256": "59a2a6d6d874d0d6b72c32091a95451b40f6ad432babdaa5d2a2257727d6db00",
+        "size_bytes": 169
+      },
+      {
+        "id": "pruned-or-unsat",
+        "path": "tests/fixtures/pruned_or_unsat.smt2",
+        "relative_path": "tests/fixtures/pruned_or_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/pruned_or_unsat.smt2",
+        "row_index": 5,
+        "sha256": "b2afeddbe5ab244f65773ef617fff3137a318fce45222d7674c53258f6dc7fe7",
+        "size_bytes": 213
+      },
+      {
+        "id": "quoted-not-sat",
+        "path": "tests/fixtures/quoted_not_sat.smt2",
+        "relative_path": "tests/fixtures/quoted_not_sat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/quoted_not_sat.smt2",
+        "row_index": 6,
+        "sha256": "094c5f0d2eef91336f8f9fbeaee4300349d729b77da8672a2cfefdafd7aa7c0f",
+        "size_bytes": 84
+      },
+      {
+        "id": "quoted-true-sat",
+        "path": "tests/fixtures/quoted_true_sat.smt2",
+        "relative_path": "tests/fixtures/quoted_true_sat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/quoted_true_sat.smt2",
+        "row_index": 7,
+        "sha256": "cc9f44c91cdbd9534d7a292c085c10999a5e360727036e54fe014b74a951a7d9",
+        "size_bytes": 81
+      },
+      {
+        "id": "transitivity-unsat",
+        "path": "tests/fixtures/transitivity_unsat.smt2",
+        "relative_path": "tests/fixtures/transitivity_unsat.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/tests/fixtures/transitivity_unsat.smt2",
+        "row_index": 8,
+        "sha256": "00f616ecb83a596462e71647547653a35eba048831662b57539bc752f9ddc23b",
+        "size_bytes": 170
+      }
+    ],
+    "manifest": {
+      "path": "benchmarks/fabric-smoke-manifest.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/fabric-smoke-manifest.jsonl",
+      "sha256": "6bc81f3685f3c451081d035920f630d1877f255cad960981985e3a919e476a3f",
+      "size_bytes": 1308
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/tmp/smoke-rust-pgo-abba.csv",
+      "resolved_path": "/private/tmp/smoke-rust-pgo-abba.csv",
+      "sha256": "38181c1668ac61ae365953703fcc921071ce2cdfb4db2c39afa6f8b3aa74c86b",
+      "size_bytes": 72312,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "/tmp/euf-viper-pre-fxhash-semantic-atoms",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 0.020959792993380688,
+  "baseline_correct": 9,
+  "baseline_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "96d502f60f95a5e4ded5c2ba0fcf422120431e1833be808b35cdf6509dc46626",
+  "baseline_wins": 2,
+  "candidate": [
+    "/tmp/euf-viper-pgo-use/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 0.02025077048165258,
+  "candidate_correct": 9,
+  "candidate_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "candidate_geometric_speedup": 1.034702077099848,
+  "candidate_only_correct": 0,
+  "candidate_only_examples": [],
+  "candidate_sha256": "a99deb53adbf1072a00420deeedf07a985d9839569a64154a223845879ddfa9f",
+  "candidate_speedup_by_total": 1.03501212521126,
+  "candidate_wins": 7,
+  "common_aggregate_speedup": 1.03501212521126,
+  "common_correct": 9,
+  "common_correct_paths": [
+    "tests/fixtures/basic_sat.smt2",
+    "tests/fixtures/basic_unsat.smt2",
+    "tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+    "tests/fixtures/eq_diamond_unsat.smt2",
+    "tests/fixtures/predicate_congruence_unsat.smt2",
+    "tests/fixtures/pruned_or_unsat.smt2",
+    "tests/fixtures/quoted_not_sat.smt2",
+    "tests/fixtures/quoted_true_sat.smt2",
+    "tests/fixtures/transitivity_unsat.smt2"
+  ],
+  "common_geometric_speedup": 1.034702077099848,
+  "coverage_delta": 0,
+  "elapsed_s": 0.7948499160120264,
+  "execution_errors": [],
+  "finished_at": "2026-07-22T17:44:23.277895+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "macbook-air-airbartek-6.home",
+    "git_revision": null,
+    "hostname": "macbook-air-airbartek-6.home",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 9,
+  "manifest": "benchmarks/fabric-smoke-manifest.jsonl",
+  "manifest_order": [
+    "tests/fixtures/basic_sat.smt2",
+    "tests/fixtures/basic_unsat.smt2",
+    "tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+    "tests/fixtures/eq_diamond_unsat.smt2",
+    "tests/fixtures/predicate_congruence_unsat.smt2",
+    "tests/fixtures/pruned_or_unsat.smt2",
+    "tests/fixtures/quoted_not_sat.smt2",
+    "tests/fixtures/quoted_true_sat.smt2",
+    "tests/fixtures/transitivity_unsat.smt2"
+  ],
+  "manifest_sha256": "6bc81f3685f3c451081d035920f630d1877f255cad960981985e3a919e476a3f",
+  "measured_runs": 288,
+  "paths": [
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.00228183351282496,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0022151669982122257,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": "basic-sat",
+      "relative_path": "tests/fixtures/basic_sat.smt2",
+      "row_index": 0
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002266833500470966,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0022089999984018505,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "basic-unsat",
+      "relative_path": "tests/fixtures/basic_unsat.smt2",
+      "row_index": 1
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0024417505046585575,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002313520497409627,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "bool-data-pigeonhole-unsat",
+      "relative_path": "tests/fixtures/bool_data_pigeonhole_unsat.smt2",
+      "row_index": 2
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0023729999957140535,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002254624996567145,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "eq-diamond-unsat",
+      "relative_path": "tests/fixtures/eq_diamond_unsat.smt2",
+      "row_index": 3
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0022819165023975074,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0021981459867674857,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "predicate-congruence-unsat",
+      "relative_path": "tests/fixtures/predicate_congruence_unsat.smt2",
+      "row_index": 4
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0024142295005731285,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0022660204995190725,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "pruned-or-unsat",
+      "relative_path": "tests/fixtures/pruned_or_unsat.smt2",
+      "row_index": 5
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002407999985734932,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0021868750045541674,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": "quoted-not-sat",
+      "relative_path": "tests/fixtures/quoted_not_sat.smt2",
+      "row_index": 6
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002299916493939236,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002357291494263336,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": "quoted-true-sat",
+      "relative_path": "tests/fixtures/quoted_true_sat.smt2",
+      "row_index": 7
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.002192312997067347,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0022501250059576705,
+        "results": {
+          "unsat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": "transitivity-unsat",
+      "relative_path": "tests/fixtures/transitivity_unsat.smt2",
+      "row_index": 8
+    }
+  ],
+  "repeats": 16,
+  "runtime_host": "macbook-air-airbartek-6.home",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-22T17:44:22.496312+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 36,
+    "timeouts": [],
+    "wrong_answers": []
+  },
+  "warmups": 2,
+  "wrong_answers": []
+}

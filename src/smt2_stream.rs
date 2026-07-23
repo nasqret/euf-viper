@@ -343,6 +343,13 @@ fn parse_stream_problem(
     Ok(ctx.finish_with_symbol_names())
 }
 
+pub(super) fn parse_problem(
+    input: &str,
+    scoped_let_mode: ScopedLetMode,
+) -> Result<Problem, String> {
+    parse_stream_problem(input, scoped_let_mode).map(|(problem, _)| problem)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FunctionSnapshot {
     symbol: SymId,

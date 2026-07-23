@@ -26,6 +26,7 @@ rustsat-kissat = { version = "0.7.5", features = ["quiet"] }
 
 [patch.crates-io]
 kissat = { path = "vendor/kissat" }
+rustsat-cadical = { path = "vendor/rustsat-cadical-up" }
 
 [profile.release]
 codegen-units = 1

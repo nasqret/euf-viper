@@ -241,6 +241,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--viper", default="target/release/euf-viper")
+    parser.add_argument(
+        "--viper-engine",
+        choices=("scan", "incremental", "watched", "learned", "action"),
+        help="run the default-off Fabric fixed arm instead of production solve",
+    )
     parser.add_argument("--z3")
     parser.add_argument("--cvc5")
     parser.add_argument("--yices")
@@ -279,7 +284,15 @@ def main() -> int:
     solvers: list[tuple[str, list[str]]] = []
     viper = solver_path(args.viper, "euf-viper")
     if viper and Path(viper).exists():
-        solvers.append(("euf-viper", [viper, "solve"]))
+        if args.viper_engine:
+            solvers.append(
+                (
+                    f"fabric-{args.viper_engine}",
+                    [viper, "fabric-solve", "--engine", args.viper_engine],
+                )
+            )
+        else:
+            solvers.append(("euf-viper", [viper, "solve"]))
     if not args.no_z3:
         z3 = solver_path(args.z3, "z3")
         if z3:

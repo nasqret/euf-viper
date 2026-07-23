@@ -1,0 +1,9 @@
+{"id":"basic-sat","path":"tests/fixtures/basic_sat.smt2","relative_path":"tests/fixtures/basic_sat.smt2","status":"sat"}
+{"id":"basic-unsat","path":"tests/fixtures/basic_unsat.smt2","relative_path":"tests/fixtures/basic_unsat.smt2","status":"unsat"}
+{"id":"bool-data-pigeonhole-unsat","path":"tests/fixtures/bool_data_pigeonhole_unsat.smt2","relative_path":"tests/fixtures/bool_data_pigeonhole_unsat.smt2","status":"unsat"}
+{"id":"eq-diamond-unsat","path":"tests/fixtures/eq_diamond_unsat.smt2","relative_path":"tests/fixtures/eq_diamond_unsat.smt2","status":"unsat"}
+{"id":"predicate-congruence-unsat","path":"tests/fixtures/predicate_congruence_unsat.smt2","relative_path":"tests/fixtures/predicate_congruence_unsat.smt2","status":"unsat"}
+{"id":"pruned-or-unsat","path":"tests/fixtures/pruned_or_unsat.smt2","relative_path":"tests/fixtures/pruned_or_unsat.smt2","status":"unsat"}
+{"id":"quoted-not-sat","path":"tests/fixtures/quoted_not_sat.smt2","relative_path":"tests/fixtures/quoted_not_sat.smt2","status":"sat"}
+{"id":"quoted-true-sat","path":"tests/fixtures/quoted_true_sat.smt2","relative_path":"tests/fixtures/quoted_true_sat.smt2","status":"sat"}
+{"id":"transitivity-unsat","path":"tests/fixtures/transitivity_unsat.smt2","relative_path":"tests/fixtures/transitivity_unsat.smt2","status":"unsat"}

@@ -56,6 +56,17 @@ jobs:
             tests.test_shadow_campaign \
             tests.test_audit_shadow_campaign \
             tests.test_audit_staged_shadow_campaign \
+            tests.test_adjudicate_pgo_holdout \
+            tests.test_audit_fabric_shadow \
+            tests.test_build_novelty_tail_manifest \
+            tests.test_build_pgo_split \
+            tests.test_build_rust_pgo \
+            tests.test_compare_commands_abba \
+            tests.test_compare_multiarm_williams \
+            tests.test_install_pinned_competitors \
+            tests.test_williams_design \
+            tests.test_wmi_fabric_differential \
+            tests.test_wmi_pgo_holdout \
             tests.test_wmi_continuation_scripts \
             tests.test_wmi_certificate_scripts
       - name: Check campaign scripts
@@ -82,5 +93,9 @@ jobs:
           bash -n scripts/wmi/submit_typed_parser_parity.sh
           bash -n scripts/wmi/euf_viper_fabric_shadow.sbatch
           bash -n scripts/wmi/submit_fabric_shadow.sh
+          bash -n scripts/wmi/euf_viper_fabric_differential.sbatch
+          bash -n scripts/wmi/submit_fabric_differential.sh
+          bash -n scripts/wmi/euf_viper_pgo_holdout.sbatch
+          bash -n scripts/wmi/submit_pgo_holdout.sh
       - name: Test Rust solver
         run: cargo test --all-features

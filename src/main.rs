@@ -6,6 +6,12 @@ mod eq_abstraction;
 mod fabric;
 mod finite_analysis;
 #[cfg(test)]
+mod finite_column_search;
+#[cfg(test)]
+mod finite_table_diagnostics;
+#[cfg(test)]
+mod finite_table_source;
+#[cfg(test)]
 mod forbidden_orbit_probe;
 #[cfg(test)]
 mod forbidden_table_mdd;
@@ -22,6 +28,7 @@ mod novelty_census;
 mod orbit_canon;
 #[cfg(test)]
 mod orbit_cover;
+mod phase_scout;
 #[cfg(test)]
 mod quotient_csp;
 #[cfg(test)]
@@ -34,7 +41,8 @@ mod stabilizer_order;
 use kissat::{Solver as KissatSolver, Var as KissatVar};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use rustsat::solvers::{
-    GetInternalStats, LimitConflicts, Solve as RustSatSolve, SolverResult as RustSatResult,
+    GetInternalStats, LimitConflicts, PhaseLit, Solve as RustSatSolve,
+    SolverResult as RustSatResult,
 };
 use rustsat::types::{Clause as RustSatClause, Lit as RustSatLit, TernaryVal};
 #[cfg(feature = "certificates")]
@@ -2409,11 +2417,7 @@ impl CnfProblem {
                 self.add_direct_assertion_with_negated_root(child, true);
             }
             BoolExpr::And(children) => {
-                let clause = children
-                    .iter()
-                    .map(|child| -self.encode_expr(child))
-                    .collect();
-                self.clauses.push(clause);
+                self.add_flat_negated_conjunction(children);
             }
             BoolExpr::Or(children) => {
                 for child in children {
@@ -2425,6 +2429,26 @@ impl CnfProblem {
                 self.clauses.push(vec![-literal]);
             }
         }
+    }
+
+    fn add_flat_negated_conjunction(&mut self, children: &[BoolExpr]) {
+        let mut pending = children.iter().rev().collect::<Vec<_>>();
+        let mut leaves = Vec::new();
+        while let Some(child) = pending.pop() {
+            match child {
+                BoolExpr::Const(false) => return,
+                BoolExpr::Const(true) => {}
+                BoolExpr::And(grandchildren) => {
+                    pending.extend(grandchildren.iter().rev());
+                }
+                _ => leaves.push(child),
+            }
+        }
+        let clause = leaves
+            .into_iter()
+            .map(|child| -self.encode_expr(child))
+            .collect();
+        self.clauses.push(clause);
     }
 
     fn encode_expr(&mut self, expr: &BoolExpr) -> i32 {
@@ -2729,6 +2753,7 @@ fn equality_transitivity_clauses(cnf: &CnfProblem, term_count: usize) -> Vec<Vec
     clauses
 }
 
+#[cfg(any(test, feature = "certificates"))]
 fn add_finite_domain_axioms(
     cnf: &mut CnfProblem,
     arena: &TermArena,
@@ -2752,16 +2777,12 @@ fn add_finite_domain_axioms_with_context(
     let predicate_channeling =
         env::var("EUF_VIPER_FINITE_PREDICATE_CHANNELING").as_deref() == Ok("1");
     #[cfg(feature = "finite-symmetry")]
-    if arena.apps.len() >= 1_000 {
-        let symmetry_mode =
-            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
-        let symmetry_min_apps = env::var("EUF_VIPER_FINITE_SYMMETRY_MIN_APPS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(1_000);
-        if arena.apps.len() >= symmetry_min_apps
-            && matches!(symmetry_mode.as_str(), "1" | "constants" | "hybrid" | "lex")
+    {
+        if finite_rook_symmetry_enabled().unwrap_or(false)
+            && finite_rook_symmetry_candidate(context, arena, bool_problem)
         {
+            let domain_size = context.domain.as_ref().unwrap().domain.len();
+            profile_measurement("finite_rook_symmetry_route", 1, domain_size);
             return add_finite_domain_axioms_with_options_and_context::<true>(
                 cnf,
                 arena,
@@ -2769,6 +2790,24 @@ fn add_finite_domain_axioms_with_context(
                 equality_channeling,
                 predicate_channeling,
                 context,
+                Some(domain_size),
+            );
+        }
+        let symmetry_mode =
+            env::var("EUF_VIPER_FINITE_SYMMETRY").unwrap_or_else(|_| "hybrid".to_owned());
+        let symmetry_min_apps = env::var("EUF_VIPER_FINITE_SYMMETRY_MIN_APPS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(1_000);
+        if finite_symmetry_requested(arena.apps.len(), &symmetry_mode, symmetry_min_apps) {
+            return add_finite_domain_axioms_with_options_and_context::<true>(
+                cnf,
+                arena,
+                bool_problem,
+                equality_channeling,
+                predicate_channeling,
+                context,
+                None,
             );
         }
     }
@@ -2779,7 +2818,55 @@ fn add_finite_domain_axioms_with_context(
         equality_channeling,
         predicate_channeling,
         context,
+        None,
     )
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_rook_symmetry_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    let domain_size = context.domain_analysis(arena, bool_problem).domain.len();
+    if !(3..=8).contains(&domain_size) {
+        return false;
+    }
+    if context
+        .finite_closure(arena, bool_problem)
+        .closed_functions
+        .len()
+        != 1
+    {
+        return false;
+    }
+    let guarded = context.guarded_summary(arena, bool_problem);
+    let Some(vertex_count) = domain_size.checked_mul(domain_size) else {
+        return false;
+    };
+    let Some(expected_edges) = vertex_count.checked_mul(domain_size - 1) else {
+        return false;
+    };
+    if guarded.edges.len() != expected_edges {
+        return false;
+    }
+    let mut degrees = HashMap::<TermId, usize>::default();
+    for &(left, right) in &guarded.edges {
+        if left == right {
+            return false;
+        }
+        *degrees.entry(left).or_default() += 1;
+        *degrees.entry(right).or_default() += 1;
+    }
+    degrees.len() == vertex_count
+        && degrees
+            .values()
+            .all(|&degree| degree == 2 * (domain_size - 1))
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_symmetry_requested(app_count: usize, mode: &str, min_apps: usize) -> bool {
+    app_count >= min_apps && matches!(mode, "1" | "constants" | "hybrid" | "lex")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2936,9 +3023,13 @@ fn verified_domain_swap_maps(
     let mut interner = CanonicalBoolInterner::default();
     let baseline = canonical_assertion_ids(bool_problem, &identity, &mut interner);
     let mut swap_maps = Vec::with_capacity(domain.len() - 1);
-    for pair in domain.windows(2) {
-        let term_map = term_map_under_swap(arena, pair[0], pair[1])?;
+    for (swap_index, pair) in domain.windows(2).enumerate() {
+        let Some(term_map) = term_map_under_swap(arena, pair[0], pair[1]) else {
+            profile_measurement("finite_symmetry_missing_term_map", 0, swap_index);
+            return None;
+        };
         if canonical_assertion_ids(bool_problem, &term_map, &mut interner) != baseline {
+            profile_measurement("finite_symmetry_assertion_mismatch", 0, swap_index);
             return None;
         }
         swap_maps.push(term_map);
@@ -3163,6 +3254,7 @@ fn add_finite_table_lex_leaders(
     cnf.clauses.len() - start_clause_count
 }
 
+#[cfg(test)]
 fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
     cnf: &mut CnfProblem,
     arena: &TermArena,
@@ -3178,6 +3270,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
         equality_channeling,
         predicate_channeling,
         &mut context,
+        None,
     )
 }
 
@@ -3188,7 +3281,10 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     equality_channeling: FiniteEqualityChanneling,
     predicate_channeling: bool,
     context: &mut finite_analysis::FiniteAnalysisContext,
+    forced_lex_min_domain: Option<usize>,
 ) -> usize {
+    #[cfg(not(feature = "finite-symmetry"))]
+    let _ = forced_lex_min_domain;
     context.domain_analysis(arena, bool_problem);
     #[cfg(feature = "finite-symmetry")]
     let max_domain = if FINITE_SYMMETRY {
@@ -3255,6 +3351,7 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     let domain = &domain_analysis.domain;
     let domain_set = &domain_analysis.domain_set;
     let disequality_edges = &domain_analysis.mandatory_disequalities;
+    #[cfg(feature = "finite-symmetry")]
     let covered_terms = &closure.covered_terms;
     let closed_functions = &closure.closed_functions;
     let finite_terms = &closure.finite_terms;
@@ -3403,8 +3500,8 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
             );
             let lex_min_domain = env::var("EUF_VIPER_FINITE_LEX_MIN_DOMAIN")
                 .ok()
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(8);
+                .and_then(|value| value.parse::<usize>().ok());
+            let lex_min_domain = forced_lex_min_domain.or(lex_min_domain).unwrap_or(8);
             if matches!(symmetry_mode.as_str(), "hybrid" | "lex") && domain.len() >= lex_min_domain
             {
                 let lex_clauses = add_finite_table_lex_leaders(
@@ -4423,6 +4520,27 @@ fn selected_refinement_mode() -> RefinementMode {
     parse_refinement_mode(setting.as_deref())
 }
 
+const PHASE_SCOUT_ENV: &str = "EUF_VIPER_PHASE_SCOUT";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhaseScoutMode {
+    Off,
+    FirstModelCore,
+}
+
+fn parse_phase_scout_mode(setting: Option<&str>) -> Result<PhaseScoutMode, String> {
+    match setting {
+        None | Some("off") => Ok(PhaseScoutMode::Off),
+        Some("first-model-core") => Ok(PhaseScoutMode::FirstModelCore),
+        Some(_) => Err(format!("{PHASE_SCOUT_ENV} must be off or first-model-core")),
+    }
+}
+
+fn selected_phase_scout_mode() -> Result<PhaseScoutMode, String> {
+    let setting = env::var(PHASE_SCOUT_ENV).ok();
+    parse_phase_scout_mode(setting.as_deref())
+}
+
 fn force_full_ackermann(setting: Option<&str>) -> bool {
     matches!(setting, Some("1" | "on"))
 }
@@ -4454,9 +4572,15 @@ fn dynamic_full_ackermann_before_refinement(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct InvalidModelEvidence {
+    assignment: Vec<i8>,
+    conflicts: Vec<Vec<i32>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum EagerSolveOutcome {
     Solved(SolveResult),
-    InvalidTheoryModel(usize),
+    InvalidTheoryModel(InvalidModelEvidence),
     #[cfg_attr(all(target_os = "linux", target_arch = "x86_64"), allow(dead_code))]
     Unavailable,
 }
@@ -4538,7 +4662,10 @@ fn solve_kissat_euf_once(
     if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
+        EagerSolveOutcome::InvalidTheoryModel(InvalidModelEvidence {
+            assignment,
+            conflicts,
+        })
     }
 }
 
@@ -4634,7 +4761,10 @@ fn solve_kissat_euf_once(
     if conflicts.is_empty() {
         EagerSolveOutcome::Solved(SolveResult::Sat)
     } else {
-        EagerSolveOutcome::InvalidTheoryModel(conflicts.len())
+        EagerSolveOutcome::InvalidTheoryModel(InvalidModelEvidence {
+            assignment,
+            conflicts,
+        })
     }
 }
 
@@ -4774,6 +4904,12 @@ struct CadicalRefinementTelemetry {
     cut_width_max: usize,
     candidate_clause_generation_avoided: bool,
     group_clause_loading_avoided: bool,
+    phase_scout_time_ns: u128,
+    phase_scout_input_clauses: usize,
+    phase_scout_input_literals: usize,
+    phase_scout_selected_literals: usize,
+    phase_scout_applied: bool,
+    phase_scout_first_model_valid: bool,
 }
 
 impl CadicalRefinementTelemetry {
@@ -4801,7 +4937,40 @@ impl CadicalRefinementTelemetry {
             0,
             usize::from(self.group_clause_loading_avoided),
         );
+        profile_measurement(
+            "cadical_refine_phase_scout",
+            self.phase_scout_time_ns,
+            self.phase_scout_selected_literals,
+        );
+        profile_measurement(
+            "cadical_refine_phase_scout_input",
+            self.phase_scout_input_literals as u128,
+            self.phase_scout_input_clauses,
+        );
+        profile_measurement(
+            "cadical_refine_phase_scout_outcome",
+            u128::from(self.phase_scout_first_model_valid),
+            usize::from(self.phase_scout_applied),
+        );
     }
+}
+
+fn first_model_phase_scout(cnf: &CnfProblem, evidence: &InvalidModelEvidence) -> Option<Vec<i32>> {
+    let mut occurrences = vec![0usize; cnf.var_count() + 1];
+    for clause in &cnf.clauses {
+        for &literal in clause {
+            let variable = literal.unsigned_abs() as usize;
+            let count = occurrences.get_mut(variable)?;
+            *count = count.checked_add(1)?;
+        }
+    }
+    phase_scout::scout_first_model_phases(
+        cnf.var_count(),
+        &evidence.assignment,
+        &occurrences,
+        &evidence.conflicts,
+    )
+    .ok()
 }
 
 fn add_novel_theory_cuts(
@@ -4845,7 +5014,9 @@ fn solve_cadical_euf_refining(
     true_term: TermId,
     false_term: TermId,
     refinement_mode: RefinementMode,
+    initial_phase_evidence: Option<&InvalidModelEvidence>,
 ) -> Option<(SolveResult, usize, usize)> {
+    let phase_scout_mode = selected_phase_scout_mode().ok()?;
     let max_rounds = env::var("EUF_VIPER_MAX_THEORY_ROUNDS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -4858,6 +5029,8 @@ fn solve_cadical_euf_refining(
         false_term,
         refinement_mode,
         max_rounds,
+        phase_scout_mode,
+        initial_phase_evidence,
         &mut telemetry,
     );
     telemetry.profile();
@@ -4871,6 +5044,8 @@ fn solve_cadical_euf_refining_with_limit(
     false_term: TermId,
     refinement_mode: RefinementMode,
     max_rounds: usize,
+    phase_scout_mode: PhaseScoutMode,
+    initial_phase_evidence: Option<&InvalidModelEvidence>,
     telemetry: &mut CadicalRefinementTelemetry,
 ) -> Option<(SolveResult, usize, usize)> {
     let load_start = Instant::now();
@@ -4913,6 +5088,45 @@ fn solve_cadical_euf_refining_with_limit(
             telemetry.candidate_clause_generation_avoided = true;
             telemetry.group_clause_loading_avoided = true;
             profile_measurement("cadical_refine_candidates", 0, 0);
+        }
+    }
+    if phase_scout_mode == PhaseScoutMode::FirstModelCore {
+        if let Some(evidence) = initial_phase_evidence {
+            telemetry.phase_scout_input_clauses = evidence.conflicts.len();
+            telemetry.phase_scout_input_literals = evidence
+                .conflicts
+                .iter()
+                .fold(0usize, |total, clause| total.saturating_add(clause.len()));
+            let scout_start = Instant::now();
+            let selected = first_model_phase_scout(cnf, evidence);
+            telemetry.phase_scout_time_ns = scout_start.elapsed().as_nanos();
+            if let Some(selected) = selected {
+                telemetry.phase_scout_selected_literals = selected.len();
+                let mut installed = Vec::with_capacity(selected.len());
+                let mut applied = true;
+                for literal in selected {
+                    let Some(literal) = RustSatLit::from_ipasir(literal).ok() else {
+                        applied = false;
+                        break;
+                    };
+                    if solver.phase_lit(literal).is_err() {
+                        applied = false;
+                        break;
+                    }
+                    installed.push(literal);
+                }
+                if !applied {
+                    for literal in installed {
+                        let _ = solver.unphase_lit(literal);
+                    }
+                }
+                telemetry.phase_scout_applied = applied;
+                profile_measurement(
+                    "cadical_refine_phase_scout_install",
+                    telemetry.phase_scout_time_ns,
+                    telemetry.phase_scout_selected_literals,
+                );
+            }
         }
     }
     let mut learned_theory = HashSet::<Vec<i32>>::default();
@@ -4981,6 +5195,9 @@ fn solve_cadical_euf_refining_with_limit(
         let conflicts = theory_conflict_clauses(cnf, arena, true_term, false_term, &assignment)?;
         telemetry.validation_time_ns += validation_start.elapsed().as_nanos();
         telemetry.validation_calls += 1;
+        if round == 1 && telemetry.phase_scout_applied {
+            telemetry.phase_scout_first_model_valid = conflicts.is_empty() && added == 0;
+        }
         if conflicts.is_empty() && added == 0 {
             return Some((SolveResult::Sat, round, lemma_count));
         }
@@ -5631,6 +5848,10 @@ struct SolveReport {
 
 const DIRECT_ROOT_CNF_ENV: &str = "EUF_VIPER_DIRECT_ROOT_CNF";
 const DIRECT_NEGATED_ROOT_ENV: &str = "EUF_VIPER_DIRECT_NEGATED_ROOT";
+const DIRECT_NEGATED_ROOT_AUTO_ENV: &str = "EUF_VIPER_DIRECT_NEGATED_ROOT_AUTO";
+const DIRECT_NEGATED_ROOT_AUTO_MIN_SAVED_CLAUSES: usize = 100_000;
+const FINITE_ROOK_SYMMETRY_ENV: &str = "EUF_VIPER_FINITE_ROOK_SYMMETRY";
+const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
 const SCOPED_LET_ENV: &str = "EUF_VIPER_SCOPED_LET";
 const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
 const EQ_ABSTRACTION_FRESH_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_FRESH";
@@ -5654,6 +5875,27 @@ impl RootCnfOptions {
             direct_negated_root: false,
         }
     }
+}
+
+fn negated_root_flattening_savings(assertions: &[BoolExpr]) -> usize {
+    let mut savings = 0usize;
+    for assertion in assertions {
+        let BoolExpr::Not(child) = assertion else {
+            continue;
+        };
+        let BoolExpr::And(children) = child.as_ref() else {
+            continue;
+        };
+        let mut pending = children.iter().collect::<Vec<_>>();
+        while let Some(expression) = pending.pop() {
+            if let BoolExpr::And(grandchildren) = expression {
+                savings = savings.saturating_add(grandchildren.len().saturating_add(1));
+                pending.extend(grandchildren);
+            }
+        }
+        savings = savings.saturating_add(children.len().saturating_add(1));
+    }
+    savings
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -6075,7 +6317,22 @@ fn direct_negated_root_enabled() -> Result<bool, String> {
     zero_one_env_setting(DIRECT_NEGATED_ROOT_ENV, false)
 }
 
+fn direct_negated_root_auto_enabled() -> Result<bool, String> {
+    zero_one_env_setting(DIRECT_NEGATED_ROOT_AUTO_ENV, false)
+}
+
+fn finite_rook_symmetry_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_ROOK_SYMMETRY_ENV, false)
+}
+
+fn stream_parser_enabled() -> Result<bool, String> {
+    zero_one_env_setting(STREAM_PARSER_ENV, false)
+}
+
 fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
+    direct_negated_root_auto_enabled()?;
+    finite_rook_symmetry_enabled()?;
+    selected_phase_scout_mode()?;
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
@@ -6266,12 +6523,23 @@ fn solve_bool_problem(
     let cnf_start = Instant::now();
     let mut cnf = CnfProblem::new();
     atomize_bool_data_terms(&mut cnf, bool_problem);
+    let auto_direct_negated_root = direct_negated_root_auto_enabled().unwrap_or(false);
+    let flattening_savings = if auto_direct_negated_root {
+        negated_root_flattening_savings(&bool_problem.assertions)
+    } else {
+        0
+    };
+    let direct_negated_root = root_cnf_options.direct_negated_root
+        || (auto_direct_negated_root
+            && flattening_savings >= DIRECT_NEGATED_ROOT_AUTO_MIN_SAVED_CLAUSES);
+    profile_measurement(
+        "direct_negated_root_auto",
+        u128::from(direct_negated_root),
+        flattening_savings,
+    );
     if root_cnf_options.direct_root_cnf {
         for assertion in &bool_problem.assertions {
-            cnf.add_direct_assertion_with_negated_root(
-                assertion,
-                root_cnf_options.direct_negated_root,
-            );
+            cnf.add_direct_assertion_with_negated_root(assertion, direct_negated_root);
         }
     } else {
         for assertion in &bool_problem.assertions {
@@ -6384,7 +6652,7 @@ fn solve_bool_problem(
                 EagerSolveOutcome::Solved(result) => {
                     return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
                 }
-                EagerSolveOutcome::InvalidTheoryModel(conflict_count) => {
+                EagerSolveOutcome::InvalidTheoryModel(evidence) => {
                     let mut completed_cnf = None;
                     let mut prior_sat_calls = 1;
                     if dynamic_full_ackermann_before_refinement(
@@ -6394,13 +6662,17 @@ fn solve_bool_problem(
                         arena.apps.len(),
                         finite_added,
                     ) {
-                        profile_measurement("invalid_model_dynamic_ackermann", 1, conflict_count);
+                        profile_measurement(
+                            "invalid_model_dynamic_ackermann",
+                            1,
+                            evidence.conflicts.len(),
+                        );
                         let (completed, completed_outcome) =
                             solve_dynamic_full_ackermann_with_negated_root(
                                 arena,
                                 bool_problem,
                                 &accepted_equality_facts,
-                                root_cnf_options.direct_negated_root,
+                                direct_negated_root,
                             );
                         prior_sat_calls += 1;
                         match completed_outcome {
@@ -6423,12 +6695,14 @@ fn solve_bool_problem(
                     if use_cadical_refine_after_invalid_model() {
                         profile_measurement("invalid_model_cadical_refine", 1, 0);
                         let fallback_cnf = completed_cnf.as_ref().unwrap_or(&cnf);
+                        let phase_evidence = completed_cnf.is_none().then_some(&evidence);
                         if let Some((result, sat_calls, theory_lemmas)) = solve_cadical_euf_refining(
                             fallback_cnf,
                             arena,
                             bool_problem.true_term,
                             bool_problem.false_term,
                             refinement_mode,
+                            phase_evidence,
                         ) {
                             return Some((
                                 result,
@@ -6462,6 +6736,7 @@ fn solve_bool_problem(
                 bool_problem.true_term,
                 bool_problem.false_term,
                 refinement_mode,
+                None,
             ) {
                 return Some((
                     result,
@@ -6719,7 +6994,12 @@ fn parse_one(toks: &mut [Tok], pos: &mut usize) -> Result<Sexp, String> {
 }
 
 fn parse_problem(input: &str) -> Result<Problem, String> {
-    parse_problem_with_scoped_let_mode(input, selected_scoped_let_mode()?)
+    let scoped_let_mode = selected_scoped_let_mode()?;
+    if stream_parser_enabled()? {
+        smt2_stream::parse_problem(input, scoped_let_mode)
+    } else {
+        parse_problem_with_scoped_let_mode(input, scoped_let_mode)
+    }
 }
 
 fn parse_problem_with_scoped_let_mode(
@@ -6991,6 +7271,361 @@ fn fabric_shadow_file(path: &str) -> Result<i32, String> {
         fabric::semantic::render_census_json(&projection, input.len(), parse_ns, projection_ns,)
     );
     Ok(0)
+}
+
+#[cfg(feature = "fabric")]
+fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, String> {
+    let total_start = Instant::now();
+    let input = if path == "-" {
+        let mut input = String::new();
+        io::stdin()
+            .lock()
+            .read_to_string(&mut input)
+            .map_err(|error| format!("failed to read Fabric input from stdin: {error}"))?;
+        input
+    } else {
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?
+    };
+    let parse_start = Instant::now();
+    let problem = parse_problem(&input)?;
+    let parse_ns = parse_start.elapsed().as_nanos();
+    let projection_start = Instant::now();
+    let projection = fabric::semantic::project(&problem)
+        .map_err(|error| format!("Fabric semantic projection failed: {error}"))?;
+    let projection_ns = projection_start.elapsed().as_nanos();
+    if engine == "cadical-up" {
+        let lowering_start = Instant::now();
+        let formula =
+            fabric::bool_cnf::lower(&projection, fabric::bool_cnf::LoweringCaps::default())
+                .map_err(|error| format!("Fabric Boolean lowering failed: {error}"))?;
+        let lowering_ns = lowering_start.elapsed().as_nanos();
+        let solve_start = Instant::now();
+        let mut caps = fabric::cadical_up::CadicalUpCaps::default();
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_LAZY_REASONS") {
+            caps.lazy_propagation_reasons = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => return Err("EUF_VIPER_FABRIC_LAZY_REASONS must be 0 or 1".to_owned()),
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS") {
+            caps.indexed_class_members = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT") {
+            caps.pair_filtered_impact_atoms = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_DEMAND_FLUSH") {
+            caps.demand_driven_propagation_flush = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => return Err("EUF_VIPER_FABRIC_DEMAND_FLUSH must be 0 or 1".to_owned()),
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER") {
+            caps.narrow_explicit_merge_frontier = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_SPARSE_ROOT") {
+            caps.sparse_root_initialization = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => return Err("EUF_VIPER_FABRIC_SPARSE_ROOT must be 0 or 1".to_owned()),
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION") {
+            caps.post_construction_congruence_validation = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err(
+                        "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION must be 0 or 1".to_owned()
+                    );
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PROFILE_CALLBACKS") {
+            caps.profile_callback_timings = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_PROFILE_CALLBACKS must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS") {
+            caps.allocation_free_assignment_decode = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err(
+                        "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS must be 0 or 1".to_owned(),
+                    );
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_THEORY_PROPAGATION") {
+            caps.propagate_implied_atoms = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_THEORY_PROPAGATION must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION") {
+            caps.propagate_explicit_disequalities = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err(
+                        "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION must be 0 or 1".to_owned()
+                    );
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_EQUALITY_PROPAGATION") {
+            caps.propagate_explicit_equalities = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_EQUALITY_PROPAGATION must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES") {
+            let raw = raw.into_string().map_err(|_| {
+                "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES is not UTF-8".to_owned()
+            })?;
+            caps.propagation_batch_updates = raw.parse::<usize>().map_err(|_| {
+                "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES must be a positive integer".to_owned()
+            })?;
+            if caps.propagation_batch_updates == 0 {
+                return Err(
+                    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES must be positive".to_owned(),
+                );
+            }
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP") {
+            let raw = raw
+                .into_string()
+                .map_err(|_| "EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP is not UTF-8".to_owned())?;
+            caps.congruence.max_explanation_edge_visits = raw.parse::<usize>().map_err(|_| {
+                "EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP must be a nonnegative integer".to_owned()
+            })?;
+        }
+        let report = fabric::cadical_up::solve(&projection, &formula, caps);
+        let solve_ns = solve_start.elapsed().as_nanos();
+        match &report.outcome {
+            fabric::cadical_up::CadicalUpOutcome::Sat { .. } => println!("sat"),
+            fabric::cadical_up::CadicalUpOutcome::Unsat => println!("unsat"),
+            fabric::cadical_up::CadicalUpOutcome::Abstain { reason } => {
+                println!("unknown");
+                if with_stats {
+                    eprintln!("fabric_abstention={reason:?}");
+                }
+            }
+        }
+        if with_stats {
+            eprintln!(
+                "fabric_engine={engine} parse_ns={parse_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} solve_ns={solve_ns} total_ns={} theory_log_entries={} stats={:?}",
+                total_start.elapsed().as_nanos(),
+                report.theory_log.len(),
+                report.stats,
+            );
+        }
+        return Ok(0);
+    }
+    let solve_start = Instant::now();
+    let caps = fabric::engine::EngineCaps::default();
+    let outcome = match engine {
+        "scan" => fabric::engine::solve_reference(&projection, caps),
+        "incremental" => fabric::engine::solve_incremental_reference(&projection, caps),
+        "watched" => fabric::engine::solve_incremental_watched_reference(&projection, caps),
+        "learned" => fabric::engine::solve_incremental_learned_reference(&projection, caps),
+        "action" => fabric::engine::solve_incremental_action_nogood_reference(&projection, caps),
+        other => {
+            return Err(format!(
+                "unknown Fabric engine `{other}`; expected scan, incremental, watched, learned, action, or cadical-up"
+            ));
+        }
+    }
+    .map_err(|error| format!("Fabric {engine} engine failed: {error}"))?;
+    let solve_ns = solve_start.elapsed().as_nanos();
+    match &outcome {
+        fabric::engine::ReferenceOutcome::Sat { .. } => println!("sat"),
+        fabric::engine::ReferenceOutcome::Unsat { .. } => println!("unsat"),
+        fabric::engine::ReferenceOutcome::Abstained { reason, .. } => {
+            println!("unknown");
+            if with_stats {
+                eprintln!("fabric_abstention={reason}");
+            }
+        }
+    }
+    if with_stats {
+        eprintln!(
+            "fabric_engine={engine} parse_ns={parse_ns} projection_ns={projection_ns} solve_ns={solve_ns} total_ns={} stats={:?}",
+            total_start.elapsed().as_nanos(),
+            outcome.stats(),
+        );
+    }
+    Ok(0)
+}
+
+#[cfg(feature = "fabric")]
+fn parse_fabric_solve_args(args: &[String]) -> Result<(&str, &str, bool), String> {
+    let mut engine = None;
+    let mut file = None;
+    let mut with_stats = false;
+    let mut index = 2usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--engine" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(|| {
+                    "usage: euf-viper fabric-solve --engine ENGINE [--stats] FILE".to_owned()
+                })?;
+                if engine.replace(value.as_str()).is_some() {
+                    return Err("Fabric engine was specified more than once".to_owned());
+                }
+            }
+            "--stats" => with_stats = true,
+            value if value.starts_with("--") => {
+                return Err(format!("unknown fabric-solve option `{value}`"));
+            }
+            value => {
+                if file.replace(value).is_some() {
+                    return Err("fabric-solve accepts exactly one input file".to_owned());
+                }
+            }
+        }
+        index += 1;
+    }
+    Ok((
+        file.ok_or_else(|| {
+            "usage: euf-viper fabric-solve --engine ENGINE [--stats] FILE".to_owned()
+        })?,
+        engine.ok_or_else(|| "fabric-solve requires --engine ENGINE".to_owned())?,
+        with_stats,
+    ))
+}
+
+#[cfg(feature = "fabric")]
+fn parse_fabric_u64(value: &str, label: &str) -> Result<u64, String> {
+    let parsed = if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16)
+    } else {
+        value.parse::<u64>()
+    };
+    parsed.map_err(|error| format!("invalid {label} `{value}`: {error}"))
+}
+
+#[cfg(feature = "fabric")]
+fn json_string(value: &str) -> String {
+    let mut output = String::with_capacity(value.len().saturating_add(2));
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            character if character <= '\u{1f}' => {
+                output.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
+}
+
+#[cfg(feature = "fabric")]
+fn fabric_differential(args: &[String]) -> Result<i32, String> {
+    let mut cases = 10_000u64;
+    let mut first = 0u64;
+    let mut seed = fabric::generated_differential::DEFAULT_CAMPAIGN_SEED;
+    let mut index = 2usize;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        index += 1;
+        let value = args
+            .get(index)
+            .ok_or_else(|| format!("fabric-differential option `{flag}` requires a value"))?;
+        match flag {
+            "--cases" => cases = parse_fabric_u64(value, "case count")?,
+            "--first" => first = parse_fabric_u64(value, "first case")?,
+            "--seed" => seed = parse_fabric_u64(value, "campaign seed")?,
+            other => return Err(format!("unknown fabric-differential option `{other}`")),
+        }
+        index += 1;
+    }
+    if cases == 0 {
+        return Err("fabric-differential --cases must be at least one".to_owned());
+    }
+    let mut spec = fabric::generated_differential::CampaignSpec::new(seed, cases);
+    spec.first_case = fabric::generated_differential::CaseId::new(first);
+    let start = Instant::now();
+    let outcome = fabric::generated_differential::run_campaign(spec)
+        .map_err(|error| format!("Fabric generated differential failed: {error}"))?;
+    let elapsed_ns = start.elapsed().as_nanos();
+    match outcome {
+        fabric::generated_differential::CampaignOutcome::Complete(report) => {
+            println!(
+                "{{\"schema_version\":1,\"status\":\"complete\",\"generator_version\":{},\"seed\":{},\"first_case\":{},\"cases_run\":{},\"sat_cases\":{},\"unsat_cases\":{},\"abstained_cases\":{},\"oracle_cases\":{},\"oracle_skipped\":{},\"total_terms\":{},\"total_atoms\":{},\"total_expression_nodes\":{},\"campaign_fingerprint\":{},\"elapsed_ns\":{}}}",
+                fabric::generated_differential::GENERATOR_VERSION,
+                report.seed,
+                report.first_case.raw(),
+                report.cases_run,
+                report.sat_cases,
+                report.unsat_cases,
+                report.abstained_cases,
+                report.oracle_cases,
+                report.oracle_skipped,
+                report.total_terms,
+                report.total_atoms,
+                report.total_expression_nodes,
+                report.campaign_fingerprint,
+                elapsed_ns,
+            );
+            Ok(0)
+        }
+        fabric::generated_differential::CampaignOutcome::Disagreement {
+            cases_checked,
+            witness,
+        } => {
+            println!(
+                "{{\"schema_version\":1,\"status\":\"disagreement\",\"generator_version\":{},\"seed\":{},\"first_case\":{},\"cases_checked\":{},\"witness\":{},\"elapsed_ns\":{}}}",
+                fabric::generated_differential::GENERATOR_VERSION,
+                seed,
+                first,
+                cases_checked,
+                json_string(&witness.to_string()),
+                elapsed_ns,
+            );
+            Ok(2)
+        }
+    }
 }
 
 fn read_parse_check_input<R: Read>(path: &str, stdin: &mut R) -> Result<String, String> {
@@ -7301,7 +7936,10 @@ fn base_usage() -> &'static str {
 
 fn usage() -> String {
     #[cfg(feature = "fabric")]
-    return format!("{}\n  euf-viper fabric-shadow FILE", base_usage());
+    return format!(
+        "{}\n  euf-viper fabric-shadow FILE\n  euf-viper fabric-solve --engine ENGINE [--stats] FILE\n  euf-viper fabric-differential [--cases N] [--first N] [--seed N|0xHEX]",
+        base_usage()
+    );
     #[cfg(not(feature = "fabric"))]
     base_usage().to_owned()
 }
@@ -7344,6 +7982,13 @@ fn run() -> Result<i32, String> {
             }
             fabric_shadow_file(file)
         }
+        #[cfg(feature = "fabric")]
+        "fabric-solve" => {
+            let (file, engine, with_stats) = parse_fabric_solve_args(&args)?;
+            fabric_solve_file(file, engine, with_stats)
+        }
+        #[cfg(feature = "fabric")]
+        "fabric-differential" => fabric_differential(&args),
         "parse-check" => {
             let file = args.get(2).ok_or_else(|| usage().to_owned())?;
             if args.len() != 3 {
@@ -7620,6 +8265,33 @@ mod tests {
                 direct_root_cnf: true,
                 direct_negated_root: false,
             }
+        );
+    }
+
+    #[test]
+    fn direct_negated_root_auto_uses_exact_tseitin_savings() {
+        for (value, expected) in [
+            (None, Ok(false)),
+            (Some("0"), Ok(false)),
+            (Some("1"), Ok(true)),
+        ] {
+            assert_eq!(
+                parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_AUTO_ENV, value, false),
+                expected
+            );
+        }
+        assert!(
+            parse_zero_one_setting_with_default(DIRECT_NEGATED_ROOT_AUTO_ENV, Some("auto"), false)
+                .is_err()
+        );
+
+        let atom = |term| BoolExpr::Atom(BoolAtomKey::BoolTerm(term));
+        let nested = (1..49).fold(atom(0), |left, term| BoolExpr::And(vec![left, atom(term)]));
+        let blocker = BoolExpr::Not(Box::new(nested));
+        assert_eq!(negated_root_flattening_savings(&[blocker.clone()]), 144);
+        assert!(
+            negated_root_flattening_savings(&vec![blocker; 695])
+                >= DIRECT_NEGATED_ROOT_AUTO_MIN_SAVED_CLAUSES
         );
     }
 
@@ -8242,11 +8914,22 @@ mod tests {
             atom(0),
             BoolExpr::And(vec![atom(1), BoolExpr::Not(Box::new(atom(2)))]),
         ]))));
-        assert_eq!(nested_and.var_count(), 4);
-        assert_eq!(
-            nested_and.clauses,
-            vec![vec![-4, 2], vec![-4, -3], vec![4, -2, 3], vec![-1, -4]]
-        );
+        assert_eq!(nested_and.var_count(), 3);
+        assert_eq!(nested_and.clauses, vec![vec![-1, -2, 3]]);
+
+        let nested_constants = encode(BoolExpr::Not(Box::new(BoolExpr::And(vec![
+            atom(0),
+            BoolExpr::And(vec![BoolExpr::Const(true), atom(1)]),
+        ]))));
+        assert_eq!(nested_constants.var_count(), 2);
+        assert_eq!(nested_constants.clauses, vec![vec![-1, -2]]);
+
+        let nested_false = encode(BoolExpr::Not(Box::new(BoolExpr::And(vec![
+            atom(0),
+            BoolExpr::And(vec![BoolExpr::Const(false), atom(1)]),
+        ]))));
+        assert_eq!(nested_false.var_count(), 0);
+        assert!(nested_false.clauses.is_empty());
 
         let double_negation = encode(BoolExpr::Not(Box::new(BoolExpr::Not(Box::new(
             BoolExpr::And(vec![atom(0), atom(1)]),
@@ -8736,6 +9419,8 @@ mod tests {
             bool_problem.false_term,
             refinement_mode,
             max_rounds,
+            PhaseScoutMode::Off,
+            None,
             &mut telemetry,
         );
         (outcome, telemetry, initial_vars, cnf.var_count())
@@ -9212,6 +9897,77 @@ mod tests {
             (check-sat)
         ";
         assert_eq!(solve_text(input), SolveResult::Unsat);
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn finite_symmetry_threshold_honors_explicit_small_app_arm() {
+        assert!(finite_symmetry_requested(147, "hybrid", 0));
+        assert!(finite_symmetry_requested(147, "lex", 147));
+        assert!(!finite_symmetry_requested(147, "hybrid", 148));
+        assert!(!finite_symmetry_requested(10_000, "off", 0));
+    }
+
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    fn finite_rook_symmetry_requires_a_complete_regular_guard_graph() {
+        let mut source = String::from(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-fun e0 () U)\n\
+             (declare-fun e1 () U)\n\
+             (declare-fun e2 () U)\n\
+             (declare-fun op (U U) U)\n\
+             (assert (distinct e0 e1 e2))\n",
+        );
+        for row in 0..3 {
+            for column in 0..3 {
+                source.push_str(&format!(
+                    "(assert (or (= (op e{row} e{column}) e0) (= (op e{row} e{column}) e1) (= (op e{row} e{column}) e2)))\n"
+                ));
+            }
+        }
+        let mut guards = Vec::new();
+        for row in 0..3 {
+            for left in 0..3 {
+                for right in (left + 1)..3 {
+                    guards.push(format!(
+                        "(or (= e0 e1) (not (= (op e{row} e{left}) (op e{row} e{right}))))"
+                    ));
+                    guards.push(format!(
+                        "(or (= e0 e1) (not (= (op e{left} e{row}) (op e{right} e{row}))))"
+                    ));
+                }
+            }
+        }
+        source.push_str(&format!("(assert (and {}))\n", guards.join(" ")));
+        source.push_str("(check-sat)\n");
+
+        let problem = parse_problem(&source).unwrap();
+        let mut complete = finite_analysis::FiniteAnalysisContext::default();
+        assert!(finite_rook_symmetry_candidate(
+            &mut complete,
+            &problem.arena,
+            problem.bool_problem.as_ref().unwrap()
+        ));
+
+        let incomplete_source = source.replacen(&guards[0], "true", 1);
+        let incomplete_problem = parse_problem(&incomplete_source).unwrap();
+        let mut incomplete = finite_analysis::FiniteAnalysisContext::default();
+        assert!(!finite_rook_symmetry_candidate(
+            &mut incomplete,
+            &incomplete_problem.arena,
+            incomplete_problem.bool_problem.as_ref().unwrap()
+        ));
+
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_ROOK_SYMMETRY_ENV, None, false),
+            Ok(false)
+        );
+        assert!(
+            parse_zero_one_setting_with_default(FINITE_ROOK_SYMMETRY_ENV, Some("rook"), false)
+                .is_err()
+        );
     }
 
     #[cfg(feature = "finite-symmetry")]
@@ -9731,6 +10487,37 @@ mod tests {
     }
 
     #[test]
+    fn phase_scout_mode_is_strict_and_defaults_off() {
+        assert_eq!(parse_phase_scout_mode(None), Ok(PhaseScoutMode::Off));
+        assert_eq!(parse_phase_scout_mode(Some("off")), Ok(PhaseScoutMode::Off));
+        assert_eq!(
+            parse_phase_scout_mode(Some("first-model-core")),
+            Ok(PhaseScoutMode::FirstModelCore)
+        );
+        assert!(parse_phase_scout_mode(Some("on")).is_err());
+        assert!(parse_phase_scout_mode(Some("first_model_core")).is_err());
+    }
+
+    #[test]
+    fn phase_scout_rechecks_captured_evidence_against_the_same_cnf() {
+        let mut cnf = CnfProblem::new();
+        for _ in 0..3 {
+            cnf.new_var(None);
+        }
+        cnf.clauses.push(vec![1, -2]);
+        cnf.clauses.push(vec![-2, 3]);
+        let evidence = InvalidModelEvidence {
+            assignment: vec![0, -1, 1, -1],
+            conflicts: vec![vec![1, -2], vec![-2, 3]],
+        };
+        assert_eq!(first_model_phase_scout(&cnf, &evidence), Some(vec![-2]));
+
+        let mut malformed = evidence;
+        malformed.conflicts[0][0] = -1;
+        assert_eq!(first_model_phase_scout(&cnf, &malformed), None);
+    }
+
+    #[test]
     fn model_cut_validator_emits_exact_existing_atom_clause() {
         let mut arena = TermArena::default();
         let a = arena.intern(0, Vec::new());
@@ -9860,6 +10647,55 @@ mod tests {
         assert_eq!(telemetry.cut_width_max, 2);
         assert!(telemetry.candidate_clause_generation_avoided);
         assert!(telemetry.group_clause_loading_avoided);
+    }
+
+    #[test]
+    fn phase_scout_handoff_preserves_an_unsat_euf_result() {
+        let input = "
+            (set-logic QF_UF)
+            (declare-sort U 0)
+            (declare-fun a () U)
+            (declare-fun b () U)
+            (declare-fun f (U) U)
+            (assert (= a b))
+            (assert (distinct (f a) (f b)))
+            (check-sat)
+        ";
+        let problem = parse_problem(input).unwrap();
+        let bool_problem = problem.bool_problem.as_ref().unwrap();
+        let mut cnf = CnfProblem::new();
+        atomize_bool_data_terms(&mut cnf, bool_problem);
+        for assertion in &bool_problem.assertions {
+            cnf.add_assertion(assertion);
+        }
+        let evidence = match solve_kissat_euf_once(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            false,
+        ) {
+            EagerSolveOutcome::InvalidTheoryModel(evidence) => evidence,
+            outcome => panic!("expected an invalid eager model, got {outcome:?}"),
+        };
+        let expected_conflicts = evidence.conflicts.len();
+        let mut telemetry = CadicalRefinementTelemetry::default();
+        let outcome = solve_cadical_euf_refining_with_limit(
+            &cnf,
+            &problem.arena,
+            bool_problem.true_term,
+            bool_problem.false_term,
+            RefinementMode::ModelCuts,
+            8,
+            PhaseScoutMode::FirstModelCore,
+            Some(&evidence),
+            &mut telemetry,
+        );
+        assert_eq!(outcome.map(|entry| entry.0), Some(SolveResult::Unsat));
+        assert!(telemetry.phase_scout_applied);
+        assert!(telemetry.phase_scout_selected_literals > 0);
+        assert_eq!(telemetry.phase_scout_input_clauses, expected_conflicts);
+        assert!(!telemetry.phase_scout_first_model_valid);
     }
 
     #[test]

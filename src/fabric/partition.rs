@@ -17,6 +17,8 @@ use std::error::Error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rustc_hash::FxHashMap;
+
 pub const MAX_TERMS: u64 = u32::MAX as u64 + 1;
 static NEXT_PARTITION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -168,6 +170,25 @@ pub enum Relation {
     Equal,
     Disequal,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProspectiveMergeIncidenceResource {
+    NeighborClasses,
+    Terms,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProspectiveMergeIncidenceOutcome {
+    Complete {
+        kept: TermId,
+        terms: Vec<TermId>,
+    },
+    LimitExceeded {
+        resource: ProspectiveMergeIncidenceResource,
+        attempted: usize,
+        limit: usize,
+    },
 }
 
 /// The original endpoints and reason of a structural equality merge.
@@ -417,10 +438,11 @@ pub struct Partition {
     parent: Vec<usize>,
     size: Vec<usize>,
     minimum: Vec<TermId>,
+    next_member: Vec<usize>,
     disequalities: Vec<Adjacency>,
     classes: usize,
     merge_records: Vec<MergeRecord>,
-    separation_records: BTreeMap<EdgeId, SeparationRecord>,
+    separation_records: FxHashMap<EdgeId, SeparationRecord>,
     trail: Vec<TrailEntry>,
     next_state_id: u64,
 }
@@ -450,6 +472,7 @@ impl Partition {
         let mut parent = Vec::new();
         let mut size = Vec::new();
         let mut minimum = Vec::new();
+        let mut next_member = Vec::new();
         let mut disequalities = Vec::new();
         parent
             .try_reserve_exact(term_count)
@@ -457,6 +480,9 @@ impl Partition {
         size.try_reserve_exact(term_count)
             .map_err(|_| PartitionError::AllocationFailed)?;
         minimum
+            .try_reserve_exact(term_count)
+            .map_err(|_| PartitionError::AllocationFailed)?;
+        next_member
             .try_reserve_exact(term_count)
             .map_err(|_| PartitionError::AllocationFailed)?;
         disequalities
@@ -471,6 +497,7 @@ impl Partition {
             parent.push(index);
             size.push(1);
             minimum.push(term);
+            next_member.push(index);
             disequalities.push(BTreeMap::new());
         }
 
@@ -485,10 +512,11 @@ impl Partition {
             parent,
             size,
             minimum,
+            next_member,
             disequalities,
             classes: term_count,
             merge_records: Vec::new(),
-            separation_records: BTreeMap::new(),
+            separation_records: FxHashMap::default(),
             trail: Vec::new(),
             next_state_id: 1,
         })
@@ -520,6 +548,32 @@ impl Partition {
         self.separation_records.len()
     }
 
+    /// Number of active merge and separation updates in rollback order.
+    pub fn update_count(&self) -> usize {
+        self.trail.len()
+    }
+
+    /// Stable endpoints of every active update after `depth`, in trail order.
+    /// This is a read-only invalidation aid; it exposes neither union roots nor
+    /// mutable rollback internals.
+    pub fn update_endpoints_since(&self, depth: usize) -> PartitionResult<Vec<(TermId, TermId)>> {
+        let Some(suffix) = self.trail.get(depth..) else {
+            return Err(PartitionError::InvalidSnapshot(SnapshotError::FutureState));
+        };
+        let mut endpoints = Vec::new();
+        endpoints
+            .try_reserve_exact(suffix.len())
+            .map_err(|_| PartitionError::AllocationFailed)?;
+        for entry in suffix {
+            let pair = match &entry.undo {
+                Undo::Merge { record, .. } => (record.left, record.right),
+                Undo::Separation { record, .. } => (record.left, record.right),
+            };
+            endpoints.push(pair);
+        }
+        Ok(endpoints)
+    }
+
     /// Number of distinct current class-to-class disequality edges.
     pub fn disequality_edge_count(&self) -> PartitionResult<usize> {
         let mut directed = 0usize;
@@ -544,6 +598,45 @@ impl Partition {
             ));
         }
         Ok(directed / 2)
+    }
+
+    /// Returns the canonical representatives of every class currently known
+    /// disequal to `term`'s class. The result is independent of union roots and
+    /// sorted by stable minimum-term representative.
+    pub fn disequal_class_representatives(&self, term: TermId) -> PartitionResult<Vec<TermId>> {
+        let root = self.root_of_term(term)?;
+        self.check_root_adjacency(root)?;
+        let adjacency = self
+            .disequalities
+            .get(root)
+            .ok_or(PartitionError::InvariantViolation(
+                "class root has no disequality adjacency",
+            ))?;
+        let mut representatives = Vec::new();
+        representatives
+            .try_reserve_exact(adjacency.len())
+            .map_err(|_| PartitionError::AllocationFailed)?;
+        for &neighbor_root in adjacency.keys() {
+            if self.parent.get(neighbor_root).copied() != Some(neighbor_root) {
+                return Err(PartitionError::InvariantViolation(
+                    "disequality adjacency names a non-root class",
+                ));
+            }
+            self.check_root_adjacency(neighbor_root)?;
+            representatives.push(*self.minimum.get(neighbor_root).ok_or(
+                PartitionError::InvariantViolation(
+                    "disequality neighbor has no canonical representative",
+                ),
+            )?);
+        }
+        representatives.sort_unstable();
+        representatives.dedup();
+        if representatives.len() != adjacency.len() {
+            return Err(PartitionError::InvariantViolation(
+                "distinct disequality neighbors share a representative",
+            ));
+        }
+        Ok(representatives)
     }
 
     pub fn contains_term(&self, term: TermId) -> bool {
@@ -607,6 +700,31 @@ impl Partition {
 
     pub fn class_members(&self, term: TermId) -> PartitionResult<Vec<TermId>> {
         let wanted_root = self.root_of_term(term)?;
+        let class_size = self.class_size(term)?;
+        let mut members = Vec::new();
+        members
+            .try_reserve_exact(class_size)
+            .map_err(|_| PartitionError::AllocationFailed)?;
+        let mut current = wanted_root;
+        for _ in 0..class_size {
+            members.push(self.term_from_index(current)?);
+            current = *self
+                .next_member
+                .get(current)
+                .ok_or(PartitionError::InvariantViolation(
+                    "class member link is out of range",
+                ))?;
+        }
+        if current != wanted_root {
+            return Err(PartitionError::InvariantViolation(
+                "class member cycle does not match the stored class size",
+            ));
+        }
+        Ok(members)
+    }
+
+    pub(crate) fn class_members_by_scan(&self, term: TermId) -> PartitionResult<Vec<TermId>> {
+        let wanted_root = self.root_of_term(term)?;
         let mut members = Vec::with_capacity(self.class_size(term)?);
         for index in 0..self.term_count() {
             if self.root_index(index)? == wanted_root {
@@ -614,6 +732,90 @@ impl Partition {
             }
         }
         Ok(members)
+    }
+
+    /// Returns a pre-merge incidence frontier for a currently distinct pair.
+    /// Every relation changed by a successful merge has at least one endpoint
+    /// in this set, so scanning source atoms incident to these terms is sound.
+    pub(crate) fn prospective_merge_incidence_terms(
+        &self,
+        left: TermId,
+        right: TermId,
+        max_neighbor_classes: usize,
+        max_terms: usize,
+    ) -> PartitionResult<ProspectiveMergeIncidenceOutcome> {
+        let left_root = self.root_of_term(left)?;
+        let right_root = self.root_of_term(right)?;
+        if left_root == right_root {
+            return Ok(ProspectiveMergeIncidenceOutcome::Complete {
+                kept: self.term_from_index(left_root)?,
+                terms: Vec::new(),
+            });
+        }
+        self.check_root_adjacency(left_root)?;
+        self.check_root_adjacency(right_root)?;
+        let (kept, removed) = self.choose_union_roots(left_root, right_root)?;
+        let removed_size = *self
+            .size
+            .get(removed)
+            .ok_or(PartitionError::InvariantViolation(
+                "removed root has no class size",
+            ))?;
+        if removed_size > max_terms {
+            return Ok(ProspectiveMergeIncidenceOutcome::LimitExceeded {
+                resource: ProspectiveMergeIncidenceResource::Terms,
+                attempted: removed_size,
+                limit: max_terms,
+            });
+        }
+        let mut terms = self.class_members(self.term_from_index(removed)?)?;
+        let mut neighbor_classes = 0usize;
+        for &neighbor in self.disequalities[removed].keys() {
+            if neighbor == kept {
+                continue;
+            }
+            neighbor_classes =
+                neighbor_classes
+                    .checked_add(1)
+                    .ok_or(PartitionError::InvariantViolation(
+                        "prospective merge neighbor count overflowed",
+                    ))?;
+            if neighbor_classes > max_neighbor_classes {
+                return Ok(ProspectiveMergeIncidenceOutcome::LimitExceeded {
+                    resource: ProspectiveMergeIncidenceResource::NeighborClasses,
+                    attempted: neighbor_classes,
+                    limit: max_neighbor_classes,
+                });
+            }
+            let neighbor_size =
+                *self
+                    .size
+                    .get(neighbor)
+                    .ok_or(PartitionError::InvariantViolation(
+                        "neighbor root has no class size",
+                    ))?;
+            let attempted = terms.len().checked_add(neighbor_size).ok_or(
+                PartitionError::InvariantViolation("prospective merge frontier size overflowed"),
+            )?;
+            if attempted > max_terms {
+                return Ok(ProspectiveMergeIncidenceOutcome::LimitExceeded {
+                    resource: ProspectiveMergeIncidenceResource::Terms,
+                    attempted,
+                    limit: max_terms,
+                });
+            }
+            let members = self.class_members(self.term_from_index(neighbor)?)?;
+            terms
+                .try_reserve(members.len())
+                .map_err(|_| PartitionError::AllocationFailed)?;
+            terms.extend(members);
+        }
+        terms.sort_unstable();
+        terms.dedup();
+        Ok(ProspectiveMergeIncidenceOutcome::Complete {
+            kept: self.term_from_index(kept)?,
+            terms,
+        })
     }
 
     pub fn relation(&self, left: TermId, right: TermId) -> PartitionResult<Relation> {
@@ -770,7 +972,13 @@ impl Partition {
     }
 
     pub fn separation_records(&self) -> Vec<SeparationRecord> {
-        self.separation_records.values().copied().collect()
+        let mut records = self
+            .separation_records
+            .iter()
+            .map(|(&edge_id, &record)| (edge_id, record))
+            .collect::<Vec<_>>();
+        records.sort_unstable_by_key(|&(edge_id, _)| edge_id);
+        records.into_iter().map(|(_, record)| record).collect()
     }
 
     /// Enumerates classes by minimum term; members are in increasing term order.
@@ -934,6 +1142,7 @@ impl Partition {
                 .extend(edge_ids.iter().copied());
         }
         self.disequalities[removed].clear();
+        self.next_member.swap(kept, removed);
         self.parent[removed] = kept;
         self.size[kept] = new_size;
         self.minimum[kept] = new_minimum;
@@ -1088,6 +1297,7 @@ impl Partition {
         let term_count = self.term_count();
         if self.size.len() != term_count
             || self.minimum.len() != term_count
+            || self.next_member.len() != term_count
             || self.disequalities.len() != term_count
         {
             return Err(PartitionError::InvariantViolation(
@@ -1110,6 +1320,7 @@ impl Partition {
         }
 
         let mut actual_classes = 0usize;
+        let mut listed_members = vec![false; term_count];
         for index in 0..term_count {
             if self.parent[index] == index {
                 actual_classes += 1;
@@ -1123,6 +1334,24 @@ impl Partition {
                         "root canonical minimum is incorrect",
                     ));
                 }
+                let mut current = index;
+                for _ in 0..self.size[index] {
+                    if current >= term_count
+                        || listed_members[current]
+                        || self.root_index(current)? != index
+                    {
+                        return Err(PartitionError::InvariantViolation(
+                            "class member cycle contains an invalid member",
+                        ));
+                    }
+                    listed_members[current] = true;
+                    current = self.next_member[current];
+                }
+                if current != index {
+                    return Err(PartitionError::InvariantViolation(
+                        "class member cycle has the wrong length",
+                    ));
+                }
                 self.check_root_adjacency(index)?;
             } else if !self.disequalities[index].is_empty() {
                 return Err(PartitionError::InvariantViolation(
@@ -1133,6 +1362,11 @@ impl Partition {
         if actual_classes != self.classes {
             return Err(PartitionError::InvariantViolation(
                 "stored class count is incorrect",
+            ));
+        }
+        if listed_members.iter().any(|listed| !listed) {
+            return Err(PartitionError::InvariantViolation(
+                "class member cycles do not cover every term",
             ));
         }
 
@@ -1421,6 +1655,7 @@ impl Partition {
                 }
                 self.disequalities[kept] = kept_adjacency;
                 self.disequalities[removed] = removed_adjacency;
+                self.next_member.swap(kept, removed);
                 self.parent[removed] = removed;
                 self.size[kept] = kept_size;
                 self.minimum[kept] = kept_minimum;
@@ -1602,6 +1837,41 @@ mod tests {
         ReasonId::new(raw)
     }
 
+    const FOUR_PAIRS: [(u32, u32); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+
+    fn four_term_partition(mut encoded: usize) -> Partition {
+        let mut partition = Partition::new(4).unwrap();
+        for (index, &(left, right)) in FOUR_PAIRS.iter().enumerate() {
+            let action = encoded % 3;
+            encoded /= 3;
+            if partition.relation(term(left), term(right)).unwrap() != Relation::Unknown {
+                continue;
+            }
+            match action {
+                0 => {}
+                1 => {
+                    partition
+                        .merge(term(left), term(right), reason(index as u64 + 1))
+                        .unwrap();
+                }
+                2 => {
+                    partition
+                        .separate(term(left), term(right), reason(index as u64 + 1))
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        partition
+    }
+
+    fn four_pair_relations(partition: &Partition) -> Vec<Relation> {
+        FOUR_PAIRS
+            .iter()
+            .map(|&(left, right)| partition.relation(term(left), term(right)).unwrap())
+            .collect()
+    }
+
     #[test]
     fn stable_ids_and_empty_partition_are_checked() {
         assert_eq!(TermId::new(17).raw(), 17);
@@ -1642,6 +1912,10 @@ mod tests {
         assert_eq!(partition.representative(invalid), Err(expected.clone()));
         assert_eq!(partition.class_size(invalid), Err(expected.clone()));
         assert_eq!(partition.class_members(invalid), Err(expected.clone()));
+        assert_eq!(
+            partition.disequal_class_representatives(invalid),
+            Err(expected.clone())
+        );
         assert_eq!(partition.relation(term(0), invalid), Err(expected.clone()));
         assert_eq!(
             partition.equality_reasons(invalid, term(0)),
@@ -1751,6 +2025,24 @@ mod tests {
         assert_eq!(
             partition.disequality_reasons(term(0), term(2)).unwrap(),
             Some(vec![reason(70)])
+        );
+        assert_eq!(
+            partition.disequal_class_representatives(term(0)).unwrap(),
+            vec![term(2)]
+        );
+        assert_eq!(
+            partition.disequal_class_representatives(term(1)).unwrap(),
+            vec![term(2)]
+        );
+        assert_eq!(
+            partition.disequal_class_representatives(term(3)).unwrap(),
+            vec![term(0)]
+        );
+        assert!(
+            partition
+                .disequal_class_representatives(term(4))
+                .unwrap()
+                .is_empty()
         );
         let edge = &partition.canonical_disequalities().unwrap()[0];
         assert_eq!((edge.left, edge.right), (term(0), term(2)));
@@ -1955,6 +2247,89 @@ mod tests {
         }
         assert!(TruthValue::True.is_decided());
         assert!(!TruthValue::Unknown.is_decided());
+    }
+
+    #[test]
+    fn prospective_merge_frontier_touches_every_changed_relation() {
+        for encoded in 0usize..3usize.pow(FOUR_PAIRS.len() as u32) {
+            let partition = four_term_partition(encoded);
+            let before = four_pair_relations(&partition);
+            for &(left, right) in &FOUR_PAIRS {
+                if partition.relation(term(left), term(right)).unwrap() != Relation::Unknown {
+                    continue;
+                }
+
+                let forward = partition
+                    .prospective_merge_incidence_terms(
+                        term(left),
+                        term(right),
+                        usize::MAX,
+                        usize::MAX,
+                    )
+                    .unwrap();
+                let reverse = partition
+                    .prospective_merge_incidence_terms(
+                        term(right),
+                        term(left),
+                        usize::MAX,
+                        usize::MAX,
+                    )
+                    .unwrap();
+                assert_eq!(forward, reverse, "state {encoded}, pair ({left}, {right})");
+
+                let ProspectiveMergeIncidenceOutcome::Complete { terms: forward, .. } = forward
+                else {
+                    unreachable!()
+                };
+
+                let mut merged = four_term_partition(encoded);
+                merged.merge(term(left), term(right), reason(100)).unwrap();
+                let after = four_pair_relations(&merged);
+                for (index, (&old_relation, &new_relation)) in
+                    before.iter().zip(after.iter()).enumerate()
+                {
+                    if old_relation == new_relation {
+                        continue;
+                    }
+                    let (changed_left, changed_right) = FOUR_PAIRS[index];
+                    assert!(
+                        forward.contains(&term(changed_left))
+                            || forward.contains(&term(changed_right)),
+                        "state {encoded}, merge ({left}, {right}), changed relation \
+                         ({changed_left}, {changed_right}), frontier {forward:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prospective_merge_frontier_checks_limits_before_growth() {
+        let mut partition = Partition::new(5).unwrap();
+        partition.merge(term(1), term(2), reason(1)).unwrap();
+        partition.separate(term(0), term(3), reason(2)).unwrap();
+        partition.separate(term(0), term(4), reason(3)).unwrap();
+
+        assert_eq!(
+            partition
+                .prospective_merge_incidence_terms(term(0), term(1), 1, usize::MAX)
+                .unwrap(),
+            ProspectiveMergeIncidenceOutcome::LimitExceeded {
+                resource: ProspectiveMergeIncidenceResource::NeighborClasses,
+                attempted: 2,
+                limit: 1,
+            }
+        );
+        assert_eq!(
+            partition
+                .prospective_merge_incidence_terms(term(0), term(1), usize::MAX, 2)
+                .unwrap(),
+            ProspectiveMergeIncidenceOutcome::LimitExceeded {
+                resource: ProspectiveMergeIncidenceResource::Terms,
+                attempted: 3,
+                limit: 2,
+            }
+        );
     }
 
     #[test]

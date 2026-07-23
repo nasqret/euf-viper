@@ -1,0 +1,259 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 0,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 16,
+      "coverage": 1.0,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 1,
+      "result_counts": {
+        "sat": 16
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 16,
+      "coverage": 1.0,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 1,
+      "result_counts": {
+        "sat": 16
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/tmp/euf-viper-pre-inline-edge",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-pre-inline-edge",
+          "requested": "/tmp/euf-viper-pre-inline-edge",
+          "resolved_path": "/private/tmp/euf-viper-pre-inline-edge",
+          "sha256": "a661c62482b00cf106ed447789e777b18757f8c9656e53bcbd7e1aa28cfbc4f6",
+          "size_bytes": 3599280
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "b064083b4b536495eb6241b2c0a52681c592704fccfd9aba2c67faaba0192dc2",
+          "size_bytes": 3523792
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 305,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "row_index": 0,
+        "sha256": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+        "size_bytes": 1146846
+      }
+    ],
+    "manifest": {
+      "path": "benchmarks/novelty-tail/goel-frogs2.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/novelty-tail/goel-frogs2.jsonl",
+      "sha256": "c46566fb61aaae253a4e9874fd9df64216e3d0ac2a375d71b48865528d935277",
+      "size_bytes": 505
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/tmp/goel-inline-edge-ids-abba.csv",
+      "resolved_path": "/private/tmp/goel-inline-edge-ids-abba.csv",
+      "sha256": "0b49033fecc42a73d7124dcf6a042990d3b18d1f4a26d4236036dc3d8a1fc24b",
+      "size_bytes": 10300,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "/tmp/euf-viper-pre-inline-edge",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 0.18581931250810158,
+  "baseline_correct": 1,
+  "baseline_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "a661c62482b00cf106ed447789e777b18757f8c9656e53bcbd7e1aa28cfbc4f6",
+  "baseline_wins": 1,
+  "candidate": [
+    "target/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 0.18823856249218807,
+  "candidate_correct": 1,
+  "candidate_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "candidate_geometric_speedup": 0.9871479576126337,
+  "candidate_only_correct": 0,
+  "candidate_only_examples": [],
+  "candidate_sha256": "b064083b4b536495eb6241b2c0a52681c592704fccfd9aba2c67faaba0192dc2",
+  "candidate_speedup_by_total": 0.9871479576126337,
+  "candidate_wins": 0,
+  "common_aggregate_speedup": 0.9871479576126337,
+  "common_correct": 1,
+  "common_correct_paths": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2"
+  ],
+  "common_geometric_speedup": 0.9871479576126337,
+  "coverage_delta": 0,
+  "elapsed_s": 6.7494809580093715,
+  "execution_errors": [],
+  "finished_at": "2026-07-22T17:08:30.435466+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "macbook-air-airbartek-6.home",
+    "git_revision": null,
+    "hostname": "macbook-air-airbartek-6.home",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 1,
+  "manifest": "benchmarks/novelty-tail/goel-frogs2.jsonl",
+  "manifest_order": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2"
+  ],
+  "manifest_sha256": "c46566fb61aaae253a4e9874fd9df64216e3d0ac2a375d71b48865528d935277",
+  "measured_runs": 32,
+  "paths": [
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.18581931250810158,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 16,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.18823856249218807,
+        "results": {
+          "sat": 16
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 305,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "row_index": 0
+    }
+  ],
+  "repeats": 16,
+  "runtime_host": "macbook-air-airbartek-6.home",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-22T17:08:23.702492+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 5.0,
+  "timeouts": [],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 4,
+    "timeouts": [],
+    "wrong_answers": []
+  },
+  "warmups": 2,
+  "wrong_answers": []
+}

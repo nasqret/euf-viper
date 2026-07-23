@@ -14,6 +14,9 @@ The machine-readable contract is
 [`viper-fabric-2026-07.json`](../../campaigns/viper-fabric-2026-07.json).
 The bounded closest-prior-art audit and mechanism-specific falsifiers are in
 the [`novelty-boundary ledger`](https://github.com/nasqret/euf-viper/blob/main/research-vault/01-literature/2026-07-22-viper-fabric-novelty-boundaries.md).
+The Dsat prior-art boundary and the gated dynamic-domain experiment are in
+[`the Dsat boundary`](https://github.com/nasqret/euf-viper/blob/main/research-vault/01-literature/2026-07-22-dsat-partition-boundary.md)
+and [`the E2 domain-watch contract`](https://github.com/nasqret/euf-viper/blob/main/research-vault/02-design/2026-07-22-e2-domain-watch-experiment.md).
 
 ## Current Checkpoint
 
@@ -37,6 +40,20 @@ independently replays equality, congruence, native-unit, conflict, and
 UNSAT-root events. Neither reference result path is connected to the public
 solve command.
 
+The continuation branch adds canonical existing-class-or-fresh actions and a
+rollback application-signature index. Binary and canonical branching agree
+with all 676 formulas in the three-term five-partition oracle. They each visit
+1,422 search nodes on that easy panel; on the complete five-partition UNSAT
+blocker the canonical reference visits eight nodes versus seven for binary
+branching. Canonical enumeration alone therefore has no performance credit.
+The signature backend and watched propagation now have an impact-driven
+integration arm: a stable CSR index maps changed quotient terms to source
+atoms, while an all-atom test oracle checks every synchronized state. Stable
+theory reason clauses cover congruence equalities and endpoint-aligned
+disequalities. First-UIP and partition-level learning still must earn their own
+gates; a pre-merge frozen domain-proof repair is active before either can be
+enabled.
+
 The only feature-gated command is `fabric-shadow`. It emits structural and
 timing telemetry but cannot emit `sat` or `unsat`. The strict corpus runner
 binds every manifest, input, and solver hash; rejects malformed output and
@@ -48,12 +65,52 @@ build and result paths.
 The F0 campaign is frozen in
 [`viper-fabric-f0-shadow-v1.json`](../../campaigns/viper-fabric-f0-shadow-v1.json).
 Its full corpus is exactly 7,503 rows with manifest SHA-256
-`9c509b0f...50a08db`. A frozen two-row smoke manifest precedes it. Direct
-access through the VPN gateway IP confirmed that all SLURM controllers are up,
-the read-only corpus is present under `/home`, and campaign storage is present
-under `/work`. At the latest preflight all 308 CPU cores were allocated;
-submission waits for a frozen published Fabric revision and will therefore
-enter the ordinary queue rather than displacing existing work.
+`9c509b0f...50a08db`. A frozen two-row smoke manifest precedes it. The exact
+reference revision
+`51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc` is published on
+`perf-viper-fabric` and passed hosted run `29881100724`. Direct access
+through the VPN gateway IP confirmed that all SLURM controllers are up, the
+read-only corpus is present under `/home`, and campaign storage is present
+under `/work`. The two-row smoke is WMI job `169653` and is pending on
+priority while the CPU cluster is saturated. The full 7,503-row shadow remains
+blocked until that smoke is terminal and independently audited.
+
+## Family-Disjoint PGO Experiment
+
+Profile-guided optimization is isolated as a build experiment. It does not
+alter the solver algorithm and cannot establish novelty by itself. The test is
+whether a profile learned without any Goel source improves an untouched Goel
+holdout while preserving exact answers and coverage.
+
+The deterministic splitter selects 101 official sources from seven non-Goel
+families, with at most 16 per family and a 2 MB source cap. All 302 official
+Goel sources are held out. The builder verifies source bytes and hashes, uses
+separate profile-generation and profile-use targets, pins the matching LLVM
+profile merger, and records every resulting artifact. Training `unknown` is
+permitted only by an explicit option and must be replayed exactly by the
+optimized binary; it never receives solve credit.
+
+The WMI design compares standard Viper, PGO Viper, Z3, Yices2, and cvc5 in one
+complete cold-process Williams block on one CPU. The two Viper arms use the
+same explicitly recorded ten-setting Fabric configuration. A completion
+receipt is emitted only after checking the split, clean revision, tool and
+binary hashes, environment maps, row completeness, wrong answers, and process
+errors. The full protocol and promotion boundary are in the
+[`family-disjoint PGO campaign`](https://github.com/nasqret/euf-viper/blob/main/research-vault/02-design/2026-07-23-family-disjoint-pgo-campaign.md).
+The machine-readable contract is
+[`viper-pgo-goel-holdout-v1.json`](../../campaigns/viper-pgo-goel-holdout-v1.json).
+
+The campaign also runs a frozen adjudicator before publishing its completion
+receipt. It requires no coverage or timeout regression, aggregate and geometric
+point wins, 99% paired instance-bootstrap lower bounds above one, and a p95
+slowdown no greater than `1.05x`. The decision is recorded as `promote` or
+`reject`; thresholds are not chosen after observing the holdout.
+
+A local plumbing smoke successfully profiled and replayed an `unknown` result,
+but it was built from a dirty worktree and used an incompatible Apple LLVM 17
+fallback with Rust LLVM 21.1.8. The builder now rejects such a mismatch before
+compilation. No WMI PGO holdout result exists yet. This experiment therefore
+does not change the current comparison with Yices2 or Z3.
 
 ## Implementation Surface
 
@@ -63,14 +120,20 @@ The isolated `fabric` Cargo feature currently owns:
 - rollback equality partitions and explicit disequalities;
 - rollback congruence with explicit causal antecedents;
 - deterministic native CNF, watched clauses, and an implication trail;
-- exhaustive reference E2 search with hard-cap abstention;
+- exhaustive binary and canonical-action E2 search with hard-cap abstention;
+- deterministic rollback application signatures with reverse argument uses
+  and exact collision deltas;
+- impact-driven source-atom scheduling with a full-state differential oracle;
+- canonical append-only theory reasons over stable source literals;
+- an isolated finite-domain quotient-action nogood and certificate checker;
 - independent SAT-model reconstruction, exhaustive UNSAT covers, and native
   UNSAT event replay;
 - non-attesting corpus telemetry and WMI campaign machinery.
 
-Incremental signature buckets, first-UIP native learning,
-quotient-state/frontier memoization, theory extension definitions, repeated
-semantic symmetry, bridge replay, and one-way migration remain staged work.
+Integration of signature buckets into congruence, first-UIP native learning,
+dynamic quotient-domain watches, quotient-state/frontier memoization, theory
+extension definitions, repeated semantic symmetry, bridge replay, and one-way
+migration remain staged work.
 They are not implied by the presence of their architecture contracts.
 
 Ordinary builds do not include the module. Tests compile it so each primitive

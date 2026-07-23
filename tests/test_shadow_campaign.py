@@ -181,10 +181,7 @@ class CampaignFixture:
         self.candidate_results: dict[str, str] = {}
         self.corpus.mkdir(parents=True)
         write_executable(self.viper, FAKE_VIPER)
-        write_executable(
-            self.z3,
-            f"#!{sys.executable}\nimport sys\nprint('sat')\n",
-        )
+        write_executable(self.z3, FAKE_VIPER)
         write_executable(self.checker, FAKE_CHECKER)
         write_executable(self.drat, "#!/bin/sh\nexit 0\n")
 
@@ -253,7 +250,7 @@ class CampaignFixture:
                 "argv_template": ["{binary}", "{instance}", "{budget_s}"],
                 "version_output": None,
                 "version_output_sha256": None,
-                "environment": {},
+                "environment": {"CALL_LOG": str(self.call_log)},
             },
         ]
         lock: dict[str, Any] = {
@@ -381,11 +378,13 @@ class CampaignFixture:
     def run(
         self,
         *,
-        timeout: float = 1.0,
+        timeout: float = 3.0,
         checker_timeout: float | None = None,
         include_drat: bool = False,
+        solver_id: str | None = None,
         extra: list[str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        binary = self.z3 if solver_id == "z3" else self.viper
         command = [
             sys.executable,
             str(SCRIPT),
@@ -394,7 +393,7 @@ class CampaignFixture:
             "--output-dir",
             str(self.output),
             "--binary",
-            str(self.viper),
+            str(binary),
             "--checker",
             str(self.checker),
             "--timeout",
@@ -402,6 +401,8 @@ class CampaignFixture:
             "--timeout-grace",
             "0.05",
         ]
+        if solver_id is not None:
+            command.extend(["--solver-id", solver_id])
         if checker_timeout is not None:
             command.extend(["--checker-timeout", str(checker_timeout)])
         if include_drat:
@@ -470,9 +471,43 @@ class SelectionAndPartitionTests(unittest.TestCase):
             campaign["observations"][candidate_key]["result"] = "unsat"
             with self.assertRaisesRegex(
                 SHADOW.ShadowError,
-                "wrong decisive euf-viper observation.*claimed 'unsat'.*expected 'sat'",
+                "wrong decisive observation for solver 'euf-viper'.*"
+                "claimed 'unsat'.*expected 'sat'",
             ):
                 SHADOW.derive_work_records(campaign, lock_path)
+
+    def test_requested_solver_controls_selection_and_observation_validation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance(
+                "family/selected.smt2", expected="sat", campaign_result="unknown"
+            )
+            lock_path, raw_path = fixture.finalize()
+            campaign = SHADOW.load_validated_campaign(lock_path, raw_path)
+
+            self.assertEqual(SHADOW.derive_work_records(campaign, lock_path), [])
+            works = SHADOW.derive_work_records(
+                campaign, lock_path, solver_id="z3"
+            )
+
+            self.assertEqual(len(works), 1)
+            self.assertEqual(works[0]["solver_id"], "z3")
+            self.assertEqual(works[0]["solver_sha256"], sha256_file(fixture.z3))
+
+            selected_key = next(
+                key for key in campaign["observations"] if key[2] == "z3"
+            )
+            campaign["observations"][selected_key]["result"] = "unsat"
+            with self.assertRaisesRegex(
+                SHADOW.ShadowError,
+                "wrong decisive observation for solver 'z3'.*"
+                "claimed 'unsat'.*expected 'sat'",
+            ):
+                SHADOW.derive_work_records(
+                    campaign, lock_path, solver_id="z3"
+                )
 
     def test_independent_parser_canary_validates_and_hashes_the_complete_workset(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -580,6 +615,35 @@ class SelectionAndPartitionTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_cli_certifies_with_requested_locked_solver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("family/case.smt2")
+            fixture.finalize()
+
+            completed = fixture.run(solver_id="z3")
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            summary = fixture.summary()
+            self.assertEqual(summary["solver"]["id"], "z3")
+            self.assertEqual(summary["solver"]["path"], str(fixture.z3.resolve()))
+            self.assertEqual(summary["counts"]["verified_instances"], 1)
+
+    def test_cli_rejects_missing_locked_solver_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = CampaignFixture(Path(temporary))
+            fixture.add_instance("family/case.smt2")
+            fixture.finalize()
+
+            completed = fixture.run(solver_id="missing")
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn(
+                "locked campaign must contain exactly one solver with id 'missing'",
+                completed.stderr,
+            )
+            self.assertFalse(fixture.call_log.exists())
+
     def test_parent_raw_tampering_is_rejected_before_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = CampaignFixture(Path(temporary))

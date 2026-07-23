@@ -1988,3 +1988,173 @@
   match the launch contract. No Fabric job has yet been submitted.
 - This is correctness and campaign infrastructure, not timing evidence. The
   audited production solver still trails Yices2; no superiority claim changed.
+
+# 2026-07-22 - Fabric freeze, canonical actions, and incremental substrate
+
+- Froze the default-off reference at exact commit
+  `51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc`, pushed branch
+  `perf-viper-fabric`, and observed hosted run `29881100724` complete
+  successfully. Continued work is isolated on `perf-viper-fabric-next`; the
+  frozen worktree remains clean.
+- Submitted only the two-row no-solve WMI shadow smoke as job `169653`.
+  Direct `squeue` and `sacct` checks still report `PENDING (Priority)` with
+  no node. No full shadow job has been submitted.
+- Added canonical existing-class-or-fresh partition actions with hard caps and
+  deterministic rollback search. Action enumeration produces exactly the Bell
+  partitions through five terms and typed-sort products without duplicates.
+- Compared binary equality branching and canonical partition branching on all
+  676 two-clause formulas over three equalities. Both modes agree with the
+  direct five-partition oracle and each visits 1,422 search nodes. On a formula
+  excluding all five partitions, binary visits seven nodes and the canonical
+  reference visits eight. Canonical enumeration alone receives no performance
+  credit and remains default-off.
+- Integrated a standalone rollback application-signature index with reverse
+  argument use lists, deterministic collision deltas, lineage-checked
+  snapshots, and transactional caps. The integrated Fabric suite passes 103
+  tests; the index is not yet connected to the full-scan congruence engine.
+- Added a strict offline WMI artifact auditor. It snapshots non-symlink regular
+  files by descriptor, verifies exact schemas, canonical JSONL, all hashes and
+  counts, rejects solver claims, and publishes one atomic ASCII receipt.
+  Independent operator expectations for revision, manifest hash, corpus mode,
+  row count, and Slurm job ID are mandatory; focused tests pass 15/15.
+- Refreshed the SAT 2026 boundary. Dsat already owns fixed-domain set-valued
+  decisions, watched states, and native first-UIP. Fabric's candidate delta is
+  restricted to dynamic quotient domains, congruence-coupled target collapse,
+  and relabeling-invariant replay. Preregistered the E2 domain-watch experiment;
+  simple class choice remains its fixed control.
+- Next: audit job `169653` when terminal; integrate the independent finite
+  oracle, incremental congruence, and watched scheduler; then run exhaustive
+  differential gates before any fixed E2 solve route or timing campaign.
+
+# 2026-07-22 - Fabric differential propagation checkpoint
+
+- Integrated an independent typed finite-model oracle which directly enumerates
+  restricted-growth partitions, checks congruence, evaluates the Boolean shell,
+  and rejects malformed Boolean universes. It shares no union-find or search
+  implementation with E2.
+- Closed adversarial search defects: a branch-local abstention no longer hides
+  a later SAT sibling; error paths restore partition, trail, and action-reason
+  state; model reconstruction now includes searched relations; canonical action
+  relation-query caps are solve-wide rather than recursion-local.
+- Integrated rollback signature congruence, deterministic native watch queues,
+  the first-UIP analysis kernel, Boolean-domain action watches, and stable
+  formula-order clause IDs shared by watches, trail reasons, and learning.
+- Refactored E2 over a congruence-backend trait while retaining the full-scan
+  implementation as the reference. Added separate default-off incremental and
+  incremental-plus-watched entry points. All three produce byte-identical
+  outcomes, models, covers, and search statistics on the 676 ordered
+  two-clause formulas in both branching modes and on function/Boolean canaries.
+- Added source theory assignments to the stable implication trail. Solving
+  truth still comes from the partition; the trail record exists for checked
+  clause and theory explanations and rolls back with its decision frame.
+- Added a stable impact-frontier primitive. After a merge or separation it
+  marks both endpoint classes and all post-update disequality-neighbor classes.
+  Exhaustive four-term testing proves every changed pair relation touches the
+  returned frontier, including imported disequality edges.
+- Corrected an initial microbenchmark that accidentally applied zero updates
+  and discarded its number. The corrected release canary applies 96 base
+  equalities over 386 terms for five repetitions: full rescans have median
+  `115,308,792 ns`; rollback signatures have median `487,667 ns`, a `236.450x`
+  kernel speedup. This is isolated substrate evidence, not solver timing.
+- Current Fabric checkpoint: 169 tests pass, one manual microbenchmark is
+  ignored, and `git diff --check` passes. WMI smoke `169653` remains pending
+  for priority with no runtime; the full 7,503-row shadow remains unsubmitted.
+- Exact Yices2 and Z3 source audits confirm that rollback congruence, signature
+  tables, use lists, queues, and ordinary explanations are established prior
+  art. Candidate novelty remains dynamic canonical quotient actions,
+  quotient-stable learning, and independently replayed mixed certificates.
+
+# 2026-07-22 - Fabric impacted propagation and proof boundary
+
+- Fixed quotient-domain reconciliation when the pivot is already equal to a
+  target. The equal existing action is now fixed, all competitors including
+  `Fresh` are pruned atomically, and rollback restores both targets and the
+  fresh state. Focused and exhaustive domain tests pass.
+- Replaced the watched engine's forward whole-formula truth scan with a stable
+  term-to-source-atom CSR index driven by post-update quotient impact. Merge
+  endpoints, congruence merges, explicit separations, imported disequality
+  neighbors, auxiliary assignments, initialization, and rollback all have
+  explicit scheduling paths. A test-only all-atom oracle checks every watched
+  synchronization.
+- Added an append-only theory reason arena and source-trail publication.
+  Congruence equality, transported disequality with endpoint alignment, and
+  exact-Boolean domain canaries emit canonical stable-literal clauses. Missing
+  antecedent order, opaque action provenance, or caps disable learning rather
+  than fabricate a reason.
+- An adversarial audit rejected reconstructing domain reasons after their
+  merge: it can cycle and aliases different replacement-branch proofs. A fresh
+  frozen pre-merge domain-proof arena is now mandatory before first-UIP can be
+  enabled. Congruence conflict payloads are also excluded until their witness
+  endpoint alignments are explicit.
+- Added an isolated quotient-action nogood substrate. It keeps Existing/Fresh
+  as finite-domain values, retains stable frontier terms, matches partitions
+  three-valuedly, and independently replays certificate evidence. Its 23 tests
+  pass, but it is not connected to pruning.
+- The integrated suite passed 204 Fabric tests before action-nogood
+  registration; the action-nogood module then passed all 23 focused tests.
+  WMI smoke `169653` remains `PENDING (Priority)` with zero runtime. No full
+  campaign or competitive claim was authorized.
+
+# 2026-07-23 - Accepted hash paths and family-disjoint PGO gate
+
+- Accepted two deterministic hot-path substitutions under local causal ABBA:
+  `Partition.separation_records` now uses `FxHashMap` and sorts only at the
+  observable API, while Boolean clause deduplication uses `FxHashSet` and one
+  final deterministic sort. The Goel median moved from `0.190730s` through
+  `0.144987s` to `0.138404s`, about `1.378x` end to end on that source. The
+  rebuilt release binary is byte-identical to the accepted measured artifact,
+  SHA-256 `96d502f6...46626`.
+- Preserved the empty-environment comparison as a rejection artifact. The same
+  accepted binary timed out on both arms at two seconds when the ten Fabric
+  settings were omitted, then returned `sat` immediately when they were
+  restored. This exposed a campaign configuration defect rather than a source
+  regression.
+- Added a deterministic, strict JSONL PGO splitter. The official 3,521-row
+  manifest yields 101 size-bounded training sources from seven non-Goel
+  families and a 302-row Goel holdout. The splitter rejects duplicate IDs,
+  paths, noncanonical records, family leakage, source drift, and invalid
+  rebasing, and stages its report last.
+- Added a reproducible Rust PGO builder. It uses separate generation and
+  profile-use Cargo targets, a Rust-matched `llvm-profdata`, exact source and
+  profile hashes, clean-git promotion status, isolated build environments, and
+  exact post-build outcome replay. Wrong decisive answers always abort;
+  explicit `unknown` profiling is allowed only when optimized replay agrees.
+- Completed two local PGO integrations. A Goel SAT build/replay succeeded. A
+  second smoke profiled `eq_diamond24` as `unknown`, merged one nonempty raw
+  profile, rebuilt, and replayed `unknown`. Both artifacts are non-promotable
+  because the worktree was deliberately dirty.
+- Added a default-off WMI PGO holdout job and clean published-head submitter.
+  The job uses one CPU, isolated `/work` state, an exact 101/302 split, a full
+  five-arm Williams block, and report-last completion. A canary exposed that
+  the first wrapper omitted the accepted Fabric environment. The repaired
+  wrapper now passes one audited ten-setting vector to training, standard
+  Viper, and PGO Viper, and verifies the recorded maps before completion.
+- Added the frozen PGO holdout adjudicator. It validates complete Williams
+  accounting, forbids standard-only solves and timeout growth, requires both
+  aggregate and geometric point wins and 99% instance-bootstrap lower bounds
+  above `1.00x`, and caps p95 slowdown at `1.05x`. It publishes an immutable
+  `promote` or `reject`; a rejection remains a complete campaign result.
+- Added a hash-verifying competitor installer and installed immutable static
+  Yices2 2.7.0 and cvc5 1.3.4 bundles on WMI. Binary hashes are
+  `eab7efbf...54c501` and `7562a8b0...ed5ee`; both receipts report `not a
+  dynamic executable`.
+- Validation at this checkpoint: 528 Python tests pass; the main Rust Fabric
+  suite has 613 passed and nine expected ignored out of 622, while the
+  no-default-feature suite has 605 passed and eight expected ignored out of
+  613. The all-feature, warning-strict matrix has 619 passed and ten expected
+  ignored out of 629. Vendored CaDiCaL-up has 29 unit tests and three doc tests
+  passing. Both narrower Rust feature surfaces also compile with
+  `RUSTFLAGS=-Dwarnings`; `cargo fmt --check`, `git diff --check`, both WMI
+  shell syntax checks, and the warning-as-error Jupyter Book build pass. The
+  focused PGO/WMI contract suite passes 39/39 after the environment and
+  provenance repairs.
+- Live WMI refresh: frozen non-attesting smoke `169653` is still
+  `PENDING (Priority)`, elapsed `00:00:00`, with no assigned node. The PGO
+  holdout has not been submitted. No superiority, coverage, or paper claim is
+  promoted from local smoke evidence.
+- Post-review provenance exposed Apple LLVM 17 as the Mac fallback for Rust
+  1.93's LLVM 21.1.8. The latest control-flow binary is
+  `719a421d...5639f0`, but neither local PGO binary is valid build-performance
+  evidence. The builder now compares the numeric LLVM versions exactly and
+  aborts before compilation on mismatch. The pinned WMI Rust and
+  `llvm-profdata` tools both report 21.1.8.

@@ -11,7 +11,7 @@
 
 use super::native_clause::AtomId;
 use super::partition::TermId;
-use super::semantic::{SemanticAtom, SemanticExpr, SemanticProblem};
+use super::semantic::{RootLiteral, SemanticAtom, SemanticExpr, SemanticProblem};
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -107,6 +107,11 @@ pub(crate) enum ModelError {
         term: TermId,
         term_count: usize,
     },
+    CandidateTermOutOfRange {
+        relation: usize,
+        term: TermId,
+        term_count: usize,
+    },
     IllSortedEquality {
         atom: AtomId,
         left: TermId,
@@ -115,6 +120,11 @@ pub(crate) enum ModelError {
     IllSortedBooleanAtom {
         atom: AtomId,
         term: TermId,
+    },
+    IllSortedCandidateRelation {
+        relation: usize,
+        left: TermId,
+        right: TermId,
     },
     RootAtomOutOfRange {
         literal: usize,
@@ -126,6 +136,7 @@ pub(crate) enum ModelError {
         atom: AtomId,
         atom_count: usize,
     },
+    InvalidCheckerState(&'static str),
     AllocationFailed {
         context: &'static str,
     },
@@ -192,6 +203,14 @@ impl fmt::Display for ModelError {
                 "atom {} contains term {term} outside 0..{term_count}",
                 atom.index()
             ),
+            Self::CandidateTermOutOfRange {
+                relation,
+                term,
+                term_count,
+            } => write!(
+                output,
+                "candidate relation {relation} contains term {term} outside 0..{term_count}"
+            ),
             Self::IllSortedEquality { atom, left, right } => write!(
                 output,
                 "equality atom {} relates differently sorted terms {left} and {right}",
@@ -201,6 +220,14 @@ impl fmt::Display for ModelError {
                 output,
                 "Boolean atom {} contains non-Boolean term {term}",
                 atom.index()
+            ),
+            Self::IllSortedCandidateRelation {
+                relation,
+                left,
+                right,
+            } => write!(
+                output,
+                "candidate relation {relation} relates differently sorted terms {left} and {right}"
             ),
             Self::RootAtomOutOfRange {
                 literal,
@@ -220,6 +247,12 @@ impl fmt::Display for ModelError {
                 "assertion {assertion} references atom {} outside 0..{atom_count}",
                 atom.index()
             ),
+            Self::InvalidCheckerState(message) => {
+                write!(
+                    output,
+                    "independent model checker invariant failed: {message}"
+                )
+            }
             Self::AllocationFailed { context } => {
                 write!(output, "allocation failed while building {context}")
             }
@@ -259,6 +292,12 @@ pub(crate) enum InvalidModel {
         function: u32,
         first: TermId,
         second: TermId,
+    },
+    CandidateDisequalityCollapsed {
+        relation: usize,
+        left: TermId,
+        right: TermId,
+        representative: TermId,
     },
 }
 
@@ -326,18 +365,166 @@ pub(crate) enum ModelValidation {
     Abstained(ModelLimit),
 }
 
+/// Result of independently replaying a conjunction of stable source literals.
+/// This checker ignores the parser's contradiction flag and the source formula;
+/// callers must separately justify why every supplied literal is required.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LiteralConjunctionValidation {
+    Consistent { work: usize },
+    Conflict { work: usize },
+    Abstained(ModelLimit),
+}
+
+/// One stable relation selected by a search engine and independently checked
+/// during SAT-model reconstruction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct CandidateRelation {
+    pub(crate) left: TermId,
+    pub(crate) right: TermId,
+    pub(crate) equal: bool,
+}
+
+impl CandidateRelation {
+    pub(crate) const fn equality(left: TermId, right: TermId) -> Self {
+        Self {
+            left,
+            right,
+            equal: true,
+        }
+    }
+
+    pub(crate) const fn disequality(left: TermId, right: TermId) -> Self {
+        Self {
+            left,
+            right,
+            equal: false,
+        }
+    }
+}
+
 /// Validate one total assignment to exactly the projected source atoms.
 pub(crate) fn validate_complete(
     problem: &SemanticProblem,
     source_atom_values: &[bool],
     caps: ModelCaps,
 ) -> Result<ModelValidation, ModelError> {
-    match validate_inner(problem, source_atom_values, caps) {
+    validate_complete_with_relations(problem, source_atom_values, &[], caps)
+}
+
+/// Validate a complete source assignment together with stable relations from
+/// the actual search state. The validator reconstructs congruence independently
+/// and never consults producer roots or class labels.
+pub(crate) fn validate_complete_with_relations(
+    problem: &SemanticProblem,
+    source_atom_values: &[bool],
+    candidate_relations: &[CandidateRelation],
+    caps: ModelCaps,
+) -> Result<ModelValidation, ModelError> {
+    match validate_inner(problem, source_atom_values, candidate_relations, caps) {
         Ok(model) => Ok(ModelValidation::Valid(model)),
         Err(CheckFailure::Invalid(reason)) => Ok(ModelValidation::Invalid(reason)),
         Err(CheckFailure::Limit(limit)) => Ok(ModelValidation::Abstained(limit)),
         Err(CheckFailure::Malformed(error)) => Err(error),
     }
+}
+
+/// Independently decide whether a conjunction of stable source literals is
+/// inconsistent in EUF. The implementation shares no equality state with any
+/// solving backend and treats malformed projected data as an error.
+pub(crate) fn validate_literal_conjunction(
+    problem: &SemanticProblem,
+    literals: &[RootLiteral],
+    caps: ModelCaps,
+) -> Result<LiteralConjunctionValidation, ModelError> {
+    match validate_literal_conjunction_inner(problem, literals, caps) {
+        Ok((false, work)) => Ok(LiteralConjunctionValidation::Consistent { work }),
+        Ok((true, work)) => Ok(LiteralConjunctionValidation::Conflict { work }),
+        Err(CheckFailure::Limit(limit)) => Ok(LiteralConjunctionValidation::Abstained(limit)),
+        Err(CheckFailure::Malformed(error)) => Err(error),
+        Err(CheckFailure::Invalid(_)) => Err(ModelError::InvalidCheckerState(
+            "literal conjunction replay returned a complete-model invalidity",
+        )),
+    }
+}
+
+fn validate_literal_conjunction_inner(
+    problem: &SemanticProblem,
+    literals: &[RootLiteral],
+    caps: ModelCaps,
+) -> CheckResult<(bool, usize)> {
+    if problem.stats.unsupported_fragments != 0 {
+        return Err(ModelError::UnsupportedFragments {
+            count: problem.stats.unsupported_fragments,
+        }
+        .into());
+    }
+    enforce_limit(ModelLimitKind::Terms, problem.terms.len(), caps.max_terms)?;
+    enforce_limit(ModelLimitKind::Atoms, problem.atoms.len(), caps.max_atoms)?;
+    enforce_limit(
+        ModelLimitKind::RootLiterals,
+        literals.len(),
+        caps.max_root_literals,
+    )?;
+    if problem.terms.len() > u32::MAX as usize {
+        return Err(ModelError::TermIdSpaceExhausted {
+            count: problem.terms.len(),
+        }
+        .into());
+    }
+
+    let mut budget = WorkBudget::new(caps.max_work);
+    validate_terms(problem, caps, &mut budget)?;
+    let boolean_values = validate_boolean_values(problem)?;
+    let bool_atoms = validate_atoms(problem, boolean_values, &mut budget)?;
+    validate_boolean_coverage(problem, boolean_values, &bool_atoms)?;
+    validate_source_shape(problem, caps, &mut budget)?;
+
+    let mut equality = Equality::new(problem.terms.len())?;
+    let mut disequalities = Vec::new();
+    disequalities
+        .try_reserve(literals.len())
+        .map_err(|_| ModelError::AllocationFailed {
+            context: "literal conjunction disequalities",
+        })?;
+    for (literal_index, literal) in literals.iter().copied().enumerate() {
+        budget.charge(1)?;
+        let Some(atom) = problem.atoms.get(literal.atom.index()) else {
+            return Err(ModelError::RootAtomOutOfRange {
+                literal: literal_index,
+                atom: literal.atom,
+                atom_count: problem.atoms.len(),
+            }
+            .into());
+        };
+        match *atom {
+            SemanticAtom::Equality(left, right) if literal.positive => {
+                equality.merge(left.index(), right.index(), &mut budget)?;
+            }
+            SemanticAtom::Equality(left, right) => disequalities.push((left, right)),
+            SemanticAtom::BoolTerm(term) => {
+                let (true_term, false_term) = boolean_values
+                    .ok_or(ModelError::MissingBooleanValues { atom: literal.atom })?;
+                let target = if literal.positive {
+                    true_term
+                } else {
+                    false_term
+                };
+                equality.merge(term.index(), target.index(), &mut budget)?;
+            }
+        }
+    }
+
+    saturate_congruence(problem, &mut equality, caps, &mut budget)?;
+    let mut conflict = false;
+    if let Some((true_term, false_term)) = boolean_values {
+        conflict |= equality.find(true_term.index(), &mut budget)?
+            == equality.find(false_term.index(), &mut budget)?;
+    }
+    for (left, right) in disequalities {
+        conflict |= equality.find(left.index(), &mut budget)?
+            == equality.find(right.index(), &mut budget)?;
+    }
+    Ok((conflict, budget.used))
 }
 
 #[derive(Debug)]
@@ -365,6 +552,7 @@ struct FunctionSignature {
 fn validate_inner(
     problem: &SemanticProblem,
     source_atom_values: &[bool],
+    candidate_relations: &[CandidateRelation],
     caps: ModelCaps,
 ) -> CheckResult<CanonicalModel> {
     if source_atom_values.len() != problem.atoms.len() {
@@ -402,6 +590,38 @@ fn validate_inner(
     }
 
     let mut equality = Equality::new(problem.terms.len())?;
+    let mut candidate_disequalities = Vec::new();
+    candidate_disequalities
+        .try_reserve(candidate_relations.len())
+        .map_err(|_| ModelError::AllocationFailed {
+            context: "candidate disequality list",
+        })?;
+    for (relation_index, relation) in candidate_relations.iter().copied().enumerate() {
+        budget.charge(1)?;
+        for term in [relation.left, relation.right] {
+            if term.index() >= problem.terms.len() {
+                return Err(ModelError::CandidateTermOutOfRange {
+                    relation: relation_index,
+                    term,
+                    term_count: problem.terms.len(),
+                }
+                .into());
+            }
+        }
+        if problem.terms[relation.left.index()].sort != problem.terms[relation.right.index()].sort {
+            return Err(ModelError::IllSortedCandidateRelation {
+                relation: relation_index,
+                left: relation.left,
+                right: relation.right,
+            }
+            .into());
+        }
+        if relation.equal {
+            equality.merge(relation.left.index(), relation.right.index(), &mut budget)?;
+        } else {
+            candidate_disequalities.push((relation_index, relation.left, relation.right));
+        }
+    }
     let mut negative_equalities = Vec::new();
     negative_equalities
         .try_reserve(problem.atoms.len())
@@ -452,6 +672,18 @@ fn validate_inner(
             return Err(CheckFailure::Invalid(
                 InvalidModel::FalseEqualityCollapsed {
                     atom,
+                    left,
+                    right,
+                    representative: term_classes[left.index()],
+                },
+            ));
+        }
+    }
+    for &(relation, left, right) in &candidate_disequalities {
+        if term_classes[left.index()] == term_classes[right.index()] {
+            return Err(CheckFailure::Invalid(
+                InvalidModel::CandidateDisequalityCollapsed {
+                    relation,
                     left,
                     right,
                     representative: term_classes[left.index()],

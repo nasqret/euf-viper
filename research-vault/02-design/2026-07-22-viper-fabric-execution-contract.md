@@ -149,6 +149,12 @@ classes. For proved finite components, a term may instead choose an existing
 class or the single canonical next class. Class labels cannot be permuted into
 new branches.
 
+Simple class choice remains the control. A gated successor may prune a set of
+class alternatives using two-level watches, as specified in
+`2026-07-22-e2-domain-watch-experiment.md`. Dsat already occupies fixed-domain
+set-valued CDCL; Fabric receives no novelty credit unless dynamic quotient
+maintenance, relabeling-invariant reasons, and EUF coupling add measured value.
+
 #### Learning
 
 The implication graph includes clause, congruence, disequality, and canonical

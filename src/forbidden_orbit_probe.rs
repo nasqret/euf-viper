@@ -564,6 +564,64 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "finite-symmetry")]
+    #[test]
+    #[ignore = "requires EUF_VIPER_ORBIT_PROBE_CASE"]
+    fn probe_external_separated_base_symmetry() {
+        let path = env::var("EUF_VIPER_ORBIT_PROBE_CASE").unwrap();
+        let source = fs::read_to_string(path).unwrap();
+        let problem = parse_problem_with_scoped_let_mode(&source, ScopedLetMode::Auto).unwrap();
+        let (degree, function, _) = dominant_table_exclusions(&problem);
+        let mut bool_problem = problem.bool_problem.clone().unwrap();
+        let mut finite = FiniteAnalysisContext::default();
+        let domain = finite
+            .domain_analysis(&problem.arena, &bool_problem)
+            .domain
+            .clone();
+        let domain_positions = domain
+            .iter()
+            .enumerate()
+            .map(|(position, &term)| (term, position))
+            .collect::<HashMap<_, _>>();
+        let before = bool_problem.assertions.len();
+        bool_problem.assertions.retain(|assertion| {
+            let BoolExpr::Not(inner) = assertion else {
+                return true;
+            };
+            let mut equalities = Vec::new();
+            if !collect_conjunctive_equalities(inner, &mut equalities) {
+                return true;
+            }
+            !matches!(
+                extract_complete_table(&problem.arena, &domain_positions, degree, &equalities),
+                Ok(extracted) if extracted.function == function
+            )
+        });
+        let removed = before - bool_problem.assertions.len();
+        let identity = (0..problem.arena.terms.len()).collect::<Vec<_>>();
+        let mut interner = crate::CanonicalBoolInterner::default();
+        let baseline = crate::canonical_assertion_ids(&bool_problem, &identity, &mut interner);
+        let mut verified_transpositions = Vec::new();
+        for left in 0..degree {
+            for right in (left + 1)..degree {
+                let verified =
+                    crate::term_map_under_swap(&problem.arena, domain[left], domain[right])
+                        .is_some_and(|term_map| {
+                            crate::canonical_assertion_ids(&bool_problem, &term_map, &mut interner)
+                                == baseline
+                        });
+                if verified {
+                    verified_transpositions.push((left, right));
+                }
+            }
+        }
+        println!(
+            "{{\"degree\":{degree},\"base_assertions\":{},\"removed_exclusions\":{removed},\"verified_transpositions\":{verified_transpositions:?}}}",
+            bool_problem.assertions.len(),
+        );
+        assert_eq!(removed, 5_040);
+    }
+
     #[test]
     #[ignore = "requires EUF_VIPER_MDD_PROBE_CASE"]
     fn probe_external_forbidden_table_mdd() {

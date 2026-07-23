@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Certify every correct euf-viper result in a validated locked campaign.
+"""Certify every correct selected-solver result in a validated locked campaign.
 
 The supplied lock/raw pair is accepted only through the strict validator in
 ``scripts/bench/analyze_campaign.py``.  This tool then freezes deterministic
@@ -40,6 +40,7 @@ DEFAULT_CHECKER = ROOT / "scripts" / "cert" / "check_certificate.py"
 INDEPENDENT_PARSER_PATH = ROOT / "scripts" / "cert" / "independent_qfuf.py"
 
 SCHEMA_VERSION = 1
+DEFAULT_SOLVER_ID = "euf-viper"
 DECISIVE_RESULTS = {"sat", "unsat"}
 ABSTENTIONS = {"unknown", "unsupported"}
 HEX_DIGITS = frozenset("0123456789abcdef")
@@ -301,11 +302,15 @@ def _resolve_source(
     return resolved
 
 
-def _candidate_solver(lock: Mapping[str, Any]) -> dict[str, Any]:
-    matches = [solver for solver in lock["solvers"] if solver["id"] == "euf-viper"]
+def _candidate_solver(
+    lock: Mapping[str, Any], solver_id: str = DEFAULT_SOLVER_ID
+) -> dict[str, Any]:
+    if type(solver_id) is not str or not solver_id:
+        raise ShadowError("solver id must be a non-empty string")
+    matches = [solver for solver in lock["solvers"] if solver["id"] == solver_id]
     if len(matches) != 1:
         raise ShadowError(
-            "locked campaign must contain exactly one solver with id 'euf-viper'"
+            f"locked campaign must contain exactly one solver with id {solver_id!r}"
         )
     return matches[0]
 
@@ -314,35 +319,37 @@ def derive_work_records(
     campaign: Mapping[str, Any],
     lock_path: Path,
     *,
+    solver_id: str = DEFAULT_SOLVER_ID,
     corpus_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Select decisive candidate rows and reject any wrong candidate claim."""
+    """Select decisive rows for one locked solver and reject any wrong claim."""
 
     lock = campaign["lock"]
-    solver = _candidate_solver(lock)
+    solver = _candidate_solver(lock, solver_id)
     observations = campaign["observations"]
-    candidate_budgets: dict[str, list[float]] = collections.defaultdict(list)
+    solver_budgets: dict[str, list[float]] = collections.defaultdict(list)
     for key, observation in observations.items():
-        relative_path, budget_s, solver_id = key
-        if solver_id != "euf-viper":
+        relative_path, budget_s, observation_solver_id = key
+        if observation_solver_id != solver_id:
             continue
         if observation["binary_sha256"] != solver["sha256"]:
             raise ShadowError(
-                f"validated observation solver hash drift for {relative_path!r}"
+                f"validated observation hash drift for solver {solver_id!r} "
+                f"on {relative_path!r}"
             )
         if observation["result"] in DECISIVE_RESULTS:
             if observation["result"] != observation["expected_status"]:
                 raise ShadowError(
-                    "wrong decisive euf-viper observation: "
+                    f"wrong decisive observation for solver {solver_id!r}: "
                     f"{relative_path!r} at budget {budget_s} claimed "
                     f"{observation['result']!r}, expected "
                     f"{observation['expected_status']!r}"
                 )
-            candidate_budgets[relative_path].append(float(budget_s))
+            solver_budgets[relative_path].append(float(budget_s))
     selected: list[tuple[Mapping[str, Any], list[float], Path]] = []
 
     for instance in lock["corpus"]["instances"]:
-        decisive_budgets = candidate_budgets.get(instance["relative_path"], [])
+        decisive_budgets = solver_budgets.get(instance["relative_path"], [])
         if decisive_budgets:
             if instance["status"] not in DECISIVE_RESULTS:
                 raise ShadowError(
@@ -543,6 +550,7 @@ def build_plan_record(
     works: Sequence[dict[str, Any]],
     shard_works: Sequence[dict[str, Any]],
     *,
+    solver_id: str = DEFAULT_SOLVER_ID,
     solver_path: Path,
     checker_path: Path,
     drat_trim_path: Path | None,
@@ -557,7 +565,7 @@ def build_plan_record(
     checker_environment: Mapping[str, str],
 ) -> dict[str, Any]:
     lock = campaign["lock"]
-    solver = _candidate_solver(lock)
+    solver = _candidate_solver(lock, solver_id)
     plan: dict[str, Any] = {
         "record_type": "plan",
         "schema_version": SCHEMA_VERSION,
@@ -1685,6 +1693,7 @@ def run_shadow_campaign(
     raw_path: Path,
     *,
     output_directory: Path,
+    solver_id: str = DEFAULT_SOLVER_ID,
     binary: str | Path | None = None,
     checker: str | Path = DEFAULT_CHECKER,
     drat_trim: str | Path | None = None,
@@ -1725,17 +1734,19 @@ def run_shadow_campaign(
             raise ShadowError(f"cannot resolve corpus root: {error}") from error
 
     campaign = load_validated_campaign(lock_path, raw_path)
-    works = derive_work_records(campaign, lock_path, corpus_root=corpus_root)
+    works = derive_work_records(
+        campaign, lock_path, solver_id=solver_id, corpus_root=corpus_root
+    )
     shard_works = partition_work_records(works, shard_index, shard_count)
-    locked_solver = _candidate_solver(campaign["lock"])
+    locked_solver = _candidate_solver(campaign["lock"], solver_id)
     solver_path = resolve_executable(
-        binary or locked_solver["binary"], "euf-viper binary"
+        binary or locked_solver["binary"], f"{solver_id} binary"
     )
     actual_solver_hash = sha256_file(solver_path)
     if actual_solver_hash != locked_solver["sha256"]:
         raise ShadowError(
-            f"euf-viper binary SHA-256 mismatch: locked {locked_solver['sha256']}, "
-            f"actual {actual_solver_hash}"
+            f"solver {solver_id!r} binary SHA-256 mismatch: locked "
+            f"{locked_solver['sha256']}, actual {actual_solver_hash}"
         )
     checker_path = resolve_executable(checker, "certificate checker")
 
@@ -1782,6 +1793,7 @@ def run_shadow_campaign(
         campaign,
         works,
         shard_works,
+        solver_id=solver_id,
         solver_path=solver_path,
         checker_path=checker_path,
         drat_trim_path=drat_trim_path,
@@ -1899,6 +1911,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("lock", type=Path, help="validated campaign lock JSON")
     parser.add_argument("raw", type=Path, help="complete locked raw JSONL")
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--solver-id", default=DEFAULT_SOLVER_ID)
     parser.add_argument("--binary", "--euf-viper", dest="binary")
     parser.add_argument("--checker", default=str(DEFAULT_CHECKER))
     parser.add_argument("--drat-trim")
@@ -1921,6 +1934,7 @@ def main(argv: list[str] | None = None) -> int:
             args.lock,
             args.raw,
             output_directory=args.output_dir,
+            solver_id=args.solver_id,
             binary=args.binary,
             checker=args.checker,
             drat_trim=args.drat_trim,

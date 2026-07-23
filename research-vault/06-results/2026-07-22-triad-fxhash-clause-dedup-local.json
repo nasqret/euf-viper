@@ -1,0 +1,547 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 16,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 4,
+      "coverage": 0.3333333333333333,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 8,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "timeout": 8
+      },
+      "timeout_runs": 8,
+      "uncovered_runs": 8,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 4,
+      "coverage": 0.3333333333333333,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 8,
+      "paths": 3,
+      "result_counts": {
+        "sat": 4,
+        "timeout": 8
+      },
+      "timeout_runs": 8,
+      "uncovered_runs": 8,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/tmp/euf-viper-pre-fxhash-adjacency",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-pre-fxhash-adjacency",
+          "requested": "/tmp/euf-viper-pre-fxhash-adjacency",
+          "resolved_path": "/private/tmp/euf-viper-pre-fxhash-adjacency",
+          "sha256": "2090912e769406253eacfb9bc8707882c1f8a06059f93b4b91e0dcd289e75310",
+          "size_bytes": 3522576
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "cadical-up",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "96d502f60f95a5e4ded5c2ba0fcf422120431e1833be808b35cdf6509dc46626",
+          "size_bytes": 3523296
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 305,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "row_index": 0,
+        "sha256": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+        "size_bytes": 1146846
+      },
+      {
+        "id": 924,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "row_index": 1,
+        "sha256": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+        "size_bytes": 42150
+      },
+      {
+        "id": 7309,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "row_index": 2,
+        "sha256": "6e9ea0786a672c467f853bf8964283bbdc53c2b51c41e0b0e6fc1fbd8ba34be0",
+        "size_bytes": 6013419
+      }
+    ],
+    "manifest": {
+      "path": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+      "sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+      "size_bytes": 1438
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/tmp/triad-fxhash-clause-dedup-abba.csv",
+      "resolved_path": "/private/tmp/triad-fxhash-clause-dedup-abba.csv",
+      "sha256": "621cac8cdd6ca166976e5e2138db58c2d9aabd5766ff791db74405921f96a4c4",
+      "size_bytes": 7344,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "/tmp/euf-viper-pre-fxhash-adjacency",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 0.14298172949929722,
+  "baseline_correct": 1,
+  "baseline_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "2090912e769406253eacfb9bc8707882c1f8a06059f93b4b91e0dcd289e75310",
+  "baseline_wins": 0,
+  "candidate": [
+    "target/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "cadical-up",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 0.13652052098768763,
+  "candidate_correct": 1,
+  "candidate_env": [
+    "EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION=0",
+    "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES=4",
+    "EUF_VIPER_FABRIC_LAZY_REASONS=1",
+    "EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS=1",
+    "EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT=1",
+    "EUF_VIPER_FABRIC_DEMAND_FLUSH=1",
+    "EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER=1",
+    "EUF_VIPER_FABRIC_SPARSE_ROOT=0",
+    "EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION=0",
+    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS=0"
+  ],
+  "candidate_geometric_speedup": 1.047327745784037,
+  "candidate_only_correct": 0,
+  "candidate_only_examples": [],
+  "candidate_sha256": "96d502f60f95a5e4ded5c2ba0fcf422120431e1833be808b35cdf6509dc46626",
+  "candidate_speedup_by_total": 1.047327745784037,
+  "candidate_wins": 1,
+  "common_aggregate_speedup": 1.047327745784037,
+  "common_correct": 1,
+  "common_correct_paths": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2"
+  ],
+  "common_geometric_speedup": 1.047327745784037,
+  "coverage_delta": 0,
+  "elapsed_s": 41.54906550000305,
+  "execution_errors": [],
+  "finished_at": "2026-07-22T17:28:42.805965+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "macbook-air-airbartek-6.home",
+    "git_revision": null,
+    "hostname": "macbook-air-airbartek-6.home",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 3,
+  "manifest": "research-vault/06-results/2026-07-22-representative-triad.local.jsonl",
+  "manifest_order": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+    "QF_UF/PEQ/PEQ012_size6.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2"
+  ],
+  "manifest_sha256": "c618918689a1bcd257662f27f8f2163768d994739b854c1a1a5ca74c29795a50",
+  "measured_runs": 24,
+  "paths": [
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 4,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.14298172949929722,
+        "results": {
+          "sat": 4
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 4,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.13652052098768763,
+        "results": {
+          "sat": 4
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 305,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "row_index": 0
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0031582709925715,
+        "results": {
+          "timeout": 4
+        },
+        "timeout_repeats": 4,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0028738744877046,
+        "results": {
+          "timeout": 4
+        },
+        "timeout_repeats": 4,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 924,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "row_index": 1
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0077176250051707,
+        "results": {
+          "timeout": 4
+        },
+        "timeout_repeats": 4,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0078190625063144,
+        "results": {
+          "timeout": 4
+        },
+        "timeout_repeats": 4,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7309,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "row_index": 2
+    }
+  ],
+  "repeats": 4,
+  "runtime_host": "macbook-air-airbartek-6.home",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-22T17:28:01.274425+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 6,
+    "timeouts": [
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "candidate",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "repeat": 0,
+        "result": "timeout",
+        "row_index": 1,
+        "stderr": ""
+      },
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "baseline",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "repeat": 0,
+        "result": "timeout",
+        "row_index": 1,
+        "stderr": ""
+      },
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "baseline",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "repeat": 0,
+        "result": "timeout",
+        "row_index": 2,
+        "stderr": ""
+      },
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "candidate",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2",
+        "repeat": 0,
+        "result": "timeout",
+        "row_index": 2,
+        "stderr": ""
+      }
+    ],
+    "wrong_answers": []
+  },
+  "warmups": 1,
+  "wrong_answers": []
+}

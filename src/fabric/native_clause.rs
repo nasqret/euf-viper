@@ -79,8 +79,25 @@ pub trait Interpretation {
 pub struct ClauseId(u32);
 
 impl ClauseId {
+    pub(crate) const MIN: Self = Self(0);
+    pub(crate) const MAX: Self = Self(u32::MAX);
+
+    pub(crate) const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    pub(crate) const fn raw(self) -> u32 {
+        self.0
+    }
+
     pub const fn index(self) -> usize {
         self.0 as usize
+    }
+}
+
+impl fmt::Display for ClauseId {
+    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(output)
     }
 }
 

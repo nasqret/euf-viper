@@ -1,0 +1,1397 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 36,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 6,
+  "arm_order": [
+    "production",
+    "scan",
+    "incremental",
+    "watched",
+    "learned",
+    "action"
+  ],
+  "arms": {
+    "action": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.024967456993181,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "incremental": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.02292254101485,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "learned": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.022233499999857,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "production": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.023940751008922,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "scan": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.022626874007983,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "watched": {
+      "common_aggregate_speedup_vs_reference": null,
+      "common_geometric_speedup_vs_reference": null,
+      "common_total_time_s": 0.0,
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 6
+      },
+      "runs": 6,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 12.024205790978158,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "action": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "action",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "incremental": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "incremental",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "learned": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "learned",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "production": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "solve",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "scan": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "scan",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      },
+      "watched": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "watched",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+          "size_bytes": 3405472
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "expected_status": "sat",
+        "id": 305,
+        "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+        "row_index": 0,
+        "sha256": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc",
+        "size_bytes": 1146846
+      }
+    ],
+    "manifest": {
+      "path": "benchmarks/novelty-tail/goel-frogs2.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/novelty-tail/goel-frogs2.jsonl",
+      "sha256": "c46566fb61aaae253a4e9874fd9df64216e3d0ac2a375d71b48865528d935277",
+      "size_bytes": 505
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "research-vault/06-results/2026-07-22-goel-fabric-engines-local.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/2026-07-22-goel-fabric-engines-local.csv",
+      "sha256": "e1edb5bca31247c5de5ed9f70c00a555062681c39bea805927a11ef523337727",
+      "size_bytes": 23361,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "research-vault/06-results/2026-07-22-goel-fabric-engines-local.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py",
+        "sha256": "07dd430123583b664dd7b7dfcb3f2b9e22b0601db1be1e3dfe5aa5ff49db6428",
+        "size_bytes": 37715
+      },
+      "runner": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "action": [
+      "target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "action",
+      "{input}"
+    ],
+    "incremental": [
+      "target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "incremental",
+      "{input}"
+    ],
+    "learned": [
+      "target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "learned",
+      "{input}"
+    ],
+    "production": [
+      "target/release/euf-viper",
+      "solve",
+      "{input}"
+    ],
+    "scan": [
+      "target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "scan",
+      "{input}"
+    ],
+    "watched": [
+      "target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "watched",
+      "{input}"
+    ]
+  },
+  "common_correct": 0,
+  "common_correct_paths": [],
+  "complete_blocks": 1,
+  "elapsed_s": 72.18996237500687,
+  "environment_overrides": {
+    "action": {},
+    "incremental": {},
+    "learned": {},
+    "production": {},
+    "scan": {},
+    "watched": {}
+  },
+  "executable_sha256": {
+    "action": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "incremental": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "learned": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "production": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "scan": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59",
+    "watched": "ab641974196a077e07503ee8b6abee0a75477ccd0c9240367e777410de6dda59"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 1
+    }
+  },
+  "finished_at": "2026-07-22T05:59:58.195735+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 1,
+  "manifest": "benchmarks/novelty-tail/goel-frogs2.jsonl",
+  "manifest_order": [
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2"
+  ],
+  "manifest_sha256": "c46566fb61aaae253a4e9874fd9df64216e3d0ac2a375d71b48865528d935277",
+  "measured_runs": 36,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "action": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.004207937497995,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "incremental": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.003928166508558,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "learned": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.0036579790030373,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "production": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.003949042002205,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "scan": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.0038965830026427,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "watched": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.004171666500042,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 305,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "row_index": 0
+    }
+  ],
+  "reference_arm": "production",
+  "repeats": 6,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schedule": {
+    "arm_count": 6,
+    "arms": [
+      "production",
+      "scan",
+      "incremental",
+      "watched",
+      "learned",
+      "action"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "production",
+            "successor": "scan"
+          },
+          {
+            "count": 1,
+            "predecessor": "production",
+            "successor": "incremental"
+          },
+          {
+            "count": 1,
+            "predecessor": "production",
+            "successor": "watched"
+          },
+          {
+            "count": 1,
+            "predecessor": "production",
+            "successor": "learned"
+          },
+          {
+            "count": 1,
+            "predecessor": "production",
+            "successor": "action"
+          },
+          {
+            "count": 1,
+            "predecessor": "scan",
+            "successor": "production"
+          },
+          {
+            "count": 1,
+            "predecessor": "scan",
+            "successor": "incremental"
+          },
+          {
+            "count": 1,
+            "predecessor": "scan",
+            "successor": "watched"
+          },
+          {
+            "count": 1,
+            "predecessor": "scan",
+            "successor": "learned"
+          },
+          {
+            "count": 1,
+            "predecessor": "scan",
+            "successor": "action"
+          },
+          {
+            "count": 1,
+            "predecessor": "incremental",
+            "successor": "production"
+          },
+          {
+            "count": 1,
+            "predecessor": "incremental",
+            "successor": "scan"
+          },
+          {
+            "count": 1,
+            "predecessor": "incremental",
+            "successor": "watched"
+          },
+          {
+            "count": 1,
+            "predecessor": "incremental",
+            "successor": "learned"
+          },
+          {
+            "count": 1,
+            "predecessor": "incremental",
+            "successor": "action"
+          },
+          {
+            "count": 1,
+            "predecessor": "watched",
+            "successor": "production"
+          },
+          {
+            "count": 1,
+            "predecessor": "watched",
+            "successor": "scan"
+          },
+          {
+            "count": 1,
+            "predecessor": "watched",
+            "successor": "incremental"
+          },
+          {
+            "count": 1,
+            "predecessor": "watched",
+            "successor": "learned"
+          },
+          {
+            "count": 1,
+            "predecessor": "watched",
+            "successor": "action"
+          },
+          {
+            "count": 1,
+            "predecessor": "learned",
+            "successor": "production"
+          },
+          {
+            "count": 1,
+            "predecessor": "learned",
+            "successor": "scan"
+          },
+          {
+            "count": 1,
+            "predecessor": "learned",
+            "successor": "incremental"
+          },
+          {
+            "count": 1,
+            "predecessor": "learned",
+            "successor": "watched"
+          },
+          {
+            "count": 1,
+            "predecessor": "learned",
+            "successor": "action"
+          },
+          {
+            "count": 1,
+            "predecessor": "action",
+            "successor": "production"
+          },
+          {
+            "count": 1,
+            "predecessor": "action",
+            "successor": "scan"
+          },
+          {
+            "count": 1,
+            "predecessor": "action",
+            "successor": "incremental"
+          },
+          {
+            "count": 1,
+            "predecessor": "action",
+            "successor": "watched"
+          },
+          {
+            "count": 1,
+            "predecessor": "action",
+            "successor": "learned"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        },
+        "transitions_per_row": 5
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "production",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "scan",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "incremental",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "watched",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "learned",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "action",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 6,
+        "expected_length": 6
+      }
+    },
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 6,
+    "rows": [
+      {
+        "order": [
+          "production",
+          "scan",
+          "action",
+          "incremental",
+          "learned",
+          "watched"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "scan",
+          "incremental",
+          "production",
+          "watched",
+          "action",
+          "learned"
+        ],
+        "repeat": 1
+      },
+      {
+        "order": [
+          "incremental",
+          "watched",
+          "scan",
+          "learned",
+          "production",
+          "action"
+        ],
+        "repeat": 2
+      },
+      {
+        "order": [
+          "watched",
+          "learned",
+          "incremental",
+          "action",
+          "scan",
+          "production"
+        ],
+        "repeat": 3
+      },
+      {
+        "order": [
+          "learned",
+          "action",
+          "watched",
+          "production",
+          "incremental",
+          "scan"
+        ],
+        "repeat": 4
+      },
+      {
+        "order": [
+          "action",
+          "production",
+          "learned",
+          "scan",
+          "watched",
+          "incremental"
+        ],
+        "repeat": 5
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "production",
+      "scan",
+      "incremental",
+      "watched",
+      "learned",
+      "action"
+    ],
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "2779d97083b8112ebf5ed6613f1ad1272b315378eef821dba92570a95c0c2772"
+  },
+  "schedule_sha256": "2779d97083b8112ebf5ed6613f1ad1272b315378eef821dba92570a95c0c2772",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2": "6db2ccdeecb6e2ef248596dc6b85a3bba3da39aa5dcdde859d5c1e05916417cc"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-22T05:58:46.024684+00:00",
+  "status": "complete",
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 0,
+      "stderr": ""
+    },
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 8,
+      "stderr": ""
+    },
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 16,
+      "stderr": ""
+    },
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 23,
+      "stderr": ""
+    },
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 27,
+      "stderr": ""
+    },
+    {
+      "arm": "production",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "production",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 31,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 1,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 6,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 14,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 22,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 29,
+      "stderr": ""
+    },
+    {
+      "arm": "scan",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "scan",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 33,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 3,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 7,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 12,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 20,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 28,
+      "stderr": ""
+    },
+    {
+      "arm": "incremental",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "incremental",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 35,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 5,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 9,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 13,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 18,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 26,
+      "stderr": ""
+    },
+    {
+      "arm": "watched",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "watched",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 34,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 4,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 11,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 15,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 19,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 24,
+      "stderr": ""
+    },
+    {
+      "arm": "learned",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "learned",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 32,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 2,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 10,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 17,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 21,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 25,
+      "stderr": ""
+    },
+    {
+      "arm": "action",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "action",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "sequence": 30,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

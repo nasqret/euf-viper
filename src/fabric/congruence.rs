@@ -841,14 +841,18 @@ impl<'terms> RollbackCongruence<'terms> {
                 "equality assertion produced a disequality conflict variant",
             )));
         };
+        let mut budget = ExplanationBudget::default();
+        let base = self.checked_single_reason(reason)?;
+        let (equality_reasons, disequality_reasons) =
+            self.aligned_conflict_reasons(left, right, &base, &separations, &mut budget)?;
         Ok(CongruenceConflict {
             origin: ConflictOrigin::ExplicitEquality {
                 left,
                 right,
                 reason,
             },
-            equality_reasons: self.checked_single_reason(reason)?,
-            disequality_reasons: self.reasons_from_separations(&separations)?,
+            equality_reasons,
+            disequality_reasons,
         })
     }
 
@@ -868,24 +872,87 @@ impl<'terms> RollbackCongruence<'terms> {
         Ok(reasons)
     }
 
-    fn reasons_from_separations(
+    fn aligned_conflict_reasons(
         &self,
+        left: TermId,
+        right: TermId,
+        base_equality_reasons: &[ReasonId],
         separations: &[SeparationRecord],
-    ) -> Result<Vec<ReasonId>, WorkFailure> {
-        let mut reasons = Vec::new();
-        reasons
+        budget: &mut ExplanationBudget,
+    ) -> Result<(Vec<ReasonId>, Vec<ReasonId>), WorkFailure> {
+        let mut ordered = Vec::new();
+        ordered
             .try_reserve_exact(separations.len())
             .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
-        reasons.extend(separations.iter().map(|record| record.reason));
-        canonicalize_reasons(&mut reasons);
-        if reasons.len() > self.limits.max_antecedent_reasons {
-            return Err(WorkFailure::Abstained(Abstention::CapExceeded {
-                resource: CappedResource::AntecedentReasons,
-                attempted: reasons.len(),
-                limit: self.limits.max_antecedent_reasons,
-            }));
+        ordered.extend_from_slice(separations);
+        ordered.sort_by_key(|record| (record.reason, record.left, record.right));
+
+        let mut best: Option<(Vec<ReasonId>, Vec<ReasonId>)> = None;
+        for separation in ordered {
+            let direct = self
+                .partition
+                .are_equal(left, separation.left)
+                .map_err(CongruenceError::Partition)
+                .map_err(WorkFailure::Error)?
+                && self
+                    .partition
+                    .are_equal(right, separation.right)
+                    .map_err(CongruenceError::Partition)
+                    .map_err(WorkFailure::Error)?;
+            let swapped = self
+                .partition
+                .are_equal(left, separation.right)
+                .map_err(CongruenceError::Partition)
+                .map_err(WorkFailure::Error)?
+                && self
+                    .partition
+                    .are_equal(right, separation.left)
+                    .map_err(CongruenceError::Partition)
+                    .map_err(WorkFailure::Error)?;
+            let (left_witness, right_witness) = if direct {
+                (separation.left, separation.right)
+            } else if swapped {
+                (separation.right, separation.left)
+            } else {
+                continue;
+            };
+
+            let mut equality_reasons = Vec::new();
+            equality_reasons
+                .try_reserve(base_equality_reasons.len())
+                .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
+            equality_reasons.extend_from_slice(base_equality_reasons);
+            for (endpoint, witness) in [(left, left_witness), (right, right_witness)] {
+                let Some(reasons) = self.explain_equal_internal(endpoint, witness, budget)? else {
+                    return Err(WorkFailure::Error(CongruenceError::InvariantViolation(
+                        "disequality witness endpoint lacks its class-alignment proof",
+                    )));
+                };
+                equality_reasons
+                    .try_reserve(reasons.len())
+                    .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
+                equality_reasons.extend(reasons);
+            }
+            canonicalize_reasons(&mut equality_reasons);
+            check_reason_cap(equality_reasons.len(), self.limits.max_antecedent_reasons)
+                .map_err(WorkFailure::Abstained)?;
+            let disequality_reasons = self.checked_single_reason(separation.reason)?;
+            let replace = best.as_ref().is_none_or(|current| {
+                let candidate_len = equality_reasons.len() + disequality_reasons.len();
+                let current_len = current.0.len() + current.1.len();
+                candidate_len < current_len
+                    || (candidate_len == current_len
+                        && (&equality_reasons, &disequality_reasons) < (&current.0, &current.1))
+            });
+            if replace {
+                best = Some((equality_reasons, disequality_reasons));
+            }
         }
-        Ok(reasons)
+        best.ok_or_else(|| {
+            WorkFailure::Error(CongruenceError::InvariantViolation(
+                "no disequality witness aligns with the conflicting classes",
+            ))
+        })
     }
 
     fn saturate(&mut self) -> Result<SaturationStats, SaturationFailure> {
@@ -1025,21 +1092,27 @@ impl<'terms> RollbackCongruence<'terms> {
                         Err(PartitionError::Conflict(
                             PartitionConflict::EqualityAgainstDisequality { separations, .. },
                         )) => {
-                            let disequality_reasons = self
-                                .reasons_from_separations(&separations)
+                            let (equality_reasons, disequality_reasons) = self
+                                .aligned_conflict_reasons(
+                                    left,
+                                    right,
+                                    &antecedent_reasons,
+                                    &separations,
+                                    &mut explanation_budget,
+                                )
                                 .map_err(|failure| match failure {
-                                WorkFailure::Abstained(reason) => {
-                                    SaturationFailure::Abstained(reason)
-                                }
-                                WorkFailure::Error(error) => SaturationFailure::Error(error),
-                            })?;
+                                    WorkFailure::Abstained(reason) => {
+                                        SaturationFailure::Abstained(reason)
+                                    }
+                                    WorkFailure::Error(error) => SaturationFailure::Error(error),
+                                })?;
                             return Err(SaturationFailure::Conflict(CongruenceConflict {
                                 origin: ConflictOrigin::Congruence {
                                     left_application: left,
                                     right_application: right,
                                     argument_pairs,
                                 },
-                                equality_reasons: antecedent_reasons,
+                                equality_reasons,
                                 disequality_reasons,
                             }));
                         }

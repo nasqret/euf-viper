@@ -25,7 +25,7 @@ class ShadowShardAuditTests(unittest.TestCase):
             fixture = CampaignFixture(Path(temporary))
             fixture.add_instance("family/sat.smt2", expected="sat")
             fixture.finalize()
-            completed = fixture.run()
+            completed = fixture.run(timeout=1.0)
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
             summary = AUDIT.audit_shadow_shard(
@@ -66,7 +66,7 @@ class ShadowShardAuditTests(unittest.TestCase):
                 "family/unknown.smt2", expected="sat", campaign_result="unknown"
             )
             fixture.finalize()
-            completed = fixture.run()
+            completed = fixture.run(timeout=1.0)
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
             summary = AUDIT.audit_shadow_shard(
