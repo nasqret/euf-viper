@@ -19,7 +19,7 @@ SCHEMA_VERSION = "euf-viper.helios-resource-usage.v1"
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.UTC).isoformat(timespec="microseconds").replace(
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds").replace(
         "+00:00", "Z"
     )
 

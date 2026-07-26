@@ -203,6 +203,9 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("AMD EPYC 9654", task)
         self.assertNotIn("print $2; exit", task)
         self.assertNotIn("NF {print; exit}", PREFLIGHT.read_text(encoding="utf-8"))
+        wrapper = RESOURCE_WRAPPER.read_text(encoding="utf-8")
+        self.assertIn("dt.timezone.utc", wrapper)
+        self.assertNotIn("dt.UTC", wrapper)
         self.assertIn(
             '/bin/bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"',
             batch,
