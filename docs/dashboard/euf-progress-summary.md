@@ -2,23 +2,23 @@
 
 - Campaign: `euf-world-leader-2026-07`
 - Candidate: `euf-viper` at `8368d21de96eec77f3bb5f6820c11d1363d3041b`
-- Source registry: `euf-viper-world-leader-progress` (`71e4ffda28a0b1a1af5b9d9f11ebe81343d8e862fac51ebec7ee6e22c2efb13c`)
-- Broad current-route baseline: **MISSING**. No broad whole-corpus panel uses the campaign candidate revision.
-- Selected panels: 12 (162 excluded; claim boundaries are not pooled)
+- Source registry: `euf-viper-world-leader-progress` (`0d6ef9625e53a01b9f5bf61912aa73fc874e1e1ce83821232b0cf4d7319ba6f9`)
+- Broad current-route baseline: **AVAILABLE**. At least one complete verified broad whole-corpus panel is available.
+- Selected panels: 13 (187 excluded; claim boundaries are not pooled)
 
 ## Victory Gates
 
 | Gate | State | Evidence | Reason |
 |---|---:|---|---|
-| V0 | **UNKNOWN** | none | Dashboard model v1 does not attest independent model/proof checks, hash drift, or missing-row audits. |
+| V0 | **UNKNOWN** | `panel-07e69f4abc38cc0e`, `panel-0f3e537b85853559`, `panel-11b52e27d3604d98`, `panel-168b065ccb0389ce`, `panel-19275909c33ff08d`, `panel-2e1e2403bc884402`, `panel-2fd70bb629f8b487`, `panel-3e5c463cd01acad0`, `panel-4123cee98a4f3257`, `panel-4d5d09f822121064`, `panel-5bf9f54563dfae67`, `panel-6387fd1864146f38`, `panel-6a1104e0474213a6`, `panel-6de4979a366aed69`, `panel-78222df7cdcbb8d5`, `panel-7a64fb2ce67123fe`, `panel-855e9752a433555d`, `panel-86f8222ce9c1fbe8`, `panel-92b37e0cee865cc7`, `panel-92d6e75920d3e24f`, `panel-95189c7f7e3f0e51`, `panel-c6943e6f8a21960a`, `panel-cadbdf60dae050ca`, `panel-cce4ebc63bc3a66e`, `panel-ddf2b002f5ecc0a3`, `panel-e3ac265e08610cea` | Dashboard model v1 does not attest independent model/proof checks, hash drift, or missing-row audits. |
 | V1 | **UNKNOWN** | none | Missing complete verified exact-candidate all-comparator panels: smtcomp-2025-qf-uf@0.05s, smtcomp-2025-qf-uf@0.2s, smtcomp-2025-qf-uf@2s, smtcomp-2025-qf-uf@24s, smtcomp-2025-qf-uf@60s, smtcomp-2025-qf-uf@1200s |
-| V2 | **UNKNOWN** | none | Missing complete verified exact-candidate all-comparator panels: smtlib-2025-full@2s, smtlib-2025-full@60s, smtlib-2025-full@1200s |
-| V3 | **UNKNOWN** | none | Missing complete verified exact-candidate timing panels: smtcomp-2025-qf-uf@0.05s, smtcomp-2025-qf-uf@0.2s, smtcomp-2025-qf-uf@2s, smtcomp-2025-qf-uf@24s, smtcomp-2025-qf-uf@60s, smtcomp-2025-qf-uf@1200s, smtlib-2025-full@0.05s, smtlib-2025-full@0.2s, smtlib-2025-full@2s, smtlib-2025-full@24s, smtlib-2025-full@60s, smtlib-2025-full@1200s |
+| V2 | **FAIL** | `panel-cce4ebc63bc3a66e` | Viper loses coverage on smtlib-2025-full at 2 s. |
+| V3 | **FAIL** | `panel-cce4ebc63bc3a66e` | cvc5 ratio is 1.02573 for common_total on smtlib-2025-full@2s; 1.05 is required. |
 | V4 | **UNKNOWN** | none | Dashboard model v1 contains no RSS, instruction, or cache metrics. |
 | V5 | **UNKNOWN** | none | Dashboard model v1 does not attest CPU classes or sealed-holdout status. |
 | V6 | **UNKNOWN** | none | Dashboard model v1 contains no independent proof/model checks or novelty ablation record. |
 
-Overall `best_overall_QF_UF_solver` state: **UNKNOWN**.
+Overall `best_overall_QF_UF_solver` state: **FAIL**.
 
 ## Broad Whole Corpus: SMT-LIB 2025 QF_UF full
 
@@ -52,6 +52,39 @@ Instances: 7503; complete: `true`; leader solves: 7445.
 | Z3 sat.euf (`z3-sat-euf`) | par2 | 7231 | 0.8371 | -16.29% | 16.29% |
 | Z3 sat.euf (`z3-sat-euf`) | common total | 7231 | 1.03295 | +3.30% | 0.00% |
 | Z3 sat.euf (`z3-sat-euf`) | common geometric | 7231 | 1.90269 | +90.27% | 0.00% |
+
+## Broad Whole Corpus: SMT-LIB 2025 QF_UF full
+
+`panel-cce4ebc63bc3a66e` | revision `8368d21de96eec77f3bb5f6820c11d1363d3041b` | status `verified` | family `all` | expected `all` | timeout `2s` | host `helios-epyc-9654` | class `audited-build-once-sharded-locked`
+
+Instances: 7503; complete: `true`; leader solves: 7490.
+
+| Solver | Solved | Coverage | PAR2 (s) |
+|---|---:|---:|---:|
+| cvc5 (`cvc5`) | 7364 | 98.15% | 0.178151 |
+| Viper (`euf-viper`) | 7436 | 99.11% | 0.140919 |
+| OpenSMT (`opensmt`) | 7289 | 97.15% | 0.255699 |
+| Yices2 (`yices2`) | 7490 | 99.83% | 0.0423575 |
+| Z3 default (`z3-default`) | 7446 | 99.24% | 0.107313 |
+| Z3 sat.euf (`z3-sat-euf`) | 7459 | 99.41% | 0.11132 |
+
+| Competitor | Metric | Common solved | Ratio | Signed | Required Viper reduction |
+|---|---|---:|---:|---:|---:|
+| cvc5 (`cvc5`) | par2 | 7339 | 1.26421 | +26.42% | 0.00% |
+| cvc5 (`cvc5`) | common total | 7339 | 1.02573 | +2.57% | 0.00% |
+| cvc5 (`cvc5`) | common geometric | 7339 | 1.22566 | +22.57% | 0.00% |
+| OpenSMT (`opensmt`) | par2 | 7278 | 1.81451 | +81.45% | 0.00% |
+| OpenSMT (`opensmt`) | common total | 7278 | 1.58239 | +58.24% | 0.00% |
+| OpenSMT (`opensmt`) | common geometric | 7278 | 0.968037 | -3.20% | 3.20% |
+| Yices2 (`yices2`) | par2 | 7429 | 0.300581 | -69.94% | 69.94% |
+| Yices2 (`yices2`) | common total | 7429 | 0.288925 | -71.11% | 71.11% |
+| Yices2 (`yices2`) | common geometric | 7429 | 0.393365 | -60.66% | 60.66% |
+| Z3 default (`z3-default`) | par2 | 7399 | 0.761527 | -23.85% | 23.85% |
+| Z3 default (`z3-default`) | common total | 7399 | 0.72377 | -27.62% | 27.62% |
+| Z3 default (`z3-default`) | common geometric | 7399 | 0.885829 | -11.42% | 11.42% |
+| Z3 sat.euf (`z3-sat-euf`) | par2 | 7409 | 0.789959 | -21.00% | 21.00% |
+| Z3 sat.euf (`z3-sat-euf`) | common total | 7409 | 0.817004 | -18.30% | 18.30% |
+| Z3 sat.euf (`z3-sat-euf`) | common geometric | 7409 | 0.954398 | -4.56% | 4.56% |
 
 ## Broad Whole Corpus: SMT-LIB 2025 QF_UF full
 

@@ -35,7 +35,6 @@ REMOTE_ROOT="${EUF_VIPER_HELIOS_REMOTE_ROOT:?set remote campaign root}"
 CAMPAIGN_ROOT="${EUF_VIPER_HELIOS_CAMPAIGN_ROOT:-$RUN_ROOT}"
 
 CANDIDATE_ARGV_JSON='["{binary}","fabric-solve","--engine","quotient-portfolio","{instance}"]'
-PINNED_SOLVER_REVISION=8368d21de96eec77f3bb5f6820c11d1363d3041b
 
 die() {
   printf '%s\n' "$*" >&2
@@ -87,8 +86,8 @@ for forbidden in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS; do
   [ -z "${!forbidden:-}" ] || die "ambient build override is forbidden: $forbidden"
 done
 
-[ "$EXPECTED_SOLVER_REVISION" = "$PINNED_SOLVER_REVISION" ] || \
-  die "solver revision must remain pinned to $PINNED_SOLVER_REVISION"
+[[ "$EXPECTED_SOLVER_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
+  die "solver revision must be a full lowercase commit"
 case "$EXECUTION_MODE" in
   single)
     [ "$SHARD_COUNT" = 1 ] || die "single mode requires one shard"
@@ -212,9 +211,12 @@ python3 "$ORCHESTRATION_CHECKOUT/scripts/bench/record_solver_config.py" \
 
 TAXONOMY="$RUN_ROOT/taxonomy.jsonl"
 TAXONOMY_SPLIT="$RUN_ROOT/taxonomy-split.json"
-python3 "$ORCHESTRATION_CHECKOUT/scripts/bench/build_family_manifest.py" \
+TAXONOMY_CACHE_ROOT="$REMOTE_ROOT/taxonomy-cache"
+python3 "$ORCHESTRATION_CHECKOUT/scripts/helios/materialize_taxonomy.py" \
   "$MANIFEST" \
   --repository-root "$ORCHESTRATION_CHECKOUT" \
+  --builder "$ORCHESTRATION_CHECKOUT/scripts/bench/build_family_manifest.py" \
+  --cache-root "$TAXONOMY_CACHE_ROOT" \
   --taxonomy-out "$TAXONOMY" \
   --split-out "$TAXONOMY_SPLIT" \
   > "$RUN_ROOT/taxonomy-summary.json"
@@ -248,7 +250,7 @@ if [ "$EXECUTION_MODE" = prepare-sharded ]; then
     --count "$SHARD_COUNT" \
     --out-dir "$SHARD_LOCKS" \
     > "$SHARD_SUMMARY"
-  printf 'execution_mode\t%s\nshard_count\t%s\ncampaign_root\t%s\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\nlock_file_sha256\t%s\nshard_summary_sha256\t%s\n' \
+  printf 'execution_mode\t%s\nshard_count\t%s\ncampaign_root\t%s\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\ntaxonomy_cache_summary_sha256\t%s\nlock_file_sha256\t%s\nshard_summary_sha256\t%s\n' \
     "$EXECUTION_MODE" \
     "$SHARD_COUNT" \
     "$CAMPAIGN_ROOT" \
@@ -259,6 +261,7 @@ if [ "$EXECUTION_MODE" = prepare-sharded ]; then
     "$(hash_file "$SOLVER_CONFIG")" \
     "$(hash_file "$TAXONOMY")" \
     "$(hash_file "$TAXONOMY_SPLIT")" \
+    "$(hash_file "$RUN_ROOT/taxonomy-summary.json")" \
     "$(hash_file "$LOCK")" \
     "$(hash_file "$SHARD_SUMMARY")" \
     > "$RUN_ROOT/preparation.tsv"
@@ -287,7 +290,7 @@ RUNNER_STATUS="$?"
 set -e
 [ -s "$RESOURCE_CAPTURE" ] || die "resource wrapper did not produce a record"
 
-printf 'execution_mode\tsingle\nshard_count\t1\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\nlock_file_sha256\t%s\nbound_lock_file_sha256\t%s\n' \
+printf 'execution_mode\tsingle\nshard_count\t1\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\ntaxonomy_cache_summary_sha256\t%s\nlock_file_sha256\t%s\nbound_lock_file_sha256\t%s\n' \
   "$EXPECTED_ORCHESTRATION_REVISION" \
   "$EXPECTED_SOLVER_REVISION" \
   "$EXPECTED_COMPARATOR_BUNDLE_RECEIPT_SHA256" \
@@ -295,6 +298,7 @@ printf 'execution_mode\tsingle\nshard_count\t1\norchestration_revision\t%s\nsolv
   "$(hash_file "$SOLVER_CONFIG")" \
   "$(hash_file "$TAXONOMY")" \
   "$(hash_file "$TAXONOMY_SPLIT")" \
+  "$(hash_file "$RUN_ROOT/taxonomy-summary.json")" \
   "$(hash_file "$LOCK")" \
   "$(hash_file "$BOUND_LOCK")" \
   > "$RUN_ROOT/preparation.tsv"

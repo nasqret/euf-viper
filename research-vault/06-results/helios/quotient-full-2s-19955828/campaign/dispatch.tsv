@@ -1,0 +1,2 @@
+schema_version	status	array_job_id	finalizer_job_id	shard_count	preparation_receipt_sha256
+1	submitted	19955828	19955833	64	a4c7772069a2bb3ca67368d61160721c972cecef4ae8f6373aa7970782f40a31

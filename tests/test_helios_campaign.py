@@ -304,10 +304,17 @@ class HeliosShellContractTests(unittest.TestCase):
     def test_taxonomy_and_split_provenance_are_required(self) -> None:
         task = TASK.read_text(encoding="utf-8")
         preparer = PREPARE_LOCK.read_text(encoding="utf-8")
+        taxonomy_cache = (
+            ROOT / "scripts" / "helios" / "materialize_taxonomy.py"
+        ).read_text(encoding="utf-8")
         taxonomy_builder = (
             ROOT / "scripts" / "bench" / "build_family_manifest.py"
         ).read_text(encoding="utf-8")
         self.assertIn("build_family_manifest.py", task)
+        self.assertIn("materialize_taxonomy.py", task)
+        self.assertIn("taxonomy_cache_summary_sha256", task)
+        self.assertIn("fcntl.LOCK_EX", taxonomy_cache)
+        self.assertIn("cached output hash drifted", taxonomy_cache)
         self.assertIn('--taxonomy "$TAXONOMY"', task)
         self.assertIn('parser.add_argument("--taxonomy", type=Path, required=True)', preparer)
         self.assertIn('lock["promotion_eligible"] is not True', preparer)
@@ -319,8 +326,15 @@ class HeliosShellContractTests(unittest.TestCase):
         submit = SUBMIT.read_text(encoding="utf-8")
         task = TASK.read_text(encoding="utf-8")
         batch = SBATCH.read_text(encoding="utf-8")
-        for source in (submit, task):
-            self.assertIn(SOLVER_REVISION, source)
+        self.assertIn("--solver-revision", submit)
+        self.assertIn(
+            'SOLVER_REVISION="${EUF_VIPER_HELIOS_SOLVER_REVISION:-}"', submit
+        )
+        self.assertIn('SOLVER_REVISION="$ORCHESTRATION_REVISION"', submit)
+        self.assertIn("solver revision must be a full lowercase commit", submit)
+        self.assertIn("solver revision must be a full lowercase commit", task)
+        self.assertNotIn(SOLVER_REVISION, submit)
+        self.assertNotIn(SOLVER_REVISION, task)
         self.assertIn('$SOLVER_CHECKOUT/Cargo.toml', task)
         self.assertIn('--repository "$ORCHESTRATION_CHECKOUT"', task)
         self.assertIn(

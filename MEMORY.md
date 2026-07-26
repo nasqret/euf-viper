@@ -1309,3 +1309,28 @@
   It is pending for unavailable/reserved nodes; do not treat submission or
   scheduler estimates as solver evidence. Fetch and adjudicate only after the
   final remote `artifacts/campaign.json` exists.
+- Supersede the old broad-status checkpoint with Helios full campaign
+  `19955431`/`19955828`/`19955833`, run
+  `20260726T203358Z-da57b301a572-8368d21`. It has 45,018/45,018 rows and exact
+  portable replay. At 2 s Viper solves 7,436/7,503, Yices2 7,490, Z3 default
+  7,446, Z3 `sat.euf=true` 7,459, cvc5 7,364, and OpenSMT 7,289. Viper is not
+  the broad leader. The frozen Yices-only cohort has 61 rows: 57 QG, one Goel,
+  two PEQ, one SEQ; 52 are UNSAT.
+- Current broad dashboard panel is `panel-cce4ebc63bc3a66e`. Against Yices2,
+  Viper's factors are `0.300581x` PAR-2, `0.288925x` common total, and
+  `0.393365x` common geometric; required reductions are 69.94%, 71.11%, and
+  60.66%. Against Z3 default required reductions are 23.85%, 27.62%, and
+  11.42%. Keep historical 60/1,200 s evidence at `30828a4` separate.
+- Dense-six qg6 candidate: route only when proved carrier size is six,
+  Boolean applications are zero, explicit disequality edges are at least 200,
+  and guarded disequalities are zero. Same-binary local ABBA with
+  `EUF_VIPER_FINITE_DENSE6_CADICAL=0/1` changed 192/244 to 244/244 and recorded
+  `1.89734x` total and `1.20616x` geometric speed with no wrong/error. This is
+  local arm64 A2 evidence only. Helios currently has 21 qg6 timeouts; do not add
+  52 to broad coverage. A perfect Helios projection is 7,457, still 33 behind
+  Yices2. Run the exact all-solver Helios campaign before promotion.
+- Campaign analysis now uses equivalent family sufficient statistics: the full
+  10,000-replicate five-comparator replay takes 4.18 seconds instead of 49:07,
+  about `704x`, with identical decisions. Helios taxonomy is content-addressed,
+  hash-checked, lock-protected, and tamper-failing. Python discovery is 627/627;
+  Rust all-feature testing is 643 passed with ten intentional ignores.

@@ -19,18 +19,23 @@ mechanism-specific authority and cannot be weakened by the top-level program.
 Immediate execution order:
 
 1. generate the dashboard from frozen broad and current targeted evidence
-   (**complete: 186 records, 174 claim-isolated panels**);
+   (**complete: 212 records, 200 claim-isolated panels**);
 2. qualify a promotion-eligible Helios lock with exact taxonomy, separate
    orchestration/solver provenance, and the official hash-locked comparator
-   bundle (**complete: terminal smoke job `19954649`, 18/18 rows**);
+   bundle (**complete**);
 3. implement build-once sharding and replicate the current fast cycle under
-   `plgccaiautore2026-cpu` (**complete: array `19955299`, finalizer `19955300`,
-   byte-identical fetched audit replay**);
-4. adjudicate WMI PGO/Goel job `170902` when it becomes terminal, without
-   treating that older-route result as quotient-portfolio evidence;
-5. run revision `8368d21` on full and official two-second campaigns;
-6. continue only its timeouts to 60 and 1,200 seconds; and
-7. choose the next isolated mechanism from the measured post-structural gap.
+   `plgccaiautore2026-cpu` (**complete**);
+4. run revision `8368d21` on the complete full corpus (**complete: preparation
+   `19955431`, array `19955828`, finalizer `19955833`, 45,018/45,018 rows**);
+5. derive exact gap cohorts, accelerate analysis, and cache taxonomy
+   (**complete: 61 Yices-only rows; about `704x` faster bootstrap analysis**);
+6. run the semantic dense-six CaDiCaL route through local A0-A2
+   (**complete: qg6 192/244 -> 244/244, zero wrong/error**) and execute its
+   all-solver Helios A3/A4 campaign (**next**);
+7. run the current official two-second selection, then continue only current
+   timeouts to 60 and 1,200 seconds; and
+8. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
+   older-route result as quotient-portfolio evidence.
 
 After each A4 or later step, report exact coverage, PAR-2, common timing,
 distribution, resources, confidence, leader-relative percentage, required
@@ -40,13 +45,13 @@ confounder, or holdout failure.
 
 The generated dashboard is `docs/dashboard/euf-progress.html`, with compact
 model `docs/dashboard/euf-progress.json` and canonical compressed evidence
-`docs/dashboard/evidence/registry.json.gz`. The current structural discovery
-panel solves 148/151 versus Yices2 140, Z3 126, and cvc5 113. Its pairwise
-PAR-2 factors are `1.816x`, `3.563x`, and `5.787x`; against Yices2 its
-common-geometric factor is still only `0.751x`, requiring a 24.9% Viper time
-reduction for parity. These rows are provisional one-repeat evidence at
-revision `9a076353`; the audited broad rows remain revision `30828a4` and are
-not combined with them.
+`docs/dashboard/evidence/registry.json.gz`. The authoritative current panel is
+`panel-cce4ebc63bc3a66e` at revision `8368d21`: Viper solves 7,436/7,503,
+Yices2 7,490, Z3 default 7,446, Z3 `sat.euf=true` 7,459, cvc5 7,364, and
+OpenSMT 7,289. Against Yices2, Viper needs reductions of `69.94%` PAR-2,
+`71.11%` common total, and `60.66%` common geometric. Against Z3 default the
+corresponding reductions are `23.85%`, `27.62%`, and `11.42%`. Viper is not
+the broad leader.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate
@@ -91,10 +96,12 @@ Continued implementation is isolated on `research/quotient-jit-lcg`. It now
 contains a routed, source-structural finite tier in addition to the bounded E2
 substrate: verified finite closure, lex symmetry, predicate congruence
 channeling, focused permutation support, and route-local CaDiCaL policy are
-selected only from formula structure. The complete local all-feature suite is
-green at 643 passed and 10 intentionally ignored; Python discovery is green at
-621 tests. These results authorize a clean freeze and fixed WMI comparison,
-not a production-default change or an overall-leader claim.
+selected only from formula structure. The new dense-six candidate adds a
+semantic backend hint, not a family or identity route. The complete local
+all-feature suite is green at 643 passed and 10 intentionally ignored; Python
+discovery is green at 627 tests. These results authorize a clean freeze and
+fixed Helios comparison, not a production-default change or an overall-leader
+claim.
 
 The implementation freeze is commit `8368d21de96eec77f3bb5f6820c11d1363d3041b`,
 published at `refs/heads/research/quotient-jit-lcg`; hosted Campaign contract
@@ -107,9 +114,28 @@ change PGO status; the submission itself is no performance evidence.
 
 ## Current Truth
 
-Authoritative exact-revision campaign: prepare/full/official/global-audit
-`144990`/`144991`/`144992`/`144993`, solver revision `30828a4`, with all six
-configurations and both corpus selections hash-bound by the campaign locks.
+Authoritative current fast-tail campaign: Helios preparation `19955431`,
+64-shard array `19955828`, and finalizer `19955833`, solver revision
+`8368d21`, with all six configurations and all 7,503 sources hash-bound.
+
+| Solver configuration | Current full 2s |
+| --- | ---: |
+| euf-viper | 7,436 |
+| cvc5 | 7,364 |
+| OpenSMT | 7,289 |
+| Yices2 | 7,490 |
+| Z3 default | 7,446 |
+| Z3 `sat.euf=true` | 7,459 |
+
+The current campaign contains zero wrong answers, execution errors, missing
+rows, or hash drift. Viper has seven Viper-only and 61 Yices-only solves. The
+Yices-only set is 57 QG, one Goel, two PEQ, and one SEQ; 52 are UNSAT. This
+frozen cohort determines the next architectural experiments.
+
+The longer-budget and official-selection table below remains the authoritative
+historical `30828a4` campaign. It must not be pooled with the current 2 s row.
+Its prepare/full/official/global-audit jobs are
+`144990`/`144991`/`144992`/`144993`.
 
 | Solver configuration | Full 2s | Official 2s | Full 60s | Official 60s | Full 1,200s | Official 1,200s |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |

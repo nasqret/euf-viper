@@ -2196,6 +2196,13 @@ impl<'a> IntoIterator for &'a FlatClauses {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CadicalSearchHint {
+    None,
+    DefaultSafe,
+    UnsatSafe,
+}
+
 #[derive(Debug)]
 struct CnfProblem {
     clauses: FlatClauses,
@@ -2204,7 +2211,7 @@ struct CnfProblem {
     true_lit: Option<i32>,
     finite_equalities_complete: bool,
     finite_predicate_congruence_complete: bool,
-    finite_default_safe_cadical: bool,
+    finite_cadical_search_hint: CadicalSearchHint,
 }
 
 #[cfg(feature = "certificates")]
@@ -2301,7 +2308,7 @@ impl CnfProblem {
             true_lit: None,
             finite_equalities_complete: false,
             finite_predicate_congruence_complete: false,
-            finite_default_safe_cadical: false,
+            finite_cadical_search_hint: CadicalSearchHint::None,
         }
     }
 
@@ -2778,6 +2785,7 @@ fn add_finite_domain_axioms(
         false,
         false,
         false,
+        false,
     )
 }
 
@@ -2802,6 +2810,7 @@ fn add_finite_domain_axioms_with_context(
     finite_rook_symmetry: bool,
     force_finite_symmetry: bool,
     finite_structural_default_safe: bool,
+    finite_dense6_cadical: bool,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 ) -> usize {
@@ -2839,10 +2848,15 @@ fn add_finite_domain_axioms_with_context(
         {
             if force_finite_symmetry {
                 profile_measurement("finite_structural_symmetry_route", 1, arena.apps.len());
-                if finite_structural_default_safe
+                if finite_dense6_cadical
+                    && finite_dense6_cadical_candidate(context, arena, bool_problem)
+                {
+                    cnf.finite_cadical_search_hint = CadicalSearchHint::UnsatSafe;
+                    profile_measurement("finite_dense6_cadical_route", 1, arena.apps.len());
+                } else if finite_structural_default_safe
                     && finite_structural_default_safe_candidate(context, arena, bool_problem)
                 {
-                    cnf.finite_default_safe_cadical = true;
+                    cnf.finite_cadical_search_hint = CadicalSearchHint::DefaultSafe;
                     profile_measurement("finite_structural_default_safe", 1, arena.apps.len());
                 }
             }
@@ -2969,6 +2983,37 @@ fn finite_structural_default_safe_candidate(
         domain_size,
         closed_function_count,
         guarded_disequality_clauses,
+    )
+}
+
+#[cfg(feature = "finite-symmetry")]
+const FINITE_DENSE6_MIN_DISEQUALITY_EDGES: usize = 200;
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_dense6_cadical_signature(
+    domain_size: usize,
+    boolean_applications: usize,
+    disequality_edges: usize,
+    guarded_disequality_clauses: usize,
+) -> bool {
+    domain_size == 6
+        && boolean_applications == 0
+        && disequality_edges >= FINITE_DENSE6_MIN_DISEQUALITY_EDGES
+        && guarded_disequality_clauses == 0
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_dense6_cadical_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    let analysis = context.analyze(arena, bool_problem);
+    finite_dense6_cadical_signature(
+        analysis.discovered_domain_size,
+        analysis.boolean_applications,
+        analysis.disequality_graph_edges,
+        analysis.guarded_disequality_clauses,
     )
 }
 
@@ -4658,6 +4703,16 @@ fn auto_prefers_cadical(app_count: usize, finite_added: usize, app_threshold: us
         || (finite_added > 0 && !cfg!(all(target_os = "linux", target_arch = "x86_64")))
 }
 
+fn auto_prefers_cadical_with_hint(
+    app_count: usize,
+    finite_added: usize,
+    app_threshold: usize,
+    search_hint: CadicalSearchHint,
+) -> bool {
+    search_hint == CadicalSearchHint::UnsatSafe
+        || auto_prefers_cadical(app_count, finite_added, app_threshold)
+}
+
 fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
     match setting {
         Some("cadical-refine") => true,
@@ -4945,28 +5000,23 @@ fn rustsat_clause(clause: &[i32]) -> RustSatClause {
 }
 
 fn configure_cadical(solver: &mut CadicalSolver<'_, '_>, prefer_unsat_search: bool) -> Option<()> {
-    configure_cadical_with_hint(solver, prefer_unsat_search, false)
+    configure_cadical_with_hint(solver, prefer_unsat_search, CadicalSearchHint::None)
 }
 
 fn configure_cadical_with_hint(
     solver: &mut CadicalSolver<'_, '_>,
     prefer_unsat_search: bool,
-    default_safe_hint: bool,
+    search_hint: CadicalSearchHint,
 ) -> Option<()> {
     let configured_mode = env::var("EUF_VIPER_CADICAL_MODE").ok();
-    match configured_mode.as_deref() {
-        Some("default-safe") => {
+    match (configured_mode.as_deref(), search_hint) {
+        (Some("default-safe"), _) | (None, CadicalSearchHint::DefaultSafe) => {
             solver.set_configuration(CadicalConfig::Default).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
-        Some("unsat-safe") => {
+        (Some("unsat-safe"), _) | (None, CadicalSearchHint::UnsatSafe) => {
             solver.set_configuration(CadicalConfig::Unsat).ok()?;
-            solver.set_option("sweep", 0).ok()?;
-            solver.set_option("inprobing", 0).ok()?;
-        }
-        None if default_safe_hint => {
-            solver.set_configuration(CadicalConfig::Default).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
@@ -5025,7 +5075,7 @@ fn solve_cadical_euf_once(
     configure_cadical_with_hint(
         &mut solver,
         prefer_unsat_search,
-        cnf.finite_default_safe_cadical,
+        cnf.finite_cadical_search_hint,
     )?;
     for clause in &cnf.clauses {
         solver.add_clause(rustsat_clause(clause)).ok()?;
@@ -6041,6 +6091,7 @@ const FINITE_ROOK_SYMMETRY_ENV: &str = "EUF_VIPER_FINITE_ROOK_SYMMETRY";
 const FINITE_MULTI_ROOK_ENV: &str = "EUF_VIPER_FINITE_MULTI_ROOK";
 const FINITE_STRUCTURAL_EAGER_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_EAGER";
 const FINITE_STRUCTURAL_DEFAULT_SAFE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_DEFAULT_SAFE";
+const FINITE_DENSE6_CADICAL_ENV: &str = "EUF_VIPER_FINITE_DENSE6_CADICAL";
 const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
 const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
@@ -6062,6 +6113,7 @@ struct RootCnfOptions {
     finite_rook_symmetry: bool,
     force_finite_symmetry: bool,
     finite_structural_default_safe: bool,
+    finite_dense6_cadical: bool,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 }
@@ -6075,6 +6127,7 @@ impl RootCnfOptions {
             finite_rook_symmetry: false,
             force_finite_symmetry: false,
             finite_structural_default_safe: false,
+            finite_dense6_cadical: false,
             force_finite_predicate_channeling: false,
             force_finite_permutation_support: false,
         }
@@ -6541,6 +6594,10 @@ fn finite_structural_default_safe_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_STRUCTURAL_DEFAULT_SAFE_ENV, true)
 }
 
+fn finite_dense6_cadical_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_DENSE6_CADICAL_ENV, true)
+}
+
 fn finite_structural_predicate_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_STRUCTURAL_PREDICATE_ENV, true)
 }
@@ -6584,6 +6641,7 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
         finite_rook_symmetry: finite_rook_symmetry_enabled()?,
         force_finite_symmetry: false,
         finite_structural_default_safe: finite_structural_default_safe_enabled()?,
+        finite_dense6_cadical: finite_dense6_cadical_enabled()?,
         force_finite_predicate_channeling: false,
         force_finite_permutation_support: false,
     })
@@ -6839,6 +6897,7 @@ fn solve_bool_problem(
                 root_cnf_options.finite_rook_symmetry,
                 root_cnf_options.force_finite_symmetry,
                 root_cnf_options.finite_structural_default_safe,
+                root_cnf_options.finite_dense6_cadical,
                 root_cnf_options.force_finite_predicate_channeling,
                 root_cnf_options.force_finite_permutation_support,
             );
@@ -6883,7 +6942,12 @@ fn solve_bool_problem(
             .and_then(|value| value.parse().ok())
             .unwrap_or(1_000usize);
         let auto_uses_cadical = backend == "auto"
-            && auto_prefers_cadical(arena.apps.len(), finite_added, auto_cadical_threshold);
+            && auto_prefers_cadical_with_hint(
+                arena.apps.len(),
+                finite_added,
+                auto_cadical_threshold,
+                cnf.finite_cadical_search_hint,
+            );
         if backend == "auto" && auto_uses_cadical {
             if let Some(result) = solve_cadical_euf_once(
                 &cnf,
@@ -9068,6 +9132,7 @@ mod tests {
                 finite_rook_symmetry: false,
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
+                finite_dense6_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             }
@@ -9496,6 +9561,7 @@ mod tests {
                 finite_rook_symmetry: false,
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
+                finite_dense6_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -9506,6 +9572,7 @@ mod tests {
                 finite_rook_symmetry: false,
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
+                finite_dense6_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -10849,6 +10916,21 @@ mod tests {
         assert!(!finite_structural_default_safe_signature(6, 2, 0));
         assert!(!finite_structural_default_safe_signature(7, 1, 0));
         assert!(!finite_structural_default_safe_signature(7, 2, 1));
+        assert!(finite_dense6_cadical_signature(6, 0, 201, 0));
+        assert!(!finite_dense6_cadical_signature(6, 0, 195, 0));
+        assert!(!finite_dense6_cadical_signature(7, 0, 201, 0));
+        assert!(!finite_dense6_cadical_signature(6, 1, 201, 0));
+        assert!(!finite_dense6_cadical_signature(6, 0, 201, 1));
+        assert!(auto_prefers_cadical_with_hint(
+            10,
+            1,
+            1_000,
+            CadicalSearchHint::UnsatSafe,
+        ));
+        assert_eq!(
+            auto_prefers_cadical_with_hint(10, 1, 1_000, CadicalSearchHint::None),
+            auto_prefers_cadical(10, 1, 1_000),
+        );
         assert!(finite_structural_predicate_pressure_candidate(11_360, 6));
         assert!(!finite_structural_predicate_pressure_candidate(0, 6));
         assert!(!finite_structural_predicate_pressure_candidate(16_385, 6));
@@ -10874,6 +10956,14 @@ mod tests {
         assert!(
             parse_zero_one_setting_with_default(FINITE_ROOK_SYMMETRY_ENV, Some("rook"), false)
                 .is_err()
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_DENSE6_CADICAL_ENV, None, true),
+            Ok(true),
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_DENSE6_CADICAL_ENV, Some("0"), true),
+            Ok(false),
         );
     }
 

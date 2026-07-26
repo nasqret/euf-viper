@@ -16,7 +16,7 @@ MEMORY="${EUF_VIPER_HELIOS_MEMORY:-10G}"
 MEMORY_BYTES="${EUF_VIPER_HELIOS_MEMORY_BYTES:-8589934592}"
 SHARDS="${EUF_VIPER_HELIOS_SHARDS:-1}"
 MODE=test-only
-SOLVER_REVISION=8368d21de96eec77f3bb5f6820c11d1363d3041b
+SOLVER_REVISION="${EUF_VIPER_HELIOS_SOLVER_REVISION:-}"
 
 die() {
   printf '%s\n' "$*" >&2
@@ -33,6 +33,7 @@ Options:
   --run-id ID             immutable run identifier
   --budget SECONDS        frozen campaign budget: 2, 60, or 1200
   --shards COUNT          build once and prepare COUNT deterministic shards
+  --solver-revision SHA   exact 40-hex solver commit (default: clean HEAD)
   --wall-time HH:MM:SS    Slurm wall time
   --memory SIZE           Slurm memory request, for example 10G
   --instance-root PATH    corpus-relative instance root
@@ -69,6 +70,12 @@ while [ "$#" -gt 0 ]; do
     --shards)
       [ "$#" -ge 2 ] || die "--shards requires a count"
       SHARDS="$2"
+      shift 2
+      ;;
+    --solver-revision)
+      [ "$#" -ge 2 ] || die "--solver-revision requires a full commit"
+      [ -z "$SOLVER_REVISION" ] || die "solver revision was specified twice"
+      SOLVER_REVISION="$2"
       shift 2
       ;;
     --wall-time)
@@ -131,12 +138,17 @@ cd "$ROOT"
 ORCHESTRATION_REVISION="$(git rev-parse --verify 'HEAD^{commit}')"
 [[ "$ORCHESTRATION_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
   die "HEAD is not a full lowercase revision"
+if [ -z "$SOLVER_REVISION" ]; then
+  SOLVER_REVISION="$ORCHESTRATION_REVISION"
+fi
+[[ "$SOLVER_REVISION" =~ ^[0-9a-f]{40}$ ]] || \
+  die "solver revision must be a full lowercase commit"
 [ "$(git rev-parse --verify "$SOLVER_REVISION^{commit}")" = "$SOLVER_REVISION" ] || \
   die "pinned solver revision is unavailable: $SOLVER_REVISION"
 grep -Eq '^edition[[:space:]]*=[[:space:]]*"2024"[[:space:]]*$' Cargo.toml || \
   die "Cargo.toml must use edition 2024"
 if [ -z "$RUN_ID" ]; then
-  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${ORCHESTRATION_REVISION:0:12}-8368d21"
+  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-${ORCHESTRATION_REVISION:0:12}-${SOLVER_REVISION:0:8}"
 fi
 [[ "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "unsafe run ID"
 EXECUTION_MODE=single

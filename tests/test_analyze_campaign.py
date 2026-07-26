@@ -4,6 +4,7 @@ import csv
 import hashlib
 import importlib.util
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -728,6 +729,59 @@ class LockedArtifactTests(unittest.TestCase):
 
 
 class ResamplingAndMultiplicityTests(unittest.TestCase):
+    def test_sufficient_statistic_bootstrap_matches_expansion_reference(self) -> None:
+        pairs = []
+        for index in range(31):
+            expected = "sat" if index % 3 else "unsat"
+            baseline_result = "timeout" if index in {5, 17} else expected
+            candidate_result = "timeout" if index in {9, 23} else expected
+            pairs.append(
+                {
+                    "family": f"family-{index % 5}",
+                    "baseline": {
+                        "result": baseline_result,
+                        "expected_status": expected,
+                        "wall_time_s": 10.0 if baseline_result == "timeout" else 0.01 * (index + 1),
+                        "cpu_time_s": 10.0 if baseline_result == "timeout" else 0.008 * (index + 1),
+                        "budget_s": 10.0,
+                    },
+                    "candidate": {
+                        "result": candidate_result,
+                        "expected_status": expected,
+                        "wall_time_s": 10.0 if candidate_result == "timeout" else 0.007 * (index + 2),
+                        "cpu_time_s": 10.0 if candidate_result == "timeout" else 0.006 * (index + 2),
+                        "budget_s": 10.0,
+                    },
+                }
+            )
+        arguments = {"seed": 982_451_653, "replicates": 257, "confidence_level": 0.99}
+        reference = ANALYZER._family_cluster_bootstrap_reference(pairs, **arguments)
+        accelerated = ANALYZER.family_cluster_bootstrap(pairs, **arguments)
+        self.assertEqual(reference.keys(), accelerated.keys())
+        self.assertEqual(reference["cluster_sizes"], accelerated["cluster_sizes"])
+        for metric in ANALYZER.BOOTSTRAP_METRICS:
+            expected_interval = reference["metrics"][metric]
+            actual_interval = accelerated["metrics"][metric]
+            self.assertEqual(
+                expected_interval["valid_replicates"],
+                actual_interval["valid_replicates"],
+            )
+            for field in ("estimate", "ci_lower", "ci_upper"):
+                expected_value = expected_interval[field]
+                actual_value = actual_interval[field]
+                if expected_value is None:
+                    self.assertIsNone(actual_value)
+                else:
+                    self.assertTrue(
+                        math.isclose(
+                            expected_value,
+                            actual_value,
+                            rel_tol=5e-15,
+                            abs_tol=1e-15,
+                        ),
+                        (metric, field, expected_value, actual_value),
+                    )
+
     def test_bootstrap_resamples_whole_family_clusters(self) -> None:
         cases = [
             case("large", "sat", 1.0, 0.25),

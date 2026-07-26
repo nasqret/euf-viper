@@ -71,6 +71,13 @@ python3 scripts/bench/build_novelty_tail_manifest.py \
 The family name is matched only as the complete second path component in
 `QF_UF/FAMILY/...`; prefixes and host-local path strings are never consulted.
 
+`qg6-full.jsonl` is the checked complete 244-source qg6 subfamily used by the
+dense-six backend experiment. Its companion `qg6-full.selection.json` binds
+the ordered 122 SAT and 122 UNSAT source identities. It was derived by passing
+the canonical `QF_UF/QG-classification/qg6/...` path list through the same
+explicit `--paths-file` validation route; the directory name is not consulted
+by the solver selector.
+
 ## Explicit selections
 
 Repeat `--relative-path` in the required output order:

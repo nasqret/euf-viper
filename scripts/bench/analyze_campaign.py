@@ -824,6 +824,141 @@ def summarize_pairs(pairs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _speedup_sufficient_stats(
+    pairs: Sequence[Mapping[str, Any]],
+) -> dict[str, float | int]:
+    """Compress one immutable cluster without changing any metric definition."""
+
+    common = [
+        pair
+        for pair in pairs
+        if _is_solved(pair["baseline"]) and _is_solved(pair["candidate"])
+    ]
+    wall_ratios = [
+        pair["baseline"]["wall_time_s"] / pair["candidate"]["wall_time_s"]
+        for pair in common
+    ]
+    cpu_ratios = [
+        pair["baseline"]["cpu_time_s"] / pair["candidate"]["cpu_time_s"]
+        for pair in common
+        if pair["baseline"]["cpu_time_s"] > 0.0
+        and pair["candidate"]["cpu_time_s"] > 0.0
+    ]
+    return {
+        "baseline_timeout": math.fsum(
+            _score(pair["baseline"], 1.0) for pair in pairs
+        ),
+        "candidate_timeout": math.fsum(
+            _score(pair["candidate"], 1.0) for pair in pairs
+        ),
+        "baseline_par2": math.fsum(_score(pair["baseline"], 2.0) for pair in pairs),
+        "candidate_par2": math.fsum(
+            _score(pair["candidate"], 2.0) for pair in pairs
+        ),
+        "baseline_wall": math.fsum(
+            pair["baseline"]["wall_time_s"] for pair in common
+        ),
+        "candidate_wall": math.fsum(
+            pair["candidate"]["wall_time_s"] for pair in common
+        ),
+        "baseline_cpu": math.fsum(
+            pair["baseline"]["cpu_time_s"] for pair in common
+        ),
+        "candidate_cpu": math.fsum(
+            pair["candidate"]["cpu_time_s"] for pair in common
+        ),
+        "common_count": len(common),
+        "wall_log_ratio": math.fsum(math.log(value) for value in wall_ratios),
+        "cpu_ratio_count": len(cpu_ratios),
+        "cpu_log_ratio": math.fsum(math.log(value) for value in cpu_ratios),
+    }
+
+
+def _speedup_metrics_from_sufficient_stats(
+    selected: Sequence[Mapping[str, float | int]],
+) -> dict[str, float | None]:
+    if not selected:
+        raise ValueError("cannot aggregate an empty sufficient-statistic sample")
+
+    def summed(name: str) -> float:
+        return math.fsum(float(item[name]) for item in selected)
+
+    common_count = sum(int(item["common_count"]) for item in selected)
+    cpu_ratio_count = sum(int(item["cpu_ratio_count"]) for item in selected)
+    wall_geometric = (
+        math.exp(summed("wall_log_ratio") / common_count)
+        if common_count > 0
+        else None
+    )
+    cpu_geometric = (
+        math.exp(summed("cpu_log_ratio") / common_count)
+        if common_count > 0 and cpu_ratio_count == common_count
+        else None
+    )
+    return {
+        "timeout_charged_wall": _ratio(
+            summed("baseline_timeout"), summed("candidate_timeout")
+        ),
+        "par2_wall": _ratio(summed("baseline_par2"), summed("candidate_par2")),
+        "common_wall_total": _ratio(
+            summed("baseline_wall"), summed("candidate_wall")
+        ),
+        "common_wall_geometric": wall_geometric,
+        "common_cpu_total": _ratio(summed("baseline_cpu"), summed("candidate_cpu")),
+        "common_cpu_geometric": cpu_geometric,
+    }
+
+
+def _family_cluster_bootstrap_reference(
+    pairs: Sequence[Mapping[str, Any]],
+    *,
+    seed: int,
+    replicates: int,
+    confidence_level: float,
+) -> dict[str, Any]:
+    """Slow expansion reference retained for differential tests."""
+
+    clusters: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for pair in pairs:
+        clusters[pair["family"]].append(pair)
+    family_names = sorted(clusters)
+    estimates = _speedup_metrics(pairs)
+    samples: dict[str, list[float]] = {name: [] for name in BOOTSTRAP_METRICS}
+    random_source = random.Random(seed)
+    cluster_count = len(family_names)
+    for _ in range(replicates):
+        resample: list[Mapping[str, Any]] = []
+        for _cluster in family_names:
+            selected = family_names[random_source.randrange(cluster_count)]
+            resample.extend(clusters[selected])
+        metrics = _speedup_metrics(resample)
+        for name in BOOTSTRAP_METRICS:
+            value = metrics[name]
+            if value is not None:
+                samples[name].append(value)
+    tail = (1.0 - confidence_level) / 2.0
+    return {
+        "cluster_count": cluster_count,
+        "cluster_sizes": {
+            family: len(clusters[family]) for family in family_names
+        },
+        "confidence_level": confidence_level,
+        "interval_method": "percentile",
+        "metrics": {
+            name: {
+                "estimate": estimates[name],
+                "ci_lower": _quantile(samples[name], tail),
+                "ci_upper": _quantile(samples[name], 1.0 - tail),
+                "valid_replicates": len(samples[name]),
+            }
+            for name in BOOTSTRAP_METRICS
+        },
+        "replicates": replicates,
+        "resampling_unit": "declared_family",
+        "seed": seed,
+    }
+
+
 def family_cluster_bootstrap(
     pairs: Sequence[Mapping[str, Any]],
     *,
@@ -845,15 +980,18 @@ def family_cluster_bootstrap(
         clusters[pair["family"]].append(pair)
     family_names = sorted(clusters)
     estimates = _speedup_metrics(pairs)
+    cluster_stats = {
+        family: _speedup_sufficient_stats(clusters[family]) for family in family_names
+    }
     samples: dict[str, list[float]] = {name: [] for name in BOOTSTRAP_METRICS}
     random_source = random.Random(seed)
     cluster_count = len(family_names)
     for _ in range(replicates):
-        resample: list[Mapping[str, Any]] = []
-        for _cluster in family_names:
-            selected = family_names[random_source.randrange(cluster_count)]
-            resample.extend(clusters[selected])
-        metrics = _speedup_metrics(resample)
+        selected_stats = [
+            cluster_stats[family_names[random_source.randrange(cluster_count)]]
+            for _cluster in family_names
+        ]
+        metrics = _speedup_metrics_from_sufficient_stats(selected_stats)
         for name in BOOTSTRAP_METRICS:
             value = metrics[name]
             if value is not None:

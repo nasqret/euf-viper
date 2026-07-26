@@ -17,21 +17,28 @@ Viper is considered the overall leader only if it has:
 - replication on two CPU classes and sealed data; and
 - a closest-prior-art audit and ingredient ablation for differentiated work.
 
-The current broad result does not pass those gates. It uses an older solver
-revision, is close to complete at 1,200 seconds, beats Z3 geometrically on
-common solves, and remains materially behind Yices2. The current structural
-revision leads the local two-second PEQ/SEQ/NEQ discovery panel in coverage and
-PAR-2, but still loses common-geometric time to Yices2 and has not completed a
-broad fixed campaign.
+The current broad result does not pass those gates. The complete Helios 2 s
+campaign for revision `8368d21` has 7,503 instances and six solver
+configurations. Viper solves 7,436, Yices2 7,490, Z3 default 7,446, Z3
+`sat.euf=true` 7,459, cvc5 7,364, and OpenSMT 7,289. Viper therefore trails
+Yices2 by 54 solves and Z3 default by 10. Its common-geometric factors are
+`0.393x` against Yices2 and `0.886x` against Z3 default.
 
 The generated evidence dashboard is available at
 `../dashboard/euf-progress.html`. Its canonical compressed registry contains
-186 evidence records rendered as 174 claim-isolated panels, including separate
-SAT and UNSAT strata. On the provisional combined PEQ/SEQ/NEQ panel, Viper
-solves 148/151 versus 140 for Yices2 and has a `1.816x` PAR-2 factor, while its
-common-geometric factor remains `0.751x`; matching Yices2 on those common solves
-requires a 24.9% Viper time reduction. The audited broad panels still measure
-revision `30828a4`, so they remain separate.
+212 evidence records rendered as 200 claim-isolated panels, including separate
+SAT and UNSAT strata. The exact current panel is
+`panel-cce4ebc63bc3a66e`; historical 60 s and 1,200 s panels still measure
+revision `30828a4` and remain separate.
+
+The first post-baseline candidate recognizes a proved finite carrier of size
+six with no Boolean applications, no guarded disequalities, and at least 200
+explicit disequality edges. It routes only that semantic shape to CaDiCaL's
+UNSAT-oriented preprocessing configuration. A same-binary local ABBA on all
+244 qg6 sources changes coverage from 192 to 244 and records `1.897x`
+common-total and `1.206x` common-geometric speed. The all-solver Helios run is
+still required: the current Helios route has only 21 qg6 timeouts, so the local
+52-solve gain cannot be added to the broad score.
 
 ## Metric Model
 
@@ -85,4 +92,6 @@ is below the preregistered threshold.
 The full design and stop rules are in
 `research-vault/02-design/2026-07-26-euf-world-leader-campaign.md`; the current
 primary-source map is in
-`research-vault/01-literature/2026-07-26-hot-euf-research-map.md`.
+`research-vault/01-literature/2026-07-26-hot-euf-research-map.md`; and the first
+candidate decision record is in
+`research-vault/06-results/2026-07-26-qg6-dense6-cadical-route.md`.

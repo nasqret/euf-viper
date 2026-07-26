@@ -2321,3 +2321,47 @@
 - Validation after sharding: Python discovery passes 621/621; Rust all-feature
   testing passes 643 with ten intentional ignores and zero failures. WMI PGO
   job `170902` remains pending with no node and zero runtime.
+
+# 2026-07-26 - Current broad baseline and dense-six candidate
+
+- Completed the first current-route full Helios campaign. Preparation
+  `19955431`, 64-shard array `19955828`, and finalizer `19955833` produced
+  45,018/45,018 rows for six solvers over all 7,503 sources. Portable audit and
+  analysis replay byte-for-byte; the current dashboard panel is
+  `panel-cce4ebc63bc3a66e`.
+- Current 2 s coverage is Viper 7,436, Yices2 7,490, Z3 default 7,446, Z3
+  `sat.euf=true` 7,459, cvc5 7,364, and OpenSMT 7,289. Viper remains 54 solves
+  behind Yices2. Its Yices2 factors are `0.300581x` PAR-2, `0.288925x`
+  common total, and `0.393365x` common geometric. No broad-leader claim is
+  available.
+- Added strict current-campaign dashboard ingestion and exact gap cohorts. The
+  61 Yices-only rows are 57 QG, one Goel, two PEQ, and one SEQ; 52 are UNSAT.
+  Dashboard evidence now has 212 records and 200 claim-isolated panels.
+- Replaced row-expanding family bootstrap with mathematically equivalent
+  sufficient-statistic aggregation. Differential tests match the reference to
+  floating-point tolerance and preserve exact gate decisions. A full 10,000-
+  replicate five-comparator analysis fell from 49:07 to 4.18 seconds, about
+  `704x`.
+- Added a content-addressed, lock-protected taxonomy cache. It binds the full
+  manifest, taxonomy builder, and path-resolution mode, verifies output hashes
+  on every hit, rejects symlink roots and tampering, and publishes atomically.
+- Profiled all 244 qg6 sources and identified a semantic backend opportunity:
+  every source has a proved carrier of size six, zero Boolean applications,
+  zero guarded disequalities, and 201-232 explicit disequality edges. All 448
+  `loops6` controls have only 195 edges; all 47 PEQ controls stay below 67.
+- Implemented a default-on, rollback-switchable dense-six hint that routes only
+  that semantic shape to CaDiCaL `Unsat` preprocessing. It consumes no path,
+  family, source ID, expected status, or historical timing.
+- Same-binary local qg6 ABBA at 2 s changed coverage from 192/244 to 244/244,
+  with zero wrong answers/errors, `1.89734x` common-total speed, and `1.20616x`
+  common-geometric speed. A backend-isolation profile changed 221/244 to
+  244/244 and recorded `3.69060x`/`3.35360x` total/geometric factors.
+- The local gain is not a broad gain. The old Helios route has 21 qg6 timeouts,
+  so a perfect nonregressing replication projects only to 7,457 solves: 11
+  ahead of Z3 default, two behind Z3 `sat.euf=true`, and 33 behind Yices2.
+  Exact all-solver Helios evidence remains mandatory.
+- Made the Helios solver revision an exact full-hash parameter, defaulting to
+  clean `HEAD`, while retaining detached split checkouts and all hash receipts.
+  This removes a one-campaign hard pin without weakening provenance.
+- Validation passes: 643 Rust tests, ten intentional ignores, 627 Python tests,
+  formatting, default-feature compilation, and Helios shell syntax.

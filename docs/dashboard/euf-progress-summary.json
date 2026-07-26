@@ -1,0 +1,2730 @@
+{
+  "broad_current_route_baseline": {
+    "candidate_revision": "8368d21de96eec77f3bb5f6820c11d1363d3041b",
+    "panel_ids": [
+      "panel-cce4ebc63bc3a66e"
+    ],
+    "reason": "At least one complete verified broad whole-corpus panel is available.",
+    "state": "available"
+  },
+  "campaign": {
+    "candidate_id": "euf-viper",
+    "candidate_revision": "8368d21de96eec77f3bb5f6820c11d1363d3041b",
+    "id": "euf-world-leader-2026-07",
+    "mandatory_comparator_ids": [
+      "cvc5",
+      "opensmt",
+      "yices2",
+      "z3-default",
+      "z3-sat-euf"
+    ]
+  },
+  "panels": [
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-full",
+          "label": "SMT-LIB 2025 QF_UF full"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 7165,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.51991751765027,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 151.991751765027,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.425110131788414,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 42.51101317884141,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.3030526539674996,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 30.30526539674996,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 6879,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7318690016038891,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 73.18690016038892,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.8664209122401698,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 86.64209122401698,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.778119948652859,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 77.8119948652859,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7261,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.5170742864881132,
+              "reason": null,
+              "required_viper_reduction_percent": 48.292571351188684,
+              "required_viper_speedup_percent": 93.39580909966381,
+              "signed_percent": -48.292571351188684,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.25148801945752286,
+              "reason": null,
+              "required_viper_reduction_percent": 74.85119805424772,
+              "required_viper_speedup_percent": 297.6332559129733,
+              "signed_percent": -74.85119805424772,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.2864435257636803,
+              "reason": null,
+              "required_viper_reduction_percent": 71.35564742363196,
+              "required_viper_speedup_percent": 249.10895518895865,
+              "signed_percent": -71.35564742363196,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7243,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.657301918841423,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 65.73019188414231,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.8989771576729768,
+              "reason": null,
+              "required_viper_reduction_percent": 10.102284232702319,
+              "required_viper_speedup_percent": 11.237531617435437,
+              "signed_percent": -10.102284232702319,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.7376057613226761,
+              "reason": null,
+              "required_viper_reduction_percent": 26.23942386773239,
+              "required_viper_speedup_percent": 35.57377835644857,
+              "signed_percent": -26.23942386773239,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7231,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.9026850247084186,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 90.26850247084187,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.032953558486692,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 3.2953558486692014,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.8371002203433912,
+              "reason": null,
+              "required_viper_reduction_percent": 16.289977965660885,
+              "required_viper_speedup_percent": 19.460009171874894,
+              "signed_percent": -16.289977965660885,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-500b5f5f1cba2726",
+      "instances": 7503,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 7445,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9625483140077302
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.3701823898505066
+          },
+          "solved": 7222,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.968812475009996
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.2840885889939944
+          },
+          "solved": 7269,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9217646274823404
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.5051435872748645
+          },
+          "solved": 6916,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9922697587631614
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.08137533706066882
+          },
+          "solved": 7445,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9878715180594428
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.20954537996800007
+          },
+          "solved": 7412,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9856057576969213
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.23781062044391582
+          },
+          "solved": 7395,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-full",
+          "label": "SMT-LIB 2025 QF_UF full"
+        },
+        "evidence_class": "audited-build-once-sharded-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "helios-epyc-9654",
+          "label": "Helios AMD EPYC 9654"
+        },
+        "revision": "8368d21de96eec77f3bb5f6820c11d1363d3041b",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 7339,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.2256564917679371,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 22.565649176793713,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.0257295660716224,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 2.5729566071622356,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.2642130123812672,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 26.421301238126716,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7278,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.9680372840629022,
+              "reason": null,
+              "required_viper_reduction_percent": 3.1962715937097763,
+              "required_viper_speedup_percent": 3.301806290244169,
+              "signed_percent": -3.1962715937097763,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.5823895871383196,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 58.238958713831956,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.8145117683235952,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 81.45117683235952,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7429,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.39336548643931984,
+              "reason": null,
+              "required_viper_reduction_percent": 60.66345135606801,
+              "required_viper_speedup_percent": 154.21650716025871,
+              "signed_percent": -60.66345135606801,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.2889248763072375,
+              "reason": null,
+              "required_viper_reduction_percent": 71.10751236927625,
+              "required_viper_speedup_percent": 246.11073050581425,
+              "signed_percent": -71.10751236927625,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.30058092068590303,
+              "reason": null,
+              "required_viper_reduction_percent": 69.9419079314097,
+              "required_viper_speedup_percent": 232.68911337355522,
+              "signed_percent": -69.9419079314097,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7399,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.8858292590150642,
+              "reason": null,
+              "required_viper_reduction_percent": 11.417074098493584,
+              "required_viper_speedup_percent": 12.888571902883417,
+              "signed_percent": -11.417074098493584,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.7237695341270324,
+              "reason": null,
+              "required_viper_reduction_percent": 27.623046587296763,
+              "required_viper_speedup_percent": 38.16552823077035,
+              "signed_percent": -27.623046587296763,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.7615269963740143,
+              "reason": null,
+              "required_viper_reduction_percent": 23.847300362598567,
+              "required_viper_speedup_percent": 31.31510829707509,
+              "signed_percent": -23.847300362598567,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7409,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.9543983303122824,
+              "reason": null,
+              "required_viper_reduction_percent": 4.560166968771762,
+              "required_viper_speedup_percent": 4.7780542190174025,
+              "signed_percent": -4.560166968771762,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.8170040065012107,
+              "reason": null,
+              "required_viper_reduction_percent": 18.299599349878925,
+              "required_viper_speedup_percent": 22.39842057598502,
+              "signed_percent": -18.299599349878925,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.7899587425244204,
+              "reason": null,
+              "required_viper_reduction_percent": 21.004125747557957,
+              "required_viper_speedup_percent": 26.5888895417961,
+              "signed_percent": -21.004125747557957,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-cce4ebc63bc3a66e",
+      "instances": 7503,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 7490,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9814740770358523
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.1781513372152069
+          },
+          "solved": 7364,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9910702385712382
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.14091876564349046
+          },
+          "solved": 7436,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9714780754364921
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.25569875863774816
+          },
+          "solved": 7289,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9982673597227776
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.04235749231904136
+          },
+          "solved": 7490,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9924030387844862
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.10731344433322093
+          },
+          "solved": 7446,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9941356790617086
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.11132001090582522
+          },
+          "solved": 7459,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-full",
+          "label": "SMT-LIB 2025 QF_UF full"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 60.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 7457,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.484553596285877,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 148.4553596285877,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.3635846833221064,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 36.358468332210634,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.2151153466962605,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 21.51153466962605,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7427,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7742846160043189,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 77.42846160043189,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.129197543140897,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 112.91975431408972,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 2.1752675852674193,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 117.52675852674193,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7478,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.49008983842956694,
+              "reason": null,
+              "required_viper_reduction_percent": 50.99101615704331,
+              "required_viper_speedup_percent": 104.04422242345971,
+              "signed_percent": -50.99101615704331,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.19958658834510143,
+              "reason": null,
+              "required_viper_reduction_percent": 80.04134116548985,
+              "required_viper_speedup_percent": 401.03566992733937,
+              "signed_percent": -80.04134116548985,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.17002805505781476,
+              "reason": null,
+              "required_viper_reduction_percent": 82.99719449421852,
+              "required_viper_speedup_percent": 488.13823381086684,
+              "signed_percent": -82.99719449421852,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7467,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.5661428566561728,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 56.61428566561728,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.5723148624956823,
+              "reason": null,
+              "required_viper_reduction_percent": 42.76851375043177,
+              "required_viper_speedup_percent": 74.72899369401651,
+              "signed_percent": -42.76851375043177,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.5844630218031809,
+              "reason": null,
+              "required_viper_reduction_percent": 41.553697819681915,
+              "required_viper_speedup_percent": 71.09722303984391,
+              "signed_percent": -41.553697819681915,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7462,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7919471957103048,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 79.19471957103048,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.5662891147430275,
+              "reason": null,
+              "required_viper_reduction_percent": 43.37108852569725,
+              "required_viper_speedup_percent": 76.58824334876775,
+              "signed_percent": -43.37108852569725,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.6968452992099837,
+              "reason": null,
+              "required_viper_reduction_percent": 30.315470079001628,
+              "required_viper_speedup_percent": 43.50387397801261,
+              "signed_percent": -30.315470079001628,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-af881b5571f6827b",
+      "instances": 7503,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 7500,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9966679994668799
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9784367234729521
+          },
+          "solved": 7478,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9969345595095295
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.8052212706663555
+          },
+          "solved": 7480,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9921364787418366
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.751571729048366
+          },
+          "solved": 7444,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9996001599360256
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.13691020654258265
+          },
+          "solved": 7500,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9981340797014527
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.4706220570738551
+          },
+          "solved": 7489,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9973343995735039
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.5611146572877398
+          },
+          "solved": 7483,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-full",
+          "label": "SMT-LIB 2025 QF_UF full"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 1200.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 7494,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.477760348664655,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 147.7760348664655,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.550337003481632,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 55.033700348163194,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 3.322475331178779,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 232.24753311787788,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7497,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7892329079156752,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 78.92329079156752,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.6961955384653824,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 169.61955384653825,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 3.2936230452668718,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 229.36230452668718,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7502,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.4838250882893356,
+              "reason": null,
+              "required_viper_reduction_percent": 51.61749117106644,
+              "required_viper_speedup_percent": 106.68626414882874,
+              "signed_percent": -51.61749117106644,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.20207041480116536,
+              "reason": null,
+              "required_viper_reduction_percent": 79.79295851988346,
+              "required_viper_speedup_percent": 394.8769967063149,
+              "signed_percent": -79.79295851988346,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.14539451693896852,
+              "reason": null,
+              "required_viper_reduction_percent": 85.46054830610315,
+              "required_viper_speedup_percent": 587.783845672643,
+              "signed_percent": -85.46054830610315,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7499,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.5521631182882054,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 55.216311828820544,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.7171951797167603,
+              "reason": null,
+              "required_viper_reduction_percent": 28.280482028323974,
+              "required_viper_speedup_percent": 39.43205814558417,
+              "signed_percent": -28.280482028323974,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.3534854968554357,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 35.348549685543574,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 7491,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7732313855628794,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 77.32313855628794,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.7947262758188149,
+              "reason": null,
+              "required_viper_reduction_percent": 20.527372418118507,
+              "required_viper_speedup_percent": 25.829487513759286,
+              "signed_percent": -20.527372418118507,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 3.644735303266851,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 264.4735303266851,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-aca6d862dfff3430",
+      "instances": 7503,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 7503,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9989337598294016
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 3.7882389274955703
+          },
+          "solved": 7495,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9998667199786752
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.1401857199498133
+          },
+          "solved": 7502,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.999333599893376
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 3.755341963110905
+          },
+          "solved": 7498,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 1.0
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.16577675197281314
+          },
+          "solved": 7503,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9996001599360256
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.543224835673746
+          },
+          "solved": 7500,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9985339197654272
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 4.1556751457818155
+          },
+          "solved": 7492,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-official-qf-uf",
+          "label": "SMT-LIB 2025 QF_UF official"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 3354,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.541315095503008,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 154.13150955030082,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.3880967218659797,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 38.809672186597965,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.264971794249767,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 26.497179424976693,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3193,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7722803343094633,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 77.22803343094633,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.8595530735590078,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 85.95530735590077,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.7843048058979574,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 78.43048058979574,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3397,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.49862723525697494,
+              "reason": null,
+              "required_viper_reduction_percent": 50.1372764743025,
+              "required_viper_speedup_percent": 100.55061763416013,
+              "signed_percent": -50.1372764743025,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.24196692784973428,
+              "reason": null,
+              "required_viper_reduction_percent": 75.80330721502658,
+              "required_viper_speedup_percent": 313.27962002353377,
+              "signed_percent": -75.80330721502658,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.28048860176992035,
+              "reason": null,
+              "required_viper_reduction_percent": 71.95113982300796,
+              "required_viper_speedup_percent": 256.5207262219809,
+              "signed_percent": -71.95113982300796,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3388,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.6101530078215853,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 61.01530078215853,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.8883019763699328,
+              "reason": null,
+              "required_viper_reduction_percent": 11.16980236300672,
+              "required_viper_speedup_percent": 12.57433019416705,
+              "signed_percent": -11.16980236300672,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.7301628217617159,
+              "reason": null,
+              "required_viper_reduction_percent": 26.983717823828414,
+              "required_viper_speedup_percent": 36.955754277823786,
+              "signed_percent": -26.983717823828414,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3384,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.8511983573698434,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 85.11983573698434,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.0185264403306786,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 1.8526440330678628,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.8140578850704928,
+              "reason": null,
+              "required_viper_reduction_percent": 18.59421149295072,
+              "required_viper_speedup_percent": 22.84138736809922,
+              "signed_percent": -18.59421149295072,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-e1512e3b9c3f17d0",
+      "instances": 3521,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 3490,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9610905992615734
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.38801061764057737
+          },
+          "solved": 3384,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9656347628514627
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.30673460025304344
+          },
+          "solved": 3400,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9130928713433684
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.5473080213666942
+          },
+          "solved": 3215,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9911956830445896
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.08603555913943162
+          },
+          "solved": 3490,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9866515194547004
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.22396620125271413
+          },
+          "solved": 3474,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.98523146833286
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.2496997199599356
+          },
+          "solved": 3469,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-official-qf-uf",
+          "label": "SMT-LIB 2025 QF_UF official"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 60.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 3498,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.4936296643210674,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 149.36296643210673,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.3305147890817173,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 33.05147890817173,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.0851766225754296,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 8.517662257542957,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3486,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.8164526750591543,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 81.64526750591543,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.1533801915252266,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 115.33801915252266,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.9908686491102259,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 99.08686491102259,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3506,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.4702252267594942,
+              "reason": null,
+              "required_viper_reduction_percent": 52.97747732405058,
+              "required_viper_speedup_percent": 112.66404758659819,
+              "signed_percent": -52.97747732405058,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.1879486363012493,
+              "reason": null,
+              "required_viper_reduction_percent": 81.20513636987508,
+              "required_viper_speedup_percent": 432.06025841931205,
+              "signed_percent": -81.20513636987508,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.21097072141621517,
+              "reason": null,
+              "required_viper_reduction_percent": 78.90292785837848,
+              "required_viper_speedup_percent": 373.99942195160935,
+              "signed_percent": -78.90292785837848,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3502,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.5183996772737844,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 51.83996772737844,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.5872557943190778,
+              "reason": null,
+              "required_viper_reduction_percent": 41.27442056809222,
+              "required_viper_speedup_percent": 70.2835475909605,
+              "signed_percent": -41.27442056809222,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.5614128522342455,
+              "reason": null,
+              "required_viper_reduction_percent": 43.85871477657545,
+              "required_viper_speedup_percent": 78.12203550743742,
+              "signed_percent": -43.85871477657545,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3499,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.7383567634697663,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 73.83567634697663,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.6039954043517797,
+              "reason": null,
+              "required_viper_reduction_percent": 39.60045956482203,
+              "required_viper_speedup_percent": 65.56417363360912,
+              "signed_percent": -39.60045956482203,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.6832970951240435,
+              "reason": null,
+              "required_viper_reduction_percent": 31.670290487595654,
+              "required_viper_speedup_percent": 46.34922453730954,
+              "signed_percent": -31.670290487595654,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-035950d89cc20cb2",
+      "instances": 3521,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 3518,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9968758875319511
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9533433565249398
+          },
+          "solved": 3510,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.996307867083215
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.8785144617863105
+          },
+          "solved": 3508,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9928997443907981
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.7490068997603092
+          },
+          "solved": 3496,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9991479693268958
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.18534082977763594
+          },
+          "solved": 3518,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9980119284294234
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.49320930972048566
+          },
+          "solved": 3514,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9971598977563192
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.6002863797630484
+          },
+          "solved": 3511,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-official-qf-uf",
+          "label": "SMT-LIB 2025 QF_UF official"
+        },
+        "evidence_class": "audited-staged-locked",
+        "evidence_status": "verified",
+        "expected_status": "all",
+        "family": {
+          "id": "all",
+          "label": "All families"
+        },
+        "host": {
+          "id": "wmi-locked-x86-64",
+          "label": "WMI locked x86_64 Linux"
+        },
+        "revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
+        "scope": "broad",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper",
+          "opensmt",
+          "yices2",
+          "z3-default",
+          "z3-sat-euf"
+        ],
+        "timeout_s": 1200.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 3516,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 2.475840449987319,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 147.58404499873188,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.0803724470068103,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 8.037244700681034,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 2.2201533105956073,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 122.01533105956072,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3518,
+          "competitor_id": "opensmt",
+          "competitor_label": "OpenSMT",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.8262227701782139,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 82.62227701782139,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.36295991621543,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 136.29599162154298,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 2.205695991698445,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 120.56959916984451,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3520,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.4635279969498917,
+              "reason": null,
+              "required_viper_reduction_percent": 53.64720030501082,
+              "required_viper_speedup_percent": 115.7366990948126,
+              "signed_percent": -53.64720030501082,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.17212432638318187,
+              "reason": null,
+              "required_viper_reduction_percent": 82.78756736168181,
+              "required_viper_speedup_percent": 480.9754036589852,
+              "signed_percent": -82.78756736168181,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.10415254039673474,
+              "reason": null,
+              "required_viper_reduction_percent": 89.58474596032653,
+              "required_viper_speedup_percent": 860.1302053611269,
+              "signed_percent": -89.58474596032653,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3519,
+          "competitor_id": "z3-default",
+          "competitor_label": "Z3 default",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.5025279753859995,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 50.25279753859995,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.7961224045589765,
+              "reason": null,
+              "required_viper_reduction_percent": 20.387759544102344,
+              "required_viper_speedup_percent": 25.60882526022672,
+              "signed_percent": -20.387759544102344,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 0.8740190458597281,
+              "reason": null,
+              "required_viper_reduction_percent": 12.598095414027188,
+              "required_viper_speedup_percent": 14.413982708620598,
+              "signed_percent": -12.598095414027188,
+              "status": "available"
+            }
+          }
+        },
+        {
+          "common_solved": 3515,
+          "competitor_id": "z3-sat-euf",
+          "competitor_label": "Z3 sat.euf",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.717586688035829,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 71.7586688035829,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 0.7303761386984017,
+              "reason": null,
+              "required_viper_reduction_percent": 26.96238613015983,
+              "required_viper_speedup_percent": 36.91575436488015,
+              "signed_percent": -26.96238613015983,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 2.4098744120077944,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 140.98744120077944,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-94f499a4a81aa0db",
+      "instances": 3521,
+      "kind": "broad_whole_corpus",
+      "leader_solved": 3521,
+      "leader_solver_ids": [
+        "yices2"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9988639591025277
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 3.830997919926887
+          },
+          "solved": 3517,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9997159897756319
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.7255555738622095
+          },
+          "solved": 3520,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9994319795512638
+          },
+          "label": "OpenSMT",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 3.8060510127207854
+          },
+          "solved": 3519,
+          "solver_id": "opensmt"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 1.0
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.17972099661349458
+          },
+          "solved": 3521,
+          "solver_id": "yices2"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9997159897756319
+          },
+          "label": "Z3 default",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.5081684362449839
+          },
+          "solved": 3520,
+          "solver_id": "z3-default"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9985799488781596
+          },
+          "label": "Z3 sat.euf",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 4.158372223947964
+          },
+          "solved": 3516,
+          "solver_id": "z3-sat-euf"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "all",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 113,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 5.049265442339462,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 404.92654423394623,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 5.595550241014494,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 459.5550241014494,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 5.7867069457961495,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 478.670694579615,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-75093baeabe12046",
+      "instances": 151,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 148,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.7483443708609272
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.2837654185827814
+          },
+          "solved": 113,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9801324503311258
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.22184731845033112
+          },
+          "solved": 148,
+          "solver_id": "euf-viper"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "all",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "euf-viper",
+          "yices2"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 140,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.7508464526862657,
+              "reason": null,
+              "required_viper_reduction_percent": 24.91535473137343,
+              "required_viper_speedup_percent": 33.183022497123105,
+              "signed_percent": -24.91535473137343,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.0601503896564988,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 6.015038965649877,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.8162896448967636,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 81.62896448967636,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-4787f20fa17158fe",
+      "instances": 151,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 148,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9801324503311258
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.2250512536357616
+          },
+          "solved": 148,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9271523178807947
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.4087582615496689
+          },
+          "solved": 140,
+          "solver_id": "yices2"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "all",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "euf-viper",
+          "z3"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 126,
+          "competitor_id": "z3",
+          "competitor_label": "Z3",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.6779571536928999,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 67.79571536929,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.103341153304832,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 110.33411533048319,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 3.562996801992524,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 256.2996801992524,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-dde479db840588c5",
+      "instances": 151,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 148,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9801324503311258
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.2215792773509934
+          },
+          "solved": 148,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.8344370860927153
+          },
+          "label": "Z3",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.789486256589404
+          },
+          "solved": 126,
+          "solver_id": "z3"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "unsat",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "cvc5",
+          "euf-viper"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 101,
+          "competitor_id": "cvc5",
+          "competitor_label": "cvc5",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 5.3406515763024105,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 434.06515763024106,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 5.954269215385568,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 495.4269215385568,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 5.864767662149859,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 486.4767662149859,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-bae3258a75eab20a",
+      "instances": 139,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 136,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.7266187050359713
+          },
+          "label": "cvc5",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 1.3814102787482014
+          },
+          "solved": 101,
+          "solver_id": "cvc5"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9784172661870504
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.23554390528776978
+          },
+          "solved": 136,
+          "solver_id": "euf-viper"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "unsat",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "euf-viper",
+          "yices2"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 128,
+          "competitor_id": "yices2",
+          "competitor_label": "Yices2",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 0.7565797274249321,
+              "reason": null,
+              "required_viper_reduction_percent": 24.342027257506793,
+              "required_viper_speedup_percent": 32.17377676818867,
+              "signed_percent": -24.342027257506793,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 1.090530035704499,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 9.053003570449892,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 1.84806896049678,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 84.80689604967799,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-0fbdb314f98c66a3",
+      "instances": 139,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 136,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9784172661870504
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.23904705190647482
+          },
+          "solved": 136,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.920863309352518
+          },
+          "label": "Yices2",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.44177543672661873
+          },
+          "solved": 128,
+          "solver_id": "yices2"
+        }
+      ]
+    },
+    {
+      "claim_boundary": {
+        "corpus": {
+          "id": "smtlib-2025-qf-uf-structural-targeted",
+          "label": "SMT-LIB 2025 QF_UF PEQ SEQ NEQ"
+        },
+        "evidence_class": "local-one-repeat-discovery",
+        "evidence_status": "provisional",
+        "expected_status": "unsat",
+        "family": {
+          "id": "structural-combined",
+          "label": "PEQ + SEQ + NEQ"
+        },
+        "host": {
+          "id": "macbook-air-airbartek-local-darwin-arm64",
+          "label": "MacBook-Air-AirBartek.local (Darwin arm64)"
+        },
+        "revision": "9a0763538a496898bace0325a456d0a86771a3c5",
+        "scope": "targeted",
+        "solver_ids": [
+          "euf-viper",
+          "z3"
+        ],
+        "timeout_s": 2.0
+      },
+      "comparisons": [
+        {
+          "common_solved": 114,
+          "competitor_id": "z3",
+          "competitor_label": "Z3",
+          "metrics": {
+            "common_geometric": {
+              "ratio": 1.791963504265162,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 79.1963504265162,
+              "status": "available"
+            },
+            "common_total": {
+              "ratio": 2.256736441803122,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 125.67364418031221,
+              "status": "available"
+            },
+            "par2": {
+              "ratio": 3.6358107578519947,
+              "reason": null,
+              "required_viper_reduction_percent": 0.0,
+              "required_viper_speedup_percent": 0.0,
+              "signed_percent": 263.58107578519946,
+              "status": "available"
+            }
+          }
+        }
+      ],
+      "complete": true,
+      "id": "panel-8918a673d988377f",
+      "instances": 139,
+      "kind": "targeted_structural_combined",
+      "leader_solved": 136,
+      "leader_solver_ids": [
+        "euf-viper"
+      ],
+      "solvers": [
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.9784172661870504
+          },
+          "label": "Viper",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.23530862743884892
+          },
+          "solved": 136,
+          "solver_id": "euf-viper"
+        },
+        {
+          "coverage": {
+            "reason": null,
+            "status": "available",
+            "value": 0.8201438848920863
+          },
+          "label": "Z3",
+          "par2_s": {
+            "reason": null,
+            "status": "available",
+            "value": 0.855537639057554
+          },
+          "solved": 114,
+          "solver_id": "z3"
+        }
+      ]
+    }
+  ],
+  "schema_version": "euf-viper.campaign-scorecard.v1",
+  "selection": {
+    "claim_boundaries_pooled": false,
+    "excluded_panels": 187,
+    "policy": [
+      "broad_whole_corpus",
+      "targeted_structural_combined"
+    ],
+    "selected_panels": 13
+  },
+  "source_model": {
+    "expected_status_dimension": "explicit",
+    "registry_id": "euf-viper-world-leader-progress",
+    "registry_sha256": "0d6ef9625e53a01b9f5bf61912aa73fc874e1e1ce83821232b0cf4d7319ba6f9",
+    "schema_version": "euf-viper.dashboard-model.v1",
+    "updated_at": "2026-07-26T22:05:50Z"
+  },
+  "victory": {
+    "claim": "best_overall_QF_UF_solver",
+    "gates": [
+      {
+        "evidence_panel_ids": [
+          "panel-07e69f4abc38cc0e",
+          "panel-0f3e537b85853559",
+          "panel-11b52e27d3604d98",
+          "panel-168b065ccb0389ce",
+          "panel-19275909c33ff08d",
+          "panel-2e1e2403bc884402",
+          "panel-2fd70bb629f8b487",
+          "panel-3e5c463cd01acad0",
+          "panel-4123cee98a4f3257",
+          "panel-4d5d09f822121064",
+          "panel-5bf9f54563dfae67",
+          "panel-6387fd1864146f38",
+          "panel-6a1104e0474213a6",
+          "panel-6de4979a366aed69",
+          "panel-78222df7cdcbb8d5",
+          "panel-7a64fb2ce67123fe",
+          "panel-855e9752a433555d",
+          "panel-86f8222ce9c1fbe8",
+          "panel-92b37e0cee865cc7",
+          "panel-92d6e75920d3e24f",
+          "panel-95189c7f7e3f0e51",
+          "panel-c6943e6f8a21960a",
+          "panel-cadbdf60dae050ca",
+          "panel-cce4ebc63bc3a66e",
+          "panel-ddf2b002f5ecc0a3",
+          "panel-e3ac265e08610cea"
+        ],
+        "id": "V0",
+        "reason": "Dashboard model v1 does not attest independent model/proof checks, hash drift, or missing-row audits.",
+        "requirement": "zero wrong answers, errors, missing rows, hash drift, and unchecked decisive outputs",
+        "state": "unknown"
+      },
+      {
+        "evidence_panel_ids": [],
+        "id": "V1",
+        "reason": "Missing complete verified exact-candidate all-comparator panels: smtcomp-2025-qf-uf@0.05s, smtcomp-2025-qf-uf@0.2s, smtcomp-2025-qf-uf@2s, smtcomp-2025-qf-uf@24s, smtcomp-2025-qf-uf@60s, smtcomp-2025-qf-uf@1200s",
+        "requirement": "equal or exceed every comparator at every declared primary budget",
+        "state": "unknown"
+      },
+      {
+        "evidence_panel_ids": [
+          "panel-cce4ebc63bc3a66e"
+        ],
+        "id": "V2",
+        "reason": "Viper loses coverage on smtlib-2025-full at 2 s.",
+        "requirement": "equal or exceed every comparator at 2, 60, and 1200 seconds",
+        "state": "fail"
+      },
+      {
+        "evidence_panel_ids": [
+          "panel-cce4ebc63bc3a66e"
+        ],
+        "id": "V3",
+        "reason": "cvc5 ratio is 1.02573 for common_total on smtlib-2025-full@2s; 1.05 is required.",
+        "requirement": "at least 1.05x over every comparator in PAR2, common total, and common geometric wall time",
+        "state": "fail"
+      },
+      {
+        "evidence_panel_ids": [],
+        "id": "V4",
+        "reason": "Dashboard model v1 contains no RSS, instruction, or cache metrics.",
+        "requirement": "no material p95 RSS regression and publish instructions/cache metrics on supported hosts",
+        "state": "unknown"
+      },
+      {
+        "evidence_panel_ids": [],
+        "id": "V5",
+        "reason": "Dashboard model v1 does not attest CPU classes or sealed-holdout status.",
+        "requirement": "same direction on two CPU classes and a sealed lineage-disjoint or external holdout",
+        "state": "unknown"
+      },
+      {
+        "evidence_panel_ids": [],
+        "id": "V6",
+        "reason": "Dashboard model v1 contains no independent proof/model checks or novelty ablation record.",
+        "requirement": "models and proofs independently checked, novelty ablated against closest prior art",
+        "state": "unknown"
+      }
+    ],
+    "state": "fail"
+  }
+}
