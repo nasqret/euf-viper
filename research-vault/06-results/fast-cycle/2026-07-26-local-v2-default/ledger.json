@@ -1,0 +1,123 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T12:57:20.780077+00:00",
+  "preflight": [],
+  "reference_binary": null,
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "blocking_performance": true,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 1.031886799030885,
+      "common_geometric_speedup": 1.031886799030885,
+      "comparator": "yices2",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-yices2.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [],
+      "performance_target_met": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 1.0319x, geometric 1.0319x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-yices2.json"
+    },
+    {
+      "blocking_performance": true,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 3.789364256171118,
+      "common_geometric_speedup": 3.7893642561711185,
+      "comparator": "z3",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-z3.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [],
+      "performance_target_met": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 3.7894x, geometric 3.7894x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-z3.json"
+    },
+    {
+      "blocking_performance": true,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 9.016331229579832,
+      "common_geometric_speedup": 9.016331229579832,
+      "comparator": "cvc5",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-cvc5.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [],
+      "performance_target_met": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 9.0163x, geometric 9.0163x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q1-cvc5.json"
+    },
+    {
+      "blocking_performance": true,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 2.1844789002923375,
+      "common_geometric_speedup": 2.1844789002923375,
+      "comparator": "yices2",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q2p-yices2.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [],
+      "performance_target_met": true,
+      "stage": "Q2P",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 2.1845x, geometric 2.1845x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q2p-yices2.json"
+    },
+    {
+      "blocking_performance": true,
+      "command_returncode": 0,
+      "common_aggregate_speedup": null,
+      "common_geometric_speedup": null,
+      "comparator": "z3",
+      "coverage_delta": 1,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q2p-z3.csv",
+      "failures": [
+        "no common correct instances",
+        "common aggregate speedup is unavailable",
+        "common geometric speedup is unavailable"
+      ],
+      "kind": "competitor",
+      "passed": false,
+      "performance_target_failures": [
+        "no common correct instances",
+        "common aggregate speedup is unavailable",
+        "common geometric speedup is unavailable"
+      ],
+      "performance_target_met": false,
+      "stage": "Q2P",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 0/1 -> 1/1; no common-correct speedup\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-v2-default/q2p-z3.json"
+    }
+  ],
+  "schema_version": 2,
+  "selected_stages": [
+    "Q1",
+    "Q2P",
+    "Q2G",
+    "Q2M"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "78cdc1972b4f6ef6d469fd889f8245822776b27545be7b448c7f5bea9a57bc1c"
+  },
+  "started_at": "2026-07-26T12:56:10.237369+00:00",
+  "status": "gate_failed"
+}

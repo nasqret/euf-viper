@@ -1,10 +1,8 @@
-#![cfg(test)]
 #![allow(dead_code)]
 
 //! Exact reference certificates for complete forbidden-table orbits.
 //!
-//! This module is deliberately test-only and is not a solver route.  It checks
-//! the reduction
+//! This module checks the reduction
 //!
 //! ```text
 //! base(table) /\ table not in forbidden_records
@@ -89,6 +87,53 @@ pub struct BaseInvarianceClaim {
     fingerprint: BaseFingerprint,
     assertion_count: usize,
     witnesses: Box<[BasePermutationWitness]>,
+}
+
+/// Untrusted claim that the separated base is invariant under the standard
+/// adjacent-transposition generators of `S_n`.
+///
+/// Witness `i` must describe the transposition `(i, i + 1)`.  Exact replay of
+/// these `n - 1` bijections is sufficient: adjacent transpositions generate
+/// the full symmetric group, and relabeling is a group action on the base
+/// assertion multiset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratorBaseInvarianceClaim {
+    degree: usize,
+    fingerprint: BaseFingerprint,
+    assertion_count: usize,
+    witnesses: Box<[BasePermutationWitness]>,
+}
+
+impl GeneratorBaseInvarianceClaim {
+    pub fn new(
+        degree: usize,
+        fingerprint: BaseFingerprint,
+        assertion_count: usize,
+        witnesses: Vec<BasePermutationWitness>,
+    ) -> Self {
+        Self {
+            degree,
+            fingerprint,
+            assertion_count,
+            witnesses: witnesses.into_boxed_slice(),
+        }
+    }
+
+    pub fn degree(&self) -> usize {
+        self.degree
+    }
+
+    pub fn fingerprint(&self) -> BaseFingerprint {
+        self.fingerprint
+    }
+
+    pub fn assertion_count(&self) -> usize {
+        self.assertion_count
+    }
+
+    pub fn witnesses(&self) -> &[BasePermutationWitness] {
+        &self.witnesses
+    }
 }
 
 impl BaseInvarianceClaim {
@@ -215,6 +260,58 @@ pub struct OrbitCoverCertificate {
     telemetry: OrbitCoverTelemetry,
 }
 
+/// Exact forbidden-orbit certificate whose base invariance is proved from a
+/// Coxeter generating set instead of one source witness per group element.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratorOrbitCoverCertificate {
+    degree: usize,
+    representative: BinaryTable,
+    base_invariance: GeneratorBaseInvarianceClaim,
+    image_witnesses: Box<[OrbitImageWitness]>,
+    record_witnesses: Box<[ForbiddenRecordWitness]>,
+    telemetry: OrbitCoverTelemetry,
+}
+
+impl GeneratorOrbitCoverCertificate {
+    pub fn degree(&self) -> usize {
+        self.degree
+    }
+
+    pub fn representative(&self) -> &BinaryTable {
+        &self.representative
+    }
+
+    pub fn base_invariance(&self) -> &GeneratorBaseInvarianceClaim {
+        &self.base_invariance
+    }
+
+    pub fn image_witnesses(&self) -> &[OrbitImageWitness] {
+        &self.image_witnesses
+    }
+
+    pub fn record_witnesses(&self) -> &[ForbiddenRecordWitness] {
+        &self.record_witnesses
+    }
+
+    pub fn telemetry(&self) -> &OrbitCoverTelemetry {
+        &self.telemetry
+    }
+
+    pub fn covers(&self, table: &BinaryTable) -> bool {
+        self.image_witnesses
+            .binary_search_by(|witness| witness.image.cmp(table))
+            .is_ok()
+    }
+
+    pub fn verify_exact<V: BaseActionVerifier>(
+        &self,
+        forbidden_records: &[BinaryTable],
+        verifier: &V,
+    ) -> Result<OrbitCoverTelemetry, OrbitCoverFailure> {
+        verify_generator_orbit_cover_certificate(self, forbidden_records, verifier)
+    }
+}
+
 impl OrbitCoverCertificate {
     pub fn degree(&self) -> usize {
         self.degree
@@ -314,6 +411,15 @@ pub enum OrbitCoverError {
         permutation: CheckedPermutation,
         source_assertion: usize,
         target_assertion: usize,
+    },
+    GeneratorWitnessCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    GeneratorPermutationMismatch {
+        generator_index: usize,
+        expected: CheckedPermutation,
+        actual: CheckedPermutation,
     },
     PermutationEnumeration,
     TableAction(TableActionError),
@@ -426,6 +532,20 @@ impl fmt::Display for OrbitCoverError {
                 output,
                 "base replay rejected {:?}: assertion {source_assertion} -> {target_assertion}",
                 permutation.images()
+            ),
+            Self::GeneratorWitnessCountMismatch { expected, actual } => write!(
+                output,
+                "generator base claim has {actual} witnesses, expected {expected}"
+            ),
+            Self::GeneratorPermutationMismatch {
+                generator_index,
+                expected,
+                actual,
+            } => write!(
+                output,
+                "generator witness {generator_index} is {:?}, expected {:?}",
+                actual.images(),
+                expected.images()
             ),
             Self::PermutationEnumeration => {
                 write!(output, "failed to enumerate the required permutation group")
@@ -642,6 +762,138 @@ pub fn recognize_full_forbidden_orbit<V: BaseActionVerifier>(
     })
 }
 
+/// Recognizes the same exact forbidden orbit as
+/// [`recognize_full_forbidden_orbit`], but proves base invariance from the
+/// standard adjacent transpositions.  The forbidden-table side is still
+/// enumerated exhaustively; only the redundant source-AST relabeling proof is
+/// compressed.
+pub fn recognize_full_forbidden_orbit_from_generators<V: BaseActionVerifier>(
+    forbidden_records: &[BinaryTable],
+    base_claim: &GeneratorBaseInvarianceClaim,
+    verifier: &V,
+) -> Result<GeneratorOrbitCoverCertificate, OrbitCoverFailure> {
+    let mut telemetry = OrbitCoverTelemetry {
+        forbidden_records: forbidden_records.len(),
+        ..OrbitCoverTelemetry::default()
+    };
+    let Some(first_record) = forbidden_records.first() else {
+        return Err(failure(OrbitCoverError::EmptyForbiddenSet, &telemetry));
+    };
+    let degree = first_record.degree();
+    telemetry.degree = degree;
+    if degree > MAX_EXHAUSTIVE_DEGREE {
+        return Err(failure(
+            OrbitCoverError::DegreeTooLarge {
+                degree,
+                maximum: MAX_EXHAUSTIVE_DEGREE,
+            },
+            &telemetry,
+        ));
+    }
+    telemetry.expected_permutations = checked_factorial(degree).ok_or_else(|| {
+        failure(
+            OrbitCoverError::DegreeTooLarge {
+                degree,
+                maximum: MAX_EXHAUSTIVE_DEGREE,
+            },
+            &telemetry,
+        )
+    })?;
+
+    for (record_index, record) in forbidden_records.iter().enumerate() {
+        if record.degree() != degree {
+            return Err(failure(
+                OrbitCoverError::MixedTableDegree {
+                    record_index,
+                    expected: degree,
+                    actual: record.degree(),
+                },
+                &telemetry,
+            ));
+        }
+    }
+    let forbidden = forbidden_records.iter().cloned().collect::<BTreeSet<_>>();
+    telemetry.unique_forbidden_tables = forbidden.len();
+    telemetry.duplicate_forbidden_records = forbidden_records.len() - forbidden.len();
+
+    let normalized_base =
+        verify_generator_base_invariance(degree, base_claim, verifier, &mut telemetry)?;
+    let representative = forbidden
+        .first()
+        .expect("a nonempty record sequence has a nonempty table set")
+        .clone();
+
+    let permutations = LexicographicPermutations::new(degree)
+        .map_err(|_| failure(OrbitCoverError::PermutationEnumeration, &telemetry))?;
+    let mut generated = BTreeMap::<BinaryTable, CheckedPermutation>::new();
+    for permutation in permutations {
+        telemetry.orbit_permutations_enumerated += 1;
+        let image = representative
+            .conjugated_by(&permutation)
+            .map_err(|error| failure(OrbitCoverError::TableAction(error), &telemetry))?;
+        generated.entry(image).or_insert(permutation);
+    }
+    telemetry.unique_orbit_tables = generated.len();
+    if generated.is_empty() || telemetry.expected_permutations % telemetry.unique_orbit_tables != 0
+    {
+        return Err(failure(
+            OrbitCoverError::OrbitCardinalityInconsistent {
+                permutations: telemetry.expected_permutations,
+                orbit_size: telemetry.unique_orbit_tables,
+            },
+            &telemetry,
+        ));
+    }
+    telemetry.stabilizer_size = telemetry.expected_permutations / telemetry.unique_orbit_tables;
+    telemetry.missing_orbit_tables = generated
+        .keys()
+        .filter(|table| !forbidden.contains(*table))
+        .count();
+    telemetry.out_of_orbit_tables = forbidden
+        .iter()
+        .filter(|table| !generated.contains_key(*table))
+        .count();
+    if telemetry.missing_orbit_tables != 0 || telemetry.out_of_orbit_tables != 0 {
+        return Err(failure(
+            OrbitCoverError::ForbiddenSetMismatch {
+                missing_orbit_tables: telemetry.missing_orbit_tables,
+                out_of_orbit_tables: telemetry.out_of_orbit_tables,
+            },
+            &telemetry,
+        ));
+    }
+
+    let mut image_witnesses = Vec::with_capacity(generated.len());
+    for (image, witness) in &generated {
+        image_witnesses.push(OrbitImageWitness {
+            image: image.clone(),
+            seed_to_image: witness.clone(),
+        });
+    }
+
+    let mut record_witnesses = Vec::with_capacity(forbidden_records.len());
+    for (record_index, record) in forbidden_records.iter().enumerate() {
+        let witness = generated
+            .get(record)
+            .expect("exact set equality gives every source record a witness")
+            .clone();
+        record_witnesses.push(ForbiddenRecordWitness {
+            record_index,
+            seed_to_record: witness,
+        });
+    }
+    telemetry.exact_orbit_cover_verified = true;
+
+    Ok(GeneratorOrbitCoverCertificate {
+        degree,
+        representative,
+        base_invariance: normalized_base,
+        image_witnesses: image_witnesses.into_boxed_slice(),
+        record_witnesses: record_witnesses.into_boxed_slice(),
+        telemetry,
+    })
+}
+
 /// Independently reconstructs a certificate and rejects any stored mismatch.
 pub fn verify_orbit_cover_certificate<V: BaseActionVerifier>(
     certificate: &OrbitCoverCertificate,
@@ -655,6 +907,214 @@ pub fn verify_orbit_cover_certificate<V: BaseActionVerifier>(
         return Err(failure(OrbitCoverError::CertificateMismatch, &telemetry));
     }
     Ok(telemetry)
+}
+
+/// Independently reconstructs a generator-compressed certificate and rejects
+/// any stored mismatch.
+pub fn verify_generator_orbit_cover_certificate<V: BaseActionVerifier>(
+    certificate: &GeneratorOrbitCoverCertificate,
+    forbidden_records: &[BinaryTable],
+    verifier: &V,
+) -> Result<OrbitCoverTelemetry, OrbitCoverFailure> {
+    let mut replay_telemetry = certificate.telemetry.clone();
+    for (image_index, witness) in certificate.image_witnesses.iter().enumerate() {
+        let replayed = certificate
+            .representative
+            .conjugated_by(&witness.seed_to_image)
+            .map_err(|error| failure(OrbitCoverError::TableAction(error), &replay_telemetry))?;
+        if replayed != witness.image {
+            return Err(failure(
+                OrbitCoverError::UniqueTableWitnessMismatch { image_index },
+                &replay_telemetry,
+            ));
+        }
+        replay_telemetry.unique_table_witnesses_replayed += 1;
+    }
+    if certificate.record_witnesses.len() != forbidden_records.len() {
+        return Err(failure(
+            OrbitCoverError::CertificateMismatch,
+            &replay_telemetry,
+        ));
+    }
+    for (expected_record_index, witness) in certificate.record_witnesses.iter().enumerate() {
+        if witness.record_index != expected_record_index {
+            return Err(failure(
+                OrbitCoverError::RecordWitnessMismatch {
+                    record_index: expected_record_index,
+                },
+                &replay_telemetry,
+            ));
+        }
+        let replayed = certificate
+            .representative
+            .conjugated_by(&witness.seed_to_record)
+            .map_err(|error| failure(OrbitCoverError::TableAction(error), &replay_telemetry))?;
+        if replayed != forbidden_records[expected_record_index] {
+            return Err(failure(
+                OrbitCoverError::RecordWitnessMismatch {
+                    record_index: expected_record_index,
+                },
+                &replay_telemetry,
+            ));
+        }
+        replay_telemetry.record_witnesses_replayed += 1;
+    }
+
+    let rebuilt = recognize_full_forbidden_orbit_from_generators(
+        forbidden_records,
+        &certificate.base_invariance,
+        verifier,
+    )?;
+    if &rebuilt != certificate {
+        return Err(failure(
+            OrbitCoverError::CertificateMismatch,
+            &replay_telemetry,
+        ));
+    }
+    Ok(replay_telemetry)
+}
+
+fn verify_generator_base_invariance<V: BaseActionVerifier>(
+    degree: usize,
+    claim: &GeneratorBaseInvarianceClaim,
+    verifier: &V,
+    telemetry: &mut OrbitCoverTelemetry,
+) -> Result<GeneratorBaseInvarianceClaim, OrbitCoverFailure> {
+    if claim.degree != degree {
+        return Err(failure(
+            OrbitCoverError::BaseClaimDegreeMismatch {
+                table_degree: degree,
+                claim_degree: claim.degree,
+            },
+            telemetry,
+        ));
+    }
+    if verifier.degree() != claim.degree {
+        return Err(failure(
+            OrbitCoverError::VerifierDegreeMismatch {
+                claim_degree: claim.degree,
+                verifier_degree: verifier.degree(),
+            },
+            telemetry,
+        ));
+    }
+    if verifier.fingerprint() != claim.fingerprint {
+        return Err(failure(
+            OrbitCoverError::VerifierFingerprintMismatch,
+            telemetry,
+        ));
+    }
+    if verifier.assertion_count() != claim.assertion_count {
+        return Err(failure(
+            OrbitCoverError::VerifierAssertionCountMismatch {
+                claim_count: claim.assertion_count,
+                verifier_count: verifier.assertion_count(),
+            },
+            telemetry,
+        ));
+    }
+
+    let expected_count = degree.saturating_sub(1);
+    telemetry.base_witness_records = claim.witnesses.len();
+    if claim.witnesses.len() != expected_count {
+        return Err(failure(
+            OrbitCoverError::GeneratorWitnessCountMismatch {
+                expected: expected_count,
+                actual: claim.witnesses.len(),
+            },
+            telemetry,
+        ));
+    }
+
+    let mut normalized = Vec::with_capacity(expected_count);
+    for (generator_index, witness) in claim.witnesses.iter().enumerate() {
+        if witness.permutation.degree() != degree {
+            return Err(failure(
+                OrbitCoverError::BaseWitnessDegreeMismatch {
+                    witness_index: generator_index,
+                    expected: degree,
+                    actual: witness.permutation.degree(),
+                },
+                telemetry,
+            ));
+        }
+        let mut images = (0..degree).collect::<Vec<_>>();
+        images.swap(generator_index, generator_index + 1);
+        let expected = CheckedPermutation::new(images)
+            .map_err(|_| failure(OrbitCoverError::PermutationEnumeration, telemetry))?;
+        if witness.permutation != expected {
+            return Err(failure(
+                OrbitCoverError::GeneratorPermutationMismatch {
+                    generator_index,
+                    expected,
+                    actual: witness.permutation.clone(),
+                },
+                telemetry,
+            ));
+        }
+        if witness.assertion_images.len() != claim.assertion_count {
+            return Err(failure(
+                OrbitCoverError::BaseAssertionImageCountMismatch {
+                    permutation: witness.permutation.clone(),
+                    expected: claim.assertion_count,
+                    actual: witness.assertion_images.len(),
+                },
+                telemetry,
+            ));
+        }
+        let mut seen_targets = vec![false; claim.assertion_count];
+        for (source_assertion, &target_assertion) in witness.assertion_images.iter().enumerate() {
+            if target_assertion >= claim.assertion_count {
+                return Err(failure(
+                    OrbitCoverError::BaseAssertionImageOutOfRange {
+                        permutation: witness.permutation.clone(),
+                        source_assertion,
+                        target_assertion,
+                        assertion_count: claim.assertion_count,
+                    },
+                    telemetry,
+                ));
+            }
+            if seen_targets[target_assertion] {
+                return Err(failure(
+                    OrbitCoverError::DuplicateBaseAssertionImage {
+                        permutation: witness.permutation.clone(),
+                        target_assertion,
+                    },
+                    telemetry,
+                ));
+            }
+            seen_targets[target_assertion] = true;
+            if !verifier.transformed_assertion_matches(
+                &witness.permutation,
+                source_assertion,
+                target_assertion,
+            ) {
+                return Err(failure(
+                    OrbitCoverError::BaseAssertionReplayRejected {
+                        permutation: witness.permutation.clone(),
+                        source_assertion,
+                        target_assertion,
+                    },
+                    telemetry,
+                ));
+            }
+            telemetry.base_assertion_images_replayed += 1;
+        }
+        telemetry.base_permutations_replayed += 1;
+        normalized.push(witness.clone());
+    }
+
+    // The checked adjacent transpositions generate S_n.  Closure of the base
+    // multiset under each generator therefore implies closure under every
+    // product of generators and hence every carrier relabeling.
+    telemetry.base_invariance_verified = true;
+    Ok(GeneratorBaseInvarianceClaim::new(
+        claim.degree,
+        claim.fingerprint,
+        claim.assertion_count,
+        normalized,
+    ))
 }
 
 fn verify_base_invariance<V: BaseActionVerifier>(
@@ -891,6 +1351,18 @@ mod tests {
         BaseInvarianceClaim::new(degree, FINGERPRINT, degree, witnesses)
     }
 
+    fn point_generator_claim(degree: usize) -> GeneratorBaseInvarianceClaim {
+        let witnesses = (0..degree.saturating_sub(1))
+            .map(|generator_index| {
+                let mut images = (0..degree).collect::<Vec<_>>();
+                images.swap(generator_index, generator_index + 1);
+                let permutation = CheckedPermutation::new(images.clone()).unwrap();
+                BasePermutationWitness::new(permutation, images)
+            })
+            .collect();
+        GeneratorBaseInvarianceClaim::new(degree, FINGERPRINT, degree, witnesses)
+    }
+
     fn empty_base_claim(degree: usize) -> BaseInvarianceClaim {
         let witnesses = LexicographicPermutations::new(degree)
             .unwrap()
@@ -952,6 +1424,53 @@ mod tests {
         assert_eq!(
             certificate.verify_exact(&records, &verifier).unwrap(),
             *telemetry
+        );
+    }
+
+    #[test]
+    fn generator_basis_builds_fast_and_strict_replay_checks_every_table_witness() {
+        let seed = rigid_degree_three_table();
+        let records = orbit(&seed);
+        let verifier = PointAssertionVerifier {
+            degree: 3,
+            fingerprint: FINGERPRINT,
+        };
+        let certificate = recognize_full_forbidden_orbit_from_generators(
+            &records,
+            &point_generator_claim(3),
+            &verifier,
+        )
+        .unwrap();
+        assert_eq!(certificate.telemetry().base_permutations_replayed, 2);
+        assert_eq!(certificate.telemetry().base_assertion_images_replayed, 6);
+        assert_eq!(certificate.telemetry().unique_table_witnesses_replayed, 0);
+        assert_eq!(certificate.telemetry().record_witnesses_replayed, 0);
+
+        let replay = certificate.verify_exact(&records, &verifier).unwrap();
+        assert_eq!(replay.unique_table_witnesses_replayed, records.len());
+        assert_eq!(replay.record_witnesses_replayed, records.len());
+        assert!(replay.base_invariance_verified);
+        assert!(replay.exact_orbit_cover_verified);
+    }
+
+    #[test]
+    fn generator_basis_rejects_an_incomplete_adjacent_transposition_set() {
+        let seed = rigid_degree_three_table();
+        let records = orbit(&seed);
+        let verifier = PointAssertionVerifier {
+            degree: 3,
+            fingerprint: FINGERPRINT,
+        };
+        let mut claim = point_generator_claim(3);
+        claim.witnesses = claim.witnesses[..1].to_vec().into_boxed_slice();
+        let error = recognize_full_forbidden_orbit_from_generators(&records, &claim, &verifier)
+            .unwrap_err();
+        assert_eq!(
+            error.error,
+            OrbitCoverError::GeneratorWitnessCountMismatch {
+                expected: 2,
+                actual: 1,
+            }
         );
     }
 

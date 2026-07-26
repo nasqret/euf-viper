@@ -1,0 +1,345 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 9,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 0,
+      "coverage": 0.0,
+      "covered_paths": 0,
+      "error_runs": 0,
+      "failed_runs": 9,
+      "paths": 1,
+      "result_counts": {
+        "timeout": 9
+      },
+      "timeout_runs": 9,
+      "uncovered_runs": 9,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 9,
+      "coverage": 1.0,
+      "covered_paths": 1,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 1,
+      "result_counts": {
+        "unsat": 9
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/z3",
+          "-smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "requested": "third_party/solvers/pinned/bin/z3",
+          "resolved_path": "/opt/homebrew/Cellar/z3/4.16.0/bin/z3",
+          "sha256": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7",
+          "size_bytes": 15329696
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "47a2a047b11f8b1294dcb1f80b4a20fc95659815baa6cbd152bb394d6562f8bf",
+          "size_bytes": 3820816
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 924,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "row_index": 0,
+        "sha256": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+        "size_bytes": 42150
+      }
+    ],
+    "manifest": {
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/novelty-tail/peq012-size6.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/novelty-tail/peq012-size6.jsonl",
+      "sha256": "1074179603036ae481c82160cc7de65ec69827161998339b7b62194d97dcd733",
+      "size_bytes": 443
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-core-after-structural-support/q2p-z3.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-core-after-structural-support/q2p-z3.csv",
+      "sha256": "3d17ad92631039fa21da228c14b5b6001d91bd585e5d959f611030a40964a6a8",
+      "size_bytes": 4669,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "third_party/solvers/pinned/bin/z3",
+    "-smt2",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 0.0,
+  "baseline_correct": 0,
+  "baseline_env": [],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "537a502af2f4013a8e887beebe525a0dae84918a61ff545991e36dfda07ed6d7",
+  "baseline_wins": 0,
+  "candidate": [
+    "target/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 0.0,
+  "candidate_correct": 1,
+  "candidate_env": [],
+  "candidate_geometric_speedup": null,
+  "candidate_only_correct": 1,
+  "candidate_only_examples": [
+    "QF_UF/PEQ/PEQ012_size6.smt2"
+  ],
+  "candidate_sha256": "47a2a047b11f8b1294dcb1f80b4a20fc95659815baa6cbd152bb394d6562f8bf",
+  "candidate_speedup_by_total": null,
+  "candidate_wins": 0,
+  "common_aggregate_speedup": null,
+  "common_correct": 0,
+  "common_correct_paths": [],
+  "common_geometric_speedup": null,
+  "coverage_delta": 1,
+  "elapsed_s": 26.75918641698081,
+  "execution_errors": [],
+  "finished_at": "2026-07-26T14:47:00.934447+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 1,
+  "manifest": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/benchmarks/novelty-tail/peq012-size6.jsonl",
+  "manifest_order": [
+    "QF_UF/PEQ/PEQ012_size6.smt2"
+  ],
+  "manifest_sha256": "1074179603036ae481c82160cc7de65ec69827161998339b7b62194d97dcd733",
+  "measured_runs": 18,
+  "paths": [
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0042500840499997,
+        "results": {
+          "timeout": 9
+        },
+        "timeout_repeats": 9,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 9,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.42628141603199765,
+        "results": {
+          "unsat": 9
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 924,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "row_index": 0
+    }
+  ],
+  "repeats": 9,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-26T14:46:34.189373+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 6,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 7,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "repeat": 8,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 4,
+    "timeouts": [
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "baseline",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "repeat": 0,
+        "result": "timeout",
+        "row_index": 0,
+        "stderr": ""
+      },
+      {
+        "error_kind": "timeout",
+        "exit_code": 124,
+        "label": "baseline",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "repeat": 1,
+        "result": "timeout",
+        "row_index": 0,
+        "stderr": ""
+      }
+    ],
+    "wrong_answers": []
+  },
+  "warmups": 2,
+  "wrong_answers": []
+}

@@ -1,0 +1,86 @@
+{
+  "artifacts": {
+    "records": {
+      "bytes": 2500,
+      "path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/fabric-shadow.jsonl",
+      "sha256": "a27bc3c7a3f2f882fb826e1a683e81fd773786b712ca34edddb8de92cf6b74c7"
+    },
+    "solver": {
+      "bytes": 2803128,
+      "path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/euf-viper",
+      "sha256": "f374c9067fa9f560e41a5516a797c68d8bd49afb678ad129b4995b3a99acabb8"
+    },
+    "stderr": {
+      "bytes": 3722,
+      "path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/stderr.log",
+      "sha256": "d19bcb7c93465a5672cd622481d982b3a8e9dfc9064f3a6ee493cbea6008c526"
+    },
+    "stdout": {
+      "bytes": 66,
+      "path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/stdout.log",
+      "sha256": "87574f3e621b89f5a00349d3a25b3c4bc7bf65a3cd872abfd9f23b8c781b9894"
+    },
+    "summary": {
+      "bytes": 2666,
+      "path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/summary.json",
+      "sha256": "5cf02863189f7df6909fe323878ed470fbf4109526caa62b090ace446d2c3e8e"
+    }
+  },
+  "completed_at": "2026-07-24T14:05:53.769743Z",
+  "corpus_mode": "smoke",
+  "instance_timeout_s": 60.0,
+  "jobs": 1,
+  "manifest": {
+    "corpus_access": "read_only",
+    "corpus_root": "/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF",
+    "expected_sources": 2,
+    "observed_records": 2,
+    "path": "/work/bnaskrecki/euf-viper-campaigns/viper-fabric/manifests/viper-fabric-f0-smoke-v1.jsonl",
+    "sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291"
+  },
+  "resume": false,
+  "revision": "51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc",
+  "schema": "euf-viper.fabric-shadow-wmi-run.v1",
+  "scope": {
+    "default_behavior_change": false,
+    "mode": "semantic_substrate_shadow_census",
+    "performance_claim": false,
+    "promotion_claim": false,
+    "solver_result_claim": false,
+    "solver_result_claims_allowed": 0,
+    "stage": "F0"
+  },
+  "single_core": true,
+  "slurm": {
+    "account": "bnaskrecki",
+    "cluster": "cluster",
+    "cpus_per_task": 1,
+    "job_id": "169653",
+    "job_name": "euf-fabric-shadow",
+    "node_list": "c4n3",
+    "partition": "cpu_idle",
+    "submit_dir": "/work/bnaskrecki/euf-viper-fabric/checkouts/51fc7d31a0e4"
+  },
+  "status": "artifact_complete",
+  "tools": {
+    "cargo": {
+      "path": "/home/bnaskrecki/.rustup/toolchains/1.93.0-x86_64-unknown-linux-gnu/bin/cargo",
+      "sha256": "9548937d530bf439ff1ba47a3b2bd26eeb9c3aff1961c20c01798613de922578",
+      "version": "cargo 1.93.0 (083ac5135 2025-12-15)"
+    },
+    "python": {
+      "path": "/usr/bin/python3.10",
+      "sha256": "7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86",
+      "version": "Python 3.10.12"
+    },
+    "runner": {
+      "path": "/work/bnaskrecki/euf-viper-fabric/checkouts/51fc7d31a0e4/scripts/bench/run_fabric_shadow.py",
+      "sha256": "d357c26e3e38c1e54215dd3b8a03b260b91bf04354a145a01dded3e3be508cdf"
+    },
+    "rustc": {
+      "path": "/home/bnaskrecki/.rustup/toolchains/1.93.0-x86_64-unknown-linux-gnu/bin/rustc",
+      "sha256": "d32249a7c3bfcfc67b471460386e46323accae7125e344567a12d5664d99bb57",
+      "version": "rustc 1.93.0 (254b59607 2026-01-19)"
+    }
+  }
+}

@@ -1,0 +1,2321 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 11,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 40,
+      "coverage": 0.851063829787234,
+      "covered_paths": 40,
+      "error_runs": 0,
+      "failed_runs": 7,
+      "paths": 47,
+      "result_counts": {
+        "timeout": 7,
+        "unsat": 40
+      },
+      "timeout_runs": 7,
+      "uncovered_runs": 7,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 43,
+      "coverage": 0.9148936170212766,
+      "covered_paths": 43,
+      "error_runs": 0,
+      "failed_runs": 4,
+      "paths": 47,
+      "result_counts": {
+        "timeout": 4,
+        "unsat": 43
+      },
+      "timeout_runs": 4,
+      "uncovered_runs": 4,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/yices-smt2",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/yices-smt2",
+          "requested": "third_party/solvers/pinned/bin/yices-smt2",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/yices-smt2",
+          "sha256": "783047ce14bfe44cfa237d217afb76ed8cd2bb22c58f37b83fec62919d7d88a0",
+          "size_bytes": 2670856
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "5affec790185645e95d6c7a27e9cbaef4697a0b31180969f17e3f804fd08f7c2",
+          "size_bytes": 3820368
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 901,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ002_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size5.smt2",
+        "row_index": 0,
+        "sha256": "e27c97473a790ba8cc64d2740d262fda8cea04fe906b49cdfe4a76beac2b5c0b",
+        "size_bytes": 23667
+      },
+      {
+        "id": 902,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ002_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size6.smt2",
+        "row_index": 1,
+        "sha256": "6df6a3a6a9a782c431cdf13bf9cbee65d40995eadc267e34781e506f6fa7ee7b",
+        "size_bytes": 39977
+      },
+      {
+        "id": 903,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ002_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size7.smt2",
+        "row_index": 2,
+        "sha256": "2c572bed8c900528912cfb81af1f745b71f74af4ca83c9357c010f2969c33d94",
+        "size_bytes": 62827
+      },
+      {
+        "id": 904,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ002_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ002_size8.smt2",
+        "row_index": 3,
+        "sha256": "688b9986fb15d9a52389204c8bd5c3b69cb8d908bd0b1350c826021fbee34a62",
+        "size_bytes": 94351
+      },
+      {
+        "id": 905,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size10.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ003_size10.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size10.smt2",
+        "row_index": 4,
+        "sha256": "149799439eb7e82a78359eeb062572ae29371c9ceb09a33f9e56e7d3eb1d189f",
+        "size_bytes": 89097
+      },
+      {
+        "id": 906,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ003_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size7.smt2",
+        "row_index": 5,
+        "sha256": "808eabf6b0d3f950dfa1723c6180095e6149d28ee72d978b1d59afe4b578702d",
+        "size_bytes": 33699
+      },
+      {
+        "id": 907,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ003_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size8.smt2",
+        "row_index": 6,
+        "sha256": "2b9381d219868be9ae2ff6f3669bd4b9cc9dd54572333bb7e5457129bb959315",
+        "size_bytes": 48253
+      },
+      {
+        "id": 908,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size9.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ003_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ003_size9.smt2",
+        "row_index": 7,
+        "sha256": "09279d1edc252bb5338169370f8c9d6b18051109e9c4675c24d175e49298120b",
+        "size_bytes": 66609
+      },
+      {
+        "id": 909,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ004_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size6.smt2",
+        "row_index": 8,
+        "sha256": "cba2b46f64aaf1b40e2b68148dceeee9e503d3bccaf1490df062abcbb6d0a7cd",
+        "size_bytes": 44054
+      },
+      {
+        "id": 910,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ004_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size7.smt2",
+        "row_index": 9,
+        "sha256": "3ef7a9215aec81cae762f57db269ebc485229011a04e6d7ead0124557ce1b7bc",
+        "size_bytes": 67629
+      },
+      {
+        "id": 911,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ004_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size8.smt2",
+        "row_index": 10,
+        "sha256": "eeee4fb1e2592f01f6ac1a3d8f04390640b9c9214bf252df735c52202043d3cb",
+        "size_bytes": 98416
+      },
+      {
+        "id": 912,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size9.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ004_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ004_size9.smt2",
+        "row_index": 11,
+        "sha256": "9741d95d15b0205b51a0a9690d8f62054626613145d9d8bcef36e851e6724c8a",
+        "size_bytes": 138629
+      },
+      {
+        "id": 913,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ010_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size5.smt2",
+        "row_index": 12,
+        "sha256": "f02fa02d17cb440a24aac01bce88c86149093b2af6ab06203d54ceaf22599922",
+        "size_bytes": 24234
+      },
+      {
+        "id": 914,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ010_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size6.smt2",
+        "row_index": 13,
+        "sha256": "5de7f37a2872fe27d60c327fe86034f31d53b0bbb23189dcf52357c6971a2258",
+        "size_bytes": 38869
+      },
+      {
+        "id": 915,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ010_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size7.smt2",
+        "row_index": 14,
+        "sha256": "5f3a04317b39e528d29678c9cc221aec989d1d8df7ddbd898626a305bc07c761",
+        "size_bytes": 58416
+      },
+      {
+        "id": 916,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ010_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ010_size8.smt2",
+        "row_index": 15,
+        "sha256": "434d5718c7f9a6c679e3b97015d3b47a9b39e0202b2dd228775ceac305291088",
+        "size_bytes": 83789
+      },
+      {
+        "id": 917,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ011_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size5.smt2",
+        "row_index": 16,
+        "sha256": "2623b79bb4fb180b1c919a4b893c44a6a35fe2d813245e1a1d995eb7e0e57983",
+        "size_bytes": 17972
+      },
+      {
+        "id": 918,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ011_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size6.smt2",
+        "row_index": 17,
+        "sha256": "3cc3dc864c7cb0fe43278d9a65bbb3b9b16ad5428081be44c53ccb6ed3eed185",
+        "size_bytes": 29846
+      },
+      {
+        "id": 919,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ011_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size7.smt2",
+        "row_index": 18,
+        "sha256": "77c81c97ba5faf34b3d22bdadc82b5bdffaf34b2a8642ba488728bb416816db4",
+        "size_bytes": 46092
+      },
+      {
+        "id": 920,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ011_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ011_size8.smt2",
+        "row_index": 19,
+        "sha256": "5beaa9e86fa2355fa51156b467ca8a290a54ebe1a003caea4383900159761fb3",
+        "size_bytes": 67782
+      },
+      {
+        "id": 921,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size3.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size3.smt2",
+        "row_index": 20,
+        "sha256": "ad9f3c133455ce252e8098bb876306cc95838faa6659a7706ac0d8c9bdf49edc",
+        "size_bytes": 6112
+      },
+      {
+        "id": 922,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size4.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size4.smt2",
+        "row_index": 21,
+        "sha256": "7cb5c7c9dd566639e84c2e943ec573c98cb5a1d68a573c39e0dfc94b97e7b850",
+        "size_bytes": 13230
+      },
+      {
+        "id": 923,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size5.smt2",
+        "row_index": 22,
+        "sha256": "87678f1c29cd49c0f8d5bc358227a0d138b1d4a719ba186bb7b7d6cf121379be",
+        "size_bytes": 24902
+      },
+      {
+        "id": 924,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ012_size6.smt2",
+        "row_index": 23,
+        "sha256": "b3ef5c792f5df9f55bddc92062262b75b3f53aeae51609cde0b301c8f973b139",
+        "size_bytes": 42150
+      },
+      {
+        "id": 925,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ013_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size5.smt2",
+        "row_index": 24,
+        "sha256": "b8525133746923f320689b7778dab55da70523656e67cd6696b9ef4923288e65",
+        "size_bytes": 33542
+      },
+      {
+        "id": 926,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ013_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size6.smt2",
+        "row_index": 25,
+        "sha256": "5b1082af45e2a668a26bddfce1302aab989f046462aba996561f300c259c1890",
+        "size_bytes": 55319
+      },
+      {
+        "id": 927,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ013_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size7.smt2",
+        "row_index": 26,
+        "sha256": "22787214a307f821ea8ecd5ff29ed8a5ece3c3b6a69cf1e40e9962464d2519e8",
+        "size_bytes": 85122
+      },
+      {
+        "id": 928,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ013_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ013_size8.smt2",
+        "row_index": 27,
+        "sha256": "be0b76cb4494eb7a355531c94701a3a4bcd40c895c123120665499c34b43577f",
+        "size_bytes": 125129
+      },
+      {
+        "id": 929,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size10.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ014_size10.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size10.smt2",
+        "row_index": 28,
+        "sha256": "6fdff2919baa21a4d99c4e19ffbc1fe9a65bdfea710a5eca20ae6d5cea3b6e0e",
+        "size_bytes": 153607
+      },
+      {
+        "id": 930,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size11.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ014_size11.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size11.smt2",
+        "row_index": 29,
+        "sha256": "53fca12dc06816124b37d0a016ee865355148c40dea8aa01bc5207c7bba22855",
+        "size_bytes": 201300
+      },
+      {
+        "id": 931,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size8.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ014_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size8.smt2",
+        "row_index": 30,
+        "sha256": "55aec869b9f9b696eace1353e85fade22875e8431ad65b354f65b9b15b51059b",
+        "size_bytes": 82393
+      },
+      {
+        "id": 932,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size9.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ014_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ014_size9.smt2",
+        "row_index": 31,
+        "sha256": "0476ea28ab2227e35ed09153bb2da47c4b48d0f16f82b5d835b5a01b2d8519ca",
+        "size_bytes": 114339
+      },
+      {
+        "id": 933,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size4.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ016_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size4.smt2",
+        "row_index": 32,
+        "sha256": "73ee5c1ec908f5a697848c7d6f2c91c4fc6807ae5872e088b59feefe3851daf4",
+        "size_bytes": 38022
+      },
+      {
+        "id": 934,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ016_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size5.smt2",
+        "row_index": 33,
+        "sha256": "93ec911ac91606d75b868e73b73b6c7324980842ce8dbb5250f99cdc4d497b4d",
+        "size_bytes": 73662
+      },
+      {
+        "id": 935,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ016_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size6.smt2",
+        "row_index": 34,
+        "sha256": "add36378475b6f9e89805a4f7513d07c280a76b6cc77e2e2e6b263ed870ec71a",
+        "size_bytes": 128814
+      },
+      {
+        "id": 936,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ016_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ016_size7.smt2",
+        "row_index": 35,
+        "sha256": "038769bff9d86ab039c9ed6064dfd6ca3e2f25fc1f4246e3e9bb4e9ebc853d2c",
+        "size_bytes": 210463
+      },
+      {
+        "id": 937,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size4.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ018_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size4.smt2",
+        "row_index": 36,
+        "sha256": "00f5df506ffd4b6fd6e0e82db23c780dc51fba6839138c0426db086300c669a9",
+        "size_bytes": 5437
+      },
+      {
+        "id": 938,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ018_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size5.smt2",
+        "row_index": 37,
+        "sha256": "1cf86c8fcee644456bc8fc26994da84baf32d4db658a14ba2888e91938300a84",
+        "size_bytes": 9044
+      },
+      {
+        "id": 939,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ018_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size6.smt2",
+        "row_index": 38,
+        "sha256": "f75b483ec99d8f804dbcea992a9693b88f8a2590974adcfef8f0c6b1391f452b",
+        "size_bytes": 14197
+      },
+      {
+        "id": 940,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ018_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ018_size7.smt2",
+        "row_index": 39,
+        "sha256": "b785de75083b16d092369e814b181e8065a052ca5e35fc49afe353f433e10de0",
+        "size_bytes": 21234
+      },
+      {
+        "id": 941,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size4.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ019_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size4.smt2",
+        "row_index": 40,
+        "sha256": "3e05551d6faa3608a9e7164032abcde5427cc561648d4d5c6b8a2fcfaabc9d04",
+        "size_bytes": 10096
+      },
+      {
+        "id": 942,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ019_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size5.smt2",
+        "row_index": 41,
+        "sha256": "8a83cd9ed795f143ec511d52eda4937a35ab0c4970f29624b5003214bc2cadd8",
+        "size_bytes": 18393
+      },
+      {
+        "id": 943,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ019_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size6.smt2",
+        "row_index": 42,
+        "sha256": "22d1f5c322ad9919932ffa363e61a3373c1314a8da03eba0b5f4b10441f82911",
+        "size_bytes": 30456
+      },
+      {
+        "id": 944,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ019_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ019_size7.smt2",
+        "row_index": 43,
+        "sha256": "2a0946dc0623144c59356710290dada3813ced95c3aaef0e754cd2204f6b5e6e",
+        "size_bytes": 46927
+      },
+      {
+        "id": 945,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size5.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ020_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size5.smt2",
+        "row_index": 44,
+        "sha256": "f1a965c8ee2df08a2571a2e7b687f51a50af0acdd1f44cd83efbbb7891f60ad2",
+        "size_bytes": 20057
+      },
+      {
+        "id": 946,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size6.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ020_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size6.smt2",
+        "row_index": 45,
+        "sha256": "ed9b889e0f8aff681f15d905c186717769e09975cbd76544aef45321a9beaaa3",
+        "size_bytes": 60468
+      },
+      {
+        "id": 947,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size7.smt2",
+        "relative_path": "QF_UF/PEQ/PEQ020_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/PEQ/PEQ020_size7.smt2",
+        "row_index": 46,
+        "sha256": "0e75ecf33d8d86dd63e0ad1e24ea844f7ddcf31e73ee0fc1b59096d7d137b466",
+        "size_bytes": 93183
+      }
+    ],
+    "manifest": {
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-v2-yices/q2pf-resolved-manifest.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-v2-yices/q2pf-resolved-manifest.jsonl",
+      "sha256": "9c981250313d6768fecc5325192c220aa207f062504cf7729f677264197f1fac",
+      "size_bytes": 20831
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-v2-yices/q2pf-yices2.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-v2-yices/q2pf-yices2.csv",
+      "sha256": "f384bf1187c5cb35e85521cb812801ce250ffc856c37a28f30ad57c58750298b",
+      "size_bytes": 23555,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "third_party/solvers/pinned/bin/yices-smt2",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 5.424524666392244,
+  "baseline_correct": 40,
+  "baseline_env": [],
+  "baseline_only_correct": 1,
+  "baseline_only_examples": [
+    "QF_UF/PEQ/PEQ020_size7.smt2"
+  ],
+  "baseline_sha256": "783047ce14bfe44cfa237d217afb76ed8cd2bb22c58f37b83fec62919d7d88a0",
+  "baseline_wins": 34,
+  "candidate": [
+    "target/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 7.495695876190439,
+  "candidate_correct": 43,
+  "candidate_env": [],
+  "candidate_geometric_speedup": 0.4850020913695408,
+  "candidate_only_correct": 4,
+  "candidate_only_examples": [
+    "QF_UF/PEQ/PEQ003_size10.smt2",
+    "QF_UF/PEQ/PEQ003_size9.smt2",
+    "QF_UF/PEQ/PEQ013_size8.smt2",
+    "QF_UF/PEQ/PEQ018_size6.smt2"
+  ],
+  "candidate_sha256": "5affec790185645e95d6c7a27e9cbaef4697a0b31180969f17e3f804fd08f7c2",
+  "candidate_speedup_by_total": 0.7236852663170171,
+  "candidate_wins": 5,
+  "common_aggregate_speedup": 0.7236852663170171,
+  "common_correct": 39,
+  "common_correct_paths": [
+    "QF_UF/PEQ/PEQ002_size5.smt2",
+    "QF_UF/PEQ/PEQ002_size6.smt2",
+    "QF_UF/PEQ/PEQ002_size7.smt2",
+    "QF_UF/PEQ/PEQ002_size8.smt2",
+    "QF_UF/PEQ/PEQ003_size7.smt2",
+    "QF_UF/PEQ/PEQ003_size8.smt2",
+    "QF_UF/PEQ/PEQ004_size6.smt2",
+    "QF_UF/PEQ/PEQ004_size7.smt2",
+    "QF_UF/PEQ/PEQ004_size8.smt2",
+    "QF_UF/PEQ/PEQ004_size9.smt2",
+    "QF_UF/PEQ/PEQ010_size5.smt2",
+    "QF_UF/PEQ/PEQ010_size6.smt2",
+    "QF_UF/PEQ/PEQ010_size7.smt2",
+    "QF_UF/PEQ/PEQ010_size8.smt2",
+    "QF_UF/PEQ/PEQ011_size5.smt2",
+    "QF_UF/PEQ/PEQ011_size6.smt2",
+    "QF_UF/PEQ/PEQ011_size7.smt2",
+    "QF_UF/PEQ/PEQ011_size8.smt2",
+    "QF_UF/PEQ/PEQ012_size3.smt2",
+    "QF_UF/PEQ/PEQ012_size4.smt2",
+    "QF_UF/PEQ/PEQ012_size5.smt2",
+    "QF_UF/PEQ/PEQ012_size6.smt2",
+    "QF_UF/PEQ/PEQ013_size5.smt2",
+    "QF_UF/PEQ/PEQ013_size6.smt2",
+    "QF_UF/PEQ/PEQ013_size7.smt2",
+    "QF_UF/PEQ/PEQ014_size8.smt2",
+    "QF_UF/PEQ/PEQ014_size9.smt2",
+    "QF_UF/PEQ/PEQ016_size4.smt2",
+    "QF_UF/PEQ/PEQ016_size5.smt2",
+    "QF_UF/PEQ/PEQ016_size6.smt2",
+    "QF_UF/PEQ/PEQ016_size7.smt2",
+    "QF_UF/PEQ/PEQ018_size4.smt2",
+    "QF_UF/PEQ/PEQ018_size5.smt2",
+    "QF_UF/PEQ/PEQ019_size4.smt2",
+    "QF_UF/PEQ/PEQ019_size5.smt2",
+    "QF_UF/PEQ/PEQ019_size6.smt2",
+    "QF_UF/PEQ/PEQ019_size7.smt2",
+    "QF_UF/PEQ/PEQ020_size5.smt2",
+    "QF_UF/PEQ/PEQ020_size6.smt2"
+  ],
+  "common_geometric_speedup": 0.4850020913695408,
+  "coverage_delta": 3,
+  "elapsed_s": 40.37165545800235,
+  "execution_errors": [],
+  "finished_at": "2026-07-26T13:57:33.537689+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 47,
+  "manifest": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-v2-yices/q2pf-resolved-manifest.jsonl",
+  "manifest_order": [
+    "QF_UF/PEQ/PEQ002_size5.smt2",
+    "QF_UF/PEQ/PEQ002_size6.smt2",
+    "QF_UF/PEQ/PEQ002_size7.smt2",
+    "QF_UF/PEQ/PEQ002_size8.smt2",
+    "QF_UF/PEQ/PEQ003_size10.smt2",
+    "QF_UF/PEQ/PEQ003_size7.smt2",
+    "QF_UF/PEQ/PEQ003_size8.smt2",
+    "QF_UF/PEQ/PEQ003_size9.smt2",
+    "QF_UF/PEQ/PEQ004_size6.smt2",
+    "QF_UF/PEQ/PEQ004_size7.smt2",
+    "QF_UF/PEQ/PEQ004_size8.smt2",
+    "QF_UF/PEQ/PEQ004_size9.smt2",
+    "QF_UF/PEQ/PEQ010_size5.smt2",
+    "QF_UF/PEQ/PEQ010_size6.smt2",
+    "QF_UF/PEQ/PEQ010_size7.smt2",
+    "QF_UF/PEQ/PEQ010_size8.smt2",
+    "QF_UF/PEQ/PEQ011_size5.smt2",
+    "QF_UF/PEQ/PEQ011_size6.smt2",
+    "QF_UF/PEQ/PEQ011_size7.smt2",
+    "QF_UF/PEQ/PEQ011_size8.smt2",
+    "QF_UF/PEQ/PEQ012_size3.smt2",
+    "QF_UF/PEQ/PEQ012_size4.smt2",
+    "QF_UF/PEQ/PEQ012_size5.smt2",
+    "QF_UF/PEQ/PEQ012_size6.smt2",
+    "QF_UF/PEQ/PEQ013_size5.smt2",
+    "QF_UF/PEQ/PEQ013_size6.smt2",
+    "QF_UF/PEQ/PEQ013_size7.smt2",
+    "QF_UF/PEQ/PEQ013_size8.smt2",
+    "QF_UF/PEQ/PEQ014_size10.smt2",
+    "QF_UF/PEQ/PEQ014_size11.smt2",
+    "QF_UF/PEQ/PEQ014_size8.smt2",
+    "QF_UF/PEQ/PEQ014_size9.smt2",
+    "QF_UF/PEQ/PEQ016_size4.smt2",
+    "QF_UF/PEQ/PEQ016_size5.smt2",
+    "QF_UF/PEQ/PEQ016_size6.smt2",
+    "QF_UF/PEQ/PEQ016_size7.smt2",
+    "QF_UF/PEQ/PEQ018_size4.smt2",
+    "QF_UF/PEQ/PEQ018_size5.smt2",
+    "QF_UF/PEQ/PEQ018_size6.smt2",
+    "QF_UF/PEQ/PEQ018_size7.smt2",
+    "QF_UF/PEQ/PEQ019_size4.smt2",
+    "QF_UF/PEQ/PEQ019_size5.smt2",
+    "QF_UF/PEQ/PEQ019_size6.smt2",
+    "QF_UF/PEQ/PEQ019_size7.smt2",
+    "QF_UF/PEQ/PEQ020_size5.smt2",
+    "QF_UF/PEQ/PEQ020_size6.smt2",
+    "QF_UF/PEQ/PEQ020_size7.smt2"
+  ],
+  "manifest_sha256": "9c981250313d6768fecc5325192c220aa207f062504cf7729f677264197f1fac",
+  "measured_runs": 94,
+  "paths": [
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01042962505016476,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.5249678750406019,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 901,
+      "relative_path": "QF_UF/PEQ/PEQ002_size5.smt2",
+      "row_index": 0
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.032704583019949496,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.07316933298716322,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 902,
+      "relative_path": "QF_UF/PEQ/PEQ002_size6.smt2",
+      "row_index": 1
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0940866669989191,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.1533237500116229,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 903,
+      "relative_path": "QF_UF/PEQ/PEQ002_size7.smt2",
+      "row_index": 2
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.24516554200090468,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.841748958977405,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 904,
+      "relative_path": "QF_UF/PEQ/PEQ002_size8.smt2",
+      "row_index": 3
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0035465419641696,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.7008967500296421,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 905,
+      "relative_path": "QF_UF/PEQ/PEQ003_size10.smt2",
+      "row_index": 4
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.12660679197870195,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2601110419491306,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 906,
+      "relative_path": "QF_UF/PEQ/PEQ003_size7.smt2",
+      "row_index": 5
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1254229170153849,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.14603770797839388,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 907,
+      "relative_path": "QF_UF/PEQ/PEQ003_size8.smt2",
+      "row_index": 6
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.003632249950897,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.28126283298479393,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 908,
+      "relative_path": "QF_UF/PEQ/PEQ003_size9.smt2",
+      "row_index": 7
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.009513000026345253,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04240625002421439,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 909,
+      "relative_path": "QF_UF/PEQ/PEQ004_size6.smt2",
+      "row_index": 8
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.021502582996618003,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.08552374999271706,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 910,
+      "relative_path": "QF_UF/PEQ/PEQ004_size7.smt2",
+      "row_index": 9
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.10020629101200029,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.1935334160225466,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 911,
+      "relative_path": "QF_UF/PEQ/PEQ004_size8.smt2",
+      "row_index": 10
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2705362080014311,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.4882589160115458,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 912,
+      "relative_path": "QF_UF/PEQ/PEQ004_size9.smt2",
+      "row_index": 11
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.004558750020805746,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.017345542029943317,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 913,
+      "relative_path": "QF_UF/PEQ/PEQ010_size5.smt2",
+      "row_index": 12
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0090396250016056,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04148895898833871,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 914,
+      "relative_path": "QF_UF/PEQ/PEQ010_size6.smt2",
+      "row_index": 13
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.03529141703620553,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.12923654104815796,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 915,
+      "relative_path": "QF_UF/PEQ/PEQ010_size7.smt2",
+      "row_index": 14
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.07564058399293572,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.19024050002917647,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 916,
+      "relative_path": "QF_UF/PEQ/PEQ010_size8.smt2",
+      "row_index": 15
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.004788624995853752,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.008436707954388112,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 917,
+      "relative_path": "QF_UF/PEQ/PEQ011_size5.smt2",
+      "row_index": 16
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005197916005272418,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01682562503265217,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 918,
+      "relative_path": "QF_UF/PEQ/PEQ011_size6.smt2",
+      "row_index": 17
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.006475416012108326,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.030376791954040527,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 919,
+      "relative_path": "QF_UF/PEQ/PEQ011_size7.smt2",
+      "row_index": 18
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.013831667019985616,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05358658399200067,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 920,
+      "relative_path": "QF_UF/PEQ/PEQ011_size8.smt2",
+      "row_index": 19
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.003830333997029811,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005333209002856165,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 921,
+      "relative_path": "QF_UF/PEQ/PEQ012_size3.smt2",
+      "row_index": 20
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01655258401297033,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01761962502496317,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 922,
+      "relative_path": "QF_UF/PEQ/PEQ012_size4.smt2",
+      "row_index": 21
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.12273479101713747,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.050356582971289754,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 923,
+      "relative_path": "QF_UF/PEQ/PEQ012_size5.smt2",
+      "row_index": 22
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9284597080550157,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.434750999964308,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 924,
+      "relative_path": "QF_UF/PEQ/PEQ012_size6.smt2",
+      "row_index": 23
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.00591529201483354,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.02389583404874429,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 925,
+      "relative_path": "QF_UF/PEQ/PEQ013_size5.smt2",
+      "row_index": 24
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.019895083038136363,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0703664580360055,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 926,
+      "relative_path": "QF_UF/PEQ/PEQ013_size6.smt2",
+      "row_index": 25
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.10343812499195337,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.1969708339893259,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 927,
+      "relative_path": "QF_UF/PEQ/PEQ013_size7.smt2",
+      "row_index": 26
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0031901669572107,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.2032119579962455,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 928,
+      "relative_path": "QF_UF/PEQ/PEQ013_size8.smt2",
+      "row_index": 27
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.003667375014629,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0041931250016205,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 929,
+      "relative_path": "QF_UF/PEQ/PEQ014_size10.smt2",
+      "row_index": 28
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0035677919513546,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0040111250127666,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 930,
+      "relative_path": "QF_UF/PEQ/PEQ014_size11.smt2",
+      "row_index": 29
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.15701062500011176,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.31664387503406033,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 931,
+      "relative_path": "QF_UF/PEQ/PEQ014_size8.smt2",
+      "row_index": 30
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.5827699169749394,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.442505999992136,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 932,
+      "relative_path": "QF_UF/PEQ/PEQ014_size9.smt2",
+      "row_index": 31
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01073683297727257,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.017723250028211623,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 933,
+      "relative_path": "QF_UF/PEQ/PEQ016_size4.smt2",
+      "row_index": 32
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01759237505029887,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04818520898697898,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 934,
+      "relative_path": "QF_UF/PEQ/PEQ016_size5.smt2",
+      "row_index": 33
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.161514375009574,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2239503330201842,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 935,
+      "relative_path": "QF_UF/PEQ/PEQ016_size6.smt2",
+      "row_index": 34
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.6138018750352785,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.8834432500298135,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 936,
+      "relative_path": "QF_UF/PEQ/PEQ016_size7.smt2",
+      "row_index": 35
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.022346000012475997,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.02026100002694875,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 937,
+      "relative_path": "QF_UF/PEQ/PEQ018_size4.smt2",
+      "row_index": 36
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2258298330125399,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.10894220799673349,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 938,
+      "relative_path": "QF_UF/PEQ/PEQ018_size5.smt2",
+      "row_index": 37
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.003343707998283,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.8077429580152966,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 939,
+      "relative_path": "QF_UF/PEQ/PEQ018_size6.smt2",
+      "row_index": 38
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0037067080265842,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0050694579840638,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 940,
+      "relative_path": "QF_UF/PEQ/PEQ018_size7.smt2",
+      "row_index": 39
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0036079579731449485,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005009540996979922,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 941,
+      "relative_path": "QF_UF/PEQ/PEQ019_size4.smt2",
+      "row_index": 40
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.003935709013603628,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.008200999989639968,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 942,
+      "relative_path": "QF_UF/PEQ/PEQ019_size5.smt2",
+      "row_index": 41
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.004852499987464398,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.013626708008814603,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 943,
+      "relative_path": "QF_UF/PEQ/PEQ019_size6.smt2",
+      "row_index": 42
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0057070000329986215,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.02266312501160428,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 944,
+      "relative_path": "QF_UF/PEQ/PEQ019_size7.smt2",
+      "row_index": 43
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0071650000172667205,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.011820250016171485,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 945,
+      "relative_path": "QF_UF/PEQ/PEQ020_size5.smt2",
+      "row_index": 44
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.21583054098300636,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.27680833399062976,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 946,
+      "relative_path": "QF_UF/PEQ/PEQ020_size6.smt2",
+      "row_index": 45
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.3884006670559756,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.005352624983061,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 947,
+      "relative_path": "QF_UF/PEQ/PEQ020_size7.smt2",
+      "row_index": 46
+    }
+  ],
+  "repeats": 1,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-26T13:56:53.181691+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ003_size10.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 4,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ003_size9.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 7,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ013_size8.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 27,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ014_size10.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 28,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ014_size10.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 28,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ014_size11.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 29,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ014_size11.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 29,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ018_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 38,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/PEQ/PEQ018_size7.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 39,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ018_size7.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 39,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/PEQ/PEQ020_size7.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 46,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 0,
+    "timeouts": [],
+    "wrong_answers": []
+  },
+  "warmups": 0,
+  "wrong_answers": []
+}

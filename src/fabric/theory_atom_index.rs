@@ -416,6 +416,17 @@ impl TheoryAtomIndex {
         )
     }
 
+    pub(crate) fn mark_all_terms_where(
+        &mut self,
+        include: impl FnMut(AtomId) -> bool,
+    ) -> Result<TheoryAtomMark, TheoryAtomIndexError> {
+        self.mark_from_iter(
+            self.term_count,
+            (0..self.term_count).map(|index| TermId::new(index as u32)),
+            include,
+        )
+    }
+
     /// Marks a slice of affected stable terms. Duplicate terms are accepted.
     pub(crate) fn mark_affected_terms(
         &mut self,

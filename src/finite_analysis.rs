@@ -64,6 +64,7 @@ pub(crate) struct FiniteAnalysis {
     pub(crate) recognized_finite_terms: usize,
     pub(crate) distinct_constants: usize,
     pub(crate) closed_table_functions: usize,
+    pub(crate) boolean_applications: usize,
     pub(crate) unary_table_applications: usize,
     pub(crate) binary_table_applications: usize,
     pub(crate) higher_arity_table_applications: usize,
@@ -88,7 +89,8 @@ impl fmt::Display for FiniteAnalysis {
             output,
             concat!(
                 "domain_size={} covered_finite_terms={} recognized_finite_terms={} ",
-                "distinct_constants={} closed_table_functions={} unary_table_apps={} ",
+                "distinct_constants={} closed_table_functions={} boolean_apps={} ",
+                "unary_table_apps={} ",
                 "binary_table_apps={} higher_arity_table_apps={} equality_graph_vertices={} ",
                 "equality_graph_edges={} equality_graph_density_ppm={} ",
                 "disequality_graph_edges={} disequality_graph_density_ppm={} ",
@@ -102,6 +104,7 @@ impl fmt::Display for FiniteAnalysis {
             self.recognized_finite_terms,
             self.distinct_constants,
             self.closed_table_functions,
+            self.boolean_applications,
             self.unary_table_applications,
             self.binary_table_applications,
             self.higher_arity_table_applications,
@@ -278,6 +281,11 @@ impl FiniteAnalysisContext {
                     })
                     .count(),
                 closed_table_functions: closure.closed_functions.len(),
+                boolean_applications: arena
+                    .apps
+                    .iter()
+                    .filter(|&&term| arena.terms[term].sort == super::BOOL_SORT)
+                    .count(),
                 unary_table_applications,
                 binary_table_applications,
                 higher_arity_table_applications,

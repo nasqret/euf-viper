@@ -1282,3 +1282,22 @@
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
   replacement and FIFO blocking. Both repairs remain isolated; do not push,
   host, or run WMI controls before new exact reviews pass.
+- Quotient-JIT structural campaign checkpoint (2026-07-26): verified finite
+  closure plus bounded predicate channeling and focused permutation support
+  now solve PEQ 44/47, SEQ 56/56, and NEQ 48/48 at two seconds. Comparator
+  coverage is Yices2 40/56/44, Z3 34/51/41, and cvc5 28/46/39. NEQ is also
+  faster on common solves (`2.948x`/`3.753x`/`6.388x` aggregate), while PEQ
+  and SEQ still lose common timing to Yices2. The Goel canary remains a known
+  deficit at `0.286x` versus Yices2. Treat these as one-repeat local family
+  scouts until the clean WMI campaign reproduces them.
+- The critical SEQ tail mechanism is dual support for a verified finite
+  injection: `SEQ009_size10` improved from about `2.41s` to `0.013s` over five
+  paired repetitions. The routed implementation is formula-structural and
+  never consumes source paths, family names, hashes, expected status, or prior
+  timing. Explicit `EUF_VIPER_FINITE_PERMUTATION_SUPPORT=0` remains the causal
+  control.
+- F0 WMI smoke `169653` is no longer pending. It completed `0:0`; fetched
+  artifacts and the original submission receipt pass independent audit at
+  `research-vault/06-results/wmi/fabric-shadow-169653/audit.json`, with two
+  complete rows and zero solver-result claims. Python discovery is 540/540;
+  Rust all-feature testing is 643 passed, 10 intentionally ignored.

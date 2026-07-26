@@ -53,6 +53,24 @@ Here the output `path` is
 `/work/euf-viper/corpus/QF_UF/<relative_path>`; the rebase root need not be the
 local verification root.
 
+## Complete family selections
+
+Select a complete canonical source family with `--family`. The builder derives
+the sorted path set from the validated full manifest and still verifies every
+source hash, byte count, logic, and declared status:
+
+```bash
+python3 scripts/bench/build_novelty_tail_manifest.py \
+  benchmarks/smtlib-2025/qf_uf_manifest.jsonl \
+  --family PEQ \
+  --source-root benchmarks/smtlib-2025/QF_UF \
+  --out benchmarks/novelty-tail/peq-full.jsonl \
+  --report-out benchmarks/novelty-tail/peq-full.selection.json
+```
+
+The family name is matched only as the complete second path component in
+`QF_UF/FAMILY/...`; prefixes and host-local path strings are never consulted.
+
 ## Explicit selections
 
 Repeat `--relative-path` in the required output order:

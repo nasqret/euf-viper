@@ -1,11 +1,10 @@
-#![cfg(test)]
 #![allow(dead_code)]
 
 //! Fail-closed source evaluator for the finite, one-binary-operation fragment.
 //!
-//! This module is deliberately test-only. It recognizes its fragment from the
-//! parsed assertion graph, never from benchmark metadata, and it does not
-//! participate in the production solving route.
+//! It recognizes its fragment from the parsed assertion graph, never from
+//! benchmark metadata. Production use is limited to the explicit, default-off
+//! Fabric finite-table engine.
 
 use super::{
     BOOL_SORT, BoolAtomKey, BoolExpr, Problem, SortId, SymId, TermId, TermKey,
@@ -16,6 +15,7 @@ use crate::orbit_canon::{
 };
 use crate::orbit_cover::{
     BaseActionVerifier, BaseFingerprint, BaseInvarianceClaim, BasePermutationWitness,
+    GeneratorBaseInvarianceClaim,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -403,6 +403,7 @@ pub(crate) struct SourceTableCounts {
 pub(crate) enum RelabelingEvidenceKind {
     EmpiricalCheck,
     StructuralProof,
+    CoxeterGeneratorProof,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -539,6 +540,30 @@ pub(crate) struct StructuralBaseRelabelingCertificate {
     telemetry: StructuralBaseRelabelingTelemetry,
 }
 
+/// Source-derived proof over the standard adjacent-transposition generators.
+/// The retained verifier lets the orbit layer replay the claim against the
+/// normalized source without rebuilding that representation.
+#[derive(Debug, Clone)]
+pub(crate) struct StructuralGeneratorBaseRelabelingCertificate {
+    claim: GeneratorBaseInvarianceClaim,
+    verifier: SourceBaseActionVerifier,
+    telemetry: StructuralBaseRelabelingTelemetry,
+}
+
+impl StructuralGeneratorBaseRelabelingCertificate {
+    pub(crate) fn claim(&self) -> &GeneratorBaseInvarianceClaim {
+        &self.claim
+    }
+
+    pub(crate) fn verifier(&self) -> &SourceBaseActionVerifier {
+        &self.verifier
+    }
+
+    pub(crate) fn telemetry(&self) -> StructuralBaseRelabelingTelemetry {
+        self.telemetry
+    }
+}
+
 impl StructuralBaseRelabelingCertificate {
     pub(crate) fn claim(&self) -> &BaseInvarianceClaim {
         &self.claim
@@ -559,6 +584,7 @@ pub(crate) struct FiniteTableSource<'a> {
     base_assertion_ordinals: Vec<usize>,
     forbidden_records: Vec<ForbiddenTableRecord>,
     forbidden_by_table: BTreeMap<BinaryTable, Vec<usize>>,
+    partial_program: PartialBaseProgram,
     max_term_depth: usize,
 }
 
@@ -615,6 +641,33 @@ impl<'a> FiniteTableSource<'a> {
         let claim = build_base_invariance_claim(&verifier, caps)?;
         let telemetry = replay_base_invariance_claim(&verifier, &claim, caps)?;
         Ok(StructuralBaseRelabelingCertificate { claim, telemetry })
+    }
+
+    pub(crate) fn certify_structural_base_generators(
+        &self,
+    ) -> Result<StructuralGeneratorBaseRelabelingCertificate, BaseRelabelingError> {
+        let verifier =
+            self.source_base_action_verifier_with_caps(BaseRelabelingCaps::exhaustive_supported())?;
+        let claim = build_generator_base_invariance_claim(&verifier)?;
+        let permutations_checked = claim.witnesses().len();
+        let assertion_images_checked = permutations_checked
+            .checked_mul(verifier.assertions.len())
+            .ok_or(BaseRelabelingError::CertificateMismatch(
+                "generator assertion-image count overflowed",
+            ))?;
+        let telemetry = StructuralBaseRelabelingTelemetry {
+            evidence_kind: RelabelingEvidenceKind::CoxeterGeneratorProof,
+            degree: verifier.degree,
+            base_assertions: verifier.assertions.len(),
+            normalized_nodes: verifier.normalized_nodes,
+            permutations_checked,
+            assertion_images_checked,
+        };
+        Ok(StructuralGeneratorBaseRelabelingCertificate {
+            claim,
+            verifier,
+            telemetry,
+        })
     }
 
     pub(crate) fn verify_structural_base_relabeling(
@@ -753,7 +806,8 @@ impl<'a> FiniteTableSource<'a> {
         term: TermId,
     ) -> Result<u8, PartialTableError> {
         self.validate_partial_cell_domains(cell_domains)?;
-        let mut evaluator = PartialTableEvaluator::new(self, cell_domains);
+        let mut scratch = self.partial_evaluation_scratch();
+        let mut evaluator = PartialTableEvaluator::new(self, cell_domains, &mut scratch);
         match evaluator
             .term(term)
             .map_err(PartialTableError::Evaluation)?
@@ -772,15 +826,40 @@ impl<'a> FiniteTableSource<'a> {
         expression: &BoolExpr,
     ) -> Result<PartialTruth, PartialTableError> {
         self.validate_partial_cell_domains(cell_domains)?;
-        PartialTableEvaluator::new(self, cell_domains)
+        let mut scratch = self.partial_evaluation_scratch();
+        PartialTableEvaluator::new(self, cell_domains, &mut scratch)
             .bool_expr(expression)
             .map_err(PartialTableError::Evaluation)
+    }
+
+    pub(crate) fn partial_evaluation_scratch(&self) -> PartialEvaluationScratch {
+        PartialEvaluationScratch::new(self.problem.arena.terms.len())
     }
 
     /// Returns the first base assertion proved false by the partial table.
     pub(crate) fn first_definitely_false_base_assertion(
         &self,
         cell_domains: &[u8],
+    ) -> Result<Option<usize>, PartialTableError> {
+        let mut scratch = self.partial_evaluation_scratch();
+        self.first_definitely_false_base_assertion_with_scratch(cell_domains, &mut scratch)
+    }
+
+    pub(crate) fn first_definitely_false_base_assertion_with_scratch(
+        &self,
+        cell_domains: &[u8],
+        scratch: &mut PartialEvaluationScratch,
+    ) -> Result<Option<usize>, PartialTableError> {
+        self.validate_partial_cell_domains(cell_domains)?;
+        self.partial_program
+            .first_false(self.domain.len(), cell_domains, scratch)
+    }
+
+    #[cfg(test)]
+    fn first_definitely_false_base_assertion_reference_with_scratch(
+        &self,
+        cell_domains: &[u8],
+        scratch: &mut PartialEvaluationScratch,
     ) -> Result<Option<usize>, PartialTableError> {
         self.validate_partial_cell_domains(cell_domains)?;
         let assertions = &self
@@ -789,7 +868,7 @@ impl<'a> FiniteTableSource<'a> {
             .as_ref()
             .expect("compiled source retains its Boolean problem")
             .assertions;
-        let mut evaluator = PartialTableEvaluator::new(self, cell_domains);
+        let mut evaluator = PartialTableEvaluator::new(self, cell_domains, scratch);
         for &assertion_ordinal in &self.base_assertion_ordinals {
             let truth = evaluator
                 .bool_expr(&assertions[assertion_ordinal])
@@ -1477,6 +1556,33 @@ fn build_base_invariance_claim(
     ))
 }
 
+fn build_generator_base_invariance_claim(
+    verifier: &SourceBaseActionVerifier,
+) -> Result<GeneratorBaseInvarianceClaim, BaseRelabelingError> {
+    let generator_count = verifier.degree.saturating_sub(1);
+    let mut witnesses = Vec::new();
+    witnesses.try_reserve_exact(generator_count).map_err(|_| {
+        BaseRelabelingError::AllocationFailure {
+            resource: "generator witnesses",
+            requested: generator_count,
+        }
+    })?;
+    for generator_index in 0..generator_count {
+        let mut images = (0..verifier.degree).collect::<Vec<_>>();
+        images.swap(generator_index, generator_index + 1);
+        let permutation = CheckedPermutation::new(images)
+            .map_err(|_| BaseRelabelingError::PermutationEnumeration)?;
+        let assertion_images = verifier.assertion_images(&permutation)?;
+        witnesses.push(BasePermutationWitness::new(permutation, assertion_images));
+    }
+    Ok(GeneratorBaseInvarianceClaim::new(
+        verifier.degree,
+        verifier.fingerprint,
+        verifier.assertions.len(),
+        witnesses,
+    ))
+}
+
 fn replay_base_invariance_claim(
     verifier: &SourceBaseActionVerifier,
     claim: &BaseInvarianceClaim,
@@ -1911,6 +2017,13 @@ impl AssertionScan {
 pub(crate) fn compile_finite_table_source(
     problem: &Problem,
 ) -> Result<FiniteTableSource<'_>, SourceCompileError> {
+    compile_finite_table_source_with_domain_precheck(problem, false)
+}
+
+pub(crate) fn compile_finite_table_source_with_domain_precheck(
+    problem: &Problem,
+    domain_size_precheck: bool,
+) -> Result<FiniteTableSource<'_>, SourceCompileError> {
     let bool_problem = problem
         .bool_problem
         .as_ref()
@@ -1921,16 +2034,22 @@ pub(crate) fn compile_finite_table_source(
     }
     enforce_global_caps(problem, bool_problem.assertions.len())?;
 
+    let mut finite = FiniteAnalysisContext::default();
+    let domain_analysis = finite.domain_analysis(&problem.arena, bool_problem);
+    let domain = domain_analysis.domain.clone();
+    let mandatory_disequalities = domain_analysis.mandatory_disequalities.clone();
+    if domain_size_precheck && !(MIN_DOMAIN_SIZE..=MAX_DOMAIN_SIZE).contains(&domain.len()) {
+        return Err(SourceCompileError::InvalidDomainSize {
+            actual: domain.len(),
+        });
+    }
+
     let mut scan = AssertionScan::new(problem.arena.terms.len());
     for (assertion_ordinal, assertion) in bool_problem.assertions.iter().enumerate() {
         scan.bool_expr(problem, assertion, assertion_ordinal, 1)?;
     }
     validate_live_boolean_terms(problem, &scan)?;
 
-    let mut finite = FiniteAnalysisContext::default();
-    let domain_analysis = finite.domain_analysis(&problem.arena, bool_problem);
-    let domain = domain_analysis.domain.clone();
-    let mandatory_disequalities = domain_analysis.mandatory_disequalities.clone();
     let finite_terms = finite
         .finite_closure(&problem.arena, bool_problem)
         .finite_terms
@@ -1984,6 +2103,14 @@ pub(crate) fn compile_finite_table_source(
         }
     }
 
+    let partial_program = PartialBaseProgram::compile(
+        problem,
+        &domain_positions,
+        operation,
+        &scan.live_terms,
+        &base_assertion_ordinals,
+    );
+
     Ok(FiniteTableSource {
         problem,
         domain,
@@ -1993,6 +2120,7 @@ pub(crate) fn compile_finite_table_source(
         base_assertion_ordinals,
         forbidden_records,
         forbidden_by_table,
+        partial_program,
         max_term_depth: scan.max_term_depth,
     })
 }
@@ -2546,26 +2674,655 @@ impl<'compiled, 'problem, 'table> CompleteTableEvaluator<'compiled, 'problem, 't
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PartialTermInstruction {
+    Invalid,
+    Domain(u8),
+    Bool(PartialTruth),
+    Operation(TermId, TermId),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PartialBoolInstruction {
+    Const(PartialTruth),
+    Eq(TermId, TermId),
+    BoolTerm(TermId),
+    Not(usize),
+    And {
+        start: usize,
+        len: usize,
+    },
+    Or {
+        start: usize,
+        len: usize,
+    },
+    Iff {
+        start: usize,
+        len: usize,
+    },
+    Ite {
+        condition: usize,
+        then_node: usize,
+        else_node: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PartialRootInstruction {
+    AlwaysTrue,
+    LatinCoverage,
+    BoolNode(usize),
+}
+
+#[derive(Debug)]
+struct PartialBaseProgram {
+    terms: Box<[PartialTermInstruction]>,
+    bool_nodes: Box<[PartialBoolInstruction]>,
+    bool_children: Box<[usize]>,
+    roots: Box<[(usize, PartialRootInstruction)]>,
+}
+
+impl PartialBaseProgram {
+    fn compile(
+        problem: &Problem,
+        domain_positions: &BTreeMap<TermId, usize>,
+        operation: SymId,
+        live_terms: &BTreeSet<TermId>,
+        base_assertion_ordinals: &[usize],
+    ) -> Self {
+        let bool_problem = problem
+            .bool_problem
+            .as_ref()
+            .expect("finite source retains a Boolean problem");
+        let mut terms = vec![PartialTermInstruction::Invalid; problem.arena.terms.len()];
+        for &term_id in live_terms {
+            terms[term_id] = if let Some(&position) = domain_positions.get(&term_id) {
+                PartialTermInstruction::Domain(position as u8)
+            } else if term_id == bool_problem.true_term {
+                PartialTermInstruction::Bool(PartialTruth::True)
+            } else if term_id == bool_problem.false_term {
+                PartialTermInstruction::Bool(PartialTruth::False)
+            } else {
+                let term = &problem.arena.terms[term_id];
+                if term.fun == operation {
+                    match term.args.as_slice() {
+                        [left, right] => PartialTermInstruction::Operation(*left, *right),
+                        _ => PartialTermInstruction::Invalid,
+                    }
+                } else {
+                    PartialTermInstruction::Invalid
+                }
+            };
+        }
+
+        let mut builder = PartialBoolProgramBuilder::default();
+        let roots = base_assertion_ordinals
+            .iter()
+            .map(|&assertion_ordinal| {
+                let expression = &bool_problem.assertions[assertion_ordinal];
+                let root =
+                    classify_search_invariant(problem, expression, domain_positions, operation)
+                        .unwrap_or_else(|| {
+                            PartialRootInstruction::BoolNode(builder.compile(expression))
+                        });
+                (assertion_ordinal, root)
+            })
+            .collect::<Vec<_>>();
+        Self {
+            terms: terms.into_boxed_slice(),
+            bool_nodes: builder.nodes.into_boxed_slice(),
+            bool_children: builder.children.into_boxed_slice(),
+            roots: roots.into_boxed_slice(),
+        }
+    }
+
+    fn first_false(
+        &self,
+        degree: usize,
+        cell_domains: &[u8],
+        scratch: &mut PartialEvaluationScratch,
+    ) -> Result<Option<usize>, PartialTableError> {
+        let mut evaluator = PartialProgramEvaluator::new(self, degree, cell_domains, scratch);
+        for &(assertion_ordinal, root) in &self.roots {
+            let definitely_false = match root {
+                PartialRootInstruction::AlwaysTrue => false,
+                PartialRootInstruction::LatinCoverage => {
+                    !latin_coverage_holds(degree, cell_domains)
+                }
+                PartialRootInstruction::BoolNode(root) => {
+                    evaluator.bool_node(root).map_err(|error| {
+                        PartialTableError::BaseAssertionEvaluation {
+                            assertion_ordinal,
+                            error,
+                        }
+                    })? == PartialTruth::False
+                }
+            };
+            if definitely_false {
+                return Ok(Some(assertion_ordinal));
+            }
+        }
+        Ok(None)
+    }
+}
+
+#[derive(Default)]
+struct PartialBoolProgramBuilder {
+    nodes: Vec<PartialBoolInstruction>,
+    children: Vec<usize>,
+}
+
+impl PartialBoolProgramBuilder {
+    fn push(&mut self, instruction: PartialBoolInstruction) -> usize {
+        let index = self.nodes.len();
+        self.nodes.push(instruction);
+        index
+    }
+
+    fn child_range(&mut self, expressions: &[BoolExpr]) -> (usize, usize) {
+        let compiled = expressions
+            .iter()
+            .map(|expression| self.compile(expression))
+            .collect::<Vec<_>>();
+        let start = self.children.len();
+        self.children.extend(compiled);
+        (start, expressions.len())
+    }
+
+    fn compile(&mut self, expression: &BoolExpr) -> usize {
+        match expression {
+            BoolExpr::Const(value) => self.push(PartialBoolInstruction::Const(if *value {
+                PartialTruth::True
+            } else {
+                PartialTruth::False
+            })),
+            BoolExpr::Atom(BoolAtomKey::Eq(left, right)) => {
+                self.push(PartialBoolInstruction::Eq(*left, *right))
+            }
+            BoolExpr::Atom(BoolAtomKey::BoolTerm(term)) => {
+                self.push(PartialBoolInstruction::BoolTerm(*term))
+            }
+            BoolExpr::Not(child) => {
+                let child = self.compile(child);
+                self.push(PartialBoolInstruction::Not(child))
+            }
+            BoolExpr::And(children) => {
+                let (start, len) = self.child_range(children);
+                self.push(PartialBoolInstruction::And { start, len })
+            }
+            BoolExpr::Or(children) => {
+                let (start, len) = self.child_range(children);
+                self.push(PartialBoolInstruction::Or { start, len })
+            }
+            BoolExpr::Iff(children) => {
+                let (start, len) = self.child_range(children);
+                self.push(PartialBoolInstruction::Iff { start, len })
+            }
+            BoolExpr::Ite(condition, then_expression, else_expression) => {
+                let condition = self.compile(condition);
+                let then_node = self.compile(then_expression);
+                let else_node = self.compile(else_expression);
+                self.push(PartialBoolInstruction::Ite {
+                    condition,
+                    then_node,
+                    else_node,
+                })
+            }
+        }
+    }
+}
+
+fn flatten_conjunction<'a>(expression: &'a BoolExpr, output: &mut Vec<&'a BoolExpr>) {
+    if let BoolExpr::And(children) = expression {
+        for child in children {
+            flatten_conjunction(child, output);
+        }
+    } else {
+        output.push(expression);
+    }
+}
+
+fn flatten_disjunction<'a>(expression: &'a BoolExpr, output: &mut Vec<&'a BoolExpr>) {
+    if let BoolExpr::Or(children) = expression {
+        for child in children {
+            flatten_disjunction(child, output);
+        }
+    } else {
+        output.push(expression);
+    }
+}
+
+fn cell_assignment_from_expression(
+    problem: &Problem,
+    expression: &BoolExpr,
+    domain_positions: &BTreeMap<TermId, usize>,
+    operation: SymId,
+) -> Option<(usize, usize, usize)> {
+    let BoolExpr::Atom(BoolAtomKey::Eq(left, right)) = expression else {
+        return None;
+    };
+    table_cell_assignment(problem, domain_positions, operation, *left, *right)
+        .or_else(|| table_cell_assignment(problem, domain_positions, operation, *right, *left))
+}
+
+fn is_carrier_closure_assertion(
+    problem: &Problem,
+    expression: &BoolExpr,
+    domain_positions: &BTreeMap<TermId, usize>,
+    operation: SymId,
+) -> bool {
+    let degree = domain_positions.len();
+    let full_values = (1u16 << degree) - 1;
+    let mut clauses = Vec::new();
+    flatten_conjunction(expression, &mut clauses);
+    let mut cells = BTreeMap::<(usize, usize), u16>::new();
+    for clause in clauses {
+        let mut leaves = Vec::new();
+        flatten_disjunction(clause, &mut leaves);
+        let mut cell = None;
+        let mut values = 0u16;
+        for leaf in leaves {
+            let Some((row, column, value)) =
+                cell_assignment_from_expression(problem, leaf, domain_positions, operation)
+            else {
+                return false;
+            };
+            if cell
+                .replace((row, column))
+                .is_some_and(|prior| prior != (row, column))
+            {
+                return false;
+            }
+            values |= 1u16 << value;
+        }
+        let Some(cell) = cell else {
+            return false;
+        };
+        if values != full_values {
+            return false;
+        }
+        cells.insert(cell, values);
+    }
+    cells.len() == degree * degree
+        && (0..degree).all(|row| (0..degree).all(|column| cells.contains_key(&(row, column))))
+}
+
+fn is_latin_coverage_assertion(
+    problem: &Problem,
+    expression: &BoolExpr,
+    domain_positions: &BTreeMap<TermId, usize>,
+    operation: SymId,
+) -> bool {
+    let degree = domain_positions.len();
+    let full_positions = (1u16 << degree) - 1;
+    let mut clauses = Vec::new();
+    flatten_conjunction(expression, &mut clauses);
+    let mut row_coverage = BTreeMap::<(usize, usize), u16>::new();
+    let mut column_coverage = BTreeMap::<(usize, usize), u16>::new();
+    for clause in clauses {
+        let mut leaves = Vec::new();
+        flatten_disjunction(clause, &mut leaves);
+        let mut assignments = Vec::with_capacity(leaves.len());
+        for leaf in leaves {
+            let Some(assignment) =
+                cell_assignment_from_expression(problem, leaf, domain_positions, operation)
+            else {
+                return false;
+            };
+            assignments.push(assignment);
+        }
+        let Some(&(first_row, first_column, repeated_value)) = assignments.first() else {
+            return false;
+        };
+        if assignments
+            .iter()
+            .any(|&(_, _, value)| value != repeated_value)
+        {
+            return false;
+        }
+        if assignments.iter().all(|&(row, _, _)| row == first_row) {
+            let positions = assignments
+                .iter()
+                .fold(0u16, |mask, &(_, column, _)| mask | (1u16 << column));
+            if positions != full_positions {
+                return false;
+            }
+            row_coverage.insert((first_row, repeated_value), positions);
+        } else if assignments
+            .iter()
+            .all(|&(_, column, _)| column == first_column)
+        {
+            let positions = assignments
+                .iter()
+                .fold(0u16, |mask, &(row, _, _)| mask | (1u16 << row));
+            if positions != full_positions {
+                return false;
+            }
+            column_coverage.insert((first_column, repeated_value), positions);
+        } else {
+            return false;
+        }
+    }
+    row_coverage.len() == degree * degree
+        && column_coverage.len() == degree * degree
+        && (0..degree).all(|fixed| {
+            (0..degree).all(|value| {
+                row_coverage.contains_key(&(fixed, value))
+                    && column_coverage.contains_key(&(fixed, value))
+            })
+        })
+}
+
+fn is_domain_distinct_assertion(
+    expression: &BoolExpr,
+    domain_positions: &BTreeMap<TermId, usize>,
+) -> bool {
+    let degree = domain_positions.len();
+    let mut leaves = Vec::new();
+    flatten_conjunction(expression, &mut leaves);
+    let mut pairs = BTreeSet::new();
+    for leaf in leaves {
+        let BoolExpr::Not(child) = leaf else {
+            return false;
+        };
+        let BoolExpr::Atom(BoolAtomKey::Eq(left, right)) = child.as_ref() else {
+            return false;
+        };
+        let (Some(&left), Some(&right)) = (domain_positions.get(left), domain_positions.get(right))
+        else {
+            return false;
+        };
+        if left == right {
+            return false;
+        }
+        pairs.insert((left.min(right), left.max(right)));
+    }
+    pairs.len() == degree * degree.saturating_sub(1) / 2
+        && (0..degree).all(|left| (left + 1..degree).all(|right| pairs.contains(&(left, right))))
+}
+
+fn classify_search_invariant(
+    problem: &Problem,
+    expression: &BoolExpr,
+    domain_positions: &BTreeMap<TermId, usize>,
+    operation: SymId,
+) -> Option<PartialRootInstruction> {
+    if is_carrier_closure_assertion(problem, expression, domain_positions, operation)
+        || is_domain_distinct_assertion(expression, domain_positions)
+    {
+        Some(PartialRootInstruction::AlwaysTrue)
+    } else if is_latin_coverage_assertion(problem, expression, domain_positions, operation) {
+        Some(PartialRootInstruction::LatinCoverage)
+    } else {
+        None
+    }
+}
+
+fn latin_coverage_holds(degree: usize, cell_domains: &[u8]) -> bool {
+    for fixed in 0..degree {
+        for value in 0..degree {
+            let bit = 1u8 << value;
+            let row_has_value =
+                (0..degree).any(|column| cell_domains[fixed * degree + column] & bit != 0);
+            let column_has_value =
+                (0..degree).any(|row| cell_domains[row * degree + fixed] & bit != 0);
+            if !row_has_value || !column_has_value {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PartialTermValue {
     Domain(u8),
     Bool(PartialTruth),
 }
 
-struct PartialTableEvaluator<'compiled, 'problem, 'table> {
-    compiled: &'compiled FiniteTableSource<'problem>,
-    cell_domains: &'table [u8],
-    memo: Vec<Option<PartialTermValue>>,
-    visiting: Vec<bool>,
+/// Reusable memo storage for source-exact partial evaluation.
+///
+/// Epoch tags make resetting proportional to one integer increment instead of
+/// the full SMT term arena.  On epoch wrap, both tag arrays are cleared before
+/// reuse.
+pub(crate) struct PartialEvaluationScratch {
+    values: Vec<PartialTermValue>,
+    value_epochs: Vec<u32>,
+    visiting_epochs: Vec<u32>,
+    epoch: u32,
 }
 
-impl<'compiled, 'problem, 'table> PartialTableEvaluator<'compiled, 'problem, 'table> {
-    fn new(compiled: &'compiled FiniteTableSource<'problem>, cell_domains: &'table [u8]) -> Self {
+impl PartialEvaluationScratch {
+    fn new(term_count: usize) -> Self {
+        Self {
+            values: vec![PartialTermValue::Bool(PartialTruth::Unknown); term_count],
+            value_epochs: vec![0; term_count],
+            visiting_epochs: vec![0; term_count],
+            epoch: 0,
+        }
+    }
+
+    fn begin(&mut self, term_count: usize) {
+        if self.values.len() != term_count {
+            self.values
+                .resize(term_count, PartialTermValue::Bool(PartialTruth::Unknown));
+            self.value_epochs.resize(term_count, 0);
+            self.visiting_epochs.resize(term_count, 0);
+            self.epoch = 0;
+        }
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.value_epochs.fill(0);
+            self.visiting_epochs.fill(0);
+            self.epoch = 1;
+        }
+    }
+}
+
+struct PartialProgramEvaluator<'program, 'table, 'scratch> {
+    program: &'program PartialBaseProgram,
+    degree: usize,
+    cell_domains: &'table [u8],
+    scratch: &'scratch mut PartialEvaluationScratch,
+}
+
+impl<'program, 'table, 'scratch> PartialProgramEvaluator<'program, 'table, 'scratch> {
+    fn new(
+        program: &'program PartialBaseProgram,
+        degree: usize,
+        cell_domains: &'table [u8],
+        scratch: &'scratch mut PartialEvaluationScratch,
+    ) -> Self {
+        scratch.begin(program.terms.len());
+        Self {
+            program,
+            degree,
+            cell_domains,
+            scratch,
+        }
+    }
+
+    fn term(&mut self, term_id: TermId) -> Result<PartialTermValue, EvaluationError> {
+        let value_epoch = *self
+            .scratch
+            .value_epochs
+            .get(term_id)
+            .ok_or(EvaluationError::MissingTerm(term_id))?;
+        if value_epoch == self.scratch.epoch {
+            return Ok(self.scratch.values[term_id]);
+        }
+        if self.scratch.visiting_epochs[term_id] == self.scratch.epoch {
+            return Err(EvaluationError::CyclicTerm(term_id));
+        }
+        self.scratch.visiting_epochs[term_id] = self.scratch.epoch;
+        let instruction = *self
+            .program
+            .terms
+            .get(term_id)
+            .ok_or(EvaluationError::MissingTerm(term_id))?;
+        let value = match instruction {
+            PartialTermInstruction::Invalid => {
+                return Err(EvaluationError::UnsupportedTerm(term_id));
+            }
+            PartialTermInstruction::Domain(value) => PartialTermValue::Domain(1u8 << value),
+            PartialTermInstruction::Bool(value) => PartialTermValue::Bool(value),
+            PartialTermInstruction::Operation(left, right) => {
+                let left_mask = match self.term(left)? {
+                    PartialTermValue::Domain(mask) => mask,
+                    PartialTermValue::Bool(_) => {
+                        return Err(EvaluationError::ExpectedDomainValue(left));
+                    }
+                };
+                let right_mask = match self.term(right)? {
+                    PartialTermValue::Domain(mask) => mask,
+                    PartialTermValue::Bool(_) => {
+                        return Err(EvaluationError::ExpectedDomainValue(right));
+                    }
+                };
+                let mut result_mask = 0u8;
+                for left_value in 0..self.degree {
+                    if left_mask & (1u8 << left_value) == 0 {
+                        continue;
+                    }
+                    for right_value in 0..self.degree {
+                        if right_mask & (1u8 << right_value) != 0 {
+                            result_mask |=
+                                self.cell_domains[left_value * self.degree + right_value];
+                        }
+                    }
+                }
+                if result_mask == 0 {
+                    return Err(EvaluationError::UnsupportedTerm(term_id));
+                }
+                PartialTermValue::Domain(result_mask)
+            }
+        };
+        self.scratch.visiting_epochs[term_id] = 0;
+        self.scratch.values[term_id] = value;
+        self.scratch.value_epochs[term_id] = self.scratch.epoch;
+        Ok(value)
+    }
+
+    fn equality(&mut self, left: TermId, right: TermId) -> Result<PartialTruth, EvaluationError> {
+        if left == right {
+            self.term(left)?;
+            return Ok(PartialTruth::True);
+        }
+        match (self.term(left)?, self.term(right)?) {
+            (PartialTermValue::Domain(left_mask), PartialTermValue::Domain(right_mask)) => {
+                if left_mask & right_mask == 0 {
+                    Ok(PartialTruth::False)
+                } else if left_mask == right_mask && left_mask.is_power_of_two() {
+                    Ok(PartialTruth::True)
+                } else {
+                    Ok(PartialTruth::Unknown)
+                }
+            }
+            (PartialTermValue::Bool(left), PartialTermValue::Bool(right)) => {
+                Ok(kleene_iff([left, right]))
+            }
+            _ => Err(EvaluationError::UnsupportedTerm(left)),
+        }
+    }
+
+    fn bool_node(&mut self, node: usize) -> Result<PartialTruth, EvaluationError> {
+        let instruction = *self
+            .program
+            .bool_nodes
+            .get(node)
+            .ok_or(EvaluationError::UnsupportedTerm(node))?;
+        match instruction {
+            PartialBoolInstruction::Const(value) => Ok(value),
+            PartialBoolInstruction::Eq(left, right) => self.equality(left, right),
+            PartialBoolInstruction::BoolTerm(term) => match self.term(term)? {
+                PartialTermValue::Bool(value) => Ok(value),
+                PartialTermValue::Domain(_) => Err(EvaluationError::ExpectedBooleanValue(term)),
+            },
+            PartialBoolInstruction::Not(child) => Ok(self.bool_node(child)?.not()),
+            PartialBoolInstruction::And { start, len } => {
+                let mut result = PartialTruth::True;
+                for offset in 0..len {
+                    let child = self.program.bool_children[start + offset];
+                    match self.bool_node(child)? {
+                        PartialTruth::False => return Ok(PartialTruth::False),
+                        PartialTruth::Unknown => result = PartialTruth::Unknown,
+                        PartialTruth::True => {}
+                    }
+                }
+                Ok(result)
+            }
+            PartialBoolInstruction::Or { start, len } => {
+                let mut result = PartialTruth::False;
+                for offset in 0..len {
+                    let child = self.program.bool_children[start + offset];
+                    match self.bool_node(child)? {
+                        PartialTruth::False => {}
+                        PartialTruth::Unknown => result = PartialTruth::Unknown,
+                        PartialTruth::True => return Ok(PartialTruth::True),
+                    }
+                }
+                Ok(result)
+            }
+            PartialBoolInstruction::Iff { start, len } => {
+                let mut saw_false = false;
+                let mut saw_unknown = false;
+                let mut saw_true = false;
+                for offset in 0..len {
+                    let child = self.program.bool_children[start + offset];
+                    match self.bool_node(child)? {
+                        PartialTruth::False => saw_false = true,
+                        PartialTruth::Unknown => saw_unknown = true,
+                        PartialTruth::True => saw_true = true,
+                    }
+                }
+                if saw_false && saw_true {
+                    Ok(PartialTruth::False)
+                } else if saw_unknown {
+                    Ok(PartialTruth::Unknown)
+                } else {
+                    Ok(PartialTruth::True)
+                }
+            }
+            PartialBoolInstruction::Ite {
+                condition,
+                then_node,
+                else_node,
+            } => match self.bool_node(condition)? {
+                PartialTruth::True => self.bool_node(then_node),
+                PartialTruth::False => self.bool_node(else_node),
+                PartialTruth::Unknown => {
+                    let then_value = self.bool_node(then_node)?;
+                    let else_value = self.bool_node(else_node)?;
+                    if then_value == else_value && then_value != PartialTruth::Unknown {
+                        Ok(then_value)
+                    } else {
+                        Ok(PartialTruth::Unknown)
+                    }
+                }
+            },
+        }
+    }
+}
+
+struct PartialTableEvaluator<'compiled, 'problem, 'table, 'scratch> {
+    compiled: &'compiled FiniteTableSource<'problem>,
+    cell_domains: &'table [u8],
+    scratch: &'scratch mut PartialEvaluationScratch,
+}
+
+impl<'compiled, 'problem, 'table, 'scratch>
+    PartialTableEvaluator<'compiled, 'problem, 'table, 'scratch>
+{
+    fn new(
+        compiled: &'compiled FiniteTableSource<'problem>,
+        cell_domains: &'table [u8],
+        scratch: &'scratch mut PartialEvaluationScratch,
+    ) -> Self {
+        scratch.begin(compiled.problem.arena.terms.len());
         Self {
             compiled,
             cell_domains,
-            memo: vec![None; compiled.problem.arena.terms.len()],
-            visiting: vec![false; compiled.problem.arena.terms.len()],
+            scratch,
         }
     }
 
@@ -2573,17 +3330,18 @@ impl<'compiled, 'problem, 'table> PartialTableEvaluator<'compiled, 'problem, 'ta
         if !self.compiled.live_terms.contains(&term_id) {
             return Err(EvaluationError::TermNotLive(term_id));
         }
-        if let Some(value) = self
-            .memo
+        let value_epoch = *self
+            .scratch
+            .value_epochs
             .get(term_id)
-            .ok_or(EvaluationError::MissingTerm(term_id))?
-        {
-            return Ok(*value);
+            .ok_or(EvaluationError::MissingTerm(term_id))?;
+        if value_epoch == self.scratch.epoch {
+            return Ok(self.scratch.values[term_id]);
         }
-        if self.visiting[term_id] {
+        if self.scratch.visiting_epochs[term_id] == self.scratch.epoch {
             return Err(EvaluationError::CyclicTerm(term_id));
         }
-        self.visiting[term_id] = true;
+        self.scratch.visiting_epochs[term_id] = self.scratch.epoch;
         let bool_problem = self
             .compiled
             .problem
@@ -2637,8 +3395,9 @@ impl<'compiled, 'problem, 'table> PartialTableEvaluator<'compiled, 'problem, 'ta
             debug_assert_ne!(result_mask, 0);
             PartialTermValue::Domain(result_mask)
         };
-        self.visiting[term_id] = false;
-        self.memo[term_id] = Some(value);
+        self.scratch.visiting_epochs[term_id] = 0;
+        self.scratch.values[term_id] = value;
+        self.scratch.value_epochs[term_id] = self.scratch.epoch;
         Ok(value)
     }
 
@@ -3195,6 +3954,17 @@ mod tests {
             let first_false = compiled
                 .first_definitely_false_base_assertion(&cell_domains)
                 .unwrap();
+            let mut reference_scratch = compiled.partial_evaluation_scratch();
+            let reference_first_false = compiled
+                .first_definitely_false_base_assertion_reference_with_scratch(
+                    &cell_domains,
+                    &mut reference_scratch,
+                )
+                .unwrap();
+            assert_eq!(
+                first_false, reference_first_false,
+                "compiled partial program disagrees for {cell_domains:?}"
+            );
             assert_eq!(
                 compiled.base_could_hold(&cell_domains).unwrap(),
                 first_false.is_none()

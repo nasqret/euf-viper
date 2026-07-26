@@ -1,0 +1,37 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T11:04:04.679718+00:00",
+  "preflight": [],
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "command_returncode": 0,
+      "common_aggregate_speedup": 1.0042731957849118,
+      "comparator": "yices2",
+      "coverage_delta": -2,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q2-resolved/q2-yices2.csv",
+      "failures": [
+        "coverage_delta=-2",
+        "baseline_only_correct=2"
+      ],
+      "passed": false,
+      "stage": "Q2",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 3/3 -> 1/3; common aggregate 1.0043x, geometric 1.0043x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q2-resolved/q2-yices2.json"
+    }
+  ],
+  "schema_version": 1,
+  "selected_stages": [
+    "Q2"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "b750a18ddf97b5cf7140960583c64dcedc5f8cd8a828fe72100ba583c6fac984"
+  },
+  "started_at": "2026-07-26T11:03:43.419200+00:00",
+  "status": "gate_failed"
+}

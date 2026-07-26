@@ -1,0 +1,50 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T14:48:58.757064+00:00",
+  "preflight": [],
+  "reference_binary": null,
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "blocking_performance": false,
+      "command_returncode": 1,
+      "common_aggregate_speedup": null,
+      "common_geometric_speedup": null,
+      "comparator": "cvc5",
+      "coverage_delta": null,
+      "coverage_dominance": false,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5/q2nf-cvc5.csv",
+      "failures": [
+        "benchmark command returned 1"
+      ],
+      "kind": "competitor",
+      "passed": false,
+      "performance_target_failures": [
+        "benchmark command returned 1"
+      ],
+      "performance_target_met": false,
+      "stage": "Q2NF",
+      "stderr_tail": "Traceback (most recent call last):\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 438, in run_argv\n    stdout_bytes, stderr_bytes = process.communicate(timeout=timeout_s)\n                                 ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py\", line 1221, in communicate\n    stdout, stderr = self._communicate(input, endtime, timeout)\n                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py\", line 2154, in _communicate\n    self._check_timeout(endtime, orig_timeout, stdout, stderr)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py\", line 1268, in _check_timeout\n    raise TimeoutExpired(\n    ...<2 lines>...\n            stderr=b''.join(stderr_seq) if stderr_seq else None)\nsubprocess.TimeoutExpired: Command '['third_party/solvers/pinned/bin/cvc5', '/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size10.smt2']' timed out after 2.0 seconds\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 1029, in <module>\n    raise SystemExit(main())\n                     ~~~~^^\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 950, in main\n    warmup_samples, samples = execute(\n                              ~~~~~~~^\n        rows=rows,\n        ^^^^^^^^^^\n    ...<5 lines>...\n        output_csv=args.out,\n        ^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 836, in execute\n    observation = run_command(\n        templates[label],\n    ...<2 lines>...\n        timeout_s,\n    )\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 483, in run_command\n    return run_argv(expand_command(template, input_path), environment, timeout_s)\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 440, in run_argv\n    _kill_process_group(process)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^\n  File \"/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/scripts/bench/compare_commands_abba.py\", line 391, in _kill_process_group\n    os.killpg(process.pid, signal.SIGKILL)\n    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nPermissionError: [Errno 1] Operation not permitted\n",
+      "stdout_tail": "",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5/q2nf-cvc5.json"
+    }
+  ],
+  "schema_version": 2,
+  "selected_comparators": {
+    "Q2NF": [
+      "cvc5"
+    ]
+  },
+  "selected_stages": [
+    "Q2NF"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "45ae370a3a9633b453e15f54fdd825defca42808ae3885e7f2b6efe512f867ff"
+  },
+  "started_at": "2026-07-26T14:48:36.559181+00:00",
+  "status": "gate_failed"
+}

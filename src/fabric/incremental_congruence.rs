@@ -94,6 +94,65 @@ struct ExplanationBudget {
     edge_visits: usize,
 }
 
+#[derive(Debug)]
+pub(crate) struct IncrementalExplanationWorkspace {
+    seen_generation: Vec<u32>,
+    predecessor: Vec<Option<(usize, usize)>>,
+    queue: VecDeque<usize>,
+    generation: u32,
+}
+
+impl IncrementalExplanationWorkspace {
+    pub(crate) fn new(term_count: usize) -> Result<Self, CongruenceError> {
+        let mut seen_generation = Vec::new();
+        seen_generation
+            .try_reserve_exact(term_count)
+            .map_err(|_| CongruenceError::AllocationFailed)?;
+        seen_generation.resize(term_count, 0);
+        let mut predecessor = Vec::new();
+        predecessor
+            .try_reserve_exact(term_count)
+            .map_err(|_| CongruenceError::AllocationFailed)?;
+        predecessor.resize(term_count, None);
+        let mut queue = VecDeque::new();
+        queue
+            .try_reserve(term_count)
+            .map_err(|_| CongruenceError::AllocationFailed)?;
+        Ok(Self {
+            seen_generation,
+            predecessor,
+            queue,
+            generation: 0,
+        })
+    }
+
+    fn begin(&mut self, term_count: usize) -> Result<(), CongruenceError> {
+        if self.seen_generation.len() != term_count || self.predecessor.len() != term_count {
+            return Err(CongruenceError::InvariantViolation(
+                "explanation workspace has the wrong term count",
+            ));
+        }
+        self.queue.clear();
+        if self.generation == u32::MAX {
+            self.seen_generation.fill(0);
+            self.generation = 1;
+        } else {
+            self.generation += 1;
+        }
+        Ok(())
+    }
+
+    fn seen(&self, term: usize) -> bool {
+        self.seen_generation[term] == self.generation
+    }
+
+    fn mark(&mut self, term: usize, predecessor: Option<(usize, usize)>) {
+        self.seen_generation[term] = self.generation;
+        self.predecessor[term] = predecessor;
+        self.queue.push_back(term);
+    }
+}
+
 enum WorkFailure {
     Abstained(Abstention),
     Error(CongruenceError),
@@ -626,6 +685,30 @@ impl<'terms> RollbackIncrementalCongruence<'terms> {
         }
     }
 
+    pub(crate) fn explain_equal_at_with_workspace(
+        &self,
+        left: TermId,
+        right: TermId,
+        snapshot: IncrementalCongruenceSnapshot,
+        workspace: &mut IncrementalExplanationWorkspace,
+    ) -> Result<ExplanationOutcome, CongruenceError> {
+        self.validate_pair(left, right)?;
+        self.validate_composite_snapshot(snapshot)?;
+        let mut budget = ExplanationBudget::default();
+        match self.explain_equal_bounded_with_workspace(
+            left,
+            right,
+            snapshot.proof_depth,
+            &mut budget,
+            workspace,
+        ) {
+            Ok(Some(reasons)) => Ok(ExplanationOutcome::Explained(reasons)),
+            Ok(None) => Ok(ExplanationOutcome::NotEqual),
+            Err(WorkFailure::Abstained(reason)) => Ok(ExplanationOutcome::Abstained(reason)),
+            Err(WorkFailure::Error(error)) => Err(error),
+        }
+    }
+
     /// Expensive structural validation, including a full signature-to-partition
     /// oracle check and closure of every active collision.
     pub(crate) fn validate(&self) -> Result<(), CongruenceError> {
@@ -1061,6 +1144,19 @@ impl<'terms> RollbackIncrementalCongruence<'terms> {
         proof_depth: usize,
         budget: &mut ExplanationBudget,
     ) -> Result<Option<Vec<ReasonId>>, WorkFailure> {
+        let mut workspace =
+            IncrementalExplanationWorkspace::new(self.terms.len()).map_err(WorkFailure::Error)?;
+        self.explain_equal_bounded_with_workspace(left, right, proof_depth, budget, &mut workspace)
+    }
+
+    fn explain_equal_bounded_with_workspace(
+        &self,
+        left: TermId,
+        right: TermId,
+        proof_depth: usize,
+        budget: &mut ExplanationBudget,
+        workspace: &mut IncrementalExplanationWorkspace,
+    ) -> Result<Option<Vec<ReasonId>>, WorkFailure> {
         if proof_depth > self.merges.len() {
             return Err(WorkFailure::Error(CongruenceError::InvariantViolation(
                 "historical explanation depth exceeds active proof history",
@@ -1071,23 +1167,9 @@ impl<'terms> RollbackIncrementalCongruence<'terms> {
         }
 
         let term_count = self.terms.len();
-        let mut seen = Vec::new();
-        seen.try_reserve_exact(term_count)
-            .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
-        seen.resize(term_count, false);
-        let mut predecessor = Vec::new();
-        predecessor
-            .try_reserve_exact(term_count)
-            .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
-        predecessor.resize(term_count, None::<(usize, usize)>);
-        let mut queue = VecDeque::new();
-        queue
-            .try_reserve(term_count)
-            .map_err(|_| WorkFailure::Error(CongruenceError::AllocationFailed))?;
-
-        seen[left.index()] = true;
-        queue.push_back(left.index());
-        while let Some(current) = queue.pop_front() {
+        workspace.begin(term_count).map_err(WorkFailure::Error)?;
+        workspace.mark(left.index(), None);
+        while let Some(current) = workspace.queue.pop_front() {
             if current == right.index() {
                 break;
             }
@@ -1115,21 +1197,19 @@ impl<'terms> RollbackIncrementalCongruence<'terms> {
                         "merge adjacency edge is not incident to its term",
                     )));
                 };
-                if !seen[next] {
-                    seen[next] = true;
-                    predecessor[next] = Some((current, edge_index));
-                    queue.push_back(next);
+                if !workspace.seen(next) {
+                    workspace.mark(next, Some((current, edge_index)));
                 }
             }
         }
-        if !seen[right.index()] {
+        if !workspace.seen(right.index()) {
             return Ok(None);
         }
 
         let mut reasons = Vec::new();
         let mut current = right.index();
         while current != left.index() {
-            let Some((previous, edge_index)) = predecessor[current] else {
+            let Some((previous, edge_index)) = workspace.predecessor[current] else {
                 return Err(WorkFailure::Error(CongruenceError::InvariantViolation(
                     "incremental causal predecessor chain is incomplete",
                 )));
@@ -1942,6 +2022,7 @@ mod tests {
         engine.assert_equality(id(0), id(1), reason(11)).unwrap();
         let after_first = engine.snapshot();
         engine.assert_equality(id(1), id(2), reason(12)).unwrap();
+        let mut workspace = IncrementalExplanationWorkspace::new(terms.len()).unwrap();
 
         assert_eq!(
             engine.explain_equal(id(0), id(2)).unwrap(),
@@ -1952,7 +2033,19 @@ mod tests {
             ExplanationOutcome::Explained(vec![reason(11)])
         );
         assert_eq!(
+            engine
+                .explain_equal_at_with_workspace(id(0), id(1), after_first, &mut workspace)
+                .unwrap(),
+            ExplanationOutcome::Explained(vec![reason(11)])
+        );
+        assert_eq!(
             engine.explain_equal_at(id(0), id(2), after_first).unwrap(),
+            ExplanationOutcome::NotEqual
+        );
+        assert_eq!(
+            engine
+                .explain_equal_at_with_workspace(id(0), id(2), after_first, &mut workspace)
+                .unwrap(),
             ExplanationOutcome::NotEqual
         );
     }

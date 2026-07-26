@@ -2158,3 +2158,44 @@
   evidence. The builder now compares the numeric LLVM versions exactly and
   aborts before compilation on mismatch. The pinned WMI Rust and
   `llvm-profdata` tools both report 21.1.8.
+
+# 2026-07-26 - Quotient-JIT finite-family breakthrough
+
+- Added checker-owned root materialization to the reduced-CNF Fabric path. A
+  five-test exact differential against the legacy reducer passes; the frozen
+  Goel canary improved `1.042x` over 21 paired repetitions.
+- Added strict fast-cycle comparator filtering and complete PEQ, SEQ, and NEQ
+  family stages. Every stage records the selected comparator set, resolved
+  hashed manifest, binary hashes, per-run CSV, summary, and atomic ledger.
+- Generalized the exact rook detector from one to multiple closed operations.
+  This recovered 11 PEQ instances without a loss. A broader verified finite
+  structural tier, domain-7 lex threshold, and a route-local CaDiCaL policy
+  then reached 44/47 PEQ versus Yices2's 40/47.
+- Added a bounded predicate finite tier. Its source selector requires complete
+  finite closure, domain 3..11, at most 200,000 estimated one-hot clauses,
+  at most 16,384 Boolean applications, and at most 100,000 application-value
+  channel pairs. On NEQ this changed coverage from 18/48 to 48/48.
+- Revisited the abandoned permutation-support encoding. Focused support adds
+  the dual column side only for a verified finite injection. On
+  `SEQ009_size10`, five paired repetitions improved about `2.41s -> 0.013s`
+  (`183.9x`) and closed the last SEQ timeout. Route-local defaulting preserves
+  an explicit `EUF_VIPER_FINITE_PERMUTATION_SUPPORT=0` control.
+- Final two-second full-family scouts: PEQ is 44/47 versus Yices2 40, Z3 34,
+  cvc5 28; SEQ is 56/56 versus 56, 51, 46; NEQ is 48/48 versus 44, 41, 39.
+  NEQ common aggregate factors are `2.948x`, `3.753x`, and `6.388x` over
+  Yices2, Z3, and cvc5. PEQ/SEQ still lose common aggregate timing to Yices2,
+  so no overall-leader claim is made.
+- Hardened timeout cleanup after managed macOS denied `killpg` for cvc5. The
+  runner now falls back to direct child termination; nine focused runner tests
+  pass and the exact cvc5 campaign reruns complete.
+- Revalidated frozen default gates. QG7 is `1.018x` over Yices2, `3.829x` over
+  Z3, and `8.977x` over cvc5. The PEQ rook canary is `2.187x` over Yices2 and
+  uniquely solved against Z3/cvc5. Goel remains weak at `0.286x` versus
+  Yices2.
+- Validation: Python discovery passes 540/540; Rust all-feature testing passes
+  643 with 10 intentionally ignored and zero failures. Formatting is clean.
+- Refreshed WMI state. F0 smoke `169653` actually completed `0:0` on July 24.
+  Fetched its six immutable artifacts and original submission receipt; the
+  independent audit verifies two rows, no errors/duplicates, exact bindings,
+  and zero solver-result claims. The current WMI CPU queue is heavily occupied
+  by unrelated `t5f_final` arrays, so a successor campaign may remain pending.

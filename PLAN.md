@@ -14,20 +14,21 @@ machine-readable contract `campaigns/viper-fabric-2026-07.json`. Viper Fabric
 is isolated on branch `perf-viper-fabric`; migration and default behavior
 changes remain forbidden until their registered gates pass.
 
-Current Fabric stage: the default-off reference is frozen at
+Current Fabric stage: the default-off F0 reference remains frozen at
 `51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc`, published on
-`perf-viper-fabric`, and passed hosted run `29881100724`. Its exact two-row
-WMI shadow smoke is job `169653`; it remains pending because the CPU cluster
-is saturated. No full shadow has been submitted. Continued implementation is
-isolated on `perf-viper-fabric-next`. E2 finite correctness is complete at the
-bounded gate: binary and canonical search, full-scan and rollback-signature
-congruence, and full-scan and watched clause scheduling agree exactly on the
-676-formula five-partition matrix and function/Boolean canaries. The
-incremental congruence kernel measured `236.45x` over the scan control on one
-96-pair release-mode substrate canary; this is not an end-to-end or competitor
-result. Stable theory reasons, impacted-atom scheduling, learned-clause
-insertion, and nonchronological search remain open. The branch remains
-non-routed and has no performance claim.
+`perf-viper-fabric`, and passed hosted run `29881100724`. Its exact two-row WMI
+shadow smoke `169653` completed `0:0` on 2026-07-24. The independent local
+audit in `research-vault/06-results/wmi/fabric-shadow-169653/audit.json`
+verifies both rows, all tool/input bindings, and zero solver-result claims.
+
+Continued implementation is isolated on `research/quotient-jit-lcg`. It now
+contains a routed, source-structural finite tier in addition to the bounded E2
+substrate: verified finite closure, lex symmetry, predicate congruence
+channeling, focused permutation support, and route-local CaDiCaL policy are
+selected only from formula structure. The complete local all-feature suite is
+green at 643 passed and 10 intentionally ignored; Python discovery is green at
+540 tests. These results authorize a clean freeze and fixed WMI comparison,
+not a production-default change or an overall-leader claim.
 
 ## Current Truth
 
@@ -79,6 +80,34 @@ audit `145929`
 scientifically rejected whole-instance rollback: coverage improved `15 -> 23`
 and target geometric speedups were `7.32x`-`9.07x`, but anti-target p95
 overheads were `11.17x`-`32.75x` against a `1.10x` cap.
+
+## 2026-07-26 Quotient-JIT Structural Campaign
+
+The two-second, one-repeat full-family scouts below use the same hashed
+manifests and cold-process runner for every arm. They are fast-cycle evidence,
+not the final multi-CPU or long-timeout campaign.
+
+| Family | Viper | Yices2 | Z3 | cvc5 | Viper/Yices aggregate | Viper/Z3 aggregate | Viper/cvc5 aggregate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| PEQ | 44/47 | 40/47 | 34/47 | 28/47 | `0.851x` | `1.937x` | `5.407x` |
+| SEQ | 56/56 | 56/56 | 51/56 | 46/56 | `0.490x` | `0.967x` | `4.710x` |
+| NEQ | 48/48 | 44/48 | 41/48 | 39/48 | `2.948x` | `3.753x` | `6.388x` |
+
+The decisive new mechanism is focused dual support for verified finite
+injections. On `SEQ009_size10`, paired five-repeat timing moved from about
+`2.41s` to `0.013s`, roughly `184x`, and closed the last SEQ timeout. Broader
+predicate channeling moved NEQ from 18/48 to 48/48 versus Yices2. The final
+integrated route preserves the frozen QG7 and PEQ canaries; all default fast
+cycle stages pass. The QG7 microcase is `1.018x` over Yices2, `3.829x` over Z3,
+and `8.977x` over cvc5; the PEQ rook canary is `2.187x` over Yices2 and uniquely
+solved against Z3/cvc5 at two seconds.
+
+This is a material tier result, but not overall victory. Viper still loses
+common-case timing to Yices2 on PEQ and SEQ, and the Goel Fabric canary is only
+`0.286x` as fast as Yices2. The next fixed campaign must therefore preserve the
+finite-family coverage gains while measuring the full official/full-library
+population and the Goel holdout on WMI. Runtime routing by source path, family,
+hash, expected answer, or prior timing remains forbidden.
 
 ## 2026-07-23 Optimization And PGO Checkpoint
 
@@ -136,10 +165,9 @@ until a clean public freeze exists.
 This queue is ordered. A later item cannot authorize a solve route, timing
 claim, or composition while an earlier correctness gate is open.
 
-1. **F0 smoke audit:** wait for WMI job `169653`, fetch only its immutable
-   artifact directory, verify exact revision/tool/corpus hashes, require two
-   complete rows and `solver_result_emitted=false`, and run the independent
-   offline auditor.
+1. **F0 smoke audit (complete):** WMI job `169653` completed `0:0`; its fetched
+   immutable bundle passed the independent offline audit with two complete
+   rows, exact revision/tool/corpus bindings, and zero solver-result claims.
 2. **F0 full shadow:** only after item 1 passes, submit the frozen 7,503-row
    manifest from clean commit `51fc7d31`; audit row identity, completeness,
    semantic census totals, abstentions, and zero solver claims.
@@ -1036,8 +1064,9 @@ observed. Every branch remains isolated until its complete audit passes.
 The continuation branch must execute in this order. A later item cannot weaken
 an earlier correctness boundary to obtain a timing result.
 
-1. Preserve frozen commit `51fc7d31` and audit WMI smoke `169653`. It remains
-   pending for priority; no full shadow is authorized yet.
+1. Preserve frozen commit `51fc7d31` and its verified WMI smoke `169653`.
+   Independent audit is complete; the full non-attesting shadow is now
+   authorized but remains unsubmitted.
 2. Keep the full-scan congruence and clause paths as controls. The incremental
    signature backend, native watch scheduler, stable term-to-atom CSR index,
    and post-update impact frontier now agree with the controls under an
@@ -1079,9 +1108,9 @@ an earlier correctness boundary to obtain a timing result.
 4. Allow training `unknown` only as a measured execution path. Any wrong
    decisive answer, changed optimized replay, missing profile, malformed
    output, timeout, or nonzero process error aborts publication.
-5. Freeze a clean published commit and pass hosted CI before submission. Wait
-   for F0 job `169653` to finish and pass the independent artifact audit; do
-   not treat queue time as campaign evidence.
+5. Freeze a clean published commit and pass hosted CI before submission. F0
+   job `169653` and its independent artifact audit are complete; queue time and
+   unrelated cluster jobs remain non-evidence.
 6. Submit `scripts/wmi/submit_pgo_holdout.sh` only after explicit user approval.
    Require a fresh `/work` run root, exact seven-tool hashes, one CPU, the
    official manifest hash, and `campaign.json` as the final completion marker.

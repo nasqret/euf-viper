@@ -1,0 +1,87 @@
+{
+  "aggregate_component_metrics": {
+    "applications": 0,
+    "assertions": 10,
+    "atoms": 13,
+    "components": 3,
+    "contradiction_instances": 0,
+    "cross_component_boolean_nodes": 0,
+    "max_component_terms": 10,
+    "root_literals": 0,
+    "source_bytes": 1552,
+    "terms": 18,
+    "unsupported_fragments": 0
+  },
+  "counts": {
+    "attempted_rows": 2,
+    "completed_rows": 2,
+    "error_rows": 0,
+    "manifest_rows": 2,
+    "preexisting_rows": 0,
+    "remaining_rows": 0,
+    "selected_rows": 2
+  },
+  "error": null,
+  "input_binding_sha256": "75dc122cd7073b38648e64c5eb9207c511198aceccbabaa6879afafcccd5aa4c",
+  "input_bytes": 1552,
+  "manifest_path": "/work/bnaskrecki/euf-viper-campaigns/viper-fabric/manifests/viper-fabric-f0-smoke-v1.jsonl",
+  "manifest_sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291",
+  "mode": "fabric_shadow",
+  "out_jsonl_path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/.artifacts.partial/fabric-shadow.jsonl",
+  "out_jsonl_sha256": "a27bc3c7a3f2f882fb826e1a683e81fd773786b712ca34edddb8de92cf6b74c7",
+  "parameters": {
+    "jobs": 1,
+    "resume": false,
+    "timeout_s": 60.0
+  },
+  "resolution": {
+    "ambiguity_policy": "reject",
+    "corpus_root": "/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF",
+    "declared_paths": "preserved_but_ignored",
+    "invocation_cwd": null,
+    "repository_layout": "benchmarks/smtlib-2025/QF_UF",
+    "repository_layout_enabled": false,
+    "repository_root": "/work/bnaskrecki/euf-viper-fabric/checkouts/51fc7d31a0e4",
+    "resolved_by_rule": {
+      "corpus_root_relative_path": 2
+    },
+    "rule": "corpus_root_plus_relative_path_and_repository_layout_when_repo_root",
+    "traversal_policy": "normalized_relative_and_resolved_containment"
+  },
+  "schema_version": 1,
+  "solver_path": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/.artifacts.partial/euf-viper",
+  "solver_sha256": "f374c9067fa9f560e41a5516a797c68d8bd49afb678ad129b4995b3a99acabb8",
+  "status": "complete",
+  "timing_quantiles_ns": {
+    "parse_ns": {
+      "count": 2,
+      "max": 128665,
+      "min": 108228,
+      "p50": 108228,
+      "p90": 128665,
+      "p95": 128665,
+      "p99": 128665,
+      "total": 236893
+    },
+    "projection_ns": {
+      "count": 2,
+      "max": 25250,
+      "min": 24487,
+      "p50": 24487,
+      "p90": 25250,
+      "p95": 25250,
+      "p99": 25250,
+      "total": 49737
+    },
+    "wall_time_ns": {
+      "count": 2,
+      "max": 3901034,
+      "min": 2597630,
+      "p50": 2597630,
+      "p90": 3901034,
+      "p95": 3901034,
+      "p99": 3901034,
+      "total": 6498664
+    }
+  }
+}

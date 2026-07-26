@@ -1,12 +1,10 @@
-#![cfg(test)]
 #![forbid(unsafe_code)]
 
 //! Exhaustive, bounded Latin-table search by whole column permutations.
 //!
-//! This module is a test-only reference search. It is intentionally absent
-//! from the production module graph. Columns are drawn from lexicographically
-//! ordered permutations, while row-used masks enforce the other Latin axis.
-//! Any incomplete traversal, including an oracle failure, is an abstention.
+//! Columns are drawn from lexicographically ordered permutations, while
+//! row-used masks enforce the other Latin axis. Any incomplete traversal,
+//! including an oracle failure, is an abstention.
 
 use crate::orbit_canon::BinaryTable;
 use std::array;
@@ -88,6 +86,7 @@ impl Default for SearchCaps {
 }
 
 impl SearchCaps {
+    #[cfg(test)]
     pub(crate) const fn hard() -> Self {
         Self {
             max_oracle_calls: HARD_MAX_ORACLE_CALLS,
@@ -403,6 +402,7 @@ pub(crate) struct SearchReport {
 
 /// Searches with conservative defaults. Exhaustion under those defaults is
 /// reported as [`SearchOutcome::Abstain`], never as UNSAT.
+#[cfg(test)]
 pub(crate) fn search<O: FiniteColumnOracle>(
     order: usize,
     row_major_domains: &[u8],
@@ -829,6 +829,7 @@ impl<O: FiniteColumnOracle> SearchEngine<'_, O> {
 
         let mut best_column = None;
         let mut best_count = usize::MAX;
+        let mut best_compatible = None;
         for column in 0..self.order {
             if assigned[column] {
                 continue;
@@ -845,6 +846,7 @@ impl<O: FiniteColumnOracle> SearchEngine<'_, O> {
             if compatible.count < best_count {
                 best_count = compatible.count;
                 best_column = Some(column);
+                best_compatible = Some(compatible);
             }
         }
 
@@ -858,10 +860,12 @@ impl<O: FiniteColumnOracle> SearchEngine<'_, O> {
 
         self.telemetry.mix(32, usize_trace_value(column));
         self.telemetry.mix(33, usize_trace_value(best_count));
-        let compatible = self.compatible_candidates(column, row_used)?;
+        let compatible = best_compatible.ok_or(SearchAbstention::InvariantViolation(
+            "an incomplete node has no cached MRV candidates",
+        ))?;
         if compatible.count != best_count {
             return Err(SearchAbstention::InvariantViolation(
-                "selected column candidate count changed without an assignment",
+                "cached MRV candidate count disagrees with its selection",
             ));
         }
         let word_count = self.permutation_word_count();
@@ -1030,6 +1034,7 @@ impl<O: FiniteColumnOracle> SearchEngine<'_, O> {
     }
 }
 
+#[cfg(test)]
 fn checked_increment(current: u64, resource: SearchResource) -> Result<u64, SearchAbstention> {
     current
         .checked_add(1)

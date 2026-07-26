@@ -71,9 +71,61 @@ reference revision
 `perf-viper-fabric` and passed hosted run `29881100724`. Direct access
 through the VPN gateway IP confirmed that all SLURM controllers are up, the
 read-only corpus is present under `/home`, and campaign storage is present
-under `/work`. The two-row smoke is WMI job `169653` and is pending on
-priority while the CPU cluster is saturated. The full 7,503-row shadow remains
-blocked until that smoke is terminal and independently audited.
+under `/work`. The two-row smoke WMI job `169653` completed `0:0` on
+2026-07-24. Its fetched six-file bundle and original submission receipt passed
+the independent offline audit: two complete rows, no errors or duplicates,
+exact revision/tool/input bindings, and zero solver-result claims. The full
+7,503-row non-attesting shadow is now authorized but remains unsubmitted.
+
+## Source-Structural Quotient-JIT Tier
+
+The continuation branch now exposes a default-off `quotient-portfolio` arm
+which selects finite mechanisms from the parsed formula, never from benchmark
+identity. A formula enters the general finite tier only after the analyzer has
+proved a complete finite closure and bounded the eager encoding. The current
+limits are domain size at most 11 and at most 200,000 estimated one-hot
+clauses. Formulas with Boolean-valued applications additionally require at
+most 16,384 such applications and at most 100,000 application-value channel
+pairs.
+
+The key recovered technique is dual support for a verified injection. Suppose
+terms $x_1,\ldots,x_n$ each range over the same finite domain
+$D=\{d_1,\ldots,d_n\}$ and are pairwise distinct. The ordinary one-hot rows
+state
+
+$$
+\bigvee_{j=1}^n (x_i=d_j)
+\quad\text{and}\quad
+\neg(x_i=d_j)\lor\neg(x_i=d_k) \quad (j\ne k).
+$$
+
+Injectivity and $|\{x_i\}|=|D|$ imply surjectivity, so the solver may also add
+the checked column clauses
+
+$$
+\bigvee_{i=1}^n (x_i=d_j), \qquad j=1,\ldots,n.
+$$
+
+These clauses do not remove models; they expose Hall-style reasoning to the
+SAT backend. On `SEQ009_size10`, five paired runs moved from about 2.41 seconds
+without the clauses to 0.013 seconds with focused support, approximately
+`184x`, and closed the final SEQ timeout.
+
+The two-second local family scorecards are:
+
+| Family | Viper | Yices2 | Z3 | cvc5 |
+| --- | ---: | ---: | ---: | ---: |
+| PEQ | 44/47 | 40/47 | 34/47 | 28/47 |
+| SEQ | 56/56 | 56/56 | 51/56 | 46/56 |
+| NEQ | 48/48 | 44/48 | 41/48 | 39/48 |
+
+Viper is faster on common NEQ solves by `2.948x` aggregate over Yices2,
+`3.753x` over Z3, and `6.388x` over cvc5. It still loses common-case aggregate
+timing to Yices2 on PEQ and SEQ, and its frozen Goel canary is only `0.286x`
+as fast as Yices2. Therefore this is a finite-family tier result, not evidence
+that Viper is the overall QF_UF leader. The exact ledgers and causal controls
+are indexed in
+[`the finite-family campaign note`](https://github.com/nasqret/euf-viper/blob/main/research-vault/06-results/2026-07-26-quotient-jit-finite-family-campaign.md).
 
 ## Family-Disjoint PGO Experiment
 
@@ -109,8 +161,9 @@ slowdown no greater than `1.05x`. The decision is recorded as `promote` or
 A local plumbing smoke successfully profiled and replayed an `unknown` result,
 but it was built from a dirty worktree and used an incompatible Apple LLVM 17
 fallback with Rust LLVM 21.1.8. The builder now rejects such a mismatch before
-compilation. No WMI PGO holdout result exists yet. This experiment therefore
-does not change the current comparison with Yices2 or Z3.
+compilation. The F0 prerequisite is complete, but no WMI PGO holdout result
+exists yet. This experiment therefore does not change the current comparison
+with Yices2 or Z3.
 
 ## Implementation Surface
 

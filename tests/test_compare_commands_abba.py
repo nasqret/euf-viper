@@ -12,6 +12,7 @@ import time
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +154,14 @@ class ManifestAndCliValidationTests(unittest.TestCase):
 
 
 class CommandExecutionTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "process-group semantics require POSIX")
+    def test_process_group_permission_error_falls_back_to_child_kill(self) -> None:
+        process = mock.Mock()
+        process.pid = 123
+        with mock.patch.object(COMPARE.os, "killpg", side_effect=PermissionError):
+            COMPARE._kill_process_group(process)
+        process.kill.assert_called_once_with()
+
     def test_stdout_accepts_only_one_exact_solver_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             script = Path(temp_dir) / "fake.py"

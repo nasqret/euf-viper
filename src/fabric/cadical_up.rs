@@ -9,19 +9,22 @@
 //! omitted from an emitted theory clause.
 
 use super::bool_cnf::NativeFormula;
+use super::cnf_root::RootSimplification;
 use super::congruence::{
     Abstention as CongruenceAbstention, ApplyOutcome, CONGRUENCE_PARTITION_REASON,
     CongruenceConflict, CongruenceError, CongruenceLimits, ExplanationOutcome,
 };
 use super::impact::{self, ImpactCaps, ImpactError, ImpactLimit, ImpactOutcome, ImpactStats};
-use super::incremental_congruence::{IncrementalCongruenceSnapshot, RollbackIncrementalCongruence};
+use super::incremental_congruence::{
+    IncrementalCongruenceSnapshot, IncrementalExplanationWorkspace, RollbackIncrementalCongruence,
+};
 use super::model::{self, CanonicalModel, ModelCaps, ModelLimit, ModelValidation};
 use super::native_clause::{AtomId, Lit};
 use super::partition::{
     ProspectiveMergeIncidenceOutcome, ProspectiveMergeIncidenceResource, ReasonId, Relation,
     SeparationRecord, TermId,
 };
-use super::semantic::{SemanticAtom, SemanticProblem};
+use super::semantic::{RootLiteral, SemanticAtom, SemanticProblem};
 use super::signature::SignatureTelemetry;
 use super::theory_atom_index::{
     TheoryAtomIndex, TheoryAtomIndexCaps, TheoryAtomIndexError, TheoryAtomIndexResource,
@@ -46,6 +49,14 @@ pub(crate) struct CadicalUpCaps {
     pub(crate) post_construction_congruence_validation: bool,
     pub(crate) profile_callback_timings: bool,
     pub(crate) allocation_free_assignment_decode: bool,
+    pub(crate) slice_boolean_shell: bool,
+    pub(crate) preapply_forced_root_literals: bool,
+    pub(crate) compile_root_theory: bool,
+    pub(crate) reuse_explanation_workspace: bool,
+    pub(crate) zero_copy_theory_log: bool,
+    pub(crate) flat_reason_canonicalization: bool,
+    pub(crate) flat_literal_antecedents: bool,
+    pub(crate) elide_redundant_theory_assignments: bool,
     pub(crate) propagate_implied_atoms: bool,
     pub(crate) propagate_explicit_equalities: bool,
     pub(crate) propagate_explicit_disequalities: bool,
@@ -89,6 +100,14 @@ impl Default for CadicalUpCaps {
             post_construction_congruence_validation: true,
             profile_callback_timings: false,
             allocation_free_assignment_decode: false,
+            slice_boolean_shell: false,
+            preapply_forced_root_literals: false,
+            compile_root_theory: false,
+            reuse_explanation_workspace: false,
+            zero_copy_theory_log: false,
+            flat_reason_canonicalization: false,
+            flat_literal_antecedents: false,
+            elide_redundant_theory_assignments: false,
             propagate_implied_atoms: true,
             propagate_explicit_equalities: true,
             propagate_explicit_disequalities: true,
@@ -167,9 +186,6 @@ pub(crate) enum CadicalUpAbstention {
     Internal(&'static str),
     SolverInterrupted,
     SolverFailure,
-    UnsatAfterDroppedPendingClauses {
-        count: usize,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +216,8 @@ pub(crate) struct CadicalUpStats {
     pub(crate) theory_atom_index_construction_ns: u128,
     pub(crate) adapter_state_allocation_ns: u128,
     pub(crate) root_scheduling_ns: u128,
+    pub(crate) root_literals_discovered: usize,
+    pub(crate) root_theory_literals_preapplied: usize,
     pub(crate) solver_setup_ns: u128,
     pub(crate) clause_loading_ns: u128,
     pub(crate) observed_variable_setup_ns: u128,
@@ -221,6 +239,10 @@ pub(crate) struct CadicalUpStats {
     pub(crate) native_clauses: usize,
     pub(crate) native_literals: usize,
     pub(crate) observed_variables: usize,
+    pub(crate) inactive_source_atoms: usize,
+    pub(crate) fixed_source_atoms: usize,
+    pub(crate) theory_relevant_atoms: usize,
+    pub(crate) boolean_shell_atoms: usize,
     pub(crate) assignment_batches: usize,
     pub(crate) assignment_notifications: usize,
     pub(crate) decision_levels: usize,
@@ -229,6 +251,8 @@ pub(crate) struct CadicalUpStats {
     pub(crate) source_assignments_applied: usize,
     pub(crate) source_equality_assignments: usize,
     pub(crate) source_disequality_assignments: usize,
+    pub(crate) redundant_theory_assignments_elided: usize,
+    pub(crate) boolean_shell_assignments_skipped: usize,
     pub(crate) explicit_partition_updates: usize,
     pub(crate) congruence_merges: usize,
     pub(crate) impact_calls: usize,
@@ -252,6 +276,7 @@ pub(crate) struct CadicalUpStats {
     pub(crate) unadvertised_theory_clauses_dropped: usize,
     pub(crate) theory_clauses: usize,
     pub(crate) theory_clause_literals: usize,
+    pub(crate) root_clause_literals_elided: usize,
     pub(crate) fail_closed_clauses: usize,
     pub(crate) solver_propagations: usize,
     pub(crate) solver_decisions: usize,
@@ -279,11 +304,245 @@ pub(crate) struct CadicalUpReport {
     pub(crate) theory_log: Box<[TheoryClauseLog]>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RootTheoryCompilationStats {
+    pub(crate) antecedent_source_literals: usize,
+    pub(crate) producer_implications: usize,
+    pub(crate) producer_conflicts: usize,
+    pub(crate) producer_clause_literals: usize,
+    pub(crate) independent_checker_work: usize,
+    pub(crate) added_units: usize,
+    pub(crate) input_clauses: usize,
+    pub(crate) output_clauses: usize,
+    pub(crate) output_fixed_atoms: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RootTheoryCompilationOutcome {
+    Reduced {
+        reduced: RootSimplification,
+        theory_log: Box<[TheoryClauseLog]>,
+        stats: RootTheoryCompilationStats,
+    },
+    Unsat {
+        theory_log: Box<[TheoryClauseLog]>,
+        stats: RootTheoryCompilationStats,
+    },
+}
+
 /// Solve one already-lowered Fabric problem through the isolated IPASIR-UP
 /// adapter. This function is intentionally not routed from production code.
 pub(crate) fn solve(
     problem: &SemanticProblem,
     formula: &NativeFormula,
+    caps: CadicalUpCaps,
+) -> CadicalUpReport {
+    solve_internal(problem, formula, None, caps)
+}
+
+pub(crate) fn solve_reduced(
+    problem: &SemanticProblem,
+    reduced: &RootSimplification,
+    caps: CadicalUpCaps,
+) -> CadicalUpReport {
+    solve_internal(problem, &reduced.formula, Some(&reduced.fixed_values), caps)
+}
+
+/// Compile every theory consequence of the propositionally forced source
+/// assignment before SAT search. The producer is the incremental Fabric
+/// congruence engine, but all conclusions are accepted only after one fresh,
+/// implementation-independent batch replay in [`model`].
+pub(crate) fn compile_root_theory(
+    problem: &SemanticProblem,
+    reduced: &RootSimplification,
+    mut caps: CadicalUpCaps,
+) -> Result<RootTheoryCompilationOutcome, CadicalUpAbstention> {
+    let mut stats = CadicalUpStats::default();
+    validate_input(problem, &reduced.formula, caps, &mut stats)?;
+    if problem.stats.unsupported_fragments != 0 {
+        return Err(CadicalUpAbstention::UnsupportedFragments {
+            count: problem.stats.unsupported_fragments,
+        });
+    }
+
+    caps.lazy_propagation_reasons = false;
+    caps.preapply_forced_root_literals = false;
+    caps.profile_callback_timings = false;
+    let mut propagator = TheoryPropagator::new(
+        problem,
+        &reduced.formula,
+        Some(&reduced.fixed_values),
+        caps,
+        stats,
+    )
+    .map_err(|(reason, _)| reason)?;
+
+    let antecedents = reduced
+        .fixed_values
+        .iter()
+        .copied()
+        .enumerate()
+        .take(reduced.formula.source_atom_count)
+        .filter_map(|(index, value)| {
+            value.map(|positive| RootLiteral {
+                atom: AtomId::new(index as u32),
+                positive,
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut implication_literals = BTreeSet::new();
+    let mut theory_log = Vec::new();
+    let mut compilation_stats = RootTheoryCompilationStats {
+        antecedent_source_literals: antecedents.len(),
+        input_clauses: reduced.formula.clauses.len(),
+        ..RootTheoryCompilationStats::default()
+    };
+
+    while let Some(pending) = propagator.pending_propagations.pop_front() {
+        let Some((clause, antecedent_reasons)) = pending.eager_reason else {
+            return Err(CadicalUpAbstention::Internal(
+                "root theory compiler received a lazy producer reason",
+            ));
+        };
+        propagator.validate_propagation_clause(pending.literal, &clause)?;
+        implication_literals.insert(pending.literal);
+        compilation_stats.producer_clause_literals = checked_add(
+            compilation_stats.producer_clause_literals,
+            clause.len(),
+            "root theory producer literal count overflowed",
+        )?;
+        theory_log.push(TheoryClauseLog {
+            sequence: theory_log.len(),
+            kind: TheoryClauseKind::Propagation {
+                literal: pending.literal,
+            },
+            clause,
+            antecedent_reasons,
+        });
+    }
+    while let Some(pending) = propagator.pending_clauses.pop_front() {
+        if pending.kind != TheoryClauseKind::Conflict {
+            return Err(CadicalUpAbstention::Internal(
+                "root theory compiler received a non-conflict external clause",
+            ));
+        }
+        propagator.validate_false_clause(&pending.clause)?;
+        compilation_stats.producer_conflicts = checked_add(
+            compilation_stats.producer_conflicts,
+            1,
+            "root theory producer conflict count overflowed",
+        )?;
+        compilation_stats.producer_clause_literals = checked_add(
+            compilation_stats.producer_clause_literals,
+            pending.clause.len(),
+            "root theory producer literal count overflowed",
+        )?;
+        theory_log.push(TheoryClauseLog {
+            sequence: theory_log.len(),
+            kind: pending.kind,
+            clause: pending.clause,
+            antecedent_reasons: pending.antecedent_reasons,
+        });
+    }
+    compilation_stats.producer_implications = implication_literals.len();
+
+    let implications = implication_literals
+        .iter()
+        .copied()
+        .map(|literal| RootLiteral {
+            atom: literal.atom(),
+            positive: literal.is_positive(),
+        })
+        .collect::<Vec<_>>();
+    match model::validate_root_implication_batch(problem, &antecedents, &implications, caps.model)
+        .map_err(|_| CadicalUpAbstention::Internal("checking root theory implications"))?
+    {
+        model::RootImplicationBatchValidation::Valid { work } => {
+            compilation_stats.independent_checker_work = work;
+            if compilation_stats.producer_conflicts != 0 {
+                return Err(CadicalUpAbstention::Internal(
+                    "root theory producer conflict failed independent replay",
+                ));
+            }
+        }
+        model::RootImplicationBatchValidation::AntecedentConflict { work } => {
+            compilation_stats.independent_checker_work = work;
+            return Ok(RootTheoryCompilationOutcome::Unsat {
+                theory_log: theory_log.into_boxed_slice(),
+                stats: compilation_stats,
+            });
+        }
+        model::RootImplicationBatchValidation::Invalid { .. } => {
+            return Err(CadicalUpAbstention::Internal(
+                "root theory implication failed independent replay",
+            ));
+        }
+        model::RootImplicationBatchValidation::Abstained(limit) => {
+            return Err(CadicalUpAbstention::Model(limit));
+        }
+    }
+
+    let mut clauses = reduced.formula.clauses.to_vec();
+    clauses
+        .try_reserve(implication_literals.len())
+        .map_err(|_| CadicalUpAbstention::Internal("allocating root theory units"))?;
+    clauses.extend(
+        implication_literals
+            .iter()
+            .copied()
+            .map(|literal| Box::new([literal]) as Box<[Lit]>),
+    );
+    clauses.sort_unstable();
+    clauses.dedup();
+    compilation_stats.added_units = clauses
+        .iter()
+        .filter(|clause| clause.len() == 1)
+        .count()
+        .saturating_sub(
+            reduced
+                .formula
+                .clauses
+                .iter()
+                .filter(|clause| clause.len() == 1)
+                .count(),
+        );
+    let augmented = NativeFormula {
+        atom_count: reduced.formula.atom_count,
+        clauses: clauses.into_boxed_slice(),
+        source_atom_count: reduced.formula.source_atom_count,
+        auxiliary_atom_count: reduced.formula.auxiliary_atom_count,
+    };
+    match super::cnf_root::simplify(&augmented)
+        .map_err(|_| CadicalUpAbstention::Internal("simplifying root theory units"))?
+    {
+        super::cnf_root::RootSimplificationOutcome::Reduced(second) => {
+            compilation_stats.output_clauses = second.formula.clauses.len();
+            compilation_stats.output_fixed_atoms = second
+                .fixed_values
+                .iter()
+                .filter(|value| value.is_some())
+                .count();
+            Ok(RootTheoryCompilationOutcome::Reduced {
+                reduced: second,
+                theory_log: theory_log.into_boxed_slice(),
+                stats: compilation_stats,
+            })
+        }
+        super::cnf_root::RootSimplificationOutcome::Unsat { fixed_values, .. } => {
+            compilation_stats.output_fixed_atoms =
+                fixed_values.iter().filter(|value| value.is_some()).count();
+            Ok(RootTheoryCompilationOutcome::Unsat {
+                theory_log: theory_log.into_boxed_slice(),
+                stats: compilation_stats,
+            })
+        }
+    }
+}
+
+fn solve_internal(
+    problem: &SemanticProblem,
+    formula: &NativeFormula,
+    fixed_values: Option<&[Option<bool>]>,
     caps: CadicalUpCaps,
 ) -> CadicalUpReport {
     let mut stats = CadicalUpStats::default();
@@ -303,17 +562,16 @@ pub(crate) fn solve(
     }
 
     let phase_start = Instant::now();
-    let mut propagator =
-        match TheoryPropagator::new(problem, formula.source_atom_count, caps, stats) {
-            Ok(mut propagator) => {
-                propagator.stats.propagator_construction_ns = phase_start.elapsed().as_nanos();
-                propagator
-            }
-            Err((reason, mut stats)) => {
-                stats.propagator_construction_ns = phase_start.elapsed().as_nanos();
-                return empty_report(reason, stats);
-            }
-        };
+    let mut propagator = match TheoryPropagator::new(problem, formula, fixed_values, caps, stats) {
+        Ok(mut propagator) => {
+            propagator.stats.propagator_construction_ns = phase_start.elapsed().as_nanos();
+            propagator
+        }
+        Err((reason, mut stats)) => {
+            stats.propagator_construction_ns = phase_start.elapsed().as_nanos();
+            return empty_report(reason, stats);
+        }
+    };
 
     let phase_start = Instant::now();
     let mut solver = CaDiCaL::default();
@@ -353,7 +611,7 @@ pub(crate) fn solve(
     let phase_start = Instant::now();
     let mut observed = Vec::new();
     if observed
-        .try_reserve_exact(formula.source_atom_count)
+        .try_reserve_exact(propagator.stats.observed_variables)
         .is_err()
     {
         propagator.stats.observed_variable_setup_ns = phase_start.elapsed().as_nanos();
@@ -361,8 +619,10 @@ pub(crate) fn solve(
             reason: CadicalUpAbstention::Internal("allocating observed source variables"),
         });
     }
-    for index in 0..formula.source_atom_count {
-        observed.push(Var::new(index as u32));
+    for (index, is_observed) in propagator.observed_source_atoms.iter().copied().enumerate() {
+        if is_observed {
+            observed.push(Var::new(index as u32));
+        }
     }
     propagator.stats.observed_variables = observed.len();
     propagator.stats.observed_variable_setup_ns = phase_start.elapsed().as_nanos();
@@ -384,15 +644,6 @@ pub(crate) fn solve(
             Ok(SolverResult::Interrupted) => CadicalUpOutcome::Abstain {
                 reason: CadicalUpAbstention::SolverInterrupted,
             },
-            Ok(SolverResult::Unsat)
-                if propagator.stats.unadvertised_theory_clauses_dropped != 0 =>
-            {
-                CadicalUpOutcome::Abstain {
-                    reason: CadicalUpAbstention::UnsatAfterDroppedPendingClauses {
-                        count: propagator.stats.unadvertised_theory_clauses_dropped,
-                    },
-                }
-            }
             Ok(SolverResult::Unsat) => CadicalUpOutcome::Unsat,
             Ok(SolverResult::Sat) => match propagator.accepted_model.take() {
                 Some((source_atom_values, model)) => CadicalUpOutcome::Sat {
@@ -540,12 +791,18 @@ struct TheoryPropagator<'problem> {
     caps: CadicalUpCaps,
     congruence: RollbackIncrementalCongruence<'problem>,
     theory_atoms: TheoryAtomIndex,
+    theory_relevant_atoms: Box<[bool]>,
+    observed_source_atoms: Box<[bool]>,
+    globally_fixed_source_values: Box<[Option<bool>]>,
     assignments: Box<[Option<bool>]>,
+    preassigned_root_values: Box<[Option<bool>]>,
+    preassigned_root_notifications_seen: Box<[bool]>,
     trail: Vec<Lit>,
     level_starts: Vec<usize>,
     level_snapshots: Vec<IncrementalCongruenceSnapshot>,
     queued_polarities: Box<[Option<bool>]>,
     reason_tokens: Box<[Option<PropagationReasonToken>]>,
+    explanation_workspace: IncrementalExplanationWorkspace,
     affected_term_generations: Box<[u32]>,
     affected_generation: u32,
     pending_propagations: VecDeque<PendingPropagation>,
@@ -564,12 +821,22 @@ struct TheoryPropagator<'problem> {
 impl<'problem> TheoryPropagator<'problem> {
     fn new(
         problem: &'problem SemanticProblem,
-        source_atom_count: usize,
+        formula: &NativeFormula,
+        fixed_values: Option<&[Option<bool>]>,
         caps: CadicalUpCaps,
         mut stats: CadicalUpStats,
     ) -> Result<Self, (CadicalUpAbstention, CadicalUpStats)> {
+        let source_atom_count = formula.source_atom_count;
         if let Err(reason) = validate_boolean_universe(problem) {
             return Err((reason, stats));
+        }
+        if fixed_values.is_some_and(|values| values.len() != formula.atom_count) {
+            return Err((
+                CadicalUpAbstention::Malformed(
+                    "root simplification fixed-value vector has the wrong length",
+                ),
+                stats,
+            ));
         }
         let phase_start = Instant::now();
         let mut congruence = match RollbackIncrementalCongruence::with_limits_and_post_validation(
@@ -628,6 +895,184 @@ impl<'problem> TheoryPropagator<'problem> {
             }
         }
 
+        let structural_relevance = match theory_relevance(problem) {
+            Ok(relevance) => relevance,
+            Err(reason) => return Err((reason, stats)),
+        };
+        let observed_source_atoms =
+            match observed_source_atoms(problem, formula, fixed_values, &structural_relevance) {
+                Ok(observed) => observed,
+                Err(reason) => return Err((reason, stats)),
+            };
+        stats.observed_variables = observed_source_atoms.iter().filter(|value| **value).count();
+        stats.inactive_source_atoms = source_atom_count.saturating_sub(stats.observed_variables);
+        stats.fixed_source_atoms = fixed_values.map_or(0, |values| {
+            values
+                .iter()
+                .take(source_atom_count)
+                .filter(|value| value.is_some())
+                .count()
+        });
+
+        let mut theory_relevant_atoms = if caps.slice_boolean_shell {
+            structural_relevance.clone()
+        } else {
+            match try_filled_box(problem.atoms.len(), true) {
+                Ok(relevance) => relevance,
+                Err(reason) => return Err((reason, stats)),
+            }
+        };
+        for index in 0..theory_relevant_atoms.len() {
+            let fixed = fixed_values
+                .and_then(|values| values.get(index))
+                .is_some_and(Option::is_some);
+            theory_relevant_atoms[index] &= observed_source_atoms[index] || fixed;
+        }
+        stats.theory_relevant_atoms = theory_relevant_atoms.iter().filter(|value| **value).count();
+        stats.boolean_shell_atoms = structural_relevance.iter().filter(|value| !**value).count();
+
+        let mut preassigned_root_values = match try_filled_box(problem.atoms.len(), None) {
+            Ok(values) => values,
+            Err(reason) => return Err((reason, stats)),
+        };
+        if let Some(values) = fixed_values {
+            for (index, value) in values.iter().copied().enumerate().take(source_atom_count) {
+                preassigned_root_values[index] = value;
+            }
+        }
+        let globally_fixed_source_values = preassigned_root_values.clone();
+        if fixed_values.is_some() {
+            let mut native_source_units = match try_filled_box(source_atom_count, None) {
+                Ok(units) => units,
+                Err(reason) => return Err((reason, stats)),
+            };
+            for clause in formula.clauses.iter().filter(|clause| clause.len() == 1) {
+                let literal = clause[0];
+                let index = literal.atom().index();
+                if index >= source_atom_count {
+                    continue;
+                }
+                let value = literal.is_positive();
+                if native_source_units[index].is_some_and(|current| current != value) {
+                    return Err((
+                        CadicalUpAbstention::Malformed(
+                            "root-compiled formula has opposite native source units",
+                        ),
+                        stats,
+                    ));
+                }
+                native_source_units[index] = Some(value);
+            }
+            for (index, value) in globally_fixed_source_values.iter().copied().enumerate() {
+                let Some(value) = value else {
+                    continue;
+                };
+                if native_source_units[index] != Some(value) {
+                    return Err((
+                        CadicalUpAbstention::Malformed(
+                            "root-compiled source assignment has no native unit clause",
+                        ),
+                        stats,
+                    ));
+                }
+            }
+        }
+        let mut initial_conflict = None;
+        for (index, value) in preassigned_root_values.iter().copied().enumerate() {
+            let Some(value) = value else {
+                continue;
+            };
+            if !theory_relevant_atoms[index] {
+                continue;
+            }
+            let atom = AtomId::new(index as u32);
+            let literal = if value {
+                Lit::positive(atom)
+            } else {
+                Lit::negative(atom)
+            };
+            let (left, right, equal) = match initial_relation(problem, literal) {
+                Ok(relation) => relation,
+                Err(reason) => return Err((reason, stats)),
+            };
+            let reason = match literal_reason(literal) {
+                Ok(reason) => reason,
+                Err(error) => return Err((error, stats)),
+            };
+            let outcome = if equal {
+                congruence.assert_equality(left, right, reason)
+            } else {
+                congruence.assert_disequality(left, right, reason)
+            };
+            match outcome {
+                Ok(ApplyOutcome::Applied(applied)) => {
+                    stats.root_theory_literals_preapplied += 1;
+                    stats.explicit_partition_updates += usize::from(applied.explicit_update);
+                    stats.congruence_merges += applied.congruence_merges;
+                }
+                Ok(ApplyOutcome::Abstained(reason)) => {
+                    return Err((CadicalUpAbstention::Congruence(reason), stats));
+                }
+                Ok(ApplyOutcome::Conflict(conflict)) => {
+                    initial_conflict = Some(conflict);
+                    break;
+                }
+                Err(_) => {
+                    return Err((
+                        CadicalUpAbstention::Internal("preapplying a root-compiled theory literal"),
+                        stats,
+                    ));
+                }
+            }
+        }
+
+        if caps.preapply_forced_root_literals && initial_conflict.is_none() {
+            let forced_root_literals = match forced_root_literals(problem) {
+                Ok(literals) => literals,
+                Err(reason) => return Err((reason, stats)),
+            };
+            stats.root_literals_discovered = forced_root_literals.len();
+            for literal in forced_root_literals.iter().copied() {
+                if preassigned_root_values[literal.atom().index()].is_some()
+                    || !theory_relevant_atoms[literal.atom().index()]
+                {
+                    continue;
+                }
+                let (left, right, equal) = match initial_relation(problem, literal) {
+                    Ok(relation) => relation,
+                    Err(reason) => return Err((reason, stats)),
+                };
+                if !equal {
+                    continue;
+                }
+                let reason = match literal_reason(literal) {
+                    Ok(reason) => reason,
+                    Err(error) => return Err((error, stats)),
+                };
+                match congruence.assert_equality(left, right, reason) {
+                    Ok(ApplyOutcome::Applied(applied)) => {
+                        stats.root_theory_literals_preapplied += 1;
+                        stats.explicit_partition_updates += usize::from(applied.explicit_update);
+                        stats.congruence_merges += applied.congruence_merges;
+                        preassigned_root_values[literal.atom().index()] =
+                            Some(literal.is_positive());
+                    }
+                    Ok(ApplyOutcome::Abstained(reason)) => {
+                        return Err((CadicalUpAbstention::Congruence(reason), stats));
+                    }
+                    Ok(ApplyOutcome::Conflict(_)) => continue,
+                    Err(_) => {
+                        return Err((
+                            CadicalUpAbstention::Internal(
+                                "preapplying a forced root theory literal",
+                            ),
+                            stats,
+                        ));
+                    }
+                }
+            }
+        }
+
         let phase_start = Instant::now();
         let mut theory_atoms = match TheoryAtomIndex::with_caps(problem, caps.theory_atoms) {
             Ok(index) => index,
@@ -659,9 +1104,11 @@ impl<'problem> TheoryPropagator<'problem> {
                     _ => None,
                 }));
                 stats.sparse_root_terms = root_terms.len();
-                theory_atoms.mark_affected_terms(&root_terms)
+                theory_atoms.mark_affected_terms_where(&root_terms, |atom| {
+                    theory_relevant_atoms[atom.index()]
+                })
             } else {
-                theory_atoms.mark_all_terms()
+                theory_atoms.mark_all_terms_where(|atom| theory_relevant_atoms[atom.index()])
             };
             if let Err(error) = mark_result {
                 return Err((classify_theory_atom_error(error), stats));
@@ -670,7 +1117,8 @@ impl<'problem> TheoryPropagator<'problem> {
         stats.theory_atom_index_construction_ns = phase_start.elapsed().as_nanos();
 
         let phase_start = Instant::now();
-        let assignments = match try_filled_box(source_atom_count, None) {
+        let assignments = preassigned_root_values.clone();
+        let preassigned_root_notifications_seen = match try_filled_box(source_atom_count, false) {
             Ok(values) => values,
             Err(reason) => return Err((reason, stats)),
         };
@@ -681,6 +1129,16 @@ impl<'problem> TheoryPropagator<'problem> {
         let reason_tokens = match try_filled_box(source_atom_count, None) {
             Ok(values) => values,
             Err(reason) => return Err((reason, stats)),
+        };
+        let explanation_workspace = match IncrementalExplanationWorkspace::new(problem.terms.len())
+        {
+            Ok(workspace) => workspace,
+            Err(_) => {
+                return Err((
+                    CadicalUpAbstention::Internal("allocating explanation workspace"),
+                    stats,
+                ));
+            }
         };
         let affected_term_generations = match try_filled_box(problem.terms.len(), 0u32) {
             Ok(values) => values,
@@ -693,12 +1151,18 @@ impl<'problem> TheoryPropagator<'problem> {
             caps,
             congruence,
             theory_atoms,
+            theory_relevant_atoms,
+            observed_source_atoms,
+            globally_fixed_source_values,
             assignments,
+            preassigned_root_values,
+            preassigned_root_notifications_seen,
             trail: Vec::new(),
             level_starts: Vec::new(),
             level_snapshots: Vec::new(),
             queued_polarities,
             reason_tokens,
+            explanation_workspace,
             affected_term_generations,
             affected_generation: 0,
             pending_propagations: VecDeque::new(),
@@ -713,6 +1177,12 @@ impl<'problem> TheoryPropagator<'problem> {
             stats,
             theory_log: Vec::new(),
         };
+        if let Some(conflict) = initial_conflict {
+            if let Err(reason) = propagator.queue_congruence_conflict(&conflict) {
+                let stats = propagator.stats;
+                return Err((reason, stats));
+            }
+        }
         if propagator.caps.propagate_implied_atoms {
             let phase_start = Instant::now();
             if let Err(reason) = propagator.schedule_marked_atoms() {
@@ -770,7 +1240,14 @@ impl<'problem> TheoryPropagator<'problem> {
         };
         for &literal in literals {
             let decoded_literal = self.decode_source_literal(literal)?;
-            if self.assignments[decoded_literal.atom().index()].is_some() {
+            let index = decoded_literal.atom().index();
+            let value = decoded_literal.is_positive();
+            if self.preassigned_root_values[index] == Some(value)
+                && !self.preassigned_root_notifications_seen[index]
+            {
+                continue;
+            }
+            if self.assignments[index].is_some() {
                 return Err(CadicalUpAbstention::Internal(
                     "CaDiCaL repeated a source assignment without backtracking",
                 ));
@@ -785,12 +1262,22 @@ impl<'problem> TheoryPropagator<'problem> {
 
         if let Some(decoded) = decoded.as_ref() {
             for &literal in decoded {
+                let index = literal.atom().index();
+                if self.preassigned_root_values[index] == Some(literal.is_positive()) {
+                    self.preassigned_root_notifications_seen[index] = true;
+                    continue;
+                }
                 self.assignments[literal.atom().index()] = Some(literal.is_positive());
                 self.trail.push(literal);
             }
         } else {
             for &literal in literals {
                 let literal = self.decode_source_literal(literal)?;
+                let index = literal.atom().index();
+                if self.preassigned_root_values[index] == Some(literal.is_positive()) {
+                    self.preassigned_root_notifications_seen[index] = true;
+                    continue;
+                }
                 self.assignments[literal.atom().index()] = Some(literal.is_positive());
                 self.trail.push(literal);
             }
@@ -804,6 +1291,11 @@ impl<'problem> TheoryPropagator<'problem> {
 
         if let Some(decoded) = decoded {
             for literal in decoded {
+                if self.preassigned_root_values[literal.atom().index()]
+                    == Some(literal.is_positive())
+                {
+                    continue;
+                }
                 match self.apply_source_literal(literal)? {
                     SourceApply::Applied => {}
                     SourceApply::Conflict(conflict) => {
@@ -815,6 +1307,11 @@ impl<'problem> TheoryPropagator<'problem> {
         } else {
             for &literal in literals {
                 let literal = self.decode_source_literal(literal)?;
+                if self.preassigned_root_values[literal.atom().index()]
+                    == Some(literal.is_positive())
+                {
+                    continue;
+                }
                 match self.apply_source_literal(literal)? {
                     SourceApply::Applied => {}
                     SourceApply::Conflict(conflict) => {
@@ -941,6 +1438,14 @@ impl<'problem> TheoryPropagator<'problem> {
         let atom = self.problem.atoms.get(literal.atom().index()).ok_or(
             CadicalUpAbstention::Malformed("source assignment references a missing semantic atom"),
         )?;
+        if !self.theory_relevant_atoms[literal.atom().index()] {
+            self.stats.boolean_shell_assignments_skipped = checked_add(
+                self.stats.boolean_shell_assignments_skipped,
+                1,
+                "skipped Boolean-shell assignment count overflowed",
+            )?;
+            return Ok(SourceApply::Applied);
+        }
         let reason = literal_reason(literal)?;
         let (left, right, equal) = match atom {
             SemanticAtom::Equality(left, right) => (*left, *right, literal.is_positive()),
@@ -962,6 +1467,22 @@ impl<'problem> TheoryPropagator<'problem> {
                 )
             }
         };
+        if self.caps.elide_redundant_theory_assignments {
+            let relation = self
+                .congruence
+                .relation(left, right)
+                .map_err(|_| CadicalUpAbstention::Internal("querying a source assignment"))?;
+            if (equal && relation == Relation::Equal) || (!equal && relation == Relation::Disequal)
+            {
+                self.record_source_assignment_kind(equal)?;
+                self.stats.redundant_theory_assignments_elided = checked_add(
+                    self.stats.redundant_theory_assignments_elided,
+                    1,
+                    "redundant source assignment count overflowed",
+                )?;
+                return Ok(SourceApply::Applied);
+            }
+        }
         let merge_start = self.congruence.partition().merge_count();
         let phase_start = self.caps.profile_callback_timings.then(Instant::now);
         let prospective_narrow_terms = if self.caps.narrow_explicit_merge_frontier
@@ -1002,24 +1523,7 @@ impl<'problem> TheoryPropagator<'problem> {
                     .saturating_add(elapsed);
             }
         }
-        self.stats.source_assignments_applied = checked_add(
-            self.stats.source_assignments_applied,
-            1,
-            "applied source assignment count overflowed",
-        )?;
-        if equal {
-            self.stats.source_equality_assignments = checked_add(
-                self.stats.source_equality_assignments,
-                1,
-                "source equality assignment count overflowed",
-            )?;
-        } else {
-            self.stats.source_disequality_assignments = checked_add(
-                self.stats.source_disequality_assignments,
-                1,
-                "source disequality assignment count overflowed",
-            )?;
-        }
+        self.record_source_assignment_kind(equal)?;
 
         let phase_start = self.caps.profile_callback_timings.then(Instant::now);
         let result = match outcome {
@@ -1081,6 +1585,28 @@ impl<'problem> TheoryPropagator<'problem> {
                 .saturating_add(phase_start.elapsed().as_nanos());
         }
         result
+    }
+
+    fn record_source_assignment_kind(&mut self, equal: bool) -> Result<(), CadicalUpAbstention> {
+        self.stats.source_assignments_applied = checked_add(
+            self.stats.source_assignments_applied,
+            1,
+            "applied source assignment count overflowed",
+        )?;
+        if equal {
+            self.stats.source_equality_assignments = checked_add(
+                self.stats.source_equality_assignments,
+                1,
+                "source equality assignment count overflowed",
+            )?;
+        } else {
+            self.stats.source_disequality_assignments = checked_add(
+                self.stats.source_disequality_assignments,
+                1,
+                "source disequality assignment count overflowed",
+            )?;
+        }
+        Ok(())
     }
 
     fn prospective_narrow_merge_terms(
@@ -1313,11 +1839,13 @@ impl<'problem> TheoryPropagator<'problem> {
         }
         let assignments = &self.assignments;
         let problem = self.problem;
+        let theory_relevant_atoms = &self.theory_relevant_atoms;
         let generations = &self.affected_term_generations;
         let generation = self.affected_generation;
         self.theory_atoms
             .mark_affected_terms_where(affected, |atom| {
-                assignments[atom.index()].is_none()
+                theory_relevant_atoms[atom.index()]
+                    && assignments[atom.index()].is_none()
                     && (!pair_filtered
                         || atom_relation_may_change(problem, atom, generations, generation))
             })
@@ -1644,7 +2172,7 @@ impl<'problem> TheoryPropagator<'problem> {
     }
 
     fn expand_reason_token(
-        &self,
+        &mut self,
         token: PropagationReasonToken,
     ) -> Result<(Box<[Lit]>, Box<[ReasonId]>), CadicalUpAbstention> {
         let reasons = match token.witness {
@@ -1724,14 +2252,22 @@ impl<'problem> TheoryPropagator<'problem> {
     }
 
     fn equality_reasons_at(
-        &self,
+        &mut self,
         left: TermId,
         right: TermId,
         snapshot: IncrementalCongruenceSnapshot,
     ) -> Result<Option<Vec<ReasonId>>, CadicalUpAbstention> {
-        match self
-            .congruence
-            .explain_equal_at(left, right, snapshot)
+        let explanation = if self.caps.reuse_explanation_workspace {
+            self.congruence.explain_equal_at_with_workspace(
+                left,
+                right,
+                snapshot,
+                &mut self.explanation_workspace,
+            )
+        } else {
+            self.congruence.explain_equal_at(left, right, snapshot)
+        };
+        match explanation
             .map_err(|_| CadicalUpAbstention::Internal("explaining a historical equality"))?
         {
             ExplanationOutcome::NotEqual => Ok(None),
@@ -1879,8 +2415,30 @@ impl<'problem> TheoryPropagator<'problem> {
 
     fn canonical_explicit_reasons(
         &self,
-        reasons: Vec<ReasonId>,
+        mut reasons: Vec<ReasonId>,
     ) -> Result<Vec<ReasonId>, CadicalUpAbstention> {
+        if self.caps.flat_reason_canonicalization {
+            reasons.sort_unstable();
+            reasons.dedup();
+            check_cap(
+                CadicalUpResource::ReasonAntecedents,
+                reasons.len(),
+                self.caps.max_reason_antecedents,
+            )?;
+            for &reason in &reasons {
+                if reason == ROOT_BOOLEAN_SEPARATION_REASON {
+                    return Err(CadicalUpAbstention::Internal(
+                        "the Boolean separation reason appeared in an equality proof",
+                    ));
+                }
+                if reason == ReasonId::MAX {
+                    return Err(CadicalUpAbstention::Internal(
+                        "a derived partition marker escaped into an explanation",
+                    ));
+                }
+            }
+            return Ok(reasons);
+        }
         let mut canonical = BTreeSet::new();
         for reason in reasons {
             if reason == ROOT_BOOLEAN_SEPARATION_REASON {
@@ -1908,7 +2466,31 @@ impl<'problem> TheoryPropagator<'problem> {
     fn active_literals_for_reasons(
         &self,
         reasons: &[ReasonId],
-    ) -> Result<BTreeSet<Lit>, CadicalUpAbstention> {
+    ) -> Result<Vec<Lit>, CadicalUpAbstention> {
+        if self.caps.flat_literal_antecedents {
+            let mut literals = try_vec(reasons.len(), "collecting flat theory antecedents")?;
+            for &reason in reasons {
+                let literal = literal_from_reason(reason, self.source_atom_count).ok_or(
+                    CadicalUpAbstention::Internal("theory explanation contains an unknown reason"),
+                )?;
+                if self.assignments[literal.atom().index()] != Some(literal.is_positive()) {
+                    return Err(CadicalUpAbstention::Internal(
+                        "theory explanation contains an inactive source reason",
+                    ));
+                }
+                literals.push(literal);
+            }
+            literals.sort_unstable();
+            literals.dedup();
+            if literals.windows(2).any(|pair| {
+                pair[0].atom() == pair[1].atom() && pair[0].is_positive() != pair[1].is_positive()
+            }) {
+                return Err(CadicalUpAbstention::Internal(
+                    "theory explanation antecedents are contradictory",
+                ));
+            }
+            return Ok(literals);
+        }
         let mut literals = BTreeSet::new();
         for &reason in reasons {
             let literal = literal_from_reason(reason, self.source_atom_count).ok_or(
@@ -1926,7 +2508,9 @@ impl<'problem> TheoryPropagator<'problem> {
             }
             literals.insert(literal);
         }
-        Ok(literals)
+        let mut output = try_vec(literals.len(), "collecting ordered theory antecedents")?;
+        output.extend(literals);
+        Ok(output)
     }
 
     fn queue_congruence_conflict(
@@ -2026,6 +2610,36 @@ impl<'problem> TheoryPropagator<'problem> {
         Ok(())
     }
 
+    fn solver_visible_clause(
+        &mut self,
+        clause: &[Lit],
+    ) -> Result<Vec<SatLit>, CadicalUpAbstention> {
+        let mut visible = try_vec(clause.len(), "projecting a root-compiled theory clause")?;
+        for &literal in clause {
+            let index = literal.atom().index();
+            if let Some(value) = self.globally_fixed_source_values[index] {
+                if value == literal.is_positive() {
+                    return Err(CadicalUpAbstention::Internal(
+                        "a theory clause is satisfied by a globally fixed source literal",
+                    ));
+                }
+                self.stats.root_clause_literals_elided = checked_add(
+                    self.stats.root_clause_literals_elided,
+                    1,
+                    "root clause projection count overflowed",
+                )?;
+                continue;
+            }
+            if !self.observed_source_atoms[index] {
+                return Err(CadicalUpAbstention::Internal(
+                    "a SAT-visible theory clause references an unobserved source atom",
+                ));
+            }
+            visible.push(to_sat_lit(literal));
+        }
+        Ok(visible)
+    }
+
     fn emit_propagation(&mut self) -> Result<Option<ExternalPropagation>, CadicalUpAbstention> {
         if !self.pending_clauses.is_empty() {
             return Ok(None);
@@ -2054,13 +2668,13 @@ impl<'problem> TheoryPropagator<'problem> {
             self.stats.theory_propagations = attempted;
             if let Some((clause, antecedent_reasons)) = pending.eager_reason {
                 self.validate_propagation_clause(pending.literal, &clause)?;
-                let sat_clause = sat_literals(&clause)?;
+                let sat_clause = self.solver_visible_clause(&clause)?;
                 self.record_theory_clause(
                     TheoryClauseKind::Propagation {
                         literal: pending.literal,
                     },
-                    &clause,
-                    &antecedent_reasons,
+                    clause,
+                    antecedent_reasons,
                 )?;
                 return Ok(Some(ExternalPropagation::new(
                     to_sat_lit(pending.literal),
@@ -2095,11 +2709,11 @@ impl<'problem> TheoryPropagator<'problem> {
         }
         let (clause, antecedent_reasons) = self.expand_reason_token(token)?;
         self.validate_propagation_clause(literal, &clause)?;
-        let sat_clause = sat_literals(&clause)?;
+        let sat_clause = self.solver_visible_clause(&clause)?;
         self.record_theory_clause(
             TheoryClauseKind::Propagation { literal },
-            &clause,
-            &antecedent_reasons,
+            clause,
+            antecedent_reasons,
         )?;
         self.stats.lazy_reason_requests = checked_add(
             self.stats.lazy_reason_requests,
@@ -2137,8 +2751,8 @@ impl<'problem> TheoryPropagator<'problem> {
             return Ok(None);
         };
         self.validate_false_clause(&pending.clause)?;
-        let sat_clause = sat_literals(&pending.clause)?;
-        self.record_theory_clause(pending.kind, &pending.clause, &pending.antecedent_reasons)?;
+        let sat_clause = self.solver_visible_clause(&pending.clause)?;
+        self.record_theory_clause(pending.kind, pending.clause, pending.antecedent_reasons)?;
         match pending.kind {
             TheoryClauseKind::Conflict => {
                 self.stats.theory_conflicts = checked_add(
@@ -2163,8 +2777,8 @@ impl<'problem> TheoryPropagator<'problem> {
     fn record_theory_clause(
         &mut self,
         kind: TheoryClauseKind,
-        clause: &[Lit],
-        antecedent_reasons: &[ReasonId],
+        clause: Box<[Lit]>,
+        antecedent_reasons: Box<[ReasonId]>,
     ) -> Result<(), CadicalUpAbstention> {
         let clause_count = checked_add(
             self.stats.theory_clauses,
@@ -2186,19 +2800,25 @@ impl<'problem> TheoryPropagator<'problem> {
             literal_count,
             self.caps.max_logged_literals,
         )?;
-        let clause_copy = try_boxed_copy(clause, "copying a theory clause into the replay log")?;
-        let reason_copy = try_boxed_copy(
-            antecedent_reasons,
-            "copying theory reasons into the replay log",
-        )?;
+        let (logged_clause, logged_reasons) = if self.caps.zero_copy_theory_log {
+            (clause, antecedent_reasons)
+        } else {
+            (
+                try_boxed_copy(&clause, "copying a theory clause into the replay log")?,
+                try_boxed_copy(
+                    &antecedent_reasons,
+                    "copying theory reasons into the replay log",
+                )?,
+            )
+        };
         self.theory_log
             .try_reserve(1)
             .map_err(|_| CadicalUpAbstention::Internal("growing the theory replay log"))?;
         self.theory_log.push(TheoryClauseLog {
             sequence: self.theory_log.len(),
             kind,
-            clause: clause_copy,
-            antecedent_reasons: reason_copy,
+            clause: logged_clause,
+            antecedent_reasons: logged_reasons,
         });
         self.stats.theory_clauses = clause_count;
         self.stats.theory_clause_literals = literal_count;
@@ -2217,28 +2837,56 @@ impl<'problem> TheoryPropagator<'problem> {
         let mut values = try_filled_vec(self.source_atom_count, None)?;
         for &literal in model {
             let source = self.decode_source_literal(literal)?;
-            let slot = &mut values[source.atom().index()];
+            let index = source.atom().index();
+            if !self.observed_source_atoms[index] {
+                return Err(CadicalUpAbstention::Internal(
+                    "a complete model includes an unobserved source atom",
+                ));
+            }
+            let slot = &mut values[index];
             if slot.replace(source.is_positive()).is_some() {
                 return Err(CadicalUpAbstention::Internal(
                     "a complete model assigns a source atom twice",
                 ));
             }
         }
-        if values.iter().any(Option::is_none) {
-            return Err(CadicalUpAbstention::Internal(
-                "a complete model omits an observed source atom",
-            ));
-        }
         let mut complete = try_vec(values.len(), "materializing a complete source model")?;
         for (index, value) in values.into_iter().enumerate() {
-            let value = value.ok_or(CadicalUpAbstention::Internal(
-                "validated complete model contains an unknown value",
-            ))?;
-            if self.assignments[index] != Some(value) {
-                return Err(CadicalUpAbstention::Internal(
-                    "model callback disagrees with the reported source trail",
-                ));
-            }
+            let value = if self.observed_source_atoms[index] {
+                let value = value.ok_or(CadicalUpAbstention::Internal(
+                    "a complete model omits an observed source atom",
+                ))?;
+                if self.assignments[index] != Some(value) {
+                    return Err(CadicalUpAbstention::Internal(
+                        "model callback disagrees with the reported source trail",
+                    ));
+                }
+                value
+            } else if let Some(value) = self.preassigned_root_values[index] {
+                value
+            } else {
+                match self
+                    .problem
+                    .atoms
+                    .get(index)
+                    .ok_or(CadicalUpAbstention::Malformed(
+                        "model reconstruction references a missing semantic atom",
+                    ))? {
+                    SemanticAtom::Equality(left, right) => {
+                        self.congruence.are_equal(*left, *right).map_err(|_| {
+                            CadicalUpAbstention::Internal(
+                                "reconstructing an inactive equality atom",
+                            )
+                        })?
+                    }
+                    SemanticAtom::BoolTerm(_) if self.theory_relevant_atoms[index] => {
+                        return Err(CadicalUpAbstention::Internal(
+                            "a theory-relevant Boolean atom was neither fixed nor observed",
+                        ));
+                    }
+                    SemanticAtom::BoolTerm(_) => false,
+                }
+            };
             complete.push(value);
         }
 
@@ -2259,6 +2907,11 @@ impl<'problem> TheoryPropagator<'problem> {
                     1,
                     "invalid model count overflowed",
                 )?;
+                if self.stats.inactive_source_atoms != 0 {
+                    return Err(CadicalUpAbstention::Internal(
+                        "independent validation rejected a reconstructed reduced model",
+                    ));
+                }
                 let blocks = checked_add(self.stats.model_blocks, 1, "model block cap overflowed")?;
                 check_cap(
                     CadicalUpResource::ModelBlocks,
@@ -2322,6 +2975,85 @@ impl<'problem> TheoryPropagator<'problem> {
             self.queued_polarities[pending.literal.atom().index()] = None;
         }
     }
+}
+
+fn forced_root_literals(problem: &SemanticProblem) -> Result<Box<[Lit]>, CadicalUpAbstention> {
+    let mut values = try_filled_vec(problem.atoms.len(), None)?;
+    let mut pending = Vec::new();
+    pending
+        .try_reserve(problem.assertions.len())
+        .map_err(|_| CadicalUpAbstention::Internal("collecting forced Boolean roots"))?;
+    pending.extend(
+        problem
+            .assertions
+            .iter()
+            .rev()
+            .map(|expression| (expression, true)),
+    );
+
+    while let Some((expression, positive)) = pending.pop() {
+        match expression {
+            super::semantic::SemanticExpr::Const(value) => {
+                if *value != positive {
+                    return Err(CadicalUpAbstention::Malformed(
+                        "the asserted Boolean shell contains a forced contradiction",
+                    ));
+                }
+            }
+            super::semantic::SemanticExpr::Atom(atom) => {
+                let slot = values
+                    .get_mut(atom.index())
+                    .ok_or(CadicalUpAbstention::Malformed(
+                        "forced Boolean root references a missing semantic atom",
+                    ))?;
+                if slot.is_some_and(|value| value != positive) {
+                    return Err(CadicalUpAbstention::Malformed(
+                        "the asserted Boolean shell forces opposite atom values",
+                    ));
+                }
+                *slot = Some(positive);
+            }
+            super::semantic::SemanticExpr::Not(child) => pending.push((child, !positive)),
+            super::semantic::SemanticExpr::And(children) if positive => {
+                pending.extend(children.iter().rev().map(|child| (child, true)));
+            }
+            super::semantic::SemanticExpr::Or(children) if !positive => {
+                pending.extend(children.iter().rev().map(|child| (child, false)));
+            }
+            super::semantic::SemanticExpr::And(children)
+            | super::semantic::SemanticExpr::Or(children)
+                if children.len() == 1 =>
+            {
+                pending.push((&children[0], positive));
+            }
+            super::semantic::SemanticExpr::Iff(children) if positive => {
+                let forced_value = children.iter().find_map(|child| match child {
+                    super::semantic::SemanticExpr::Const(value) => Some(*value),
+                    _ => None,
+                });
+                if let Some(value) = forced_value {
+                    pending.extend(children.iter().rev().map(|child| (child, value)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let literals = values
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            value.map(|positive| {
+                let atom = AtomId::new(index as u32);
+                if positive {
+                    Lit::positive(atom)
+                } else {
+                    Lit::negative(atom)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(literals.into_boxed_slice())
 }
 
 impl ExternalPropagator for TheoryPropagator<'_> {
@@ -2471,6 +3203,118 @@ impl ExternalPropagator for TheoryPropagator<'_> {
 enum SourceApply {
     Applied,
     Conflict(CongruenceConflict),
+}
+
+fn observed_source_atoms(
+    problem: &SemanticProblem,
+    formula: &NativeFormula,
+    fixed_values: Option<&[Option<bool>]>,
+    structural_relevance: &[bool],
+) -> Result<Box<[bool]>, CadicalUpAbstention> {
+    let mut observed = try_filled_box(formula.source_atom_count, false)?;
+    for clause in formula.clauses.iter() {
+        for &literal in clause.iter() {
+            let index = literal.atom().index();
+            if index >= formula.source_atom_count {
+                continue;
+            }
+            let fixed = fixed_values
+                .and_then(|values| values.get(index))
+                .is_some_and(Option::is_some);
+            if !fixed {
+                observed[index] = true;
+            }
+        }
+    }
+    for (index, atom) in problem.atoms.iter().enumerate() {
+        let fixed = fixed_values
+            .and_then(|values| values.get(index))
+            .is_some_and(Option::is_some);
+        let theory_connected = structural_relevance.get(index).copied() == Some(true);
+        if !fixed && theory_connected && matches!(atom, SemanticAtom::BoolTerm(_)) {
+            observed[index] = true;
+        }
+    }
+    Ok(observed)
+}
+
+fn initial_relation(
+    problem: &SemanticProblem,
+    literal: Lit,
+) -> Result<(TermId, TermId, bool), CadicalUpAbstention> {
+    let atom = problem
+        .atoms
+        .get(literal.atom().index())
+        .ok_or(CadicalUpAbstention::Malformed(
+            "initial source literal references a missing semantic atom",
+        ))?;
+    match atom {
+        SemanticAtom::Equality(left, right) => Ok((*left, *right, literal.is_positive())),
+        SemanticAtom::BoolTerm(term) => {
+            let (true_term, false_term) =
+                problem
+                    .boolean_values
+                    .ok_or(CadicalUpAbstention::Malformed(
+                        "initial Boolean literal has no distinguished Boolean values",
+                    ))?;
+            Ok((
+                *term,
+                if literal.is_positive() {
+                    true_term
+                } else {
+                    false_term
+                },
+                true,
+            ))
+        }
+    }
+}
+
+fn theory_relevance(problem: &SemanticProblem) -> Result<Box<[bool]>, CadicalUpAbstention> {
+    let mut relevant_terms = try_filled_box(problem.terms.len(), false)?;
+    for term in &problem.terms {
+        for argument in &term.arguments {
+            let Some(relevant) = relevant_terms.get_mut(argument.index()) else {
+                return Err(CadicalUpAbstention::Malformed(
+                    "semantic application has an out-of-range argument",
+                ));
+            };
+            *relevant = true;
+        }
+    }
+    for atom in &problem.atoms {
+        match atom {
+            SemanticAtom::Equality(left, right) => {
+                for term in [left, right] {
+                    let Some(relevant) = relevant_terms.get_mut(term.index()) else {
+                        return Err(CadicalUpAbstention::Malformed(
+                            "semantic equality has an out-of-range endpoint",
+                        ));
+                    };
+                    *relevant = true;
+                }
+            }
+            SemanticAtom::BoolTerm(term) => {
+                let Some(semantic) = problem.terms.get(term.index()) else {
+                    return Err(CadicalUpAbstention::Malformed(
+                        "Boolean atom has an out-of-range term",
+                    ));
+                };
+                if !semantic.arguments.is_empty() {
+                    relevant_terms[term.index()] = true;
+                }
+            }
+        }
+    }
+
+    let mut relevant_atoms = try_filled_box(problem.atoms.len(), false)?;
+    for (index, atom) in problem.atoms.iter().enumerate() {
+        relevant_atoms[index] = match atom {
+            SemanticAtom::Equality(_, _) => true,
+            SemanticAtom::BoolTerm(term) => relevant_terms[term.index()],
+        };
+    }
+    Ok(relevant_atoms)
 }
 
 fn validate_boolean_universe(problem: &SemanticProblem) -> Result<(), CadicalUpAbstention> {
@@ -2666,6 +3510,7 @@ fn try_boxed_copy<T: Copy>(
 #[cfg(test)]
 mod tests {
     use super::super::bool_cnf::{self, LoweringCaps};
+    use super::super::cnf_root::{self, RootSimplification, RootSimplificationOutcome};
     use super::super::engine::{EngineCaps, ReferenceOutcome, solve_incremental_reference};
     use super::super::model::{
         LiteralConjunctionValidation, ModelValidation, validate_complete,
@@ -2689,11 +3534,152 @@ mod tests {
         (problem, formula, report)
     }
 
+    fn reduced(source: &str) -> (SemanticProblem, RootSimplification) {
+        let parsed = parse_problem(source).expect("test source must parse");
+        let problem = semantic::project(&parsed).expect("test source must project");
+        let formula = bool_cnf::lower_direct(&problem, LoweringCaps::unlimited())
+            .expect("test source must lower directly");
+        let RootSimplificationOutcome::Reduced(reduced) =
+            cnf_root::simplify(&formula).expect("root simplification must succeed")
+        else {
+            panic!("test source must not be propositionally contradictory");
+        };
+        (problem, reduced)
+    }
+
     fn assert_sat(report: &CadicalUpReport) {
         assert!(
             matches!(report.outcome, CadicalUpOutcome::Sat { .. }),
             "expected SAT, got {report:#?}"
         );
+    }
+
+    #[test]
+    fn reduced_sat_reconstructs_fixed_and_inactive_source_atoms() {
+        let (problem, reduced) = reduced(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (declare-const p Bool)\n\
+             (assert p)\n\
+             (assert (or p (= a b)))\n\
+             (check-sat)",
+        );
+        let mut caps = CadicalUpCaps::default();
+        caps.slice_boolean_shell = true;
+        let report = solve_reduced(&problem, &reduced, caps);
+
+        assert_sat(&report);
+        assert!(report.stats.fixed_source_atoms > 0);
+        assert!(report.stats.inactive_source_atoms > 0);
+        assert_eq!(report.stats.invalid_models, 0);
+    }
+
+    #[test]
+    fn reduced_root_theory_conflict_projects_to_checked_unsat() {
+        let (problem, reduced) = reduced(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (declare-fun f (U) U)\n\
+             (assert (= a b))\n\
+             (assert (not (= (f a) (f b))))\n\
+             (check-sat)",
+        );
+        let report = solve_reduced(&problem, &reduced, CadicalUpCaps::default());
+
+        assert_unsat(&report);
+        assert!(report.stats.root_clause_literals_elided > 0);
+        validate_emitted_lemmas(&problem, &report);
+    }
+
+    #[test]
+    fn root_theory_compiler_checks_and_fixes_a_congruence_implication() {
+        let (problem, reduced) = reduced(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (declare-const p Bool)\n\
+             (declare-fun f (U) U)\n\
+             (assert (= a b))\n\
+             (assert (or (= (f a) (f b)) p))\n\
+             (check-sat)",
+        );
+        let input_fixed_atoms = reduced
+            .fixed_values
+            .iter()
+            .filter(|value| value.is_some())
+            .count();
+
+        let outcome = compile_root_theory(&problem, &reduced, CadicalUpCaps::default())
+            .expect("checked root theory compilation must succeed");
+        let RootTheoryCompilationOutcome::Reduced {
+            reduced: compiled,
+            theory_log,
+            stats,
+        } = outcome
+        else {
+            panic!("consistent root assignment must remain satisfiable");
+        };
+
+        assert!(stats.producer_implications > 0);
+        assert_eq!(stats.producer_conflicts, 0);
+        assert!(stats.independent_checker_work > 0);
+        assert!(stats.added_units > 0);
+        assert!(stats.output_fixed_atoms > input_fixed_atoms);
+        assert_eq!(stats.output_fixed_atoms, compiled.stats.fixed_atoms);
+        assert_eq!(theory_log.len(), stats.producer_implications);
+        for entry in theory_log.iter() {
+            assert!(matches!(entry.kind, TheoryClauseKind::Propagation { .. }));
+        }
+    }
+
+    #[test]
+    fn root_theory_compiler_checks_a_conflicting_antecedent_batch() {
+        let (problem, reduced) = reduced(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (declare-fun f (U) U)\n\
+             (assert (= a b))\n\
+             (assert (not (= (f a) (f b))))\n\
+             (check-sat)",
+        );
+
+        let outcome = compile_root_theory(&problem, &reduced, CadicalUpCaps::default())
+            .expect("independently checked root conflict must compile");
+        let RootTheoryCompilationOutcome::Unsat { theory_log, stats } = outcome else {
+            panic!("inconsistent root assignment must compile to UNSAT");
+        };
+
+        assert!(stats.producer_conflicts > 0);
+        assert!(stats.independent_checker_work > 0);
+        assert!(
+            theory_log
+                .iter()
+                .any(|entry| entry.kind == TheoryClauseKind::Conflict)
+        );
+    }
+
+    #[test]
+    fn reduced_solver_rejects_a_missing_fixed_source_unit() {
+        let (problem, mut reduced) = reduced(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (assert (= a b))\n\
+             (check-sat)",
+        );
+        reduced.formula.clauses = Box::new([]);
+        let report = solve_reduced(&problem, &reduced, CadicalUpCaps::default());
+        assert!(matches!(
+            report.outcome,
+            CadicalUpOutcome::Abstain {
+                reason: CadicalUpAbstention::Malformed(
+                    "root-compiled source assignment has no native unit clause"
+                )
+            }
+        ));
     }
 
     fn assert_unsat(report: &CadicalUpReport) {
@@ -2721,6 +3707,84 @@ mod tests {
              (check-sat)");
         assert_unsat(&unsat);
         assert!(unsat.stats.theory_conflicts > 0);
+    }
+
+    #[test]
+    fn boolean_shell_slice_keeps_exactly_theory_connected_boolean_terms() {
+        let (problem, _) = project(
+            "(set-logic QF_UF)\n\
+             (declare-const wire Bool)\n\
+             (declare-const argument Bool)\n\
+             (declare-fun p (Bool) Bool)\n\
+             (assert (or wire (p argument)))\n\
+             (check-sat)",
+        );
+        let relevance = theory_relevance(&problem).unwrap();
+        let mut isolated = 0usize;
+        let mut connected = 0usize;
+        for (index, atom) in problem.atoms.iter().enumerate() {
+            let SemanticAtom::BoolTerm(term) = atom else {
+                continue;
+            };
+            let used_as_argument = problem
+                .terms
+                .iter()
+                .any(|candidate| candidate.arguments.contains(term));
+            if problem.terms[term.index()].arguments.is_empty() && !used_as_argument {
+                isolated += 1;
+                assert!(!relevance[index]);
+            } else {
+                connected += 1;
+                assert!(relevance[index]);
+            }
+        }
+        assert_eq!((isolated, connected), (1, 2));
+    }
+
+    #[test]
+    fn boolean_shell_slice_matches_full_theory_on_sat_and_unsat_sources() {
+        let sources = [
+            (
+                true,
+                "(set-logic QF_UF)\n\
+                 (declare-const wire Bool)\n\
+                 (declare-const a Bool) (declare-const b Bool)\n\
+                 (declare-fun p (Bool) Bool)\n\
+                 (assert (= wire (not (p a))))\n\
+                 (assert (= a b))\n\
+                 (assert (p b))\n\
+                 (check-sat)",
+            ),
+            (
+                false,
+                "(set-logic QF_UF)\n\
+                 (declare-const wire Bool)\n\
+                 (declare-const a Bool) (declare-const b Bool)\n\
+                 (declare-fun p (Bool) Bool)\n\
+                 (assert (or wire (not wire)))\n\
+                 (assert (= a b))\n\
+                 (assert (not (p a)))\n\
+                 (assert (p b))\n\
+                 (check-sat)",
+            ),
+        ];
+        for (expected_sat, source) in sources {
+            let (problem, _) = project(source);
+            let formula = bool_cnf::lower_direct(&problem, LoweringCaps::unlimited()).unwrap();
+            let full = solve(&problem, &formula, CadicalUpCaps::default());
+            let mut sliced_caps = CadicalUpCaps::default();
+            sliced_caps.slice_boolean_shell = true;
+            let sliced = solve(&problem, &formula, sliced_caps);
+            if expected_sat {
+                assert_sat(&full);
+                assert_sat(&sliced);
+            } else {
+                assert_unsat(&full);
+                assert_unsat(&sliced);
+            }
+            validate_emitted_lemmas(&problem, &sliced);
+            assert!(sliced.stats.boolean_shell_atoms > 0);
+        }
     }
 
     #[test]
@@ -2837,13 +3901,9 @@ mod tests {
             caps.sparse_root_initialization = true;
             caps.demand_driven_propagation_flush = demand_driven;
             caps.propagation_batch_updates = 4;
-            let mut propagator = TheoryPropagator::new(
-                &problem,
-                formula.source_atom_count,
-                caps,
-                CadicalUpStats::default(),
-            )
-            .unwrap();
+            let mut propagator =
+                TheoryPropagator::new(&problem, &formula, None, caps, CadicalUpStats::default())
+                    .unwrap();
 
             propagator
                 .notify_assignment_inner(&[SatLit::positive(equality_atom as u32)])
@@ -2901,7 +3961,8 @@ mod tests {
         };
         let mut propagator = TheoryPropagator::new(
             &problem,
-            formula.source_atom_count,
+            &formula,
+            None,
             CadicalUpCaps::default(),
             CadicalUpStats::default(),
         )
@@ -2917,7 +3978,18 @@ mod tests {
         );
         assert_eq!(propagator.assignments[atom_index], Some(true));
 
+        let assigned = Lit::positive(AtomId::new(atom_index as u32));
+        propagator
+            .queue_external_clause(
+                TheoryClauseKind::Conflict,
+                Box::new([assigned.negate()]),
+                Box::new([literal_reason(assigned).unwrap()]),
+            )
+            .unwrap();
+
         propagator.notify_backtrack_inner(0).unwrap();
+        assert_eq!(propagator.stats.unadvertised_theory_clauses_dropped, 1);
+        assert!(propagator.pending_clauses.is_empty());
         assert_eq!(
             propagator.congruence.relation(left, right).unwrap(),
             Relation::Unknown
@@ -2957,13 +4029,9 @@ mod tests {
         let consequence_atom = consequence_atom.unwrap();
         let mut caps = CadicalUpCaps::default();
         caps.lazy_propagation_reasons = true;
-        let mut propagator = TheoryPropagator::new(
-            &problem,
-            formula.source_atom_count,
-            caps,
-            CadicalUpStats::default(),
-        )
-        .unwrap();
+        let mut propagator =
+            TheoryPropagator::new(&problem, &formula, None, caps, CadicalUpStats::default())
+                .unwrap();
 
         propagator
             .notify_assignment_inner(&[SatLit::positive(base_atom as u32)])
@@ -3177,6 +4245,9 @@ mod tests {
             let mut compact_callback_caps = fast_constructor_caps;
             compact_callback_caps.allocation_free_assignment_decode = true;
             let compact_callback = solve(&problem, &formula, compact_callback_caps);
+            let mut elided_caps = fast_constructor_caps;
+            elided_caps.elide_redundant_theory_assignments = true;
+            let elided = solve(&problem, &formula, elided_caps);
             assert_eq!(
                 std::mem::discriminant(&lazy.outcome),
                 std::mem::discriminant(&eager.outcome),
@@ -3261,6 +4332,18 @@ mod tests {
                 "compact callback abstained for generated case {encoded}: {:?}",
                 compact_callback.outcome
             );
+            assert_eq!(
+                std::mem::discriminant(&elided.outcome),
+                std::mem::discriminant(&eager.outcome),
+                "assignment-elided/eager outcome mismatch for generated case {encoded}: eager={:?}, elided={:?}",
+                eager.outcome,
+                elided.outcome
+            );
+            assert!(
+                !matches!(elided.outcome, CadicalUpOutcome::Abstain { .. }),
+                "assignment-elided adapter abstained for generated case {encoded}: {:?}",
+                elided.outcome
+            );
             validate_emitted_lemmas(&problem, &lazy);
             validate_emitted_lemmas(&problem, &filtered);
             validate_emitted_lemmas(&problem, &demand);
@@ -3268,6 +4351,7 @@ mod tests {
             validate_emitted_lemmas(&problem, &sparse);
             validate_emitted_lemmas(&problem, &fast_constructor);
             validate_emitted_lemmas(&problem, &compact_callback);
+            validate_emitted_lemmas(&problem, &elided);
         }
     }
 

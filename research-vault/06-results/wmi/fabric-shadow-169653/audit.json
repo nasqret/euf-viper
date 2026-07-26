@@ -1,0 +1,88 @@
+{
+  "audited_at": "2026-07-26T15:00:29.242568Z",
+  "bindings": {
+    "cargo_sha256": "9548937d530bf439ff1ba47a3b2bd26eeb9c3aff1961c20c01798613de922578",
+    "input_binding_sha256": "75dc122cd7073b38648e64c5eb9207c511198aceccbabaa6879afafcccd5aa4c",
+    "python_sha256": "7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86",
+    "runner_sha256": "d357c26e3e38c1e54215dd3b8a03b260b91bf04354a145a01dded3e3be508cdf",
+    "rustc_sha256": "d32249a7c3bfcfc67b471460386e46323accae7125e344567a12d5664d99bb57",
+    "solver_sha256": "f374c9067fa9f560e41a5516a797c68d8bd49afb678ad129b4995b3a99acabb8"
+  },
+  "corpus_mode": "smoke",
+  "counts": {
+    "completed_rows": 2,
+    "duplicate_rows": 0,
+    "error_rows": 0,
+    "manifest_rows": 2,
+    "missing_rows": 0,
+    "solver_result_claims": 0
+  },
+  "inputs": {
+    "artifact_directory": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts",
+    "artifacts": {
+      "euf-viper": {
+        "bytes": 2803128,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/euf-viper",
+        "sha256": "f374c9067fa9f560e41a5516a797c68d8bd49afb678ad129b4995b3a99acabb8"
+      },
+      "fabric-shadow.jsonl": {
+        "bytes": 2500,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/fabric-shadow.jsonl",
+        "sha256": "a27bc3c7a3f2f882fb826e1a683e81fd773786b712ca34edddb8de92cf6b74c7"
+      },
+      "slurm.json": {
+        "bytes": 3360,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/slurm.json",
+        "sha256": "3a3fd41918b09794c19daed27c8b701319b6d98f4a4447223e434ab04f72c42b"
+      },
+      "stderr.log": {
+        "bytes": 3722,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/stderr.log",
+        "sha256": "d19bcb7c93465a5672cd622481d982b3a8e9dfc9064f3a6ee493cbea6008c526"
+      },
+      "stdout.log": {
+        "bytes": 66,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/stdout.log",
+        "sha256": "87574f3e621b89f5a00349d3a25b3c4bc7bf65a3cd872abfd9f23b8c781b9894"
+      },
+      "summary.json": {
+        "bytes": 2666,
+        "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/artifacts/summary.json",
+        "sha256": "5cf02863189f7df6909fe323878ed470fbf4109526caa62b090ace446d2c3e8e"
+      }
+    },
+    "submission_receipt": {
+      "bytes": 2922,
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/wmi/fabric-shadow-169653/submission.json",
+      "sha256": "59c0438caecd43a42d76c45dcd30401da301877b92d490e3371dcc1b6f5fac57"
+    }
+  },
+  "job_id": 169653,
+  "manifest": {
+    "corpus_root": "/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF",
+    "rows": 2,
+    "sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291"
+  },
+  "operator_expectations": {
+    "corpus_mode": "smoke",
+    "manifest_sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291",
+    "revision": "51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc",
+    "row_count": 2,
+    "slurm_job_id": 169653,
+    "source": "independent_operator_input"
+  },
+  "revision": "51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc",
+  "schema": "euf-viper.fabric-shadow-offline-audit.v1",
+  "scope": {
+    "default_behavior_change": false,
+    "mode": "semantic_substrate_shadow_census",
+    "performance_claim": false,
+    "promotion_claim": false,
+    "solver_result_claim": false,
+    "solver_result_claims_allowed": 0,
+    "stage": "F0",
+    "verification": "complete_bound_shadow_census_artifact",
+    "verified": true
+  },
+  "status": "verified"
+}

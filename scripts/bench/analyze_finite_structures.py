@@ -33,6 +33,7 @@ KNOWN_METRICS = (
     "recognized_finite_terms",
     "distinct_constants",
     "closed_table_functions",
+    "boolean_apps",
     "unary_table_apps",
     "binary_table_apps",
     "higher_arity_table_apps",

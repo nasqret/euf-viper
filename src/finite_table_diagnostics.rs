@@ -6,6 +6,7 @@
 use crate::finite_column_search::{
     FiniteColumnOracle, SearchCaps, SearchOutcome, search, search_with_caps,
 };
+use crate::finite_symmetry::is_canonical_zero_column;
 use crate::finite_table_source::{
     FiniteTableSource, RelabelingEvidenceKind, SourceTableValidationError,
     compile_finite_table_source,
@@ -127,6 +128,14 @@ fn full_mask(degree: usize) -> u8 {
 struct SourceOracle<'compiled, 'problem> {
     source: &'compiled FiniteTableSource<'problem>,
     partial_conflicts: BTreeMap<usize, u64>,
+    canonical_zero_column: bool,
+    symmetry_prunes: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SourcePruneToken {
+    BaseAssertion(usize),
+    CertifiedSymmetry,
 }
 
 impl SourceOracle<'_, '_> {
@@ -143,7 +152,7 @@ impl SourceOracle<'_, '_> {
 }
 
 impl FiniteColumnOracle for SourceOracle<'_, '_> {
-    type PartialConflictToken = usize;
+    type PartialConflictToken = SourcePruneToken;
     type Error = String;
 
     fn root_column_pruning_enabled(&self) -> bool {
@@ -159,6 +168,16 @@ impl FiniteColumnOracle for SourceOracle<'_, '_> {
         if values_by_row.len() != degree || column >= degree {
             return Err("root column candidate has the wrong shape".to_owned());
         }
+        if self.canonical_zero_column
+            && column == 0
+            && !is_canonical_zero_column(values_by_row).map_err(|error| error.to_string())?
+        {
+            self.symmetry_prunes = self
+                .symmetry_prunes
+                .checked_add(1)
+                .ok_or_else(|| "symmetry-prune counter overflowed".to_owned())?;
+            return Ok(Some(SourcePruneToken::CertifiedSymmetry));
+        }
         let mut domains = vec![full_mask(degree); degree * degree];
         for (row, &value) in values_by_row.iter().enumerate() {
             if usize::from(value) >= degree {
@@ -166,14 +185,18 @@ impl FiniteColumnOracle for SourceOracle<'_, '_> {
             }
             domains[row * degree + column] = 1u8 << value;
         }
-        self.source_conflict(&domains)
+        Ok(self
+            .source_conflict(&domains)?
+            .map(SourcePruneToken::BaseAssertion))
     }
 
     fn partial_conflict(
         &mut self,
         row_major_domains: &[u8],
     ) -> Result<Option<Self::PartialConflictToken>, Self::Error> {
-        self.source_conflict(row_major_domains)
+        Ok(self
+            .source_conflict(row_major_domains)?
+            .map(SourcePruneToken::BaseAssertion))
     }
 
     fn validate_complete(&mut self, table: &BinaryTable) -> Result<bool, Self::Error> {
@@ -319,6 +342,8 @@ fn search_external_finite_table_case() {
     let mut oracle = SourceOracle {
         source: &compiled,
         partial_conflicts: BTreeMap::new(),
+        canonical_zero_column: orbit.base_invariance_verified && orbit.exact_orbit_cover_verified,
+        symmetry_prunes: 0,
     };
 
     let report = if env::var_os("EUF_VIPER_FINITE_TABLE_HARD_CAPS").is_some() {
@@ -330,6 +355,7 @@ fn search_external_finite_table_case() {
         "partial_conflicts_by_assertion={:?}",
         oracle.partial_conflicts
     );
+    println!("certified_symmetry_prunes={}", oracle.symmetry_prunes);
     println!("{report:#?}");
     assert!(
         !matches!(&report.outcome, SearchOutcome::Abstain(_)),

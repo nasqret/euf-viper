@@ -12,6 +12,7 @@
 use super::native_clause::AtomId;
 use super::partition::TermId;
 use super::semantic::{RootLiteral, SemanticAtom, SemanticExpr, SemanticProblem};
+use rustc_hash::FxHashMap;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt;
@@ -28,6 +29,7 @@ pub(crate) struct ModelCaps {
     pub(crate) max_function_entries: usize,
     pub(crate) max_function_argument_cells: usize,
     pub(crate) max_work: usize,
+    pub(crate) hash_congruence_signatures: bool,
 }
 
 impl Default for ModelCaps {
@@ -42,6 +44,7 @@ impl Default for ModelCaps {
             max_function_entries: 1_000_000,
             max_function_argument_cells: 4_000_000,
             max_work: 64_000_000,
+            hash_congruence_signatures: false,
         }
     }
 }
@@ -375,6 +378,17 @@ pub(crate) enum LiteralConjunctionValidation {
     Abstained(ModelLimit),
 }
 
+/// Result of independently checking theory literals derived from one fixed
+/// root assignment. The checker builds one fresh congruence closure and shares
+/// no state or explanations with the producer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RootImplicationBatchValidation {
+    Valid { work: usize },
+    AntecedentConflict { work: usize },
+    Invalid { implication: usize, work: usize },
+    Abstained(ModelLimit),
+}
+
 /// One stable relation selected by a search engine and independently checked
 /// during SAT-model reconstruction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -443,6 +457,26 @@ pub(crate) fn validate_literal_conjunction(
         Err(CheckFailure::Malformed(error)) => Err(error),
         Err(CheckFailure::Invalid(_)) => Err(ModelError::InvalidCheckerState(
             "literal conjunction replay returned a complete-model invalidity",
+        )),
+    }
+}
+
+/// Validate every `implication` under the complete conjunction of
+/// `antecedents`. This is intentionally stronger than replaying producer
+/// explanations: a caller may add a derived unit only after separately proving
+/// that every antecedent is forced by its Boolean root compiler.
+pub(crate) fn validate_root_implication_batch(
+    problem: &SemanticProblem,
+    antecedents: &[RootLiteral],
+    implications: &[RootLiteral],
+    caps: ModelCaps,
+) -> Result<RootImplicationBatchValidation, ModelError> {
+    match validate_root_implication_batch_inner(problem, antecedents, implications, caps) {
+        Ok(validation) => Ok(validation),
+        Err(CheckFailure::Limit(limit)) => Ok(RootImplicationBatchValidation::Abstained(limit)),
+        Err(CheckFailure::Malformed(error)) => Err(error),
+        Err(CheckFailure::Invalid(_)) => Err(ModelError::InvalidCheckerState(
+            "root implication replay returned a complete-model invalidity",
         )),
     }
 }
@@ -525,6 +559,154 @@ fn validate_literal_conjunction_inner(
             == equality.find(right.index(), &mut budget)?;
     }
     Ok((conflict, budget.used))
+}
+
+fn validate_root_implication_batch_inner(
+    problem: &SemanticProblem,
+    antecedents: &[RootLiteral],
+    implications: &[RootLiteral],
+    caps: ModelCaps,
+) -> CheckResult<RootImplicationBatchValidation> {
+    if problem.stats.unsupported_fragments != 0 {
+        return Err(ModelError::UnsupportedFragments {
+            count: problem.stats.unsupported_fragments,
+        }
+        .into());
+    }
+    enforce_limit(ModelLimitKind::Terms, problem.terms.len(), caps.max_terms)?;
+    enforce_limit(ModelLimitKind::Atoms, problem.atoms.len(), caps.max_atoms)?;
+    let literal_count = antecedents.len().checked_add(implications.len()).ok_or(
+        ModelError::InvalidCheckerState("root implication literal count overflowed"),
+    )?;
+    enforce_limit(
+        ModelLimitKind::RootLiterals,
+        literal_count,
+        caps.max_root_literals,
+    )?;
+    if problem.terms.len() > u32::MAX as usize {
+        return Err(ModelError::TermIdSpaceExhausted {
+            count: problem.terms.len(),
+        }
+        .into());
+    }
+
+    let mut budget = WorkBudget::new(caps.max_work);
+    validate_terms(problem, caps, &mut budget)?;
+    let boolean_values = validate_boolean_values(problem)?;
+    let bool_atoms = validate_atoms(problem, boolean_values, &mut budget)?;
+    validate_boolean_coverage(problem, boolean_values, &bool_atoms)?;
+    validate_source_shape(problem, caps, &mut budget)?;
+
+    let mut equality = Equality::new(problem.terms.len())?;
+    let mut disequalities = Vec::new();
+    disequalities
+        .try_reserve(antecedents.len())
+        .map_err(|_| ModelError::AllocationFailed {
+            context: "root implication antecedent disequalities",
+        })?;
+    for (literal_index, literal) in antecedents.iter().copied().enumerate() {
+        budget.charge(1)?;
+        let Some(atom) = problem.atoms.get(literal.atom.index()) else {
+            return Err(ModelError::RootAtomOutOfRange {
+                literal: literal_index,
+                atom: literal.atom,
+                atom_count: problem.atoms.len(),
+            }
+            .into());
+        };
+        match *atom {
+            SemanticAtom::Equality(left, right) if literal.positive => {
+                equality.merge(left.index(), right.index(), &mut budget)?;
+            }
+            SemanticAtom::Equality(left, right) => disequalities.push((left, right)),
+            SemanticAtom::BoolTerm(term) => {
+                let (true_term, false_term) = boolean_values
+                    .ok_or(ModelError::MissingBooleanValues { atom: literal.atom })?;
+                equality.merge(
+                    term.index(),
+                    if literal.positive {
+                        true_term.index()
+                    } else {
+                        false_term.index()
+                    },
+                    &mut budget,
+                )?;
+            }
+        }
+    }
+
+    saturate_congruence(problem, &mut equality, caps, &mut budget)?;
+    let mut separated_classes = BTreeSet::new();
+    for (left, right) in disequalities {
+        let left = equality.find(left.index(), &mut budget)?;
+        let right = equality.find(right.index(), &mut budget)?;
+        if left == right {
+            return Ok(RootImplicationBatchValidation::AntecedentConflict { work: budget.used });
+        }
+        separated_classes.insert(normalized_class_pair(left, right));
+    }
+    let boolean_classes = if let Some((true_term, false_term)) = boolean_values {
+        let true_class = equality.find(true_term.index(), &mut budget)?;
+        let false_class = equality.find(false_term.index(), &mut budget)?;
+        if true_class == false_class {
+            return Ok(RootImplicationBatchValidation::AntecedentConflict { work: budget.used });
+        }
+        Some((true_class, false_class))
+    } else {
+        None
+    };
+
+    for (implication_index, literal) in implications.iter().copied().enumerate() {
+        budget.charge(1)?;
+        let Some(atom) = problem.atoms.get(literal.atom.index()) else {
+            return Err(ModelError::RootAtomOutOfRange {
+                literal: antecedents.len() + implication_index,
+                atom: literal.atom,
+                atom_count: problem.atoms.len(),
+            }
+            .into());
+        };
+        let valid = match *atom {
+            SemanticAtom::Equality(left, right) => {
+                let left = equality.find(left.index(), &mut budget)?;
+                let right = equality.find(right.index(), &mut budget)?;
+                if literal.positive {
+                    left == right
+                } else {
+                    separated_classes.contains(&normalized_class_pair(left, right))
+                }
+            }
+            SemanticAtom::BoolTerm(term) => {
+                let (true_class, false_class) = boolean_classes
+                    .ok_or(ModelError::MissingBooleanValues { atom: literal.atom })?;
+                let term_class = equality.find(term.index(), &mut budget)?;
+                if literal.positive {
+                    term_class == true_class
+                        || separated_classes
+                            .contains(&normalized_class_pair(term_class, false_class))
+                } else {
+                    term_class == false_class
+                        || separated_classes
+                            .contains(&normalized_class_pair(term_class, true_class))
+                }
+            }
+        };
+        if !valid {
+            return Ok(RootImplicationBatchValidation::Invalid {
+                implication: implication_index,
+                work: budget.used,
+            });
+        }
+    }
+    Ok(RootImplicationBatchValidation::Valid { work: budget.used })
+}
+
+fn normalized_class_pair(left: usize, right: usize) -> (usize, usize) {
+    if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    }
 }
 
 #[derive(Debug)]
@@ -1097,10 +1279,46 @@ impl Equality {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct CongruenceSignature {
     function: u32,
     arguments: Box<[usize]>,
+}
+
+enum CongruenceSignatureIndex {
+    Ordered(BTreeMap<CongruenceSignature, usize>),
+    Hashed(FxHashMap<CongruenceSignature, usize>),
+}
+
+impl CongruenceSignatureIndex {
+    fn new(hashed: bool) -> Self {
+        if hashed {
+            Self::Hashed(FxHashMap::default())
+        } else {
+            Self::Ordered(BTreeMap::new())
+        }
+    }
+
+    fn prior_or_insert(&mut self, signature: CongruenceSignature, term: usize) -> Option<usize> {
+        match self {
+            Self::Ordered(index) => {
+                if let Some(&prior) = index.get(&signature) {
+                    Some(prior)
+                } else {
+                    index.insert(signature, term);
+                    None
+                }
+            }
+            Self::Hashed(index) => {
+                if let Some(&prior) = index.get(&signature) {
+                    Some(prior)
+                } else {
+                    index.insert(signature, term);
+                    None
+                }
+            }
+        }
+    }
 }
 
 fn saturate_congruence(
@@ -1123,7 +1341,7 @@ fn saturate_congruence(
         )?;
         rounds = next_round;
 
-        let mut signatures = BTreeMap::<CongruenceSignature, usize>::new();
+        let mut signatures = CongruenceSignatureIndex::new(caps.hash_congruence_signatures);
         let mut changed = false;
         for (term_index, term) in problem.terms.iter().enumerate() {
             budget.charge(term.arguments.len().saturating_add(1))?;
@@ -1140,13 +1358,11 @@ fn saturate_congruence(
                 function: term.function,
                 arguments: arguments.into_boxed_slice(),
             };
-            if let Some(&prior) = signatures.get(&signature) {
+            if let Some(prior) = signatures.prior_or_insert(signature, term_index) {
                 if equality.merge(prior, term_index, budget)? {
                     merges = merges.saturating_add(1);
                     changed = true;
                 }
-            } else {
-                signatures.insert(signature, term_index);
             }
         }
         if !changed {
@@ -1636,6 +1852,10 @@ mod tests {
         let first = validate_complete(&problem, &assignment, ModelCaps::default()).unwrap();
         let second = validate_complete(&problem, &assignment, ModelCaps::default()).unwrap();
         assert_eq!(first, second);
+        let mut hashed_caps = ModelCaps::default();
+        hashed_caps.hash_congruence_signatures = true;
+        let hashed = validate_complete(&problem, &assignment, hashed_caps).unwrap();
+        assert_eq!(first, hashed);
         let ModelValidation::Valid(model) = &first else {
             panic!("expected a valid model, got {first:?}");
         };
@@ -1824,5 +2044,87 @@ mod tests {
             ),
             "{outcome:?}"
         );
+    }
+
+    #[test]
+    fn root_implication_batch_checks_congruence_and_conflicting_antecedents() {
+        let problem = projected(
+            "(set-logic QF_UF)\n\
+             (declare-sort U 0)\n\
+             (declare-const a U) (declare-const b U)\n\
+             (declare-fun f (U) U)\n\
+             (assert (= a b))\n\
+             (assert (or (= (f a) (f b)) (not (= (f a) (f b)))))\n\
+             (check-sat)",
+        );
+        let antecedent_atom = problem
+            .atoms
+            .iter()
+            .enumerate()
+            .find_map(|(index, atom)| match atom {
+                SemanticAtom::Equality(left, right)
+                    if problem.terms[left.index()].arguments.is_empty()
+                        && problem.terms[right.index()].arguments.is_empty() =>
+                {
+                    Some(AtomId::new(index as u32))
+                }
+                _ => None,
+            })
+            .unwrap();
+        let antecedents = vec![RootLiteral {
+            atom: antecedent_atom,
+            positive: true,
+        }];
+        let derived_atom = problem
+            .atoms
+            .iter()
+            .enumerate()
+            .find_map(|(index, atom)| match atom {
+                SemanticAtom::Equality(left, right)
+                    if !problem.terms[left.index()].arguments.is_empty()
+                        && !problem.terms[right.index()].arguments.is_empty() =>
+                {
+                    Some(AtomId::new(index as u32))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(matches!(
+            validate_root_implication_batch(
+                &problem,
+                &antecedents,
+                &[RootLiteral {
+                    atom: derived_atom,
+                    positive: true,
+                }],
+                ModelCaps::default(),
+            )
+            .unwrap(),
+            RootImplicationBatchValidation::Valid { .. }
+        ));
+        assert!(matches!(
+            validate_root_implication_batch(
+                &problem,
+                &antecedents,
+                &[RootLiteral {
+                    atom: derived_atom,
+                    positive: false,
+                }],
+                ModelCaps::default(),
+            )
+            .unwrap(),
+            RootImplicationBatchValidation::Invalid { implication: 0, .. }
+        ));
+
+        let mut conflicting = antecedents;
+        conflicting.push(RootLiteral {
+            atom: derived_atom,
+            positive: false,
+        });
+        assert!(matches!(
+            validate_root_implication_batch(&problem, &conflicting, &[], ModelCaps::default(),)
+                .unwrap(),
+            RootImplicationBatchValidation::AntecedentConflict { .. }
+        ));
     }
 }

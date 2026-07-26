@@ -1,0 +1,54 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T13:54:31.375677+00:00",
+  "preflight": [],
+  "reference_binary": null,
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "blocking_performance": false,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 0.9138407989389541,
+      "common_geometric_speedup": 0.5266804251002785,
+      "comparator": "yices2",
+      "coverage_delta": -1,
+      "coverage_dominance": false,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-yices/q2pf-yices2.csv",
+      "failures": [
+        "coverage_delta=-1",
+        "baseline_only_correct=3"
+      ],
+      "kind": "competitor",
+      "passed": false,
+      "performance_target_failures": [
+        "coverage_delta=-1",
+        "baseline_only_correct=3",
+        "common_aggregate_speedup=0.913841 < 1.000000",
+        "common_geometric_speedup=0.526680 < 1.000000"
+      ],
+      "performance_target_met": false,
+      "stage": "Q2PF",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 40/47 -> 39/47; common aggregate 0.9138x, geometric 0.5267x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-peq-structural-eager-yices/q2pf-yices2.json"
+    }
+  ],
+  "schema_version": 2,
+  "selected_comparators": {
+    "Q2PF": [
+      "yices2"
+    ]
+  },
+  "selected_stages": [
+    "Q2PF"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "45ae370a3a9633b453e15f54fdd825defca42808ae3885e7f2b6efe512f867ff"
+  },
+  "started_at": "2026-07-26T13:53:46.420986+00:00",
+  "status": "gate_failed"
+}

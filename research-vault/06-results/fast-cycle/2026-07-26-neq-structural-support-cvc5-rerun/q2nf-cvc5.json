@@ -1,0 +1,2345 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 9,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 39,
+      "coverage": 0.8125,
+      "covered_paths": 39,
+      "error_runs": 0,
+      "failed_runs": 9,
+      "paths": 48,
+      "result_counts": {
+        "timeout": 9,
+        "unsat": 39
+      },
+      "timeout_runs": 9,
+      "uncovered_runs": 9,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 48,
+      "coverage": 1.0,
+      "covered_paths": 48,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "paths": 48,
+      "result_counts": {
+        "unsat": 48
+      },
+      "timeout_runs": 0,
+      "uncovered_runs": 0,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "third_party/solvers/pinned/bin/cvc5",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/cvc5",
+          "requested": "third_party/solvers/pinned/bin/cvc5",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/third_party/solvers/pinned/bin/cvc5",
+          "sha256": "76677e62998e673622edc8ad2df168cb2445177ab7a336c5a25ce149bad836e1",
+          "size_bytes": 21893352
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "requested": "target/release/euf-viper",
+          "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/target/release/euf-viper",
+          "sha256": "47a2a047b11f8b1294dcb1f80b4a20fc95659815baa6cbd152bb394d6562f8bf",
+          "size_bytes": 3820816
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 853,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ004_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size4.smt2",
+        "row_index": 0,
+        "sha256": "4ae43fa49c882fa3a7d7fea249a881262db9d5c3c18439bc4d24c77f6a3dda10",
+        "size_bytes": 16180
+      },
+      {
+        "id": 854,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ004_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size5.smt2",
+        "row_index": 1,
+        "sha256": "532b32284a4c926a1c5404571621f1bbca4db9f9ae272a618005dce6f317d730",
+        "size_bytes": 25892
+      },
+      {
+        "id": 855,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ004_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size6.smt2",
+        "row_index": 2,
+        "sha256": "e20da7b94051cdd398bd0930ddd972d74dd9b42a407a469b5f1fa328c66f4231",
+        "size_bytes": 38522
+      },
+      {
+        "id": 856,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ004_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ004_size7.smt2",
+        "row_index": 3,
+        "sha256": "1daddf29723ca53c6b20a0bcd20ec2839f8c8bfcaaf5affaa7753b38116fe152",
+        "size_bytes": 53989
+      },
+      {
+        "id": 857,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size3.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ006_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size3.smt2",
+        "row_index": 4,
+        "sha256": "95596e73963590b7c066e957467bd219f106fffd55531f046df496505a966f17",
+        "size_bytes": 34931
+      },
+      {
+        "id": 858,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ006_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size4.smt2",
+        "row_index": 5,
+        "sha256": "9df39cb79676b3e81296a46c7ebadd7d2cec7a3de4963a3670534d3bfac09567",
+        "size_bytes": 77678
+      },
+      {
+        "id": 859,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ006_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size5.smt2",
+        "row_index": 6,
+        "sha256": "90b09742f1245eac76afb345f5d380aa564261587120b26febf37ab241fdfeba",
+        "size_bytes": 148196
+      },
+      {
+        "id": 860,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ006_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ006_size6.smt2",
+        "row_index": 7,
+        "sha256": "560286816a771db5980d85cdb3610012657dfb34e7efbea43bff610bd61bfa17",
+        "size_bytes": 250517
+      },
+      {
+        "id": 861,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size3.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ015_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size3.smt2",
+        "row_index": 8,
+        "sha256": "e9ac5308a175e7d02c9d4b2d6c489410d5009a6857e516314b2664a9e3f8e6ea",
+        "size_bytes": 114434
+      },
+      {
+        "id": 862,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ015_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size4.smt2",
+        "row_index": 9,
+        "sha256": "03e680a3cbae2b17b0e7b819fc21bcd3ae3939585f5075ff133be5455db81314",
+        "size_bytes": 318025
+      },
+      {
+        "id": 863,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ015_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size5.smt2",
+        "row_index": 10,
+        "sha256": "0b1864eb855be087faaae455276ccab82cde5c958184cf30bf86fa01c99a4763",
+        "size_bytes": 731342
+      },
+      {
+        "id": 864,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ015_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ015_size6.smt2",
+        "row_index": 11,
+        "sha256": "9b09c77d6e24d7eb60b44590815dc17f99cf381398ced186373cea609b30815c",
+        "size_bytes": 1514971
+      },
+      {
+        "id": 865,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ016_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size5.smt2",
+        "row_index": 12,
+        "sha256": "b815b7b4b41b61ad76b77cc06d72b27b5afa70bc207e4652b19ccce6e80aa7f8",
+        "size_bytes": 10999
+      },
+      {
+        "id": 866,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ016_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size6.smt2",
+        "row_index": 13,
+        "sha256": "84ec9e1e6e44ff3309c1ad281a00e5c12fe4b9f9c16ec76ee3c7c03aab7d9ce2",
+        "size_bytes": 17048
+      },
+      {
+        "id": 867,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ016_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size7.smt2",
+        "row_index": 14,
+        "sha256": "3f4992f749908c5e6ca2cadae6032c8f9a4e2254dfdf13866563041cdeeacd67",
+        "size_bytes": 25163
+      },
+      {
+        "id": 868,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size8.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ016_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ016_size8.smt2",
+        "row_index": 15,
+        "sha256": "39b444601016b3ed40aefcc5f71dd54b069af4dca1edfce2d4987991ca396e0a",
+        "size_bytes": 35758
+      },
+      {
+        "id": 869,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ023_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size4.smt2",
+        "row_index": 16,
+        "sha256": "f04d9b8bb3764dda5794ccb425f801d8c984f1542d5011044b18d8690f138348",
+        "size_bytes": 22409
+      },
+      {
+        "id": 870,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ023_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size5.smt2",
+        "row_index": 17,
+        "sha256": "e6c0b378f2f650db7eeb279fe2543dd76445d8addfdce02fb16b495551e0dc8c",
+        "size_bytes": 39328
+      },
+      {
+        "id": 871,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ023_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size6.smt2",
+        "row_index": 18,
+        "sha256": "bed087db3b0587a3ac855790e82589622ad7e0248f2103d80934baaa8a938cd1",
+        "size_bytes": 63540
+      },
+      {
+        "id": 872,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ023_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ023_size7.smt2",
+        "row_index": 19,
+        "sha256": "5398df14a559361dbeb57127c3cb615f34606172fe42c9d684c3be370d60ea4b",
+        "size_bytes": 97426
+      },
+      {
+        "id": 873,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size10.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ027_size10.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size10.smt2",
+        "row_index": 20,
+        "sha256": "9631ee34cb57944ef7c9cea4b938a97ee3fb257a158ba1a8fb79218d9e3a9ff8",
+        "size_bytes": 875667
+      },
+      {
+        "id": 874,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size11.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ027_size11.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size11.smt2",
+        "row_index": 21,
+        "sha256": "752a27dc181dd4906abb10941c2389d41be1a4b01fa5e616aedb65a7cac3f5af",
+        "size_bytes": 1144489
+      },
+      {
+        "id": 875,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size8.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ027_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size8.smt2",
+        "row_index": 22,
+        "sha256": "110245863842e5e98adf58cf811b11f69d97d1cd3925b5b1c2097819ec5d9c93",
+        "size_bytes": 475449
+      },
+      {
+        "id": 876,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size9.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ027_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ027_size9.smt2",
+        "row_index": 23,
+        "sha256": "e67f5abe4c7e26e78a75d082501dc0bfcb16b00f694440d814a755d44be0e59d",
+        "size_bytes": 655441
+      },
+      {
+        "id": 877,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size10.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ031_size10.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size10.smt2",
+        "row_index": 24,
+        "sha256": "05dd29cf892f28cfce225f71f5cc72ed161637efdb0fa6282e4b5c4e1a689b19",
+        "size_bytes": 839212
+      },
+      {
+        "id": 878,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ031_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size7.smt2",
+        "row_index": 25,
+        "sha256": "198845253f811b822f6bab83dfef7ce26b32b6f90484b0fa77bd7ac252f593ff",
+        "size_bytes": 317233
+      },
+      {
+        "id": 879,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size8.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ031_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size8.smt2",
+        "row_index": 26,
+        "sha256": "61c3b50d9abf505e37ee649b993af5dd8a099d2c86e6d916c0e37877521abc9d",
+        "size_bytes": 455075
+      },
+      {
+        "id": 880,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size9.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ031_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ031_size9.smt2",
+        "row_index": 27,
+        "sha256": "148650ae3c03f04c42f026c1435ca4c4a013334ae770106913ecb9a98274758f",
+        "size_bytes": 627747
+      },
+      {
+        "id": 881,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size3.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ032_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size3.smt2",
+        "row_index": 28,
+        "sha256": "b9dbe5611b17685e5834d64ca99f56320d8bb309ac6839fa2484f53e360b06a2",
+        "size_bytes": 14203
+      },
+      {
+        "id": 882,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ032_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size4.smt2",
+        "row_index": 29,
+        "sha256": "f6e1ca23238d6abd239a159af5a806dfc447c2bc0a7259d97f8a299550f5d67b",
+        "size_bytes": 28813
+      },
+      {
+        "id": 883,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ032_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size5.smt2",
+        "row_index": 30,
+        "sha256": "336bc405064a67a142a155b2e2e3b41e090214db5d2adcc1c66a1773dab8a7b9",
+        "size_bytes": 51240
+      },
+      {
+        "id": 884,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ032_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ032_size6.smt2",
+        "row_index": 31,
+        "sha256": "4a6e8be88778efb11840aa7d9733b163c8824aa194de2fe398f95cdc9ac52fb2",
+        "size_bytes": 84089
+      },
+      {
+        "id": 885,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size3.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ033_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size3.smt2",
+        "row_index": 32,
+        "sha256": "e9cd9e173428fdaf0656cd75b4fd10c3c09b7ed9781eeaa302af23a739dc7c86",
+        "size_bytes": 79519
+      },
+      {
+        "id": 886,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ033_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size4.smt2",
+        "row_index": 33,
+        "sha256": "69531ba737b2b2960ced97c1da673755f011ea2f720ccdfc684e82b3530fb881",
+        "size_bytes": 163996
+      },
+      {
+        "id": 887,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ033_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size5.smt2",
+        "row_index": 34,
+        "sha256": "6ee87dd672d7c62d540afb1949ef712e7c3184aa3b80b32551ae3bbf29990a2d",
+        "size_bytes": 296068
+      },
+      {
+        "id": 888,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ033_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ033_size6.smt2",
+        "row_index": 35,
+        "sha256": "cdf36b42d90a5489b2391b801157a1ab5cd53c35a7ef7fb785646f426e0487cf",
+        "size_bytes": 494503
+      },
+      {
+        "id": 889,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ041_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size6.smt2",
+        "row_index": 36,
+        "sha256": "1625805264b9f336043137df3a4dde231d3c225ddf352fdaf2800c167f07d297",
+        "size_bytes": 29277
+      },
+      {
+        "id": 890,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ041_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size7.smt2",
+        "row_index": 37,
+        "sha256": "24bd00f452525169751bab8b5c66ff28117046fd4c2cd2575bdd4e727c803d12",
+        "size_bytes": 43609
+      },
+      {
+        "id": 891,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size8.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ041_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size8.smt2",
+        "row_index": 38,
+        "sha256": "09a6937312744eb6a1c76b9d3ce2956f340687c44d11eaf348686b0d1cfc3c43",
+        "size_bytes": 61997
+      },
+      {
+        "id": 892,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size9.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ041_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ041_size9.smt2",
+        "row_index": 39,
+        "sha256": "48143bb4849eaf9848787acd896a21452eb6ad16bc26207852a82b88d6c5fb24",
+        "size_bytes": 84735
+      },
+      {
+        "id": 893,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size3.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ046_size3.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size3.smt2",
+        "row_index": 40,
+        "sha256": "00cdf36518d6fd8df6a4ad42bfaaa2e37d3aeb9c119d3de8dce725647e29a11f",
+        "size_bytes": 129088
+      },
+      {
+        "id": 894,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size4.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ046_size4.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size4.smt2",
+        "row_index": 41,
+        "sha256": "07a2e54e1a16b3e8b18a43ecc2e3dea4d9436488e3ac9cca01f759394c47b8c3",
+        "size_bytes": 350697
+      },
+      {
+        "id": 895,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size5.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ046_size5.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size5.smt2",
+        "row_index": 42,
+        "sha256": "d1a90b587848511255b6eb42c48c8e97455430c1e4d9f7e92cd80630a47b60a5",
+        "size_bytes": 795608
+      },
+      {
+        "id": 896,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ046_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ046_size6.smt2",
+        "row_index": 43,
+        "sha256": "260e113f0a5c2bd150ccd9667361d3c1e7d7831e0cf6777faf37d69104b0d38b",
+        "size_bytes": 1619106
+      },
+      {
+        "id": 897,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size6.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ048_size6.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size6.smt2",
+        "row_index": 44,
+        "sha256": "8854ddc28d27b64ce2be73985632a77e16463897c8ffe81827e3bbc24a5c084e",
+        "size_bytes": 31423
+      },
+      {
+        "id": 898,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size7.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ048_size7.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size7.smt2",
+        "row_index": 45,
+        "sha256": "7f4c2e3d64f24c6ff93cb8d3f4e1d6be21837512ef90732273d2f41e7b086878",
+        "size_bytes": 48080
+      },
+      {
+        "id": 899,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size8.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ048_size8.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size8.smt2",
+        "row_index": 46,
+        "sha256": "c95a85b0e06e87148ce2b9fd48f4313e505f4b791f517127682ac85d3ab00d05",
+        "size_bytes": 69955
+      },
+      {
+        "id": 900,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size9.smt2",
+        "relative_path": "QF_UF/NEQ/NEQ048_size9.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/NEQ/NEQ048_size9.smt2",
+        "row_index": 47,
+        "sha256": "06cb8e017512ab40090701b90b89c7c085d0a077581e8bf45c12dffd9b42ab64",
+        "size_bytes": 97692
+      }
+    ],
+    "manifest": {
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5-rerun/q2nf-resolved-manifest.jsonl",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5-rerun/q2nf-resolved-manifest.jsonl",
+      "sha256": "795eb2571f7539bc1c9f6e90e907c613f2c29128e7a31b619053b3b6e30e7913",
+      "size_bytes": 21294
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5-rerun/q2nf-cvc5.csv",
+      "resolved_path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5-rerun/q2nf-cvc5.csv",
+      "sha256": "b7acf2fcf39105963c90c4625b9caf3e90e264ff709a1d5e9d7fcdc5556db796",
+      "size_bytes": 23763,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "third_party/solvers/pinned/bin/cvc5",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 18.657803830865305,
+  "baseline_correct": 39,
+  "baseline_env": [],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "76677e62998e673622edc8ad2df168cb2445177ab7a336c5a25ce149bad836e1",
+  "baseline_wins": 0,
+  "candidate": [
+    "target/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 2.920625666156411,
+  "candidate_correct": 48,
+  "candidate_env": [],
+  "candidate_geometric_speedup": 6.39609890114644,
+  "candidate_only_correct": 9,
+  "candidate_only_examples": [
+    "QF_UF/NEQ/NEQ006_size6.smt2",
+    "QF_UF/NEQ/NEQ016_size7.smt2",
+    "QF_UF/NEQ/NEQ016_size8.smt2",
+    "QF_UF/NEQ/NEQ027_size10.smt2",
+    "QF_UF/NEQ/NEQ027_size11.smt2",
+    "QF_UF/NEQ/NEQ031_size10.smt2",
+    "QF_UF/NEQ/NEQ048_size7.smt2",
+    "QF_UF/NEQ/NEQ048_size8.smt2",
+    "QF_UF/NEQ/NEQ048_size9.smt2"
+  ],
+  "candidate_sha256": "47a2a047b11f8b1294dcb1f80b4a20fc95659815baa6cbd152bb394d6562f8bf",
+  "candidate_speedup_by_total": 6.3882900321900085,
+  "candidate_wins": 39,
+  "common_aggregate_speedup": 6.3882900321900085,
+  "common_correct": 39,
+  "common_correct_paths": [
+    "QF_UF/NEQ/NEQ004_size4.smt2",
+    "QF_UF/NEQ/NEQ004_size5.smt2",
+    "QF_UF/NEQ/NEQ004_size6.smt2",
+    "QF_UF/NEQ/NEQ004_size7.smt2",
+    "QF_UF/NEQ/NEQ006_size3.smt2",
+    "QF_UF/NEQ/NEQ006_size4.smt2",
+    "QF_UF/NEQ/NEQ006_size5.smt2",
+    "QF_UF/NEQ/NEQ015_size3.smt2",
+    "QF_UF/NEQ/NEQ015_size4.smt2",
+    "QF_UF/NEQ/NEQ015_size5.smt2",
+    "QF_UF/NEQ/NEQ015_size6.smt2",
+    "QF_UF/NEQ/NEQ016_size5.smt2",
+    "QF_UF/NEQ/NEQ016_size6.smt2",
+    "QF_UF/NEQ/NEQ023_size4.smt2",
+    "QF_UF/NEQ/NEQ023_size5.smt2",
+    "QF_UF/NEQ/NEQ023_size6.smt2",
+    "QF_UF/NEQ/NEQ023_size7.smt2",
+    "QF_UF/NEQ/NEQ027_size8.smt2",
+    "QF_UF/NEQ/NEQ027_size9.smt2",
+    "QF_UF/NEQ/NEQ031_size7.smt2",
+    "QF_UF/NEQ/NEQ031_size8.smt2",
+    "QF_UF/NEQ/NEQ031_size9.smt2",
+    "QF_UF/NEQ/NEQ032_size3.smt2",
+    "QF_UF/NEQ/NEQ032_size4.smt2",
+    "QF_UF/NEQ/NEQ032_size5.smt2",
+    "QF_UF/NEQ/NEQ032_size6.smt2",
+    "QF_UF/NEQ/NEQ033_size3.smt2",
+    "QF_UF/NEQ/NEQ033_size4.smt2",
+    "QF_UF/NEQ/NEQ033_size5.smt2",
+    "QF_UF/NEQ/NEQ033_size6.smt2",
+    "QF_UF/NEQ/NEQ041_size6.smt2",
+    "QF_UF/NEQ/NEQ041_size7.smt2",
+    "QF_UF/NEQ/NEQ041_size8.smt2",
+    "QF_UF/NEQ/NEQ041_size9.smt2",
+    "QF_UF/NEQ/NEQ046_size3.smt2",
+    "QF_UF/NEQ/NEQ046_size4.smt2",
+    "QF_UF/NEQ/NEQ046_size5.smt2",
+    "QF_UF/NEQ/NEQ046_size6.smt2",
+    "QF_UF/NEQ/NEQ048_size6.smt2"
+  ],
+  "common_geometric_speedup": 6.39609890114644,
+  "coverage_delta": 9,
+  "elapsed_s": 40.668910457985476,
+  "execution_errors": [],
+  "finished_at": "2026-07-26T14:50:47.793708+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 48,
+  "manifest": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-neq-structural-support-cvc5-rerun/q2nf-resolved-manifest.jsonl",
+  "manifest_order": [
+    "QF_UF/NEQ/NEQ004_size4.smt2",
+    "QF_UF/NEQ/NEQ004_size5.smt2",
+    "QF_UF/NEQ/NEQ004_size6.smt2",
+    "QF_UF/NEQ/NEQ004_size7.smt2",
+    "QF_UF/NEQ/NEQ006_size3.smt2",
+    "QF_UF/NEQ/NEQ006_size4.smt2",
+    "QF_UF/NEQ/NEQ006_size5.smt2",
+    "QF_UF/NEQ/NEQ006_size6.smt2",
+    "QF_UF/NEQ/NEQ015_size3.smt2",
+    "QF_UF/NEQ/NEQ015_size4.smt2",
+    "QF_UF/NEQ/NEQ015_size5.smt2",
+    "QF_UF/NEQ/NEQ015_size6.smt2",
+    "QF_UF/NEQ/NEQ016_size5.smt2",
+    "QF_UF/NEQ/NEQ016_size6.smt2",
+    "QF_UF/NEQ/NEQ016_size7.smt2",
+    "QF_UF/NEQ/NEQ016_size8.smt2",
+    "QF_UF/NEQ/NEQ023_size4.smt2",
+    "QF_UF/NEQ/NEQ023_size5.smt2",
+    "QF_UF/NEQ/NEQ023_size6.smt2",
+    "QF_UF/NEQ/NEQ023_size7.smt2",
+    "QF_UF/NEQ/NEQ027_size10.smt2",
+    "QF_UF/NEQ/NEQ027_size11.smt2",
+    "QF_UF/NEQ/NEQ027_size8.smt2",
+    "QF_UF/NEQ/NEQ027_size9.smt2",
+    "QF_UF/NEQ/NEQ031_size10.smt2",
+    "QF_UF/NEQ/NEQ031_size7.smt2",
+    "QF_UF/NEQ/NEQ031_size8.smt2",
+    "QF_UF/NEQ/NEQ031_size9.smt2",
+    "QF_UF/NEQ/NEQ032_size3.smt2",
+    "QF_UF/NEQ/NEQ032_size4.smt2",
+    "QF_UF/NEQ/NEQ032_size5.smt2",
+    "QF_UF/NEQ/NEQ032_size6.smt2",
+    "QF_UF/NEQ/NEQ033_size3.smt2",
+    "QF_UF/NEQ/NEQ033_size4.smt2",
+    "QF_UF/NEQ/NEQ033_size5.smt2",
+    "QF_UF/NEQ/NEQ033_size6.smt2",
+    "QF_UF/NEQ/NEQ041_size6.smt2",
+    "QF_UF/NEQ/NEQ041_size7.smt2",
+    "QF_UF/NEQ/NEQ041_size8.smt2",
+    "QF_UF/NEQ/NEQ041_size9.smt2",
+    "QF_UF/NEQ/NEQ046_size3.smt2",
+    "QF_UF/NEQ/NEQ046_size4.smt2",
+    "QF_UF/NEQ/NEQ046_size5.smt2",
+    "QF_UF/NEQ/NEQ046_size6.smt2",
+    "QF_UF/NEQ/NEQ048_size6.smt2",
+    "QF_UF/NEQ/NEQ048_size7.smt2",
+    "QF_UF/NEQ/NEQ048_size8.smt2",
+    "QF_UF/NEQ/NEQ048_size9.smt2"
+  ],
+  "manifest_sha256": "795eb2571f7539bc1c9f6e90e907c613f2c29128e7a31b619053b3b6e30e7913",
+  "measured_runs": 96,
+  "paths": [
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.031391333031933755,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005263166036456823,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 853,
+      "relative_path": "QF_UF/NEQ/NEQ004_size4.smt2",
+      "row_index": 0
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.057128333020955324,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005605875048786402,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 854,
+      "relative_path": "QF_UF/NEQ/NEQ004_size5.smt2",
+      "row_index": 1
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.09314212499884889,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.008190833032131195,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 855,
+      "relative_path": "QF_UF/NEQ/NEQ004_size6.smt2",
+      "row_index": 2
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.13323958398541436,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.013339999946765602,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 856,
+      "relative_path": "QF_UF/NEQ/NEQ004_size7.smt2",
+      "row_index": 3
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.031868499994743615,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.007835957978386432,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 857,
+      "relative_path": "QF_UF/NEQ/NEQ006_size3.smt2",
+      "row_index": 4
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.14368049998302013,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05321841704426333,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 858,
+      "relative_path": "QF_UF/NEQ/NEQ006_size4.smt2",
+      "row_index": 5
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0770182499545626,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.16535095899598673,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 859,
+      "relative_path": "QF_UF/NEQ/NEQ006_size5.smt2",
+      "row_index": 6
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004288790980354,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2282022080034949,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 860,
+      "relative_path": "QF_UF/NEQ/NEQ006_size6.smt2",
+      "row_index": 7
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04608587495749816,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.025638208026066422,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 861,
+      "relative_path": "QF_UF/NEQ/NEQ015_size3.smt2",
+      "row_index": 8
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.1472017079940997,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05088866699952632,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 862,
+      "relative_path": "QF_UF/NEQ/NEQ015_size4.smt2",
+      "row_index": 9
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.4607709579868242,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.16123145900201052,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 863,
+      "relative_path": "QF_UF/NEQ/NEQ015_size5.smt2",
+      "row_index": 10
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.4509614580310881,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.4236910829786211,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 864,
+      "relative_path": "QF_UF/NEQ/NEQ015_size6.smt2",
+      "row_index": 11
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0458244169712998,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.011736457992810756,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 865,
+      "relative_path": "QF_UF/NEQ/NEQ016_size5.smt2",
+      "row_index": 12
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.4275725420447998,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.058461249980609864,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 866,
+      "relative_path": "QF_UF/NEQ/NEQ016_size6.smt2",
+      "row_index": 13
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0039476249949075,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05906208301894367,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 867,
+      "relative_path": "QF_UF/NEQ/NEQ016_size7.smt2",
+      "row_index": 14
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004033042001538,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.11856287496630102,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 868,
+      "relative_path": "QF_UF/NEQ/NEQ016_size8.smt2",
+      "row_index": 15
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.034214541024994105,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.005729291995521635,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 869,
+      "relative_path": "QF_UF/NEQ/NEQ023_size4.smt2",
+      "row_index": 16
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.07035391696263105,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.03006758401170373,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 870,
+      "relative_path": "QF_UF/NEQ/NEQ023_size5.smt2",
+      "row_index": 17
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.36666891700588167,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.10866600001463667,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 871,
+      "relative_path": "QF_UF/NEQ/NEQ023_size6.smt2",
+      "row_index": 18
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.2386287080007605,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.2673514580237679,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 872,
+      "relative_path": "QF_UF/NEQ/NEQ023_size7.smt2",
+      "row_index": 19
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004609709023498,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.09281374997226521,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 873,
+      "relative_path": "QF_UF/NEQ/NEQ027_size10.smt2",
+      "row_index": 20
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.003499499987811,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.13032337499316782,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 874,
+      "relative_path": "QF_UF/NEQ/NEQ027_size11.smt2",
+      "row_index": 21
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.6016270840191282,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04569741600425914,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 875,
+      "relative_path": "QF_UF/NEQ/NEQ027_size8.smt2",
+      "row_index": 22
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.481484041956719,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.06595841696253046,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 876,
+      "relative_path": "QF_UF/NEQ/NEQ027_size9.smt2",
+      "row_index": 23
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0039511669892818,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.09237000002758577,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 877,
+      "relative_path": "QF_UF/NEQ/NEQ031_size10.smt2",
+      "row_index": 24
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.3101960409549065,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.03436241700546816,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 878,
+      "relative_path": "QF_UF/NEQ/NEQ031_size7.smt2",
+      "row_index": 25
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.5570168329868466,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.0464767090161331,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 879,
+      "relative_path": "QF_UF/NEQ/NEQ031_size8.smt2",
+      "row_index": 26
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0222371670533903,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.06481233303202316,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 880,
+      "relative_path": "QF_UF/NEQ/NEQ031_size9.smt2",
+      "row_index": 27
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.025330667034722865,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.004559499968308955,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 881,
+      "relative_path": "QF_UF/NEQ/NEQ032_size3.smt2",
+      "row_index": 28
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.06603887502569705,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.010144416010007262,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 882,
+      "relative_path": "QF_UF/NEQ/NEQ032_size4.smt2",
+      "row_index": 29
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.16181349998805672,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.017348417022731155,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 883,
+      "relative_path": "QF_UF/NEQ/NEQ032_size5.smt2",
+      "row_index": 30
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.105760124977678,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.03381349996197969,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 884,
+      "relative_path": "QF_UF/NEQ/NEQ032_size6.smt2",
+      "row_index": 31
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.04822066699853167,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.015527459036093205,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 885,
+      "relative_path": "QF_UF/NEQ/NEQ033_size3.smt2",
+      "row_index": 32
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.13646395795512944,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.030103207973297685,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 886,
+      "relative_path": "QF_UF/NEQ/NEQ033_size4.smt2",
+      "row_index": 33
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.8621259580249898,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.07959800004027784,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 887,
+      "relative_path": "QF_UF/NEQ/NEQ033_size5.smt2",
+      "row_index": 34
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.6976148329558782,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.1955800830037333,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 888,
+      "relative_path": "QF_UF/NEQ/NEQ033_size6.smt2",
+      "row_index": 35
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.07848741696216166,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.010050583048723638,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 889,
+      "relative_path": "QF_UF/NEQ/NEQ041_size6.smt2",
+      "row_index": 36
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.12143870803993195,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.027815749985165894,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 890,
+      "relative_path": "QF_UF/NEQ/NEQ041_size7.smt2",
+      "row_index": 37
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.34820800001034513,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.032191499951295555,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 891,
+      "relative_path": "QF_UF/NEQ/NEQ041_size8.smt2",
+      "row_index": 38
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.8431695409817621,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.036092374997679144,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 892,
+      "relative_path": "QF_UF/NEQ/NEQ041_size9.smt2",
+      "row_index": 39
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05188066599657759,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.02877166698453948,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 893,
+      "relative_path": "QF_UF/NEQ/NEQ046_size3.smt2",
+      "row_index": 40
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.16360395902302116,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.05650545802200213,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 894,
+      "relative_path": "QF_UF/NEQ/NEQ046_size4.smt2",
+      "row_index": 41
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.5100417080102488,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.16517058300087228,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 895,
+      "relative_path": "QF_UF/NEQ/NEQ046_size5.smt2",
+      "row_index": 42
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.5137768329586834,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.49796808301471174,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 896,
+      "relative_path": "QF_UF/NEQ/NEQ046_size6.smt2",
+      "row_index": 43
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0955155830015428,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.01981112500652671,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 897,
+      "relative_path": "QF_UF/NEQ/NEQ048_size6.smt2",
+      "row_index": 44
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0040220000082627,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.061270833015441895,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 898,
+      "relative_path": "QF_UF/NEQ/NEQ048_size7.smt2",
+      "row_index": 45
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0040472079999745,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.08436579199042171,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 899,
+      "relative_path": "QF_UF/NEQ/NEQ048_size8.smt2",
+      "row_index": 46
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0039245830266736,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.14715491700917482,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 900,
+      "relative_path": "QF_UF/NEQ/NEQ048_size9.smt2",
+      "row_index": 47
+    }
+  ],
+  "repeats": 1,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-26T14:50:07.152695+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ006_size6.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 7,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ016_size7.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 14,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ016_size8.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 15,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ027_size10.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 20,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ027_size11.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 21,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ031_size10.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 24,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ048_size7.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 45,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ048_size8.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 46,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/NEQ/NEQ048_size9.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 47,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 0,
+    "timeouts": [],
+    "wrong_answers": []
+  },
+  "warmups": 0,
+  "wrong_answers": []
+}

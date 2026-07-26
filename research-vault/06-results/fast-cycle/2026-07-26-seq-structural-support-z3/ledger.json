@@ -1,0 +1,48 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T14:53:49.701054+00:00",
+  "preflight": [],
+  "reference_binary": null,
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "blocking_performance": false,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 0.9672345319232294,
+      "common_geometric_speedup": 1.114120521330735,
+      "comparator": "z3",
+      "coverage_delta": 5,
+      "coverage_dominance": true,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-seq-structural-support-z3/q2sf-z3.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [
+        "common_aggregate_speedup=0.967235 < 1.000000"
+      ],
+      "performance_target_met": false,
+      "stage": "Q2SF",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 51/56 -> 56/56; common aggregate 0.9672x, geometric 1.1141x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-seq-structural-support-z3/q2sf-z3.json"
+    }
+  ],
+  "schema_version": 2,
+  "selected_comparators": {
+    "Q2SF": [
+      "z3"
+    ]
+  },
+  "selected_stages": [
+    "Q2SF"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "45ae370a3a9633b453e15f54fdd825defca42808ae3885e7f2b6efe512f867ff"
+  },
+  "started_at": "2026-07-26T14:53:31.361406+00:00",
+  "status": "passed"
+}

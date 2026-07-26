@@ -403,6 +403,34 @@ def canonical_selection_name(name: str) -> str:
     return canonical
 
 
+def validate_family_name(value: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or value in {".", "..", "QF_UF"}
+        or "/" in value
+        or "\\" in value
+        or any(ord(character) < 0x20 or ord(character) > 0x7E for character in value)
+    ):
+        raise SelectionError(f"invalid QF_UF family name {value!r}")
+    return value
+
+
+def select_family_paths(
+    records: Sequence[ManifestRecord], family_name: str
+) -> list[str]:
+    family = validate_family_name(family_name)
+    prefix = f"QF_UF/{family}/"
+    paths = sorted(
+        record.row["relative_path"]
+        for record in records
+        if record.row["relative_path"].startswith(prefix)
+    )
+    if not paths:
+        raise SelectionError(f"QF_UF family {family!r} is absent from the manifest")
+    return validate_requested_paths(paths)
+
+
 def select_records(
     records: Sequence[ManifestRecord],
     requested_paths: Sequence[str],
@@ -738,8 +766,15 @@ def serialize_selected_manifest(
 
 
 def _selection_definition_payload(
-    requested_paths: Sequence[str], expected: Sequence[ExpectedSource] | None
+    requested_paths: Sequence[str],
+    expected: Sequence[ExpectedSource] | None,
+    family_name: str | None,
 ) -> object:
+    if family_name is not None:
+        return {
+            "family": family_name,
+            "relative_paths": list(requested_paths),
+        }
     if expected is None:
         return list(requested_paths)
     return [
@@ -758,25 +793,29 @@ def build_selection_artifacts(
     *,
     requested_paths: Sequence[str] | None = None,
     selection_name: str | None = None,
+    family_name: str | None = None,
     source_root: Path | None = None,
     repository_root: Path = REPOSITORY_ROOT,
     path_mode: str = "portable",
     rebase_root: Path | None = None,
 ) -> tuple[bytes, bytes, dict[str, Any]]:
-    if (requested_paths is None) == (selection_name is None):
-        raise SelectionError("choose exactly one named or explicit selection")
+    if sum(value is not None for value in (requested_paths, selection_name, family_name)) != 1:
+        raise SelectionError("choose exactly one named, explicit, or family selection")
 
+    records, input_bytes = load_hashed_manifest(manifest_path)
     expected: tuple[ExpectedSource, ...] | None = None
     canonical_name: str | None = None
     if selection_name is not None:
         canonical_name = canonical_selection_name(selection_name)
         expected = NAMED_SELECTIONS[canonical_name]
         requested = [item.relative_path for item in expected]
+    elif family_name is not None:
+        family_name = validate_family_name(family_name)
+        requested = select_family_paths(records, family_name)
     else:
         assert requested_paths is not None
         requested = validate_requested_paths(requested_paths)
 
-    records, input_bytes = load_hashed_manifest(manifest_path)
     selected = select_records(records, requested, expected=expected)
     verified = verify_selected_sources(
         selected,
@@ -790,13 +829,17 @@ def build_selection_artifacts(
     )
     normalized_root = _normalized_rebase_root(rebase_root)
     statuses = Counter(item.source_status for item in verified)
-    definition = _selection_definition_payload(requested, expected)
+    definition = _selection_definition_payload(requested, expected, family_name)
     selection_hash = sha256_bytes(canonical_json_bytes(definition))
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "selection": {
-            "mode": "named" if canonical_name is not None else "explicit",
-            "name": canonical_name,
+            "mode": (
+                "named"
+                if canonical_name is not None
+                else ("family" if family_name is not None else "explicit")
+            ),
+            "name": canonical_name if canonical_name is not None else family_name,
             "definition_sha256": selection_hash,
             "relative_paths": list(requested),
         },
@@ -938,6 +981,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--paths-file", "--relative-paths-file", type=Path)
     parser.add_argument(
+        "--family",
+        help="select every source whose canonical path is QF_UF/FAMILY/...",
+    )
+    parser.add_argument(
         "--source-root",
         "--corpus-root",
         dest="source_root",
@@ -969,11 +1016,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     selection_sources = sum(
         bool(value)
-        for value in (args.selection, args.relative_paths, args.paths_file)
+        for value in (args.selection, args.relative_paths, args.paths_file, args.family)
     )
     if selection_sources != 1:
         parser.error(
-            "choose exactly one of --selection, repeated --relative-path, or --paths-file"
+            "choose exactly one of --selection, repeated --relative-path, --paths-file, or --family"
         )
     identities = {
         _path_identity(args.manifest),
@@ -1001,6 +1048,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.manifest,
             requested_paths=explicit_paths,
             selection_name=args.selection,
+            family_name=args.family,
             source_root=args.source_root,
             repository_root=args.repository_root,
             path_mode=path_mode,

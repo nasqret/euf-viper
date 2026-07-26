@@ -389,13 +389,17 @@ def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
             # start_new_session makes the child PID the process-group ID. Using
             # that ID directly still reaches descendants if the leader exited.
             os.killpg(process.pid, signal.SIGKILL)
+            return
         except ProcessLookupError:
+            return
+        except PermissionError:
+            # Some managed macOS environments permit signaling the child but
+            # deny signaling its freshly-created process group.
             pass
-    else:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
 
 
 def _decode(output: bytes | None) -> str:

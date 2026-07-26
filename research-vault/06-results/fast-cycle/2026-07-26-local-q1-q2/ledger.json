@@ -1,0 +1,76 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T11:02:16.513646+00:00",
+  "preflight": [],
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "command_returncode": 0,
+      "common_aggregate_speedup": 1.0050561161106493,
+      "comparator": "yices2",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-yices2.csv",
+      "failures": [],
+      "passed": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 1.0051x, geometric 1.0051x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-yices2.json"
+    },
+    {
+      "command_returncode": 0,
+      "common_aggregate_speedup": 3.7514382314634918,
+      "comparator": "z3",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-z3.csv",
+      "failures": [],
+      "passed": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 3.7514x, geometric 3.7514x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-z3.json"
+    },
+    {
+      "command_returncode": 0,
+      "common_aggregate_speedup": 8.745857740093918,
+      "comparator": "cvc5",
+      "coverage_delta": 0,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-cvc5.csv",
+      "failures": [],
+      "passed": true,
+      "stage": "Q1",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 1/1 -> 1/1; common aggregate 8.7459x, geometric 8.7459x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q1-cvc5.json"
+    },
+    {
+      "command_returncode": 2,
+      "common_aggregate_speedup": null,
+      "comparator": "yices2",
+      "coverage_delta": null,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q2-yices2.csv",
+      "failures": [
+        "benchmark command returned 2"
+      ],
+      "passed": false,
+      "stage": "Q2",
+      "stderr_tail": "usage: compare_commands_abba.py [-h] --baseline-arg TOKEN\n                                --candidate-arg TOKEN\n                                [--baseline-env KEY=VALUE]\n                                [--candidate-env KEY=VALUE]\n                                [--timeout TIMEOUT] [--repeats REPEATS]\n                                [--warmups WARMUPS] [--limit LIMIT] --out OUT\n                                --summary SUMMARY\n                                manifest\ncompare_commands_abba.py: error: manifest line 1 path does not exist: /Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2\n",
+      "stdout_tail": "",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-local-q1-q2/q2-yices2.json"
+    }
+  ],
+  "schema_version": 1,
+  "selected_stages": [
+    "Q1",
+    "Q2"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "7a6f0825c873416ff5a0a2aea6d994b514532010765057b93e1ea53559c73178"
+  },
+  "started_at": "2026-07-26T11:01:47.956163+00:00",
+  "status": "gate_failed"
+}

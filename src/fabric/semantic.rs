@@ -2,7 +2,8 @@ use super::super::{BoolAtomKey, BoolExpr, Problem};
 use super::component::{ComponentBuilder, ComponentError, ComponentGraph, ComponentId};
 use super::native_clause::AtomId;
 use super::partition::TermId;
-use std::collections::{BTreeMap, BTreeSet};
+use rustc_hash::FxHashMap;
+use std::collections::BTreeSet;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +13,7 @@ pub(crate) struct SemanticTerm {
     pub(crate) arguments: Box<[TermId]>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum SemanticAtom {
     Equality(TermId, TermId),
     BoolTerm(TermId),
@@ -126,9 +127,9 @@ pub(crate) fn project(problem: &Problem) -> Result<SemanticProblem, SemanticErro
         });
     }
 
-    let mut atom_set = BTreeSet::new();
+    let mut atoms = Vec::new();
     for &(left, right) in problem.eqs.iter().chain(&problem.diseqs) {
-        atom_set.insert(equality_atom(left, right, term_count)?);
+        atoms.push(equality_atom(left, right, term_count)?);
     }
     let boolean_values = problem
         .bool_problem
@@ -142,23 +143,24 @@ pub(crate) fn project(problem: &Problem) -> Result<SemanticProblem, SemanticErro
         .transpose()?;
     if let Some(bool_problem) = &problem.bool_problem {
         for assertion in &bool_problem.assertions {
-            collect_atoms(assertion, term_count, &mut atom_set)?;
+            collect_atoms(assertion, term_count, &mut atoms)?;
         }
         for &term in &bool_problem.data_terms {
-            atom_set.insert(SemanticAtom::BoolTerm(source_term(term, term_count)?));
+            atoms.push(SemanticAtom::BoolTerm(source_term(term, term_count)?));
         }
     }
 
-    if atom_set.len() > u32::MAX as usize {
-        return Err(SemanticError::TooManyAtoms(atom_set.len()));
+    atoms.sort_unstable();
+    atoms.dedup();
+    if atoms.len() > u32::MAX as usize {
+        return Err(SemanticError::TooManyAtoms(atoms.len()));
     }
-    let atoms = atom_set.into_iter().collect::<Vec<_>>();
     let atom_ids = atoms
         .iter()
         .cloned()
         .enumerate()
         .map(|(index, atom)| (atom, AtomId::new(index as u32)))
-        .collect::<BTreeMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
 
     if let Some(bool_problem) = &problem.bool_problem {
         let true_term = source_term(bool_problem.true_term, term_count)?;
@@ -328,12 +330,12 @@ fn equality_atom(
 fn collect_atoms(
     expression: &BoolExpr,
     term_count: usize,
-    atoms: &mut BTreeSet<SemanticAtom>,
+    atoms: &mut Vec<SemanticAtom>,
 ) -> Result<(), SemanticError> {
     match expression {
         BoolExpr::Const(_) => {}
         BoolExpr::Atom(atom) => {
-            atoms.insert(project_atom(atom, term_count)?);
+            atoms.push(project_atom(atom, term_count)?);
         }
         BoolExpr::Not(child) => collect_atoms(child, term_count, atoms)?,
         BoolExpr::And(children) | BoolExpr::Or(children) | BoolExpr::Iff(children) => {
@@ -359,7 +361,7 @@ fn project_atom(atom: &BoolAtomKey, term_count: usize) -> Result<SemanticAtom, S
 
 fn lookup_atom(
     atom: SemanticAtom,
-    atom_ids: &BTreeMap<SemanticAtom, AtomId>,
+    atom_ids: &FxHashMap<SemanticAtom, AtomId>,
 ) -> Result<AtomId, SemanticError> {
     atom_ids
         .get(&atom)
@@ -370,7 +372,7 @@ fn lookup_atom(
 fn project_expr(
     expression: &BoolExpr,
     term_count: usize,
-    atom_ids: &BTreeMap<SemanticAtom, AtomId>,
+    atom_ids: &FxHashMap<SemanticAtom, AtomId>,
 ) -> Result<SemanticExpr, SemanticError> {
     Ok(match expression {
         BoolExpr::Const(value) => SemanticExpr::Const(*value),
@@ -400,7 +402,7 @@ fn project_expr(
 fn project_children(
     children: &[BoolExpr],
     term_count: usize,
-    atom_ids: &BTreeMap<SemanticAtom, AtomId>,
+    atom_ids: &FxHashMap<SemanticAtom, AtomId>,
 ) -> Result<Box<[SemanticExpr]>, SemanticError> {
     children
         .iter()

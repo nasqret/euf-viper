@@ -1,0 +1,46 @@
+{
+  "campaign_id": "quotient-jit-fast-cycle-2026-07",
+  "finished_at": "2026-07-26T14:54:39.377890+00:00",
+  "preflight": [],
+  "reference_binary": null,
+  "repository": {
+    "clean": false,
+    "revision": "9a0763538a496898bace0325a456d0a86771a3c5"
+  },
+  "runs": [
+    {
+      "blocking_performance": false,
+      "command_returncode": 0,
+      "common_aggregate_speedup": 4.709612721657935,
+      "common_geometric_speedup": 3.888603966393536,
+      "comparator": "cvc5",
+      "coverage_delta": 10,
+      "coverage_dominance": true,
+      "csv": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-seq-structural-support-cvc5/q2sf-cvc5.csv",
+      "failures": [],
+      "kind": "competitor",
+      "passed": true,
+      "performance_target_failures": [],
+      "performance_target_met": true,
+      "stage": "Q2SF",
+      "stderr_tail": "",
+      "stdout_tail": "coverage 46/56 -> 56/56; common aggregate 4.7096x, geometric 3.8886x\n",
+      "summary": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/research-vault/06-results/fast-cycle/2026-07-26-seq-structural-support-cvc5/q2sf-cvc5.json"
+    }
+  ],
+  "schema_version": 2,
+  "selected_comparators": {
+    "Q2SF": [
+      "cvc5"
+    ]
+  },
+  "selected_stages": [
+    "Q2SF"
+  ],
+  "spec": {
+    "path": "/Users/airbartek/codex/z3/output/worktrees/viper-fabric-next/campaigns/quotient-jit-fast-cycle-2026-07.json",
+    "sha256": "45ae370a3a9633b453e15f54fdd825defca42808ae3885e7f2b6efe512f867ff"
+  },
+  "started_at": "2026-07-26T14:54:03.794294+00:00",
+  "status": "passed"
+}

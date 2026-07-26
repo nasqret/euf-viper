@@ -5,11 +5,15 @@ mod eq_abstraction;
 #[cfg(any(test, feature = "fabric"))]
 mod fabric;
 mod finite_analysis;
-#[cfg(test)]
+#[cfg(any(test, feature = "fabric"))]
 mod finite_column_search;
+#[cfg(any(test, feature = "fabric"))]
+mod finite_symmetry;
 #[cfg(test)]
 mod finite_table_diagnostics;
-#[cfg(test)]
+#[cfg(any(test, feature = "fabric"))]
+mod finite_table_engine;
+#[cfg(any(test, feature = "fabric"))]
 mod finite_table_source;
 #[cfg(test)]
 mod forbidden_orbit_probe;
@@ -19,14 +23,16 @@ mod forbidden_table_mdd;
 mod forbidden_table_mvdd;
 #[cfg(test)]
 mod hall_certificate;
+#[cfg(any(test, feature = "fabric"))]
+mod latin_certificate;
 #[cfg(test)]
 mod model_scout;
 #[cfg(test)]
 mod novelty_census;
-#[cfg(test)]
+#[cfg(any(test, feature = "fabric"))]
 #[allow(dead_code)]
 mod orbit_canon;
-#[cfg(test)]
+#[cfg(any(test, feature = "fabric"))]
 mod orbit_cover;
 mod phase_scout;
 #[cfg(test)]
@@ -2198,6 +2204,7 @@ struct CnfProblem {
     true_lit: Option<i32>,
     finite_equalities_complete: bool,
     finite_predicate_congruence_complete: bool,
+    finite_default_safe_cadical: bool,
 }
 
 #[cfg(feature = "certificates")]
@@ -2294,6 +2301,7 @@ impl CnfProblem {
             true_lit: None,
             finite_equalities_complete: false,
             finite_predicate_congruence_complete: false,
+            finite_default_safe_cadical: false,
         }
     }
 
@@ -2760,7 +2768,30 @@ fn add_finite_domain_axioms(
     bool_problem: &BoolProblem,
 ) -> usize {
     let mut context = finite_analysis::FiniteAnalysisContext::default();
-    add_finite_domain_axioms_with_context(cnf, arena, bool_problem, &mut context)
+    add_finite_domain_axioms_with_context(
+        cnf,
+        arena,
+        bool_problem,
+        &mut context,
+        false,
+        false,
+        false,
+        false,
+        false,
+    )
+}
+
+fn finite_permutation_support_mode(
+    explicit: Option<&str>,
+    force_focused: bool,
+) -> Option<finite_analysis::PermutationSupportMode> {
+    match explicit {
+        Some("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
+        Some("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
+        Some(_) => None,
+        None if force_focused => Some(finite_analysis::PermutationSupportMode::Focused),
+        None => None,
+    }
 }
 
 fn add_finite_domain_axioms_with_context(
@@ -2768,19 +2799,22 @@ fn add_finite_domain_axioms_with_context(
     arena: &TermArena,
     bool_problem: &BoolProblem,
     context: &mut finite_analysis::FiniteAnalysisContext,
+    finite_rook_symmetry: bool,
+    force_finite_symmetry: bool,
+    finite_structural_default_safe: bool,
+    force_finite_predicate_channeling: bool,
+    force_finite_permutation_support: bool,
 ) -> usize {
     let equality_channeling = match env::var("EUF_VIPER_FINITE_EQUALITY_CHANNELING").as_deref() {
         Ok("0" | "off") => FiniteEqualityChanneling::Off,
         Ok("1" | "all") => FiniteEqualityChanneling::All,
         _ => FiniteEqualityChanneling::ValueOnly,
     };
-    let predicate_channeling =
-        env::var("EUF_VIPER_FINITE_PREDICATE_CHANNELING").as_deref() == Ok("1");
+    let predicate_channeling = force_finite_predicate_channeling
+        || env::var("EUF_VIPER_FINITE_PREDICATE_CHANNELING").as_deref() == Ok("1");
     #[cfg(feature = "finite-symmetry")]
     {
-        if finite_rook_symmetry_enabled().unwrap_or(false)
-            && finite_rook_symmetry_candidate(context, arena, bool_problem)
-        {
+        if finite_rook_symmetry && finite_rook_symmetry_candidate(context, arena, bool_problem) {
             let domain_size = context.domain.as_ref().unwrap().domain.len();
             profile_measurement("finite_rook_symmetry_route", 1, domain_size);
             return add_finite_domain_axioms_with_options_and_context::<true>(
@@ -2791,6 +2825,7 @@ fn add_finite_domain_axioms_with_context(
                 predicate_channeling,
                 context,
                 Some(domain_size),
+                false,
             );
         }
         let symmetry_mode =
@@ -2799,7 +2834,18 @@ fn add_finite_domain_axioms_with_context(
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(1_000);
-        if finite_symmetry_requested(arena.apps.len(), &symmetry_mode, symmetry_min_apps) {
+        if force_finite_symmetry
+            || finite_symmetry_requested(arena.apps.len(), &symmetry_mode, symmetry_min_apps)
+        {
+            if force_finite_symmetry {
+                profile_measurement("finite_structural_symmetry_route", 1, arena.apps.len());
+                if finite_structural_default_safe
+                    && finite_structural_default_safe_candidate(context, arena, bool_problem)
+                {
+                    cnf.finite_default_safe_cadical = true;
+                    profile_measurement("finite_structural_default_safe", 1, arena.apps.len());
+                }
+            }
             return add_finite_domain_axioms_with_options_and_context::<true>(
                 cnf,
                 arena,
@@ -2807,7 +2853,8 @@ fn add_finite_domain_axioms_with_context(
                 equality_channeling,
                 predicate_channeling,
                 context,
-                None,
+                force_finite_symmetry.then_some(7),
+                force_finite_permutation_support,
             );
         }
     }
@@ -2819,6 +2866,7 @@ fn add_finite_domain_axioms_with_context(
         predicate_channeling,
         context,
         None,
+        force_finite_permutation_support,
     )
 }
 
@@ -2828,15 +2876,26 @@ fn finite_rook_symmetry_candidate(
     arena: &TermArena,
     bool_problem: &BoolProblem,
 ) -> bool {
+    finite_rook_symmetry_candidate_with_multiple(context, arena, bool_problem, true)
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_rook_symmetry_candidate_with_multiple(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+    allow_multiple_closed_functions: bool,
+) -> bool {
     let domain_size = context.domain_analysis(arena, bool_problem).domain.len();
     if !(3..=8).contains(&domain_size) {
         return false;
     }
-    if context
+    let closed_function_count = context
         .finite_closure(arena, bool_problem)
         .closed_functions
-        .len()
-        != 1
+        .len();
+    if closed_function_count == 0
+        || (!allow_multiple_closed_functions && closed_function_count != 1)
     {
         return false;
     }
@@ -2862,6 +2921,115 @@ fn finite_rook_symmetry_candidate(
         && degrees
             .values()
             .all(|&degree| degree == 2 * (domain_size - 1))
+}
+
+#[cfg(feature = "finite-symmetry")]
+const FINITE_STRUCTURAL_EAGER_MAX_DOMAIN: usize = 11;
+#[cfg(feature = "finite-symmetry")]
+const FINITE_STRUCTURAL_EAGER_MAX_ONE_HOT_CLAUSES: usize = 200_000;
+#[cfg(feature = "finite-symmetry")]
+const FINITE_STRUCTURAL_PREDICATE_MAX_BOOLEAN_APPS: usize = 16_384;
+#[cfg(feature = "finite-symmetry")]
+const FINITE_STRUCTURAL_PREDICATE_MAX_CHANNEL_PAIRS: usize = 100_000;
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_predicate_pressure_candidate(
+    boolean_applications: usize,
+    domain_size: usize,
+) -> bool {
+    boolean_applications > 0
+        && boolean_applications <= FINITE_STRUCTURAL_PREDICATE_MAX_BOOLEAN_APPS
+        && boolean_applications
+            .checked_mul(domain_size)
+            .is_some_and(|pairs| pairs <= FINITE_STRUCTURAL_PREDICATE_MAX_CHANNEL_PAIRS)
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_default_safe_signature(
+    domain_size: usize,
+    closed_function_count: usize,
+    guarded_disequality_clauses: usize,
+) -> bool {
+    domain_size == 7 && closed_function_count >= 2 && guarded_disequality_clauses == 0
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_default_safe_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    let domain_size = context.domain_analysis(arena, bool_problem).domain.len();
+    let closed_function_count = context
+        .finite_closure(arena, bool_problem)
+        .closed_functions
+        .len();
+    let guarded_disequality_clauses = context.guarded_summary(arena, bool_problem).clauses;
+    finite_structural_default_safe_signature(
+        domain_size,
+        closed_function_count,
+        guarded_disequality_clauses,
+    )
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_eager_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    !arena
+        .apps
+        .iter()
+        .any(|&term| arena.terms[term].sort == BOOL_SORT)
+        && finite_structural_base_candidate(context, arena, bool_problem)
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_base_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    if !bool_problem.unsupported.is_empty() {
+        return false;
+    }
+    let domain_size = context.domain_analysis(arena, bool_problem).domain.len();
+    if !(3..=FINITE_STRUCTURAL_EAGER_MAX_DOMAIN).contains(&domain_size) {
+        return false;
+    }
+    let closure = context.finite_closure(arena, bool_problem);
+    if closure.closed_functions.is_empty() {
+        return false;
+    }
+    if arena
+        .terms
+        .iter()
+        .enumerate()
+        .any(|(term, value)| value.sort != BOOL_SORT && !closure.finite_terms.contains(&term))
+    {
+        return false;
+    }
+    context
+        .analyze(arena, bool_problem)
+        .estimated_one_hot_clauses
+        <= FINITE_STRUCTURAL_EAGER_MAX_ONE_HOT_CLAUSES
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_structural_predicate_candidate(
+    context: &mut finite_analysis::FiniteAnalysisContext,
+    arena: &TermArena,
+    bool_problem: &BoolProblem,
+) -> bool {
+    if !finite_structural_base_candidate(context, arena, bool_problem) {
+        return false;
+    }
+    let analysis = context.analyze(arena, bool_problem);
+    finite_structural_predicate_pressure_candidate(
+        analysis.boolean_applications,
+        analysis.discovered_domain_size,
+    )
 }
 
 #[cfg(feature = "finite-symmetry")]
@@ -3271,6 +3439,7 @@ fn add_finite_domain_axioms_with_options<const FINITE_SYMMETRY: bool>(
         predicate_channeling,
         &mut context,
         None,
+        false,
     )
 }
 
@@ -3282,6 +3451,7 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     predicate_channeling: bool,
     context: &mut finite_analysis::FiniteAnalysisContext,
     forced_lex_min_domain: Option<usize>,
+    force_finite_permutation_support: bool,
 ) -> usize {
     #[cfg(not(feature = "finite-symmetry"))]
     let _ = forced_lex_min_domain;
@@ -3336,12 +3506,11 @@ fn add_finite_domain_axioms_with_options_and_context<const FINITE_SYMMETRY: bool
     #[cfg(feature = "finite-symmetry")]
     let domain_symmetry = domain_swap_maps.is_some();
 
-    let permutation_support_mode = match env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").as_deref()
-    {
-        Ok("1" | "all") => Some(finite_analysis::PermutationSupportMode::All),
-        Ok("auto" | "focused") => Some(finite_analysis::PermutationSupportMode::Focused),
-        _ => None,
-    };
+    let permutation_support_env = env::var("EUF_VIPER_FINITE_PERMUTATION_SUPPORT").ok();
+    let permutation_support_mode = finite_permutation_support_mode(
+        permutation_support_env.as_deref(),
+        force_finite_permutation_support,
+    );
     if permutation_support_mode.is_some() {
         context.guarded_summary(arena, bool_problem);
     }
@@ -4776,14 +4945,28 @@ fn rustsat_clause(clause: &[i32]) -> RustSatClause {
 }
 
 fn configure_cadical(solver: &mut CadicalSolver<'_, '_>, prefer_unsat_search: bool) -> Option<()> {
-    match env::var("EUF_VIPER_CADICAL_MODE").as_deref() {
-        Ok("default-safe") => {
+    configure_cadical_with_hint(solver, prefer_unsat_search, false)
+}
+
+fn configure_cadical_with_hint(
+    solver: &mut CadicalSolver<'_, '_>,
+    prefer_unsat_search: bool,
+    default_safe_hint: bool,
+) -> Option<()> {
+    let configured_mode = env::var("EUF_VIPER_CADICAL_MODE").ok();
+    match configured_mode.as_deref() {
+        Some("default-safe") => {
             solver.set_configuration(CadicalConfig::Default).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
-        Ok("unsat-safe") => {
+        Some("unsat-safe") => {
             solver.set_configuration(CadicalConfig::Unsat).ok()?;
+            solver.set_option("sweep", 0).ok()?;
+            solver.set_option("inprobing", 0).ok()?;
+        }
+        None if default_safe_hint => {
+            solver.set_configuration(CadicalConfig::Default).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
@@ -4839,7 +5022,11 @@ fn solve_cadical_euf_once(
 
     let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
-    configure_cadical(&mut solver, prefer_unsat_search)?;
+    configure_cadical_with_hint(
+        &mut solver,
+        prefer_unsat_search,
+        cnf.finite_default_safe_cadical,
+    )?;
     for clause in &cnf.clauses {
         solver.add_clause(rustsat_clause(clause)).ok()?;
     }
@@ -5851,7 +6038,14 @@ const DIRECT_NEGATED_ROOT_ENV: &str = "EUF_VIPER_DIRECT_NEGATED_ROOT";
 const DIRECT_NEGATED_ROOT_AUTO_ENV: &str = "EUF_VIPER_DIRECT_NEGATED_ROOT_AUTO";
 const DIRECT_NEGATED_ROOT_AUTO_MIN_SAVED_CLAUSES: usize = 100_000;
 const FINITE_ROOK_SYMMETRY_ENV: &str = "EUF_VIPER_FINITE_ROOK_SYMMETRY";
+const FINITE_MULTI_ROOK_ENV: &str = "EUF_VIPER_FINITE_MULTI_ROOK";
+const FINITE_STRUCTURAL_EAGER_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_EAGER";
+const FINITE_STRUCTURAL_DEFAULT_SAFE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_DEFAULT_SAFE";
+const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
+const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
+const CHECKER_MATERIALIZED_ROOT_ENV: &str = "EUF_VIPER_FABRIC_CHECKER_MATERIALIZED_ROOT";
+const FABRIC_PORTFOLIO_STREAM_MIN_BYTES: usize = 2 * 1024 * 1024;
 const SCOPED_LET_ENV: &str = "EUF_VIPER_SCOPED_LET";
 const EQ_ABSTRACTION_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION";
 const EQ_ABSTRACTION_FRESH_ENV: &str = "EUF_VIPER_EQ_ABSTRACTION_FRESH";
@@ -5865,6 +6059,11 @@ const SCOPED_LET_AUTO_THRESHOLD: usize = 512;
 struct RootCnfOptions {
     direct_root_cnf: bool,
     direct_negated_root: bool,
+    finite_rook_symmetry: bool,
+    force_finite_symmetry: bool,
+    finite_structural_default_safe: bool,
+    force_finite_predicate_channeling: bool,
+    force_finite_permutation_support: bool,
 }
 
 impl RootCnfOptions {
@@ -5873,6 +6072,11 @@ impl RootCnfOptions {
         Self {
             direct_root_cnf,
             direct_negated_root: false,
+            finite_rook_symmetry: false,
+            force_finite_symmetry: false,
+            finite_structural_default_safe: false,
+            force_finite_predicate_channeling: false,
+            force_finite_permutation_support: false,
         }
     }
 }
@@ -6325,17 +6529,63 @@ fn finite_rook_symmetry_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_ROOK_SYMMETRY_ENV, false)
 }
 
+fn finite_multi_rook_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_MULTI_ROOK_ENV, true)
+}
+
+fn finite_structural_eager_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_STRUCTURAL_EAGER_ENV, true)
+}
+
+fn finite_structural_default_safe_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_STRUCTURAL_DEFAULT_SAFE_ENV, true)
+}
+
+fn finite_structural_predicate_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_STRUCTURAL_PREDICATE_ENV, true)
+}
+
+fn finite_domain_precheck_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_DOMAIN_PRECHECK_ENV, true)
+}
+
+fn checker_materialized_root_enabled() -> Result<bool, String> {
+    zero_one_env_setting(CHECKER_MATERIALIZED_ROOT_ENV, true)
+}
+
 fn stream_parser_enabled() -> Result<bool, String> {
     zero_one_env_setting(STREAM_PARSER_ENV, false)
 }
 
+fn portfolio_stream_frontend_for(
+    source_bytes: usize,
+    explicit_setting: Option<&str>,
+) -> Result<bool, String> {
+    match explicit_setting {
+        Some(value) => parse_zero_one_setting_with_default(STREAM_PARSER_ENV, Some(value), false),
+        None => Ok(source_bytes >= FABRIC_PORTFOLIO_STREAM_MIN_BYTES),
+    }
+}
+
+fn selected_portfolio_stream_frontend(source_bytes: usize) -> Result<bool, String> {
+    match env::var(STREAM_PARSER_ENV) {
+        Ok(value) => portfolio_stream_frontend_for(source_bytes, Some(&value)),
+        Err(env::VarError::NotPresent) => portfolio_stream_frontend_for(source_bytes, None),
+        Err(env::VarError::NotUnicode(_)) => Err(format!("{STREAM_PARSER_ENV} must be 0 or 1")),
+    }
+}
+
 fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
     direct_negated_root_auto_enabled()?;
-    finite_rook_symmetry_enabled()?;
     selected_phase_scout_mode()?;
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
+        finite_rook_symmetry: finite_rook_symmetry_enabled()?,
+        force_finite_symmetry: false,
+        finite_structural_default_safe: finite_structural_default_safe_enabled()?,
+        force_finite_predicate_channeling: false,
+        force_finite_permutation_support: false,
     })
 }
 
@@ -6586,6 +6836,11 @@ fn solve_bool_problem(
                 arena,
                 bool_problem,
                 finite_context,
+                root_cnf_options.finite_rook_symmetry,
+                root_cnf_options.force_finite_symmetry,
+                root_cnf_options.finite_structural_default_safe,
+                root_cnf_options.force_finite_predicate_channeling,
+                root_cnf_options.force_finite_permutation_support,
             );
             profile_phase("finite_domain", finite_start, added);
             added
@@ -7274,6 +7529,294 @@ fn fabric_shadow_file(path: &str) -> Result<i32, String> {
 }
 
 #[cfg(feature = "fabric")]
+fn quotient_root_cadical_caps() -> fabric::cadical_up::CadicalUpCaps {
+    let mut caps = fabric::cadical_up::CadicalUpCaps::default();
+    caps.lazy_propagation_reasons = true;
+    caps.indexed_class_members = true;
+    caps.pair_filtered_impact_atoms = true;
+    caps.demand_driven_propagation_flush = true;
+    caps.narrow_explicit_merge_frontier = true;
+    caps.sparse_root_initialization = false;
+    caps.post_construction_congruence_validation = false;
+    caps.allocation_free_assignment_decode = false;
+    caps.slice_boolean_shell = true;
+    caps.preapply_forced_root_literals = false;
+    caps.compile_root_theory = false;
+    caps.reuse_explanation_workspace = true;
+    caps.zero_copy_theory_log = true;
+    caps.flat_reason_canonicalization = true;
+    caps.flat_literal_antecedents = true;
+    caps.model.hash_congruence_signatures = true;
+    caps.elide_redundant_theory_assignments = true;
+    caps.propagate_explicit_disequalities = false;
+    caps.propagation_batch_updates = 4;
+    caps
+}
+
+#[cfg(feature = "fabric")]
+fn selected_cadical_up_caps(
+    mut caps: fabric::cadical_up::CadicalUpCaps,
+) -> Result<fabric::cadical_up::CadicalUpCaps, String> {
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_LAZY_REASONS") {
+        caps.lazy_propagation_reasons = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_LAZY_REASONS must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS") {
+        caps.indexed_class_members = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_INDEXED_CLASS_MEMBERS must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT") {
+        caps.pair_filtered_impact_atoms = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_PAIR_FILTERED_IMPACT must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_DEMAND_FLUSH") {
+        caps.demand_driven_propagation_flush = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_DEMAND_FLUSH must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER") {
+        caps.narrow_explicit_merge_frontier = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err("EUF_VIPER_FABRIC_NARROW_MERGE_FRONTIER must be 0 or 1".to_owned());
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_SPARSE_ROOT") {
+        caps.sparse_root_initialization = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_SPARSE_ROOT must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION") {
+        caps.post_construction_congruence_validation = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err("EUF_VIPER_FABRIC_CONSTRUCTION_VALIDATION must be 0 or 1".to_owned());
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PROFILE_CALLBACKS") {
+        caps.profile_callback_timings = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_PROFILE_CALLBACKS must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS") {
+        caps.allocation_free_assignment_decode = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err(
+                    "EUF_VIPER_FABRIC_ALLOCATION_FREE_ASSIGNMENTS must be 0 or 1".to_owned(),
+                );
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_BOOL_SHELL_SLICE") {
+        caps.slice_boolean_shell = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_BOOL_SHELL_SLICE must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ROOT_QUOTIENT") {
+        caps.preapply_forced_root_literals = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_ROOT_QUOTIENT must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ROOT_THEORY_COMPILE") {
+        caps.compile_root_theory = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_ROOT_THEORY_COMPILE must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_REASON_WORKSPACE") {
+        caps.reuse_explanation_workspace = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_REASON_WORKSPACE must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ZERO_COPY_THEORY_LOG") {
+        caps.zero_copy_theory_log = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_ZERO_COPY_THEORY_LOG must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_FLAT_REASON_CANONICALIZATION") {
+        caps.flat_reason_canonicalization = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err(
+                    "EUF_VIPER_FABRIC_FLAT_REASON_CANONICALIZATION must be 0 or 1".to_owned(),
+                );
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_FLAT_LITERAL_ANTECEDENTS") {
+        caps.flat_literal_antecedents = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err("EUF_VIPER_FABRIC_FLAT_LITERAL_ANTECEDENTS must be 0 or 1".to_owned());
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_MODEL_HASH_SIGNATURES") {
+        caps.model.hash_congruence_signatures = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_MODEL_HASH_SIGNATURES must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_REDUNDANT_ASSIGNMENT_ELISION") {
+        caps.elide_redundant_theory_assignments = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err(
+                    "EUF_VIPER_FABRIC_REDUNDANT_ASSIGNMENT_ELISION must be 0 or 1".to_owned(),
+                );
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_THEORY_PROPAGATION") {
+        caps.propagate_implied_atoms = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_THEORY_PROPAGATION must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION") {
+        caps.propagate_explicit_disequalities = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => {
+                return Err("EUF_VIPER_FABRIC_DISEQUALITY_PROPAGATION must be 0 or 1".to_owned());
+            }
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_EQUALITY_PROPAGATION") {
+        caps.propagate_explicit_equalities = match raw.to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("EUF_VIPER_FABRIC_EQUALITY_PROPAGATION must be 0 or 1".to_owned()),
+        };
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES") {
+        let raw = raw
+            .into_string()
+            .map_err(|_| "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES is not UTF-8".to_owned())?;
+        caps.propagation_batch_updates = raw.parse::<usize>().map_err(|_| {
+            "EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES must be a positive integer".to_owned()
+        })?;
+        if caps.propagation_batch_updates == 0 {
+            return Err("EUF_VIPER_FABRIC_PROPAGATION_BATCH_UPDATES must be positive".to_owned());
+        }
+    }
+    if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP") {
+        let raw = raw
+            .into_string()
+            .map_err(|_| "EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP is not UTF-8".to_owned())?;
+        caps.congruence.max_explanation_edge_visits = raw.parse::<usize>().map_err(|_| {
+            "EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP must be a nonnegative integer".to_owned()
+        })?;
+    }
+    Ok(caps)
+}
+
+#[cfg(feature = "fabric")]
+fn source_selects_finite_rook(problem: &Problem) -> Result<bool, String> {
+    #[cfg(feature = "finite-symmetry")]
+    {
+        let Some(bool_problem) = problem.bool_problem.as_ref() else {
+            return Ok(false);
+        };
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        Ok(finite_rook_symmetry_candidate_with_multiple(
+            &mut context,
+            &problem.arena,
+            bool_problem,
+            finite_multi_rook_enabled()?,
+        ))
+    }
+    #[cfg(not(feature = "finite-symmetry"))]
+    {
+        let _ = problem;
+        Ok(false)
+    }
+}
+
+#[cfg(feature = "fabric")]
+fn source_selects_finite_structural_eager(problem: &Problem) -> Result<bool, String> {
+    #[cfg(feature = "finite-symmetry")]
+    {
+        if !finite_structural_eager_enabled()? {
+            return Ok(false);
+        }
+        let Some(bool_problem) = problem.bool_problem.as_ref() else {
+            return Ok(false);
+        };
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        Ok(finite_structural_eager_candidate(
+            &mut context,
+            &problem.arena,
+            bool_problem,
+        ))
+    }
+    #[cfg(not(feature = "finite-symmetry"))]
+    {
+        let _ = problem;
+        Ok(false)
+    }
+}
+
+#[cfg(feature = "fabric")]
+fn source_selects_finite_structural_predicate(problem: &Problem) -> Result<bool, String> {
+    #[cfg(feature = "finite-symmetry")]
+    {
+        if !finite_structural_predicate_enabled()? {
+            return Ok(false);
+        }
+        let Some(bool_problem) = problem.bool_problem.as_ref() else {
+            return Ok(false);
+        };
+        let mut context = finite_analysis::FiniteAnalysisContext::default();
+        Ok(finite_structural_predicate_candidate(
+            &mut context,
+            &problem.arena,
+            bool_problem,
+        ))
+    }
+    #[cfg(not(feature = "finite-symmetry"))]
+    {
+        let _ = problem;
+        Ok(false)
+    }
+}
+
+#[cfg(feature = "fabric")]
 fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, String> {
     let total_start = Instant::now();
     let input = if path == "-" {
@@ -7287,18 +7830,245 @@ fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, 
         fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?
     };
     let parse_start = Instant::now();
-    let problem = parse_problem(&input)?;
+    let finite_engine = matches!(engine, "finite-jit" | "quotient-portfolio");
+    let stream_frontend = engine == "finite-jit"
+        || (engine == "quotient-portfolio" && selected_portfolio_stream_frontend(input.len())?);
+    let frontend = if stream_frontend { "stream" } else { "tree" };
+    let problem = if stream_frontend {
+        smt2_stream::parse_problem(&input, selected_scoped_let_mode()?)?
+    } else if finite_engine {
+        parse_problem_with_scoped_let_mode(&input, selected_scoped_let_mode()?)?
+    } else {
+        parse_problem(&input)?
+    };
     let parse_ns = parse_start.elapsed().as_nanos();
+    if finite_engine {
+        let solve_start = Instant::now();
+        let mut finite_caps = finite_table_engine::FiniteTableEngineCaps::default();
+        finite_caps.domain_size_precheck =
+            engine == "quotient-portfolio" && finite_domain_precheck_enabled()?;
+        let report = finite_table_engine::solve(&problem, finite_caps);
+        let solve_ns = solve_start.elapsed().as_nanos();
+        if engine == "quotient-portfolio"
+            && matches!(
+                &report.outcome,
+                finite_table_engine::FiniteTableEngineOutcome::Abstain(_)
+            )
+        {
+            let finite_eager_route = if source_selects_finite_rook(&problem)? {
+                Some(("finite-rook-eager", true, false))
+            } else if source_selects_finite_structural_eager(&problem)? {
+                Some(("finite-structural-eager", false, false))
+            } else if source_selects_finite_structural_predicate(&problem)? {
+                Some(("finite-structural-predicate", false, true))
+            } else {
+                None
+            };
+            if let Some((route, rook_symmetry, predicate_channeling)) = finite_eager_route {
+                let mut root_cnf_options = selected_root_cnf_options()?;
+                root_cnf_options.finite_rook_symmetry = rook_symmetry;
+                root_cnf_options.force_finite_symmetry = !rook_symmetry;
+                root_cnf_options.force_finite_predicate_channeling = predicate_channeling;
+                root_cnf_options.force_finite_permutation_support = !rook_symmetry;
+                let eager_start = Instant::now();
+                let eager_report = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+                let eager_ns = eager_start.elapsed().as_nanos();
+                if with_stats {
+                    eprintln!(
+                        "fabric_engine={engine} frontend={frontend} route={route} parse_ns={parse_ns} finite_probe_ns={solve_ns} eager_ns={eager_ns} finite_stats={:?}",
+                        report.stats,
+                    );
+                }
+                let exit = match eager_report.result {
+                    SolveResult::Unsupported(_) => 3,
+                    _ => 0,
+                };
+                print_report(&eager_report, total_start.elapsed(), with_stats);
+                return Ok(exit);
+            }
+            let projection_start = Instant::now();
+            let projection = fabric::semantic::project(&problem)
+                .map_err(|error| format!("Fabric semantic projection failed: {error}"))?;
+            let projection_ns = projection_start.elapsed().as_nanos();
+            let lowering_start = Instant::now();
+            let formula = fabric::bool_cnf::lower_direct(
+                &projection,
+                fabric::bool_cnf::LoweringCaps::default(),
+            )
+            .map_err(|error| format!("Fabric Boolean lowering failed: {error}"))?;
+            let lowering_ns = lowering_start.elapsed().as_nanos();
+            let root_start = Instant::now();
+            let root_outcome = if checker_materialized_root_enabled()? {
+                fabric::cnf_root::simplify_with_checker_materialization(&formula)
+            } else {
+                fabric::cnf_root::simplify(&formula)
+            }
+            .map_err(|error| format!("Fabric root simplification failed: {error}"))?;
+            let reduced = match root_outcome {
+                fabric::cnf_root::RootSimplificationOutcome::Reduced(reduced) => reduced,
+                fabric::cnf_root::RootSimplificationOutcome::Unsat { stats, .. } => {
+                    println!("unsat");
+                    if with_stats {
+                        eprintln!(
+                            "fabric_engine={engine} frontend={frontend} route=root-unit-conflict parse_ns={parse_ns} finite_probe_ns={solve_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} root_ns={} total_ns={} finite_stats={:?} root_stats={stats:?}",
+                            root_start.elapsed().as_nanos(),
+                            total_start.elapsed().as_nanos(),
+                            report.stats,
+                        );
+                    }
+                    return Ok(0);
+                }
+            };
+            let root_ns = root_start.elapsed().as_nanos();
+            let caps = selected_cadical_up_caps(quotient_root_cadical_caps())?;
+            let root_theory_start = Instant::now();
+            let mut compiled_reduced = None;
+            let mut root_theory_stats = None;
+            let mut root_theory_log_entries = 0;
+            let mut root_theory_abstention = None;
+            if caps.compile_root_theory {
+                match fabric::cadical_up::compile_root_theory(&projection, &reduced, caps) {
+                    Ok(fabric::cadical_up::RootTheoryCompilationOutcome::Unsat {
+                        theory_log,
+                        stats,
+                    }) => {
+                        println!("unsat");
+                        if with_stats {
+                            eprintln!(
+                                "fabric_engine={engine} frontend={frontend} route=root-theory-conflict parse_ns={parse_ns} finite_probe_ns={solve_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} root_ns={root_ns} root_theory_ns={} total_ns={} root_theory_log_entries={} finite_stats={:?} first_root_stats={:?} root_theory_stats={stats:?}",
+                                root_theory_start.elapsed().as_nanos(),
+                                total_start.elapsed().as_nanos(),
+                                theory_log.len(),
+                                report.stats,
+                                reduced.stats,
+                            );
+                        }
+                        return Ok(0);
+                    }
+                    Ok(fabric::cadical_up::RootTheoryCompilationOutcome::Reduced {
+                        reduced,
+                        theory_log,
+                        stats,
+                    }) => {
+                        compiled_reduced = Some(reduced);
+                        root_theory_log_entries = theory_log.len();
+                        root_theory_stats = Some(stats);
+                    }
+                    Err(reason) => root_theory_abstention = Some(reason),
+                }
+            }
+            let root_theory_ns = root_theory_start.elapsed().as_nanos();
+            let root_theory_compiled = compiled_reduced.is_some();
+            let solve_input = compiled_reduced.as_ref().unwrap_or(&reduced);
+            let fabric_start = Instant::now();
+            let fabric_report = fabric::cadical_up::solve_reduced(&projection, solve_input, caps);
+            let fabric_ns = fabric_start.elapsed().as_nanos();
+            let decisive = match &fabric_report.outcome {
+                fabric::cadical_up::CadicalUpOutcome::Sat { .. } => Some("sat"),
+                fabric::cadical_up::CadicalUpOutcome::Unsat => Some("unsat"),
+                fabric::cadical_up::CadicalUpOutcome::Abstain { .. } => None,
+            };
+            if let Some(result) = decisive {
+                println!("{result}");
+                if with_stats {
+                    let route = if root_theory_compiled {
+                        "root-theory-fabric"
+                    } else {
+                        "root-fabric"
+                    };
+                    eprintln!(
+                        "fabric_engine={engine} frontend={frontend} route={route} parse_ns={parse_ns} finite_probe_ns={solve_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} root_ns={root_ns} root_theory_ns={root_theory_ns} fabric_ns={fabric_ns} total_ns={} root_theory_log_entries={root_theory_log_entries} theory_log_entries={} finite_stats={:?} first_root_stats={:?} active_root_stats={:?} root_theory_stats={root_theory_stats:?} root_theory_abstention={root_theory_abstention:?} fabric_stats={:?}",
+                        total_start.elapsed().as_nanos(),
+                        fabric_report.theory_log.len(),
+                        report.stats,
+                        reduced.stats,
+                        solve_input.stats,
+                        fabric_report.stats,
+                    );
+                }
+                return Ok(0);
+            }
+            let fabric_abstention = match &fabric_report.outcome {
+                fabric::cadical_up::CadicalUpOutcome::Abstain { reason } => Some(reason),
+                _ => None,
+            };
+            let root_cnf_options = selected_root_cnf_options()?;
+            let fallback_start = Instant::now();
+            let fallback = solve_problem_with_root_cnf_options(problem, root_cnf_options);
+            let fallback_ns = fallback_start.elapsed().as_nanos();
+            if with_stats {
+                eprintln!(
+                    "fabric_engine={engine} frontend={frontend} route=eager-fallback parse_ns={parse_ns} finite_probe_ns={solve_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} root_ns={root_ns} root_theory_ns={root_theory_ns} fabric_ns={fabric_ns} fallback_ns={fallback_ns} root_theory_log_entries={root_theory_log_entries} finite_stats={:?} first_root_stats={:?} active_root_stats={:?} root_theory_stats={root_theory_stats:?} root_theory_abstention={root_theory_abstention:?} fabric_abstention={fabric_abstention:?} fabric_stats={:?}",
+                    report.stats, reduced.stats, solve_input.stats, fabric_report.stats,
+                );
+            }
+            let exit = match fallback.result {
+                SolveResult::Unsupported(_) => 3,
+                _ => 0,
+            };
+            print_report(&fallback, total_start.elapsed(), with_stats);
+            return Ok(exit);
+        }
+        match &report.outcome {
+            finite_table_engine::FiniteTableEngineOutcome::Sat(_) => println!("sat"),
+            finite_table_engine::FiniteTableEngineOutcome::Unsat => println!("unsat"),
+            finite_table_engine::FiniteTableEngineOutcome::Abstain(reason) => {
+                println!("unknown");
+                if with_stats {
+                    eprintln!("fabric_abstention={reason:?}");
+                }
+            }
+        }
+        if with_stats {
+            eprintln!(
+                "fabric_engine={engine} frontend={frontend} parse_ns={parse_ns} solve_ns={solve_ns} total_ns={} stats={:?}",
+                total_start.elapsed().as_nanos(),
+                report.stats,
+            );
+        }
+        return Ok(0);
+    }
     let projection_start = Instant::now();
     let projection = fabric::semantic::project(&problem)
         .map_err(|error| format!("Fabric semantic projection failed: {error}"))?;
     let projection_ns = projection_start.elapsed().as_nanos();
-    if engine == "cadical-up" {
+    if matches!(
+        engine,
+        "cadical-up" | "cadical-up-direct" | "cadical-up-root"
+    ) {
         let lowering_start = Instant::now();
-        let formula =
+        let formula = if matches!(engine, "cadical-up-direct" | "cadical-up-root") {
+            fabric::bool_cnf::lower_direct(&projection, fabric::bool_cnf::LoweringCaps::default())
+        } else {
             fabric::bool_cnf::lower(&projection, fabric::bool_cnf::LoweringCaps::default())
-                .map_err(|error| format!("Fabric Boolean lowering failed: {error}"))?;
+        }
+        .map_err(|error| format!("Fabric Boolean lowering failed: {error}"))?;
         let lowering_ns = lowering_start.elapsed().as_nanos();
+        let mut root_simplification = None;
+        let mut root_simplification_stats = None;
+        if engine == "cadical-up-root" {
+            match fabric::cnf_root::simplify(&formula)
+                .map_err(|error| format!("Fabric root simplification failed: {error}"))?
+            {
+                fabric::cnf_root::RootSimplificationOutcome::Reduced(reduced) => {
+                    root_simplification_stats = Some(reduced.stats);
+                    root_simplification = Some(reduced);
+                }
+                fabric::cnf_root::RootSimplificationOutcome::Unsat { stats, .. } => {
+                    println!("unsat");
+                    if with_stats {
+                        eprintln!(
+                            "fabric_engine={engine} parse_ns={parse_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} total_ns={} root_stats={stats:?}",
+                            total_start.elapsed().as_nanos(),
+                        );
+                    }
+                    return Ok(0);
+                }
+            }
+        }
+        let effective_formula = root_simplification
+            .as_ref()
+            .map_or(&formula, |reduced| &reduced.formula);
         let solve_start = Instant::now();
         let mut caps = fabric::cadical_up::CadicalUpCaps::default();
         if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_LAZY_REASONS") {
@@ -7380,6 +8150,33 @@ fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, 
                 }
             };
         }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_BOOL_SHELL_SLICE") {
+            caps.slice_boolean_shell = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err("EUF_VIPER_FABRIC_BOOL_SHELL_SLICE must be 0 or 1".to_owned());
+                }
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_ROOT_QUOTIENT") {
+            caps.preapply_forced_root_literals = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => return Err("EUF_VIPER_FABRIC_ROOT_QUOTIENT must be 0 or 1".to_owned()),
+            };
+        }
+        if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_REDUNDANT_ASSIGNMENT_ELISION") {
+            caps.elide_redundant_theory_assignments = match raw.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => {
+                    return Err(
+                        "EUF_VIPER_FABRIC_REDUNDANT_ASSIGNMENT_ELISION must be 0 or 1".to_owned(),
+                    );
+                }
+            };
+        }
         if let Some(raw) = env::var_os("EUF_VIPER_FABRIC_THEORY_PROPAGATION") {
             caps.propagate_implied_atoms = match raw.to_str() {
                 Some("0") => false,
@@ -7430,7 +8227,11 @@ fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, 
                 "EUF_VIPER_FABRIC_EXPLANATION_EDGE_CAP must be a nonnegative integer".to_owned()
             })?;
         }
-        let report = fabric::cadical_up::solve(&projection, &formula, caps);
+        let report = if let Some(reduced) = root_simplification.as_ref() {
+            fabric::cadical_up::solve_reduced(&projection, reduced, caps)
+        } else {
+            fabric::cadical_up::solve(&projection, effective_formula, caps)
+        };
         let solve_ns = solve_start.elapsed().as_nanos();
         match &report.outcome {
             fabric::cadical_up::CadicalUpOutcome::Sat { .. } => println!("sat"),
@@ -7444,7 +8245,7 @@ fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, 
         }
         if with_stats {
             eprintln!(
-                "fabric_engine={engine} parse_ns={parse_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} solve_ns={solve_ns} total_ns={} theory_log_entries={} stats={:?}",
+                "fabric_engine={engine} parse_ns={parse_ns} projection_ns={projection_ns} lowering_ns={lowering_ns} solve_ns={solve_ns} total_ns={} theory_log_entries={} root_stats={root_simplification_stats:?} stats={:?}",
                 total_start.elapsed().as_nanos(),
                 report.theory_log.len(),
                 report.stats,
@@ -7462,7 +8263,7 @@ fn fabric_solve_file(path: &str, engine: &str, with_stats: bool) -> Result<i32, 
         "action" => fabric::engine::solve_incremental_action_nogood_reference(&projection, caps),
         other => {
             return Err(format!(
-                "unknown Fabric engine `{other}`; expected scan, incremental, watched, learned, action, or cadical-up"
+                "unknown Fabric engine `{other}`; expected scan, incremental, watched, learned, action, finite-jit, quotient-portfolio, cadical-up, cadical-up-direct, or cadical-up-root"
             ));
         }
     }
@@ -8264,6 +9065,11 @@ mod tests {
             RootCnfOptions {
                 direct_root_cnf: true,
                 direct_negated_root: false,
+                finite_rook_symmetry: false,
+                force_finite_symmetry: false,
+                finite_structural_default_safe: false,
+                force_finite_predicate_channeling: false,
+                force_finite_permutation_support: false,
             }
         );
     }
@@ -8687,11 +9493,21 @@ mod tests {
             RootCnfOptions {
                 direct_root_cnf: false,
                 direct_negated_root: false,
+                finite_rook_symmetry: false,
+                force_finite_symmetry: false,
+                finite_structural_default_safe: false,
+                force_finite_predicate_channeling: false,
+                force_finite_permutation_support: false,
             },
             RootCnfOptions::existing_behavior(true),
             RootCnfOptions {
                 direct_root_cnf: true,
                 direct_negated_root: true,
+                finite_rook_symmetry: false,
+                force_finite_symmetry: false,
+                finite_structural_default_safe: false,
+                force_finite_predicate_channeling: false,
+                force_finite_permutation_support: false,
             },
         ];
         for assignment_bits in 0..(1usize << atom_count) {
@@ -9941,6 +10757,17 @@ mod tests {
             }
         }
         source.push_str(&format!("(assert (and {}))\n", guards.join(" ")));
+
+        let mut multi_source = source.clone();
+        multi_source.push_str("(declare-fun op2 (U U) U)\n");
+        for row in 0..3 {
+            for column in 0..3 {
+                multi_source.push_str(&format!(
+                    "(assert (or (= (op2 e{row} e{column}) e0) (= (op2 e{row} e{column}) e1) (= (op2 e{row} e{column}) e2)))\n"
+                ));
+            }
+        }
+        multi_source.push_str("(check-sat)\n");
         source.push_str("(check-sat)\n");
 
         let problem = parse_problem(&source).unwrap();
@@ -9949,6 +10776,62 @@ mod tests {
             &mut complete,
             &problem.arena,
             problem.bool_problem.as_ref().unwrap()
+        ));
+        #[cfg(feature = "fabric")]
+        assert_eq!(source_selects_finite_rook(&problem), Ok(true));
+
+        let multi_problem = parse_problem(&multi_source).unwrap();
+        let mut strict_single = finite_analysis::FiniteAnalysisContext::default();
+        assert!(!finite_rook_symmetry_candidate_with_multiple(
+            &mut strict_single,
+            &multi_problem.arena,
+            multi_problem.bool_problem.as_ref().unwrap(),
+            false,
+        ));
+        let mut generalized = finite_analysis::FiniteAnalysisContext::default();
+        assert!(finite_rook_symmetry_candidate_with_multiple(
+            &mut generalized,
+            &multi_problem.arena,
+            multi_problem.bool_problem.as_ref().unwrap(),
+            true,
+        ));
+        let mut structural = finite_analysis::FiniteAnalysisContext::default();
+        assert!(finite_structural_eager_candidate(
+            &mut structural,
+            &multi_problem.arena,
+            multi_problem.bool_problem.as_ref().unwrap(),
+        ));
+
+        let predicate_source = multi_source.replacen(
+            "(check-sat)",
+            "(declare-fun p (U) Bool)\n(assert (or (p e0) (p e1)))\n(check-sat)",
+            1,
+        );
+        let predicate_problem = parse_problem(&predicate_source).unwrap();
+        let mut predicate = finite_analysis::FiniteAnalysisContext::default();
+        assert!(finite_structural_predicate_candidate(
+            &mut predicate,
+            &predicate_problem.arena,
+            predicate_problem.bool_problem.as_ref().unwrap(),
+        ));
+        let mut predicate_is_not_pure = finite_analysis::FiniteAnalysisContext::default();
+        assert!(!finite_structural_eager_candidate(
+            &mut predicate_is_not_pure,
+            &predicate_problem.arena,
+            predicate_problem.bool_problem.as_ref().unwrap(),
+        ));
+
+        let nonfinite_source = multi_source.replacen(
+            "(check-sat)",
+            "(declare-fun stray () U)\n(assert (= stray stray))\n(check-sat)",
+            1,
+        );
+        let nonfinite_problem = parse_problem(&nonfinite_source).unwrap();
+        let mut nonfinite = finite_analysis::FiniteAnalysisContext::default();
+        assert!(!finite_structural_eager_candidate(
+            &mut nonfinite,
+            &nonfinite_problem.arena,
+            nonfinite_problem.bool_problem.as_ref().unwrap(),
         ));
 
         let incomplete_source = source.replacen(&guards[0], "true", 1);
@@ -9959,6 +10842,30 @@ mod tests {
             &incomplete_problem.arena,
             incomplete_problem.bool_problem.as_ref().unwrap()
         ));
+        #[cfg(feature = "fabric")]
+        assert_eq!(source_selects_finite_rook(&incomplete_problem), Ok(false));
+
+        assert!(finite_structural_default_safe_signature(7, 2, 0));
+        assert!(!finite_structural_default_safe_signature(6, 2, 0));
+        assert!(!finite_structural_default_safe_signature(7, 1, 0));
+        assert!(!finite_structural_default_safe_signature(7, 2, 1));
+        assert!(finite_structural_predicate_pressure_candidate(11_360, 6));
+        assert!(!finite_structural_predicate_pressure_candidate(0, 6));
+        assert!(!finite_structural_predicate_pressure_candidate(16_385, 6));
+        assert!(!finite_structural_predicate_pressure_candidate(10_001, 10));
+        assert!(!finite_structural_predicate_pressure_candidate(
+            usize::MAX,
+            2
+        ));
+        assert_eq!(
+            finite_permutation_support_mode(None, true),
+            Some(finite_analysis::PermutationSupportMode::Focused)
+        );
+        assert_eq!(finite_permutation_support_mode(Some("0"), true), None);
+        assert_eq!(
+            finite_permutation_support_mode(Some("all"), false),
+            Some(finite_analysis::PermutationSupportMode::All)
+        );
 
         assert_eq!(
             parse_zero_one_setting_with_default(FINITE_ROOK_SYMMETRY_ENV, None, false),
@@ -9968,6 +10875,25 @@ mod tests {
             parse_zero_one_setting_with_default(FINITE_ROOK_SYMMETRY_ENV, Some("rook"), false)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn portfolio_frontend_auto_is_size_bounded_and_explicitly_overridable() {
+        assert_eq!(portfolio_stream_frontend_for(0, None), Ok(false));
+        assert_eq!(
+            portfolio_stream_frontend_for(FABRIC_PORTFOLIO_STREAM_MIN_BYTES - 1, None),
+            Ok(false)
+        );
+        assert_eq!(
+            portfolio_stream_frontend_for(FABRIC_PORTFOLIO_STREAM_MIN_BYTES, None),
+            Ok(true)
+        );
+        assert_eq!(portfolio_stream_frontend_for(0, Some("1")), Ok(true));
+        assert_eq!(
+            portfolio_stream_frontend_for(usize::MAX, Some("0")),
+            Ok(false)
+        );
+        assert!(portfolio_stream_frontend_for(0, Some("auto")).is_err());
     }
 
     #[cfg(feature = "finite-symmetry")]

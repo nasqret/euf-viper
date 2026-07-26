@@ -129,6 +129,21 @@ pub(crate) fn lower(
     )
 }
 
+/// Lowers asserted roots without allocating a redundant definition atom for
+/// each top-level connective. Nested expressions remain fully definitional,
+/// so source atom identifiers and model reconstruction are unchanged.
+pub(crate) fn lower_direct(
+    problem: &SemanticProblem,
+    caps: LoweringCaps,
+) -> Result<NativeFormula, LoweringError> {
+    lower_assertions_direct(
+        problem.atoms.len(),
+        &problem.assertions,
+        &problem.root_literals,
+        caps,
+    )
+}
+
 pub(crate) fn lower_assertions(
     source_atom_count: usize,
     assertions: &[SemanticExpr],
@@ -142,6 +157,30 @@ pub(crate) fn lower_assertions(
     for assertion in assertions {
         let literal = encode_expression(assertion, &mut builder)?;
         builder.add_clause([literal])?;
+    }
+    for fact in root_literals {
+        let literal = if fact.positive {
+            Lit::positive(fact.atom)
+        } else {
+            Lit::negative(fact.atom)
+        };
+        builder.add_clause([Encoded::Lit(literal)])?;
+    }
+    Ok(builder.finish())
+}
+
+pub(crate) fn lower_assertions_direct(
+    source_atom_count: usize,
+    assertions: &[SemanticExpr],
+    root_literals: &[RootLiteral],
+    caps: LoweringCaps,
+) -> Result<NativeFormula, LoweringError> {
+    validate_atom_count(source_atom_count, caps)?;
+    validate_source_atoms(source_atom_count, assertions, root_literals)?;
+
+    let mut builder = FormulaBuilder::new(source_atom_count, caps);
+    for assertion in assertions {
+        assert_expression(assertion, true, &mut builder)?;
     }
     for fact in root_literals {
         let literal = if fact.positive {
@@ -501,6 +540,83 @@ fn encode_expression(
         .expect("encoding one expression produces one value"))
 }
 
+fn assert_expression(
+    expression: &SemanticExpr,
+    positive: bool,
+    builder: &mut FormulaBuilder,
+) -> Result<(), LoweringError> {
+    match expression {
+        SemanticExpr::Const(value) => {
+            if *value != positive {
+                builder.add_clause([])?;
+            }
+        }
+        SemanticExpr::Atom(atom) => {
+            let literal = Lit::positive(*atom);
+            builder.add_clause([Encoded::Lit(if positive {
+                literal
+            } else {
+                literal.negate()
+            })])?;
+        }
+        SemanticExpr::Not(child) => assert_expression(child, !positive, builder)?,
+        SemanticExpr::And(children) if positive => {
+            for child in children {
+                assert_expression(child, true, builder)?;
+            }
+        }
+        SemanticExpr::Or(children) if !positive => {
+            for child in children {
+                assert_expression(child, false, builder)?;
+            }
+        }
+        SemanticExpr::And(children) | SemanticExpr::Or(children) => {
+            let mut clause = Vec::new();
+            clause
+                .try_reserve_exact(children.len())
+                .map_err(|_| LoweringError::CountOverflow {
+                    resource: "root clause allocation",
+                })?;
+            for child in children {
+                let encoded = encode_expression(child, builder)?;
+                clause.push(if positive { encoded } else { encoded.negate() });
+            }
+            builder.add_clause(clause)?;
+        }
+        SemanticExpr::Iff(children) if positive => {
+            let Some((first, rest)) = children.split_first() else {
+                return Ok(());
+            };
+            if rest.is_empty() {
+                return Ok(());
+            }
+            let first = encode_expression(first, builder)?;
+            for child in rest {
+                let child = encode_expression(child, builder)?;
+                builder.add_clause([first.negate(), child])?;
+                builder.add_clause([first, child.negate()])?;
+            }
+        }
+        SemanticExpr::Iff(_) => {
+            let encoded = encode_expression(expression, builder)?;
+            builder.add_clause([encoded.negate()])?;
+        }
+        SemanticExpr::Ite(condition, then_expression, else_expression) => {
+            let condition = encode_expression(condition, builder)?;
+            let then_expression = encode_expression(then_expression, builder)?;
+            let else_expression = encode_expression(else_expression, builder)?;
+            if positive {
+                builder.add_clause([condition.negate(), then_expression])?;
+                builder.add_clause([condition, else_expression])?;
+            } else {
+                builder.add_clause([condition.negate(), then_expression.negate()])?;
+                builder.add_clause([condition, else_expression.negate()])?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn schedule_nary<'a>(
     children: &'a [SemanticExpr],
     operator: NaryOperator,
@@ -604,7 +720,24 @@ mod tests {
     }
 
     fn assert_exact_truth_table(expression: &SemanticExpr, source_atom_count: usize) {
-        let formula = lower_assertions(
+        assert_truth_table_with(expression, source_atom_count, lower_assertions);
+    }
+
+    fn assert_direct_truth_table(expression: &SemanticExpr, source_atom_count: usize) {
+        assert_truth_table_with(expression, source_atom_count, lower_assertions_direct);
+    }
+
+    fn assert_truth_table_with(
+        expression: &SemanticExpr,
+        source_atom_count: usize,
+        lowerer: fn(
+            usize,
+            &[SemanticExpr],
+            &[RootLiteral],
+            LoweringCaps,
+        ) -> Result<NativeFormula, LoweringError>,
+    ) {
+        let formula = lowerer(
             source_atom_count,
             std::slice::from_ref(expression),
             &[],
@@ -662,6 +795,46 @@ mod tests {
             ),
             3,
         );
+    }
+
+    #[test]
+    fn direct_root_truth_tables_cover_every_expression_form_and_polarity() {
+        let expressions = [
+            SemanticExpr::Const(true),
+            SemanticExpr::Const(false),
+            atom(0),
+            not(atom(0)),
+            and(Vec::new()),
+            or(Vec::new()),
+            iff(Vec::new()),
+            iff(vec![atom(0)]),
+            and(vec![atom(0), or(vec![atom(1), not(atom(2))])]),
+            or(vec![atom(0), and(vec![atom(1), not(atom(2))])]),
+            iff(vec![atom(0), atom(1), atom(2)]),
+            ite(atom(0), atom(1), atom(2)),
+            not(and(vec![atom(0), or(vec![atom(1), atom(2)])])),
+            not(or(vec![atom(0), and(vec![atom(1), atom(2)])])),
+            not(iff(vec![atom(0), atom(1), atom(2)])),
+            not(ite(atom(0), atom(1), atom(2))),
+        ];
+        for expression in expressions {
+            assert_direct_truth_table(&expression, 3);
+        }
+    }
+
+    #[test]
+    fn direct_roots_remove_only_redundant_top_level_definitions() {
+        let expression = iff(vec![atom(0), and(vec![atom(1), atom(2)])]);
+        let ordinary =
+            lower_assertions(3, std::slice::from_ref(&expression), &[], test_caps()).unwrap();
+        let direct =
+            lower_assertions_direct(3, std::slice::from_ref(&expression), &[], test_caps())
+                .unwrap();
+
+        assert_eq!(ordinary.auxiliary_atom_count, 2);
+        assert_eq!(direct.auxiliary_atom_count, 1);
+        assert!(direct.clauses.len() < ordinary.clauses.len());
+        assert_direct_truth_table(&expression, 3);
     }
 
     #[test]

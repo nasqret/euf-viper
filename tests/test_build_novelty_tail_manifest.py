@@ -346,6 +346,37 @@ class ArtifactBuilderTests(unittest.TestCase):
             )
             self.assertEqual(report_bytes, BUILDER.canonical_json_bytes(report))
 
+    def test_family_selection_is_exact_sorted_and_source_verified(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="novelty family ") as temp:
+            fixture = Fixture(Path(temp))
+            output, _, report = BUILDER.build_selection_artifacts(
+                fixture.manifest,
+                family_name="family",
+                source_root=fixture.corpus,
+            )
+            rows = [json.loads(line) for line in output.decode().splitlines()]
+
+            self.assertEqual(
+                [row["relative_path"] for row in rows],
+                [Fixture.PATH_A, Fixture.PATH_B],
+            )
+            self.assertEqual(report["selection"]["mode"], "family")
+            self.assertEqual(report["selection"]["name"], "family")
+            self.assertEqual(report["counts"]["selected_records"], 2)
+            self.assertEqual(report["counts"]["sat"], 1)
+            self.assertEqual(report["counts"]["unsat"], 1)
+
+            with self.assertRaisesRegex(BUILDER.SelectionError, "absent"):
+                BUILDER.build_selection_artifacts(
+                    fixture.manifest,
+                    family_name="missing",
+                    source_root=fixture.corpus,
+                )
+            for invalid in ("", "QF_UF", "../family", "family/child", "bad\x00"):
+                with self.subTest(invalid=invalid):
+                    with self.assertRaises(BUILDER.SelectionError):
+                        BUILDER.validate_family_name(invalid)
+
     def test_rebased_output_uses_exact_absolute_root(self) -> None:
         with tempfile.TemporaryDirectory(prefix="novelty rebased ") as temp:
             fixture = Fixture(Path(temp))

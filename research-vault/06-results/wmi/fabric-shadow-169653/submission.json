@@ -1,0 +1,69 @@
+{
+  "artifacts": {
+    "root": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts",
+    "rows": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/fabric-shadow.jsonl",
+    "slurm": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/slurm.json",
+    "stderr": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/stderr.log",
+    "stdout": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/stdout.log",
+    "summary": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31/artifacts/summary.json"
+  },
+  "corpus_mode": "smoke",
+  "manifest": {
+    "corpus_access": "read_only",
+    "corpus_root": "/home/bnaskrecki/euf-viper/benchmarks/smtlib-2025/QF_UF",
+    "expected_sources": 2,
+    "path": "/work/bnaskrecki/euf-viper-campaigns/viper-fabric/manifests/viper-fabric-f0-smoke-v1.jsonl",
+    "sha256": "84364115fb1b169f96d3e78885ecbf4609e0d935f5aff21aa1b89cddb5d3e291"
+  },
+  "published_ref": "refs/heads/perf-viper-fabric",
+  "remote_host": "bnaskrecki@10.71.80.3",
+  "remote_worktree": "/work/bnaskrecki/euf-viper-fabric/checkouts/51fc7d31a0e4",
+  "resume": false,
+  "revision": "51fc7d31a0e499fc9ffc4c30bf9227e6b8c0fdcc",
+  "run_id": "f0-smoke-51fc7d31",
+  "run_root": "/work/bnaskrecki/euf-viper-fabric/runs/fabric-shadow-f0-smoke-51fc7d31",
+  "schema": "euf-viper.fabric-shadow-wmi-submission.v1",
+  "scope": {
+    "default_behavior_change": false,
+    "mode": "semantic_substrate_shadow_census",
+    "performance_claim": false,
+    "promotion_claim": false,
+    "solver_result_claim": false,
+    "solver_result_claims_allowed": 0,
+    "stage": "F0"
+  },
+  "slurm": {
+    "cluster": null,
+    "cpus_per_task": 1,
+    "dependency": null,
+    "instance_timeout_s": 60.0,
+    "job_id": 169653,
+    "partition": "cpu_idle",
+    "raw_submission": "169653",
+    "runner_jobs": 1,
+    "wall_time": "00:15:00"
+  },
+  "status": "submitted",
+  "submission_state_may_be_incomplete": false,
+  "tools": {
+    "cargo": {
+      "path": "/home/bnaskrecki/.rustup/toolchains/1.93.0-x86_64-unknown-linux-gnu/bin/cargo",
+      "sha256": "9548937d530bf439ff1ba47a3b2bd26eeb9c3aff1961c20c01798613de922578",
+      "version": "cargo 1.93.0 (083ac5135 2025-12-15)"
+    },
+    "python": {
+      "path": "/usr/bin/python3.10",
+      "sha256": "7d51cd6b48b521277f5caa4610a82126e315fa2be4df069823a8b1eeb5bd4a86",
+      "version": "Python 3.10.12"
+    },
+    "runner": {
+      "sha256": "d357c26e3e38c1e54215dd3b8a03b260b91bf04354a145a01dded3e3be508cdf"
+    },
+    "rustc": {
+      "path": "/home/bnaskrecki/.rustup/toolchains/1.93.0-x86_64-unknown-linux-gnu/bin/rustc",
+      "sha256": "d32249a7c3bfcfc67b471460386e46323accae7125e344567a12d5664d99bb57",
+      "version": "rustc 1.93.0 (254b59607 2026-01-19)"
+    }
+  },
+  "work_root": "/work/bnaskrecki/euf-viper-fabric"
+}

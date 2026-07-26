@@ -11,6 +11,7 @@ pub(crate) mod action_nogood;
 pub(crate) mod bool_cnf;
 pub(crate) mod cadical_up;
 pub(crate) mod certificate;
+pub(crate) mod cnf_root;
 pub(crate) mod component;
 pub(crate) mod congruence;
 pub(crate) mod cover;
