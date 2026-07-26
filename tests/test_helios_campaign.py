@@ -195,7 +195,7 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertNotIn("/usr/bin/time", task)
         self.assertIn("AMD EPYC 9654", task)
         self.assertIn(
-            'bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"',
+            '/bin/bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"',
             batch,
         )
 
