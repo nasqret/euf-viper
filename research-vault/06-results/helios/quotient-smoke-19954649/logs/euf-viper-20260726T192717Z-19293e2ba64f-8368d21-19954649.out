@@ -1,0 +1,19 @@
+[1/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 cvc5 budget=2 result=sat
+[2/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 euf-viper budget=2 result=sat
+[3/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 opensmt budget=2 result=sat
+[4/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 yices2 budget=2 result=sat
+[5/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 z3-default budget=2 result=sat
+[6/18] QF_UF/2018-Goel-hwbench/QF_UF_frogs.2.prop1_ab_br_max.smt2 z3-sat-euf budget=2 result=sat
+[7/18] QF_UF/PEQ/PEQ012_size6.smt2 euf-viper budget=2 result=unsat
+[8/18] QF_UF/PEQ/PEQ012_size6.smt2 opensmt budget=2 result=timeout
+[9/18] QF_UF/PEQ/PEQ012_size6.smt2 yices2 budget=2 result=unsat
+[10/18] QF_UF/PEQ/PEQ012_size6.smt2 z3-default budget=2 result=timeout
+[11/18] QF_UF/PEQ/PEQ012_size6.smt2 z3-sat-euf budget=2 result=timeout
+[12/18] QF_UF/PEQ/PEQ012_size6.smt2 cvc5 budget=2 result=timeout
+[13/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 opensmt budget=2 result=timeout
+[14/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 yices2 budget=2 result=unsat
+[15/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 z3-default budget=2 result=unsat
+[16/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 z3-sat-euf budget=2 result=unsat
+[17/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 cvc5 budget=2 result=timeout
+[18/18] QF_UF/QG-classification/qg7/iso_icl_nogen001.smt2 euf-viper budget=2 result=unsat
+campaign complete: runs=18 raw=/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260726T192717Z-19293e2ba64f-8368d21/output/raw.jsonl

@@ -2264,3 +2264,30 @@
 - V0 remains open because current finite SAT/UNSAT validation is not yet an
   independent source parse plus proof replay. Independent model/proof mutation
   rejection is required before any best-overall claim.
+
+# 2026-07-26 - Helios quotient runner qualification
+
+- Installed and remotely executed a content-addressed comparator bundle with
+  Z3 4.16.0, cvc5 1.3.4, Yices2 2.7.0, and OpenSMT 2.9.2. The bundle receipt is
+  `034af9fb...e68742e`; the corpus inventory is `9b39c70a...5ebeadc`.
+- Closed live Helios portability defects without weakening provenance:
+  Lustre promotion before read-only sealing, mutable namespace ownership,
+  comparator TSV columns, login-shell initialization, strict-pipe SIGPIPE,
+  login/compute transitive-module variation, GCC headers for bindgen, Python
+  3.9 recursive aliases and UTC handling, and sparse benchmark metadata.
+- Helios smoke job `19954649` completed `0:0` on one AMD EPYC 9654 core. It
+  binds orchestration `19293e2b`, solver `8368d21`, candidate binary
+  `c146a7be...e9772e0`, three instances, six configurations, and exactly 18
+  journaled runs. Raw and resource hashes match the terminal receipt.
+- Viper and Yices2 solve 3/3; Z3 default and `sat.euf=true` solve 2/3; cvc5 and
+  OpenSMT solve 1/3. Versus Yices2, Viper has `1.462x` PAR-2/common-total but
+  `0.651x` common-geometric timing. The frozen analyzer rejects promotion;
+  this selected smoke is runner evidence, not broad competitive evidence.
+- The measured matrix took 19.43 seconds and peaked at 274,968 KiB across
+  children. Cold build took about 4.3 minutes, and recursive sealing kept the
+  batch alive 140 seconds after `srun` completed. The next implementation is a
+  build-once immutable candidate bundle plus sharded result roots.
+- Fetched the evidence without the Cargo target into
+  `research-vault/06-results/helios/quotient-smoke-19954649/`, including the
+  all-comparator 10,000-replicate analysis. WMI PGO job `170902` remains
+  pending with no node and zero runtime.

@@ -22,8 +22,9 @@ Immediate execution order:
    (**complete: 186 records, 174 claim-isolated panels**);
 2. qualify a promotion-eligible Helios lock with exact taxonomy, separate
    orchestration/solver provenance, and the official hash-locked comparator
-   bundle (**in progress: live preflight and comparator execution pass**);
-3. replicate the current fast cycle under `plgccaiautore2026-cpu`;
+   bundle (**complete: terminal smoke job `19954649`, 18/18 rows**);
+3. implement build-once sharding and replicate the current fast cycle under
+   `plgccaiautore2026-cpu` (**in progress**);
 4. adjudicate WMI PGO/Goel job `170902` when it becomes terminal, without
    treating that older-route result as quotient-portfolio evidence;
 5. run revision `8368d21` on full and official two-second campaigns;
@@ -53,10 +54,16 @@ freezing. The corrected path freezes the exact command directly and records
 separate orchestration and solver revisions. Helios preflight now passes, and
 its content-addressed official comparator bundle executes Z3 4.16.0, cvc5
 1.3.4, Yices2 2.7.0, and OpenSMT 2.9.2 with every archive, payload, and Z3
-runtime-library hash checked. A scheduler dry run and campaign smoke remain
-required. WMI job `170902` trains and measures `cadical-up`, not the current
-quotient portfolio, so its terminal result is an older-route PGO experiment
-only.
+runtime-library hash checked. Terminal smoke `19954649` completed `0:0` on one
+AMD EPYC 9654 core with 18/18 records, zero wrong answers, exact hash chains,
+and a 19.43-second measured runner envelope. Viper and Yices2 each solve the
+three selected rows. Viper has a `1.462x` PAR-2/common-total factor but a
+`0.651x` common-geometric factor against Yices2, so the analyzer rejects
+promotion. The smoke qualifies orchestration only. Its recursive build-tree
+sealing took 140 seconds after the measured step, making build-once sharding a
+hard prerequisite for broad campaigns. WMI job `170902` trains and measures
+`cadical-up`, not the current quotient portfolio, so its terminal result is an
+older-route PGO experiment only; it remains pending with zero runtime.
 
 The measured best-overall design remains in
 `research-vault/02-design/2026-07-12-best-overall-qf-uf-campaign.md`. The active
