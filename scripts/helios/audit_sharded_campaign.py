@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "euf-viper.helios-shard-audit.v1"
+SCHEMA_VERSION = "euf-viper.helios-shard-audit.v2"
 HEX64 = set("0123456789abcdef")
 RECEIPT_FIELDS = {
     "schema_version",
@@ -134,6 +134,16 @@ def verify_hash(path: Path, expected: str, context: str) -> None:
 
 def lock_self_hash(lock: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_bytes({**lock, "lock_sha256": ""})).hexdigest()
+
+
+def portable_path(path: Path, root: Path, context: str) -> str:
+    try:
+        relative = path.relative_to(root)
+    except ValueError as error:
+        raise AuditError(f"{context} escaped its evidence root") from error
+    if not relative.parts:
+        raise AuditError(f"{context} cannot equal its evidence root")
+    return relative.as_posix()
 
 
 def atomic_write_new(path: Path, payload: dict[str, Any]) -> None:
@@ -260,7 +270,9 @@ def audit(
             {
                 "index": index,
                 "job_id": receipt["job_id"],
-                "receipt_path": str(receipt_path),
+                "receipt_path": portable_path(
+                    receipt_path, campaign_root, f"shard {index} receipt"
+                ),
                 "receipt_sha256": sha256_file(receipt_path),
                 "raw_records": raw_records,
                 "raw_sha256": receipt["raw_sha256"],
@@ -322,7 +334,7 @@ def audit(
 
     return {
         "analysis": {
-            "path": str(analysis_path),
+            "path": portable_path(analysis_path, campaign_root, "analysis"),
             "sha256": sha256_file(analysis_path),
             "status": analysis["status"],
         },

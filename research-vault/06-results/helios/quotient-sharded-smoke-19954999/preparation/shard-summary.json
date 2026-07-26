@@ -1,0 +1,9 @@
+{
+  "instances": 3,
+  "lock_sha256": [
+    "8745657a8097bfeb643f486df20d1eb69bb068cc221dd8e407308852ea44b3f9",
+    "9197e5dc8d3a8c4dd3047e2f8aef488a14d452fc8a5829595f268855c9a7c9c5"
+  ],
+  "parent_lock_sha256": "f01e4ea1382640a40c8dc41fb92f7d8e52722bbfef22c3514446528ac79e54c2",
+  "shards": 2
+}

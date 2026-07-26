@@ -205,6 +205,12 @@ class HeliosShardAuditTests(unittest.TestCase):
             self.assertEqual(report["completed_runs"], 2)
             self.assertEqual(len(report["tasks"]), 2)
             self.assertEqual(report["analysis"]["status"], "rejected")
+            self.assertEqual(report["analysis"]["path"], "analysis.json")
+            self.assertEqual(
+                report["tasks"][0]["receipt_path"],
+                "tasks/shard-0000/receipt.tsv",
+            )
+            self.assertNotIn(directory, json.dumps(report))
 
     def test_tampered_raw_or_stale_analysis_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
