@@ -106,7 +106,7 @@ grants="$(hpc-grants)"
 printf '%s\n' "$grants" | grep -F "$GRANT" >/dev/null || \
   die "grant is not active: $GRANT"
 squeue -h -A "$ACCOUNT" >/dev/null
-partition_probe="$(sinfo -h -p "$PARTITION" -o '%P' | awk 'NF {print; exit}')"
+partition_probe="$(sinfo -h -p "$PARTITION" -o '%P' | awk 'NF && !seen {print; seen=1}')"
 [ -n "$partition_probe" ] || die "partition is unavailable: $PARTITION"
 
 printf 'fact\tuser\t%s\t-\n' "$EXPECTED_USER"

@@ -194,6 +194,8 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("resource-usage.json", task)
         self.assertNotIn("/usr/bin/time", task)
         self.assertIn("AMD EPYC 9654", task)
+        self.assertNotIn("print $2; exit", task)
+        self.assertNotIn("NF {print; exit}", PREFLIGHT.read_text(encoding="utf-8"))
         self.assertIn(
             '/bin/bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"',
             batch,

@@ -93,7 +93,7 @@ print(len(os.sched_getaffinity(0)))
 PY
 )"
 [ "$AFFINITY_COUNT" = 1 ] || die "srun did not bind the task to exactly one CPU"
-CPU_MODEL="$(LC_ALL=C lscpu | awk -F: '$1 ~ /^Model name/ {sub(/^[[:space:]]+/, "", $2); print $2; exit}')"
+CPU_MODEL="$(LC_ALL=C lscpu | awk -F: '$1 ~ /^Model name/ {sub(/^[[:space:]]+/, "", $2); print $2}')"
 case "$CPU_MODEL" in
   *"$EXPECTED_CPU_MODEL"*) ;;
   *) die "unexpected CPU model: $CPU_MODEL" ;;
