@@ -1301,3 +1301,11 @@
   `research-vault/06-results/wmi/fabric-shadow-169653/audit.json`, with two
   complete rows and zero solver-result claims. Python discovery is 540/540;
   Rust all-feature testing is 643 passed, 10 intentionally ignored.
+- Clean freeze `8368d21de96eec77f3bb5f6820c11d1363d3041b` is public on
+  `research/quotient-jit-lcg`, and exact hosted Campaign contract run
+  `30207588244` passed. The preregistered source-family-disjoint PGO/Goel
+  holdout is WMI job `170902` with immutable receipt
+  `results/pgo-holdout-submissions/quotient-jit-pgo-8368d21-20260726.json`.
+  It is pending for unavailable/reserved nodes; do not treat submission or
+  scheduler estimates as solver evidence. Fetch and adjudicate only after the
+  final remote `artifacts/campaign.json` exists.

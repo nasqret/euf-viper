@@ -30,6 +30,15 @@ green at 643 passed and 10 intentionally ignored; Python discovery is green at
 540 tests. These results authorize a clean freeze and fixed WMI comparison,
 not a production-default change or an overall-leader claim.
 
+The implementation freeze is commit `8368d21de96eec77f3bb5f6820c11d1363d3041b`,
+published at `refs/heads/research/quotient-jit-lcg`; hosted Campaign contract
+run `30207588244` passed on that exact revision. The preregistered,
+source-family-disjoint PGO/Goel holdout is WMI job `170902`, submitted with one
+CPU and exact hashes for Rust, LLVM profile tooling, Z3, Yices2, and cvc5. It
+is currently `PENDING` because eligible nodes are down, drained, or reserved.
+Only a terminal, complete `campaign.json` plus its frozen adjudication may
+change PGO status; the submission itself is no performance evidence.
+
 ## Current Truth
 
 Authoritative exact-revision campaign: prepare/full/official/global-audit

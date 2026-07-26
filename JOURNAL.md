@@ -2199,3 +2199,13 @@
   independent audit verifies two rows, no errors/duplicates, exact bindings,
   and zero solver-result claims. The current WMI CPU queue is heavily occupied
   by unrelated `t5f_final` arrays, so a successor campaign may remain pending.
+- Froze and published the complete implementation as
+  `8368d21de96eec77f3bb5f6820c11d1363d3041b` on
+  `research/quotient-jit-lcg`. GitHub Campaign contract run `30207588244`
+  completed successfully on that exact SHA.
+- Submitted the fixed source-family-disjoint PGO/Goel holdout as WMI job
+  `170902`. The receipt binds the public revision, canonical corpus, fresh
+  `/work` run root, single CPU, Rust/LLVM tools, Z3 4.16.0, Yices2 2.7.0, and
+  cvc5 1.3.4 by hash. The job is `PENDING`; Slurm reports eligible nodes are
+  down, drained, or reserved. No timing, coverage, or promotion claim is made
+  before terminal artifacts and frozen adjudication.

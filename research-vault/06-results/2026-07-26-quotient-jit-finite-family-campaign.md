@@ -84,7 +84,12 @@ the finite-family gains.
 - F0 WMI smoke `169653`: `COMPLETED 0:0`.
 - Independent F0 audit: verified two rows, exact bindings, no errors, no
   duplicates, and zero solver-result claims.
+- Clean public implementation: `8368d21de96eec77f3bb5f6820c11d1363d3041b`.
+- Hosted Campaign contract: run `30207588244`, successful on the exact SHA.
+- Fixed PGO/Goel holdout: WMI job `170902`, currently `PENDING` because
+  eligible nodes are down, drained, or reserved.
 
-The next valid evidence is a clean published revision followed by fixed WMI
-family/full-corpus campaigns. Promotion requires repeated timing, long
-timeouts, a second CPU class, and no coverage or correctness regression.
+The next valid evidence is the terminal PGO campaign marker and its frozen
+adjudication, followed by fixed WMI family/full-corpus campaigns. Promotion
+requires repeated timing, long timeouts, a second CPU class, and no coverage
+or correctness regression. A queued job is not performance evidence.
