@@ -102,7 +102,11 @@ class HeliosShellContractTests(unittest.TestCase):
         source = SUBMIT.read_text(encoding="utf-8")
         self.assertIn("git status --porcelain=v1 --untracked-files=all", source)
         self.assertIn("git rev-parse --verify 'HEAD^{commit}'", source)
-        self.assertIn("git clone --quiet --no-hardlinks --no-checkout", source)
+        self.assertIn(
+            "git clone --quiet --filter=blob:none --no-checkout --no-local", source
+        )
+        self.assertIn("sparse-checkout set campaigns scripts slurm", source)
+        self.assertIn("sparse-checkout set src vendor", source)
         self.assertIn("checkout --quiet --detach", source)
         self.assertIn("rsync -az --delete", source)
         self.assertIn("chmod -R a-w \"$INCOMING\"", source)

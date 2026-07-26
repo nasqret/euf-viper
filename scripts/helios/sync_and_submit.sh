@@ -159,7 +159,20 @@ TOKEN="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 make_local_checkout() {
   local revision="$1"
   local checkout="$2"
-  git clone --quiet --no-hardlinks --no-checkout "$ROOT" "$checkout"
+  local profile="$3"
+  git clone --quiet --filter=blob:none --no-checkout --no-local "$ROOT" "$checkout"
+  git -C "$checkout" sparse-checkout init --cone
+  case "$profile" in
+    orchestration)
+      git -C "$checkout" sparse-checkout set campaigns scripts slurm
+      ;;
+    solver)
+      git -C "$checkout" sparse-checkout set src vendor
+      ;;
+    *)
+      die "unknown sparse checkout profile: $profile"
+      ;;
+  esac
   git -C "$checkout" checkout --quiet --detach "$revision"
   [ "$(git -C "$checkout" rev-parse --verify 'HEAD^{commit}')" = "$revision" ]
   [ -z "$(git -C "$checkout" status --porcelain=v1 --untracked-files=all)" ]
@@ -205,8 +218,9 @@ mv "$INCOMING" "$REMOTE_CHECKOUT"
 REMOTE
 }
 
-make_local_checkout "$ORCHESTRATION_REVISION" "$LOCAL_ORCHESTRATION_CHECKOUT"
-make_local_checkout "$SOLVER_REVISION" "$LOCAL_SOLVER_CHECKOUT"
+make_local_checkout \
+  "$ORCHESTRATION_REVISION" "$LOCAL_ORCHESTRATION_CHECKOUT" orchestration
+make_local_checkout "$SOLVER_REVISION" "$LOCAL_SOLVER_CHECKOUT" solver
 stage_remote_checkout \
   "$LOCAL_ORCHESTRATION_CHECKOUT" \
   "$ORCHESTRATION_CHECKOUT" \
