@@ -32,7 +32,7 @@ import sys
 import tempfile
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
-from typing import Iterable, NamedTuple, Sequence
+from typing import Iterable, NamedTuple, Sequence, Union
 
 
 SCHEMA_VERSION = "euf-viper.source-family-taxonomy.v1"
@@ -179,7 +179,7 @@ class LoadedRecord(NamedTuple):
     taxonomy: PathTaxonomy
 
 
-SExpr = Token | list["SExpr"]
+SExpr = Union[Token, list["SExpr"]]
 
 
 def sha256_bytes(data: bytes) -> str:

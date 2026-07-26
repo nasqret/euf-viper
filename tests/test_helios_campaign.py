@@ -253,11 +253,16 @@ class HeliosShellContractTests(unittest.TestCase):
     def test_taxonomy_and_split_provenance_are_required(self) -> None:
         task = TASK.read_text(encoding="utf-8")
         preparer = PREPARE_LOCK.read_text(encoding="utf-8")
+        taxonomy_builder = (
+            ROOT / "scripts" / "bench" / "build_family_manifest.py"
+        ).read_text(encoding="utf-8")
         self.assertIn("build_family_manifest.py", task)
         self.assertIn('--taxonomy "$TAXONOMY"', task)
         self.assertIn('parser.add_argument("--taxonomy", type=Path, required=True)', preparer)
         self.assertIn('lock["promotion_eligible"] is not True', preparer)
         self.assertIn('lock["corpus"]["taxonomy_sha256"]', preparer)
+        self.assertIn('SExpr = Union[Token, list["SExpr"]]', taxonomy_builder)
+        self.assertNotIn('SExpr = Token | list["SExpr"]', taxonomy_builder)
 
     def test_solver_and_orchestration_provenance_are_separate(self) -> None:
         submit = SUBMIT.read_text(encoding="utf-8")
