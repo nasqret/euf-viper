@@ -1334,3 +1334,7 @@
   about `704x`, with identical decisions. Helios taxonomy is content-addressed,
   hash-checked, lock-protected, and tamper-failing. Python discovery is 627/627;
   Rust all-feature testing is 643 passed with ten intentional ignores.
+- Candidate freeze `b5f78fb6cfef648178089a680bf365ff4367b075` contains the
+  semantic dense-six CaDiCaL route and generalized split-revision Helios
+  launcher. Keep the measured `8368d21` dashboard baseline immutable; only a
+  complete fixed all-solver campaign may assign broad performance to `b5f78fb`.

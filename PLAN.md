@@ -103,9 +103,13 @@ discovery is green at 627 tests. These results authorize a clean freeze and
 fixed Helios comparison, not a production-default change or an overall-leader
 claim.
 
-The implementation freeze is commit `8368d21de96eec77f3bb5f6820c11d1363d3041b`,
-published at `refs/heads/research/quotient-jit-lcg`; hosted Campaign contract
-run `30207588244` passed on that exact revision. The preregistered,
+The latest measured baseline freeze is commit
+`8368d21de96eec77f3bb5f6820c11d1363d3041b`, published at
+`refs/heads/research/quotient-jit-lcg`; hosted Campaign contract run
+`30207588244` passed on that exact revision. The first post-baseline candidate
+is frozen at `b5f78fb6cfef648178089a680bf365ff4367b075`; it contains the semantic
+dense-six route and has no full-corpus score until the fixed Helios comparison
+finishes. The preregistered,
 source-family-disjoint PGO/Goel holdout is WMI job `170902`, submitted with one
 CPU and exact hashes for Rust, LLVM profile tooling, Z3, Yices2, and cvc5. It
 is currently `PENDING` because eligible nodes are down, drained, or reserved.

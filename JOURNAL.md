@@ -2365,3 +2365,7 @@
   This removes a one-campaign hard pin without weakening provenance.
 - Validation passes: 643 Rust tests, ten intentional ignores, 627 Python tests,
   formatting, default-feature compilation, and Helios shell syntax.
+- Froze the solver implementation as
+  `b5f78fb6cfef648178089a680bf365ff4367b075`. The campaign contract now names
+  that exact candidate while preserving `8368d21` as the measured broad
+  baseline. This is an orchestration checkpoint, not new performance evidence.
