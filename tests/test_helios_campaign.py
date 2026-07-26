@@ -121,7 +121,9 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn(
             "git clone --quiet --filter=blob:none --no-checkout --no-local", source
         )
-        self.assertIn("sparse-checkout set campaigns scripts slurm", source)
+        self.assertIn(
+            "sparse-checkout set benchmarks campaigns scripts slurm", source
+        )
         self.assertIn("sparse-checkout set src vendor", source)
         self.assertIn("checkout --quiet --detach", source)
         self.assertIn("rsync -az --delete", source)

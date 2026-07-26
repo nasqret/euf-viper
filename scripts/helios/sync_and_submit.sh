@@ -164,7 +164,7 @@ make_local_checkout() {
   git -C "$checkout" sparse-checkout init --cone
   case "$profile" in
     orchestration)
-      git -C "$checkout" sparse-checkout set campaigns scripts slurm
+      git -C "$checkout" sparse-checkout set benchmarks campaigns scripts slurm
       ;;
     solver)
       git -C "$checkout" sparse-checkout set src vendor
