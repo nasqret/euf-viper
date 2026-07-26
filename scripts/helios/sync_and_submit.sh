@@ -279,10 +279,10 @@ solver_value() {
   printf '%s\n' "$SOLVER_REPORT" | awk -F '\t' -v label="$1" -v column="$2" \
     '$1 == "solver" && $2 == label {print $column}'
 }
-Z3_BIN="$(solver_value z3 2)"; Z3_SHA256="$(solver_value z3 3)"
-CVC5_BIN="$(solver_value cvc5 2)"; CVC5_SHA256="$(solver_value cvc5 3)"
-YICES_BIN="$(solver_value yices2 2)"; YICES_SHA256="$(solver_value yices2 3)"
-OPENSMT_BIN="$(solver_value opensmt 2)"; OPENSMT_SHA256="$(solver_value opensmt 3)"
+Z3_BIN="$(solver_value z3 3)"; Z3_SHA256="$(solver_value z3 4)"
+CVC5_BIN="$(solver_value cvc5 3)"; CVC5_SHA256="$(solver_value cvc5 4)"
+YICES_BIN="$(solver_value yices2 3)"; YICES_SHA256="$(solver_value yices2 4)"
+OPENSMT_BIN="$(solver_value opensmt 3)"; OPENSMT_SHA256="$(solver_value opensmt 4)"
 COMPARATOR_BUNDLE_ROOT="$(printf '%s\n' "$SOLVER_REPORT" | \
   awk -F '\t' '$1 == "bundle" && $2 == "bundle" {print $3}')"
 COMPARATOR_BUNDLE_RECEIPT_SHA256="$(printf '%s\n' "$SOLVER_REPORT" | \

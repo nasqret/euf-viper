@@ -229,6 +229,16 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("comparator_bundle_receipt_sha256", submit)
         self.assertIn("comparator_bundle_receipt_sha256", task)
 
+    def test_comparator_tsv_parser_uses_path_and_sha256_columns(self) -> None:
+        source = SUBMIT.read_text(encoding="utf-8")
+        for binding in (
+            'Z3_BIN="$(solver_value z3 3)"; Z3_SHA256="$(solver_value z3 4)"',
+            'CVC5_BIN="$(solver_value cvc5 3)"; CVC5_SHA256="$(solver_value cvc5 4)"',
+            'YICES_BIN="$(solver_value yices2 3)"; YICES_SHA256="$(solver_value yices2 4)"',
+            'OPENSMT_BIN="$(solver_value opensmt 3)"; OPENSMT_SHA256="$(solver_value opensmt 4)"',
+        ):
+            self.assertIn(binding, source)
+
     def test_taxonomy_and_split_provenance_are_required(self) -> None:
         task = TASK.read_text(encoding="utf-8")
         preparer = PREPARE_LOCK.read_text(encoding="utf-8")
