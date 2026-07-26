@@ -85,6 +85,17 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("#SBATCH --account=plgccaiautore2026-cpu", batch)
         self.assertIn("#SBATCH --partition=plgrid", batch)
 
+    def test_preflight_repairs_only_owned_mutable_namespaces(self) -> None:
+        source = PREFLIGHT.read_text(encoding="utf-8")
+        self.assertIn('test -O "$root"', source)
+        self.assertIn('chmod u+rwx "$root"', source)
+        self.assertIn("orchestration-checkouts", source)
+        self.assertIn("solver-checkouts", source)
+        self.assertIn('test ! -L "$path"', source)
+        self.assertIn('chmod u+rwx "$path"', source)
+        self.assertIn("content-addressed children are sealed", source)
+        self.assertNotIn('chmod -R u+w "$root"', source)
+
     def test_exact_rust_stack_architecture_and_llvm_are_rechecked(self) -> None:
         toolchain = TOOLCHAIN.read_text(encoding="utf-8")
         task = TASK.read_text(encoding="utf-8")

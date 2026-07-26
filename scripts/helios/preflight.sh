@@ -83,6 +83,24 @@ case "$root" in
 esac
 mkdir -p "$root"
 root="$(readlink -f -- "$root")"
+test -d "$root" && test ! -L "$root" && test -O "$root" || \
+  die "remote root is not an owned directory: $root"
+chmod u+rwx "$root"
+for namespace in \
+  corpora corpus-receipts helpers incoming logs manifest-sources \
+  orchestration-checkouts rebased-manifests runs solver-checkouts tools
+do
+  path="$root/$namespace"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    test -d "$path" && test ! -L "$path" && test -O "$path" || \
+      die "campaign namespace is not an owned directory: $path"
+  else
+    mkdir "$path"
+  fi
+  # Namespace containers stay mutable; content-addressed children are sealed.
+  chmod u+rwx "$path"
+  test -w "$path" || die "campaign namespace is not writable: $path"
+done
 
 grants="$(hpc-grants)"
 printf '%s\n' "$grants" | grep -F "$GRANT" >/dev/null || \
@@ -97,6 +115,7 @@ printf 'fact\taccount\t%s\t-\n' "$ACCOUNT"
 printf 'fact\tpartition\t%s\t-\n' "$PARTITION"
 printf 'fact\tscratch\t%s\t-\n' "$scratch"
 printf 'fact\tremote_root\t%s\t-\n' "$root"
+printf 'fact\tremote_root_writable\ttrue\t-\n'
 REMOTE
 }
 
