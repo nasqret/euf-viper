@@ -18,20 +18,30 @@ TOOLCHAIN = ROOT / "scripts" / "helios" / "toolchain_receipt.sh"
 CORPUS = ROOT / "scripts" / "helios" / "corpus_snapshot.py"
 SYNC_CORPUS = ROOT / "scripts" / "helios" / "sync_corpus.sh"
 SUBMIT = ROOT / "scripts" / "helios" / "sync_and_submit.sh"
+SUBMIT_SHARDS = ROOT / "scripts" / "helios" / "submit_prepared_shards.sh"
 INSTALL_COMPETITORS = ROOT / "scripts" / "helios" / "install_competitors.sh"
 TASK = ROOT / "scripts" / "helios" / "run_campaign_task.sh"
+SHARD_TASK = ROOT / "scripts" / "helios" / "run_campaign_shard_task.sh"
+FINALIZE_TASK = ROOT / "scripts" / "helios" / "run_campaign_finalize.sh"
 RESOURCE_WRAPPER = ROOT / "scripts" / "helios" / "run_with_resources.py"
 PREPARE_LOCK = ROOT / "scripts" / "helios" / "prepare_campaign_lock.py"
 SBATCH = ROOT / "slurm" / "helios" / "euf_viper_campaign.sbatch"
+SHARD_SBATCH = ROOT / "slurm" / "helios" / "euf_viper_shard.sbatch"
+FINALIZE_SBATCH = ROOT / "slurm" / "helios" / "euf_viper_finalize.sbatch"
 
 SHELL_FILES = (
     PREFLIGHT,
     TOOLCHAIN,
     SYNC_CORPUS,
     SUBMIT,
+    SUBMIT_SHARDS,
     INSTALL_COMPETITORS,
     TASK,
+    SHARD_TASK,
+    FINALIZE_TASK,
     SBATCH,
+    SHARD_SBATCH,
+    FINALIZE_SBATCH,
 )
 CANDIDATE_ARGV = [
     "{binary}",
@@ -186,6 +196,42 @@ class HeliosShellContractTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 2)
         self.assertIn("--manifest is required", completed.stderr)
+
+    def test_build_once_shards_are_prepared_dispatched_and_audited(self) -> None:
+        submit = SUBMIT.read_text(encoding="utf-8")
+        preparer = TASK.read_text(encoding="utf-8")
+        dispatcher = SUBMIT_SHARDS.read_text(encoding="utf-8")
+        shard = SHARD_TASK.read_text(encoding="utf-8")
+        finalizer = FINALIZE_TASK.read_text(encoding="utf-8")
+        shard_batch = SHARD_SBATCH.read_text(encoding="utf-8")
+
+        self.assertIn("--shards", submit)
+        self.assertIn("EXECUTION_MODE=prepare-sharded", submit)
+        self.assertIn('CAMPAIGN_ROOT="$RUN_ROOT"', submit)
+        self.assertIn('CAMPAIGN_ROOT="$REMOTE_ROOT/campaigns/$RUN_ID"', submit)
+        self.assertIn("shard_campaign_lock.py", preparer)
+        self.assertIn('if [ "$EXECUTION_MODE" = prepare-sharded ]', preparer)
+        self.assertEqual(preparer.count("cargo build"), 1)
+
+        self.assertIn('--array="0-$LAST_INDEX%$CONCURRENCY"', dispatcher)
+        self.assertIn('arguments+=(--dependency="afterok:$DEPENDENCY"', dispatcher)
+        self.assertIn("sbatch --test-only", dispatcher)
+        self.assertIn("sbatch --parsable", dispatcher)
+        self.assertIn("euf_viper_shard.sbatch", dispatcher)
+        self.assertIn("euf_viper_finalize.sbatch", dispatcher)
+
+        self.assertNotIn("cargo build", shard)
+        self.assertIn("bind_campaign_cpu.py", shard)
+        self.assertIn("run_locked_campaign.py", shard)
+        self.assertIn("run_with_resources.py", shard)
+        self.assertIn("len(os.sched_getaffinity(0))", shard)
+        self.assertIn("--cpu-bind=cores", shard_batch)
+
+        self.assertIn("analyze_campaign.py", finalizer)
+        self.assertIn("audit_sharded_campaign.py", finalizer)
+        self.assertIn('case "$ANALYZER_STATUS" in', finalizer)
+        self.assertIn("0|1)", finalizer)
+        self.assertIn('chmod -R a-w "$CAMPAIGN_ROOT"', finalizer)
 
     def test_one_cpu_binding_and_resource_wrapper_wrap_the_frozen_runner(self) -> None:
         batch = SBATCH.read_text(encoding="utf-8")

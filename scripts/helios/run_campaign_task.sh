@@ -29,6 +29,10 @@ YICES_SHA256="${EUF_VIPER_HELIOS_YICES_SHA256:?set Yices2 hash}"
 OPENSMT_BIN="${EUF_VIPER_HELIOS_OPENSMT:?set OpenSMT path}"
 OPENSMT_SHA256="${EUF_VIPER_HELIOS_OPENSMT_SHA256:?set OpenSMT hash}"
 EXPECTED_ARGV_SHA256="${EUF_VIPER_HELIOS_CANDIDATE_ARGV_SHA256:?set candidate argv hash}"
+EXECUTION_MODE="${EUF_VIPER_HELIOS_EXECUTION_MODE:-single}"
+SHARD_COUNT="${EUF_VIPER_HELIOS_SHARD_COUNT:-1}"
+REMOTE_ROOT="${EUF_VIPER_HELIOS_REMOTE_ROOT:?set remote campaign root}"
+CAMPAIGN_ROOT="${EUF_VIPER_HELIOS_CAMPAIGN_ROOT:-$RUN_ROOT}"
 
 CANDIDATE_ARGV_JSON='["{binary}","fabric-solve","--engine","quotient-portfolio","{instance}"]'
 PINNED_SOLVER_REVISION=8368d21de96eec77f3bb5f6820c11d1363d3041b
@@ -85,6 +89,21 @@ done
 
 [ "$EXPECTED_SOLVER_REVISION" = "$PINNED_SOLVER_REVISION" ] || \
   die "solver revision must remain pinned to $PINNED_SOLVER_REVISION"
+case "$EXECUTION_MODE" in
+  single)
+    [ "$SHARD_COUNT" = 1 ] || die "single mode requires one shard"
+    ;;
+  prepare-sharded)
+    [[ "$SHARD_COUNT" =~ ^[1-9][0-9]*$ ]] && [ "$SHARD_COUNT" -ge 2 ] || \
+      die "prepare-sharded mode requires at least two shards"
+    case "$CAMPAIGN_ROOT" in
+      "$REMOTE_ROOT/campaigns/"*) ;;
+      *) die "sharded campaign root escaped its namespace" ;;
+    esac
+    [ ! -e "$CAMPAIGN_ROOT" ] || die "sharded campaign root already exists"
+    ;;
+  *) die "unsupported execution mode: $EXECUTION_MODE" ;;
+esac
 verify_checkout \
   "$ORCHESTRATION_CHECKOUT" "$EXPECTED_ORCHESTRATION_REVISION" orchestration
 verify_checkout "$SOLVER_CHECKOUT" "$EXPECTED_SOLVER_REVISION" solver
@@ -202,6 +221,10 @@ python3 "$ORCHESTRATION_CHECKOUT/scripts/bench/build_family_manifest.py" \
 chmod 0444 "$TAXONOMY" "$TAXONOMY_SPLIT"
 
 LOCK="$RUN_ROOT/campaign-lock.json"
+OUTPUT_DIRECTORY="$RUN_ROOT/output"
+if [ "$EXECUTION_MODE" = prepare-sharded ]; then
+  OUTPUT_DIRECTORY="$CAMPAIGN_ROOT/results"
+fi
 python3 "$ORCHESTRATION_CHECKOUT/scripts/helios/prepare_campaign_lock.py" \
   --spec "$ORCHESTRATION_CHECKOUT/$SPEC_RELATIVE" \
   --manifest "$MANIFEST" \
@@ -213,9 +236,42 @@ python3 "$ORCHESTRATION_CHECKOUT/scripts/helios/prepare_campaign_lock.py" \
   --orchestration-revision "$EXPECTED_ORCHESTRATION_REVISION" \
   --budget "$BUDGET" \
   --memory-bytes "$MEMORY_BYTES" \
-  --output-directory "$RUN_ROOT/output" \
+  --output-directory "$OUTPUT_DIRECTORY" \
   --out "$LOCK" \
   > "$RUN_ROOT/lock-summary.json"
+
+if [ "$EXECUTION_MODE" = prepare-sharded ]; then
+  SHARD_LOCKS="$RUN_ROOT/shard-locks"
+  SHARD_SUMMARY="$RUN_ROOT/shard-summary.json"
+  python3 "$ORCHESTRATION_CHECKOUT/scripts/bench/shard_campaign_lock.py" \
+    "$LOCK" \
+    --count "$SHARD_COUNT" \
+    --out-dir "$SHARD_LOCKS" \
+    > "$SHARD_SUMMARY"
+  printf 'execution_mode\t%s\nshard_count\t%s\ncampaign_root\t%s\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\nlock_file_sha256\t%s\nshard_summary_sha256\t%s\n' \
+    "$EXECUTION_MODE" \
+    "$SHARD_COUNT" \
+    "$CAMPAIGN_ROOT" \
+    "$EXPECTED_ORCHESTRATION_REVISION" \
+    "$EXPECTED_SOLVER_REVISION" \
+    "$EXPECTED_COMPARATOR_BUNDLE_RECEIPT_SHA256" \
+    "$VIPER_SHA256" \
+    "$(hash_file "$SOLVER_CONFIG")" \
+    "$(hash_file "$TAXONOMY")" \
+    "$(hash_file "$TAXONOMY_SPLIT")" \
+    "$(hash_file "$LOCK")" \
+    "$(hash_file "$SHARD_SUMMARY")" \
+    > "$RUN_ROOT/preparation.tsv"
+  chmod 0444 \
+    "$RUN_ROOT/preparation.tsv" \
+    "$RUN_ROOT/solver-config.json" \
+    "$RUN_ROOT/taxonomy.jsonl" \
+    "$RUN_ROOT/taxonomy-split.json" \
+    "$RUN_ROOT/campaign-lock.json" \
+    "$RUN_ROOT/shard-summary.json" \
+    "$RUN_ROOT"/shard-locks/lock-*.json
+  exit 0
+fi
 
 BOUND_LOCK="$RUN_ROOT/bound-lock.json"
 python3 "$ORCHESTRATION_CHECKOUT/scripts/bench/bind_campaign_cpu.py" "$LOCK" \
@@ -231,7 +287,7 @@ RUNNER_STATUS="$?"
 set -e
 [ -s "$RESOURCE_CAPTURE" ] || die "resource wrapper did not produce a record"
 
-printf 'orchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\nlock_file_sha256\t%s\nbound_lock_file_sha256\t%s\n' \
+printf 'execution_mode\tsingle\nshard_count\t1\norchestration_revision\t%s\nsolver_revision\t%s\npromotion_eligible\ttrue\ncomparator_bundle_receipt_sha256\t%s\ncandidate_binary_sha256\t%s\nsolver_config_sha256\t%s\ntaxonomy_sha256\t%s\ntaxonomy_split_sha256\t%s\nlock_file_sha256\t%s\nbound_lock_file_sha256\t%s\n' \
   "$EXPECTED_ORCHESTRATION_REVISION" \
   "$EXPECTED_SOLVER_REVISION" \
   "$EXPECTED_COMPARATOR_BUNDLE_RECEIPT_SHA256" \

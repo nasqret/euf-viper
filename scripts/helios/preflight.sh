@@ -61,7 +61,7 @@ die() {
 
 [ "$(id -un)" = "$EXPECTED_USER" ] || die "unexpected Helios user: $(id -un)"
 [ "$(uname -m)" = x86_64 ] || die "Helios login host is not x86_64"
-for program in hpc-grants python3 readlink sbatch sha256sum sinfo squeue srun; do
+for program in hpc-grants python3 readlink sbatch scancel sha256sum sinfo squeue srun; do
   command -v "$program" >/dev/null || die "missing Helios command: $program"
 done
 [ -n "${SCRATCH:-}" ] || die "SCRATCH is unset"
@@ -87,7 +87,7 @@ test -d "$root" && test ! -L "$root" && test -O "$root" || \
   die "remote root is not an owned directory: $root"
 chmod u+rwx "$root"
 for namespace in \
-  corpora corpus-receipts helpers incoming logs manifest-sources \
+  campaigns corpora corpus-receipts helpers incoming logs manifest-sources \
   orchestration-checkouts rebased-manifests runs solver-checkouts tools
 do
   path="$root/$namespace"

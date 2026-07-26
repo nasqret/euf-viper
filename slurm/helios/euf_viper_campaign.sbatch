@@ -22,6 +22,9 @@ EXPECTED_PARTITION="${EUF_VIPER_HELIOS_PARTITION:-plgrid}"
 EXPECTED_TOOLCHAIN_SHA256="${EUF_VIPER_HELIOS_TOOLCHAIN_SHA256:?set toolchain hash}"
 EXPECTED_ARGV_SHA256="${EUF_VIPER_HELIOS_CANDIDATE_ARGV_SHA256:?set candidate argv hash}"
 EXPECTED_COMPARATOR_BUNDLE_RECEIPT_SHA256="${EUF_VIPER_HELIOS_COMPARATOR_BUNDLE_RECEIPT_SHA256:?set comparator bundle hash}"
+EXECUTION_MODE="${EUF_VIPER_HELIOS_EXECUTION_MODE:-single}"
+SHARD_COUNT="${EUF_VIPER_HELIOS_SHARD_COUNT:-1}"
+CAMPAIGN_ROOT="${EUF_VIPER_HELIOS_CAMPAIGN_ROOT:-$RUN_ROOT}"
 
 die() {
   printf '%s\n' "$*" >&2
@@ -88,7 +91,8 @@ write_receipt() {
   header=(
     schema_version status job_id run_id
     orchestration_revision solver_revision orchestration_checkout solver_checkout
-    account partition cpu_model cpus_per_task cpu_bind started_at finished_at
+    account partition execution_mode shard_count campaign_root cpu_model
+    cpus_per_task cpu_bind started_at finished_at
     task_exit_code toolchain_sha256 rust_module_sha256 gcc_module_sha256
     cargo_sha256 rustc_sha256 python_sha256 resource_wrapper_sha256
     comparator_bundle_receipt_sha256 corpus_inventory_sha256 manifest_sha256 taxonomy_sha256
@@ -100,7 +104,8 @@ write_receipt() {
     1 "$status" "$SLURM_JOB_ID" "$RUN_ID"
     "$EXPECTED_ORCHESTRATION_REVISION" "$EXPECTED_SOLVER_REVISION"
     "$ORCHESTRATION_CHECKOUT" "$SOLVER_CHECKOUT"
-    "$EXPECTED_ACCOUNT" "$EXPECTED_PARTITION" "$cpu_model" 1 cores
+    "$EXPECTED_ACCOUNT" "$EXPECTED_PARTITION" "$EXECUTION_MODE" "$SHARD_COUNT"
+    "$CAMPAIGN_ROOT" "$cpu_model" 1 cores
     "$STARTED_AT" "$finished_at" "$task_status"
     "$EXPECTED_TOOLCHAIN_SHA256" "$rust_module_sha256" "$gcc_module_sha256"
     "$cargo_sha256" "$rustc_sha256" "$python_sha256" "$resource_wrapper_sha256"
