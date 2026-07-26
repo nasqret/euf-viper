@@ -74,6 +74,10 @@ export TZ=UTC
 export PYTHONDONTWRITEBYTECODE=1
 export CARGO_BUILD_JOBS=1
 export CARGO_INCREMENTAL=0
+GCC_INTERNAL_INCLUDE="$(gcc -print-file-name=include)"
+case "$GCC_INTERNAL_INCLUDE" in /*) ;; *) die "GCC returned a non-absolute include path" ;; esac
+[ -f "$GCC_INTERNAL_INCLUDE/stdbool.h" ] || die "GCC stdbool.h is missing"
+export BINDGEN_EXTRA_CLANG_ARGS="-isystem $GCC_INTERNAL_INCLUDE"
 
 for forbidden in RUSTFLAGS CARGO_ENCODED_RUSTFLAGS; do
   [ -z "${!forbidden:-}" ] || die "ambient build override is forbidden: $forbidden"

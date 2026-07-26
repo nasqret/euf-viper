@@ -109,6 +109,10 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("module --redirect --location show", toolchain)
         self.assertIn("hash_file \"$location\"", toolchain)
         self.assertIn('done <<EOF\n$RUST_MODULE_GCC\n$RUST_MODULE\nEOF', toolchain)
+        self.assertIn('gcc -print-file-name=include', toolchain)
+        self.assertIn("header\\tstdbool.h", toolchain)
+        self.assertIn("gcc:gcc", toolchain)
+        self.assertIn('BINDGEN_EXTRA_CLANG_ARGS="-isystem $GCC_INTERNAL_INCLUDE"', task)
 
     def test_sync_requires_a_clean_exact_revision_and_uses_rsync(self) -> None:
         source = SUBMIT.read_text(encoding="utf-8")

@@ -55,9 +55,18 @@ $RUST_MODULE_GCC
 $RUST_MODULE
 EOF
 
+GCC_INTERNAL_INCLUDE="$(gcc -print-file-name=include)"
+case "$GCC_INTERNAL_INCLUDE" in /*) ;; *) die "GCC returned a non-absolute include path" ;; esac
+[ -d "$GCC_INTERNAL_INCLUDE" ] || die "GCC internal include directory is missing"
+[ -f "$GCC_INTERNAL_INCLUDE/stdbool.h" ] || die "GCC stdbool.h is missing"
+printf 'header\tstdbool.h\t%s\t%s\n' \
+  "$GCC_INTERNAL_INCLUDE/stdbool.h" \
+  "$(hash_file "$GCC_INTERNAL_INCLUDE/stdbool.h")"
+
 for binding in \
   bash:bash \
   cargo:cargo \
+  gcc:gcc \
   git:git \
   python3:python3 \
   rsync:rsync \
