@@ -192,6 +192,7 @@ set -euo pipefail
 test "$(git -C "$REMOTE_CHECKOUT" rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_CHECKOUT_REVISION"
 test -z "$(git -C "$REMOTE_CHECKOUT" status --porcelain=v1 --untracked-files=all)"
 test -e "$REMOTE_CHECKOUT/$MARKER"
+chmod -R a-w "$REMOTE_CHECKOUT"
 REMOTE
     return
   fi
@@ -212,9 +213,10 @@ set -euo pipefail
 test "$(git -C "$INCOMING" rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_CHECKOUT_REVISION"
 test -z "$(git -C "$INCOMING" status --porcelain=v1 --untracked-files=all)"
 test -e "$INCOMING/$MARKER"
-chmod -R a-w "$INCOMING"
 test ! -e "$REMOTE_CHECKOUT"
-mv "$INCOMING" "$REMOTE_CHECKOUT"
+# Lustre rejects renaming a directory whose owner-write bit is already clear.
+mv -T "$INCOMING" "$REMOTE_CHECKOUT"
+chmod -R a-w "$REMOTE_CHECKOUT"
 REMOTE
 }
 

@@ -120,7 +120,12 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("sparse-checkout set src vendor", source)
         self.assertIn("checkout --quiet --detach", source)
         self.assertIn("rsync -az --delete", source)
-        self.assertIn("chmod -R a-w \"$INCOMING\"", source)
+        self.assertIn('mv -T "$INCOMING" "$REMOTE_CHECKOUT"', source)
+        self.assertIn('chmod -R a-w "$REMOTE_CHECKOUT"', source)
+        self.assertLess(
+            source.index('mv -T "$INCOMING" "$REMOTE_CHECKOUT"'),
+            source.rindex('chmod -R a-w "$REMOTE_CHECKOUT"'),
+        )
 
     def test_submit_uses_split_checkout_and_revision_names_everywhere(self) -> None:
         source = SUBMIT.read_text(encoding="utf-8")
@@ -148,7 +153,12 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("rebase-manifest", source)
         self.assertIn("verify-rebased-manifest", source)
         self.assertIn("--exclude=.DS_Store", source)
-        self.assertIn("chmod -R a-w \"$REMOTE_INCOMING\"", source)
+        self.assertIn('mv -T "$REMOTE_INCOMING" "$REMOTE_CORPUS"', source)
+        self.assertIn('chmod -R a-w "$REMOTE_CORPUS"', source)
+        self.assertLess(
+            source.index('mv -T "$REMOTE_INCOMING" "$REMOTE_CORPUS"'),
+            source.index('chmod -R a-w "$REMOTE_CORPUS"'),
+        )
 
     def test_submission_is_test_only_unless_submit_is_explicit(self) -> None:
         source = SUBMIT.read_text(encoding="utf-8")
