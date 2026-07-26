@@ -194,6 +194,10 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn("resource-usage.json", task)
         self.assertNotIn("/usr/bin/time", task)
         self.assertIn("AMD EPYC 9654", task)
+        self.assertIn(
+            'bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"',
+            batch,
+        )
 
     def test_candidate_argv_is_exact_and_recorded_before_freezing(self) -> None:
         task = TASK.read_text(encoding="utf-8")

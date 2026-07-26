@@ -165,7 +165,7 @@ srun \
   --cpus-per-task=1 \
   --cpu-bind=cores \
   --exclusive \
-  "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"
+  bash -l "$ORCHESTRATION_CHECKOUT/scripts/helios/run_campaign_task.sh"
 TASK_STATUS="$?"
 set -e
 exit "$TASK_STATUS"
