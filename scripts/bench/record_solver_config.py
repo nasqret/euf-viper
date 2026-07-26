@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -58,7 +59,31 @@ def executable(path: Path, identifier: str) -> Path:
     return resolved
 
 
-def capture_version(binary: Path, argv: list[str], expected: str) -> str:
+ENVIRONMENT_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def parse_environment(bindings: list[str] | None) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for binding in bindings or []:
+        key, separator, value = binding.partition("=")
+        if not separator or not ENVIRONMENT_KEY.fullmatch(key):
+            raise SolverConfigError(
+                f"environment binding must use NAME=VALUE syntax: {binding!r}"
+            )
+        if "\x00" in value:
+            raise SolverConfigError(f"environment value contains NUL: {key}")
+        if key in environment:
+            raise SolverConfigError(f"duplicate environment binding: {key}")
+        environment[key] = value
+    return dict(sorted(environment.items()))
+
+
+def capture_version(
+    binary: Path,
+    argv: list[str],
+    expected: str,
+    environment: dict[str, str] | None = None,
+) -> str:
     try:
         completed = subprocess.run(
             [str(binary), *argv],
@@ -66,7 +91,12 @@ def capture_version(binary: Path, argv: list[str], expected: str) -> str:
             capture_output=True,
             text=True,
             timeout=10,
-            env={"LANG": "C", "LC_ALL": "C", "PATH": os.environ.get("PATH", "")},
+            env={
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": os.environ.get("PATH", ""),
+                **(environment or {}),
+            },
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SolverConfigError(f"cannot query {binary} version: {error}") from error
@@ -88,6 +118,25 @@ def result_token(output: str) -> str | None:
         if token in {"sat", "unsat", "unknown"}:
             return token
     return None
+
+
+def validate_viper_argv_template(arguments: list[str] | None) -> list[str]:
+    template = ["{binary}", "solve", "{instance}"] if arguments is None else arguments
+    if not template or any(type(argument) is not str or not argument for argument in template):
+        raise SolverConfigError("Viper argv template must contain non-empty strings")
+    if template.count("{binary}") != 1 or template.count("{instance}") != 1:
+        raise SolverConfigError(
+            "Viper argv template requires exactly one {binary} and one {instance}"
+        )
+    if template[0] != "{binary}":
+        raise SolverConfigError("Viper argv template must start with {binary}")
+    for argument in template:
+        if "{" in argument or "}" in argument:
+            if argument not in {"{binary}", "{instance}"}:
+                raise SolverConfigError(
+                    f"unsupported Viper argv placeholder in {argument!r}"
+                )
+    return list(template)
 
 
 def smoke_solver(record: dict[str, Any], instance: Path, expected: str) -> None:
@@ -131,7 +180,14 @@ def make_records(
     yices2: Path,
     opensmt: Path,
     viper_version: str,
+    viper_argv_template: list[str] | None = None,
+    viper_configuration: str = "default",
+    z3_environment: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
+    if not viper_configuration or viper_configuration != viper_configuration.strip():
+        raise SolverConfigError("Viper configuration must be a non-empty trimmed string")
+    viper_argv_template = validate_viper_argv_template(viper_argv_template)
+    z3_environment = dict(sorted((z3_environment or {}).items()))
     paths = {
         "euf-viper": executable(viper, "euf-viper"),
         "z3": executable(z3, "z3"),
@@ -143,10 +199,10 @@ def make_records(
         {
             "id": "euf-viper",
             "comparator_id": "euf-viper",
-            "configuration": "default",
+            "configuration": viper_configuration,
             "version": viper_version,
             "binary": paths["euf-viper"],
-            "argv_template": ["{binary}", "solve", "{instance}"],
+            "argv_template": viper_argv_template,
             "version_argv": ["--version"],
             "version_output_contains": "euf-viper",
         },
@@ -159,6 +215,7 @@ def make_records(
             "argv_template": ["{binary}", "{instance}"],
             "version_argv": ["-version"],
             "version_output_contains": versions["z3"],
+            "environment": z3_environment,
         },
         {
             "id": "z3-sat-euf",
@@ -169,6 +226,7 @@ def make_records(
             "argv_template": ["{binary}", "sat.euf=true", "{instance}"],
             "version_argv": ["-version"],
             "version_output_contains": versions["z3"],
+            "environment": z3_environment,
         },
         {
             "id": "cvc5",
@@ -209,6 +267,7 @@ def make_records(
             binary,
             definition["version_argv"],
             definition["version_output_contains"],
+            definition.get("environment"),
         )
         records.append(
             {
@@ -238,7 +297,23 @@ def main() -> int:
     parser.add_argument("--campaign", type=Path, required=True)
     parser.add_argument("--viper", type=Path, required=True)
     parser.add_argument("--viper-version", required=True)
+    parser.add_argument(
+        "--viper-arg",
+        action="append",
+        dest="viper_args",
+        help=(
+            "one Viper argv token; repeat to override the default command and "
+            "include literal {binary} and {instance} tokens"
+        ),
+    )
+    parser.add_argument("--viper-configuration", default="default")
     parser.add_argument("--z3", type=Path, required=True)
+    parser.add_argument(
+        "--z3-env",
+        action="append",
+        default=[],
+        help="one NAME=VALUE environment binding for both Z3 configurations",
+    )
     parser.add_argument("--cvc5", type=Path, required=True)
     parser.add_argument("--yices2", type=Path, required=True)
     parser.add_argument("--opensmt", type=Path, required=True)
@@ -257,6 +332,9 @@ def main() -> int:
             yices2=args.yices2,
             opensmt=args.opensmt,
             viper_version=args.viper_version,
+            viper_argv_template=args.viper_args,
+            viper_configuration=args.viper_configuration,
+            z3_environment=parse_environment(args.z3_env),
         )
         if args.smoke_instance:
             if not args.smoke_instance.is_file():

@@ -2209,3 +2209,58 @@
   cvc5 1.3.4 by hash. The job is `PENDING`; Slurm reports eligible nodes are
   down, drained, or reserved. No timing, coverage, or promotion claim is made
   before terminal artifacts and frozen adjudication.
+
+# 2026-07-26 - World-leader campaign expansion
+
+- Added `campaigns/euf-world-leader-2026-07.json`, a strict top-level contract
+  spanning validity, coverage, latency distribution, PAR-2, memory and hardware
+  counters, proof/model quality, robustness, and API feature coverage.
+- Defined an A0-A6 agile funnel from observe-only census through same-binary
+  ABBA, lineage panels, full two-second timing, timeout-only continuation,
+  second CPU replication, and sealed holdout. Failed mechanisms stop at the
+  cheapest decisive gate.
+- Split the technical work into eleven ordered lanes. Goel/general Boolean EUF,
+  canonical quotient-frontier caching, and proof-system compilation are the
+  main architectural opportunities. Component migration stays blocked because
+  its measured oracle headroom is only 3.74%.
+- Added a primary-source research map covering Dsat native discrete CDCL,
+  SORB, modern learned-clause factoring, CaDiCaL 3.0 scheduling and proof
+  support, clausal congruence closure, small congruence proofs, verified
+  proof-producing union-find, and IPASIR-UP.
+- Verified live Helios access. The active `plgccaiautore2026-cpu` allocation
+  has a 72-hour limit and 50,000 CPU hours; scratch storage is available.
+  Helios is designated as the second CPU class, not as a GPU timing shortcut.
+- WMI job `170902` remains pending with zero runtime because its eligible nodes
+  are down, drained, or reserved. Its evidence contract remains unchanged.
+
+# 2026-07-26 - Evidence dashboard and launch audit
+
+- Implemented a strict pairwise-aware dashboard schema. Evidence names the
+  exact solver subset measured, and panels cannot mix revisions, hosts,
+  corpora, families, timeouts, statuses, classes, or solver sets.
+- Added importers for staged locked campaigns and local fast-cycle ledgers.
+  The staged importer re-hashes every raw shard and record and reconstructs
+  carried observations from source-record hashes. The fast-cycle importer
+  validates ledger, summary, CSV, command, binary, repeat, and instance
+  identity before emitting provisional evidence.
+- Reconstructed the full and official `30828a4` WMI campaigns and the final
+  PEQ/SEQ/NEQ scouts into 186 strict evidence records. These render as 174
+  claim-isolated panels, including separate SAT and UNSAT strata. The canonical
+  compressed evidence is `docs/dashboard/evidence/registry.json.gz`; the
+  computed model and self-contained view are `docs/dashboard/euf-progress.json`
+  and `docs/dashboard/euf-progress.html`.
+- Combined structural score: Viper 148/151, Yices2 140/151, Z3 126/151, cvc5
+  113/151. Pairwise PAR-2 factors are `1.816x`, `3.563x`, and `5.787x`.
+  Viper still has only a `0.751x` common-geometric factor against Yices2 and
+  needs a 24.9% time reduction for parity. Evidence is one-repeat and
+  provisional.
+- The launch audit rejected the first Helios lock path: it omitted taxonomy,
+  mutated `default` to `quotient-portfolio` after freezing, and conflated the
+  orchestration revision with the solver artifact revision. No timing job is
+  authorized until the corrected dry run is promotion-eligible and exact.
+- Reclassified WMI job `170902`: it measures PGO for `cadical-up`, not the
+  current quotient portfolio. Its eventual result is useful older-route PGO
+  evidence but cannot promote or reject the structural route.
+- V0 remains open because current finite SAT/UNSAT validation is not yet an
+  independent source parse plus proof replay. Independent model/proof mutation
+  rejection is required before any best-overall claim.

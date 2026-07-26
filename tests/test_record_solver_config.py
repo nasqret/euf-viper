@@ -77,6 +77,80 @@ class RecordSolverConfigTests(unittest.TestCase):
                 viper_version="test-build",
             )
 
+    def test_records_explicit_structural_viper_command(self) -> None:
+        records = RECORDER.make_records(
+            versions=RECORDER.load_versions(CAMPAIGN),
+            viper=self.binary,
+            z3=self.binary,
+            cvc5=self.binary,
+            yices2=self.binary,
+            opensmt=self.binary,
+            viper_version="structural-build",
+            viper_argv_template=[
+                "{binary}",
+                "fabric-solve",
+                "--engine",
+                "quotient-portfolio",
+                "{instance}",
+            ],
+            viper_configuration="quotient-portfolio",
+        )
+        viper = next(record for record in records if record["id"] == "euf-viper")
+        self.assertEqual(viper["configuration"], "quotient-portfolio")
+        self.assertEqual(
+            viper["argv_template"],
+            [
+                "{binary}",
+                "fabric-solve",
+                "--engine",
+                "quotient-portfolio",
+                "{instance}",
+            ],
+        )
+
+    def test_rejects_ambiguous_viper_command(self) -> None:
+        with self.assertRaisesRegex(RECORDER.SolverConfigError, "exactly one"):
+            RECORDER.make_records(
+                versions=RECORDER.load_versions(CAMPAIGN),
+                viper=self.binary,
+                z3=self.binary,
+                cvc5=self.binary,
+                yices2=self.binary,
+                opensmt=self.binary,
+                viper_version="test-build",
+                viper_argv_template=["{binary}", "solve"],
+            )
+
+    def test_records_z3_runtime_environment_for_both_configurations(self) -> None:
+        records = RECORDER.make_records(
+            versions=RECORDER.load_versions(CAMPAIGN),
+            viper=self.binary,
+            z3=self.binary,
+            cvc5=self.binary,
+            yices2=self.binary,
+            opensmt=self.binary,
+            viper_version="test-build",
+            z3_environment={"LD_LIBRARY_PATH": "/pinned/z3/lib"},
+        )
+        z3_records = [record for record in records if record["comparator_id"] == "z3"]
+        self.assertEqual(len(z3_records), 2)
+        self.assertTrue(
+            all(
+                record["environment"] == {"LD_LIBRARY_PATH": "/pinned/z3/lib"}
+                for record in z3_records
+            )
+        )
+
+    def test_environment_parser_is_strict(self) -> None:
+        self.assertEqual(
+            RECORDER.parse_environment(["B=two", "A=one"]),
+            {"A": "one", "B": "two"},
+        )
+        with self.assertRaisesRegex(RECORDER.SolverConfigError, "NAME=VALUE"):
+            RECORDER.parse_environment(["not-a-binding"])
+        with self.assertRaisesRegex(RECORDER.SolverConfigError, "duplicate"):
+            RECORDER.parse_environment(["A=one", "A=two"])
+
     def test_campaign_must_have_exact_comparator_set(self) -> None:
         spec = json.loads(CAMPAIGN.read_text(encoding="utf-8"))
         spec["comparators"] = spec["comparators"][:-1]

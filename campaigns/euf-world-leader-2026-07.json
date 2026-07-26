@@ -1,0 +1,577 @@
+{
+  "schema_version": "euf-viper.world-leader-campaign.v1",
+  "campaign_id": "euf-world-leader-2026-07",
+  "status": "active_measurement_first",
+  "objective": "Make euf-viper the independently validated leader for QF_UF without external fallback, benchmark-identity routing, or unchecked answers, while preserving a differentiated structural and proof-reconfigurable architecture.",
+  "scope": {
+    "primary_logic": "QF_UF",
+    "primary_mode": "single_query_cold_process_single_core",
+    "secondary_modes": [
+      "single_query_warm_throughput",
+      "incremental_push_pop",
+      "model_production",
+      "unsat_proof_production",
+      "unsat_core_production"
+    ],
+    "explicitly_separate": [
+      "quantified_UF",
+      "UF_combined_with_arithmetic_or_bitvectors",
+      "multicore_portfolios"
+    ],
+    "candidate_branch": "research/quotient-jit-lcg",
+    "candidate_revision": "8368d21de96eec77f3bb5f6820c11d1363d3041b",
+    "language": "Rust"
+  },
+  "comparators": {
+    "mandatory": [
+      {
+        "id": "yices2",
+        "version": "2.7.0",
+        "role": "coverage_and_speed_leader"
+      },
+      {
+        "id": "z3-default",
+        "version": "4.16.0",
+        "role": "widely_deployed_reference"
+      },
+      {
+        "id": "z3-sat-euf",
+        "version": "4.16.0",
+        "role": "alternative_z3_equality_engine"
+      },
+      {
+        "id": "cvc5",
+        "version": "1.3.4",
+        "role": "proof_and_model_reference"
+      },
+      {
+        "id": "opensmt",
+        "version": "2.9.2",
+        "role": "open_lazy_dpllt_reference"
+      }
+    ],
+    "census_before_final_claim": [
+      "veriT",
+      "SMTInterpol",
+      "MathSAT5_if_licensed_binary_is_available",
+      "Alt-Ergo",
+      "new_SMT_COMP_QF_UF_entries"
+    ],
+    "pinning": "Every executable, source revision, argument vector, environment, and version output is hash-bound before timing."
+  },
+  "benchmark_space": {
+    "corpora": [
+      {
+        "id": "smtlib-2025-full",
+        "instances": 7503,
+        "role": "full_library_regression"
+      },
+      {
+        "id": "smtcomp-2025-qf-uf",
+        "instances": 3521,
+        "role": "official_primary"
+      },
+      {
+        "id": "lineage_disjoint_holdout",
+        "instances": null,
+        "role": "anti_overfit",
+        "split_unit": "source_family_generator_lineage_and_normalized_AST_duplicate_closure"
+      },
+      {
+        "id": "generated_scaling",
+        "instances": null,
+        "role": "complexity_and_soundness",
+        "split_unit": "unseen_size_symbol_renaming_and_generator_seed"
+      },
+      {
+        "id": "future_smtlib_or_smtcomp_release",
+        "instances": null,
+        "role": "sealed_external_validation"
+      }
+    ],
+    "required_families": [
+      "QG-classification",
+      "2018-Goel-hwbench",
+      "PEQ",
+      "SEQ",
+      "NEQ",
+      "20170829-Rodin",
+      "20190906-CLEARSY",
+      "TypeSafe",
+      "eq_diamond"
+    ],
+    "required_status_strata": [
+      "sat",
+      "unsat"
+    ],
+    "required_structural_strata": [
+      "conjunction_only",
+      "general_boolean",
+      "boolean_terms_as_function_arguments",
+      "deep_let",
+      "many_sorted",
+      "high_arity",
+      "deep_terms",
+      "wide_terms",
+      "dense_congruence",
+      "sparse_congruence",
+      "proved_finite_domain",
+      "injective_or_permutation",
+      "multi_operation_table",
+      "large_source_and_parse_dominated"
+    ],
+    "budgets_s": [
+      0.05,
+      0.2,
+      2,
+      24,
+      60,
+      1200
+    ]
+  },
+  "metric_taxonomy": {
+    "validity": [
+      "wrong_answers",
+      "execution_errors",
+      "missing_rows",
+      "hash_mismatches",
+      "nondeterministic_statuses",
+      "independent_SAT_model_validation_rate",
+      "independent_UNSAT_proof_replay_rate"
+    ],
+    "coverage": [
+      "solved",
+      "coverage_fraction",
+      "candidate_only_solves",
+      "competitor_only_solves",
+      "sat_solved",
+      "unsat_solved"
+    ],
+    "latency": [
+      "cold_wall_p50",
+      "cold_wall_p90",
+      "cold_wall_p95",
+      "cold_wall_p99",
+      "cold_cpu_p50",
+      "common_wall_geometric",
+      "common_wall_total",
+      "parser_encode_search_validate_breakdown"
+    ],
+    "tail": [
+      "timeout_charged_wall",
+      "PAR2_wall",
+      "cactus_area",
+      "timeouts",
+      "maximum_solved_time"
+    ],
+    "resources": [
+      "maximum_RSS",
+      "allocated_bytes",
+      "allocation_count",
+      "instructions",
+      "cycles",
+      "branches",
+      "branch_misses",
+      "LLC_misses",
+      "binary_size"
+    ],
+    "proof_and_model_quality": [
+      "proof_bytes",
+      "proof_steps",
+      "proof_generation_overhead",
+      "proof_check_time",
+      "model_validation_time",
+      "unsat_core_size_if_supported"
+    ],
+    "robustness": [
+      "repeat_coefficient_of_variation",
+      "seed_sensitivity",
+      "family_cluster_bootstrap_interval",
+      "CPU_class_replication",
+      "sealed_holdout_replication"
+    ],
+    "feature_surface": [
+      "SMT_LIB_parser_acceptance",
+      "model_production",
+      "proof_production",
+      "incremental_push_pop",
+      "unsat_core_production",
+      "warm_throughput"
+    ]
+  },
+  "score_policy": {
+    "candidate_id": "euf-viper",
+    "panel_identity": [
+      "evidence_id",
+      "revision",
+      "host_class",
+      "corpus",
+      "family_or_all",
+      "expected_status_or_all",
+      "budget_s",
+      "repetition_policy"
+    ],
+    "coverage_index": "100 * candidate_solved / maximum_solver_solved, aggregated only across complete comparable panels",
+    "lower_is_better_index": "100 * minimum_solver_value / candidate_value",
+    "candidate_speedup_over_comparator": "comparator_value / candidate_value",
+    "candidate_required_improvement": "candidate_value / minimum_comparator_value - 1",
+    "primary_performance_index": "geometric mean of panel PAR2 indices after validity and coverage floors pass",
+    "common_speed_index": "geometric mean of common-solved geometric-time indices",
+    "resource_index": "geometric mean of RSS and instruction indices where complete measurements exist",
+    "feature_index": "supported_and_independently_checked_required_features / required_features",
+    "no_compensation_rule": "A composite score cannot hide a wrong answer, coverage loss, missing panel, certificate failure, or failed holdout.",
+    "world_leader_label": "Allowed only when all V0 through V6 gates pass; otherwise the dashboard must say provisional, targeted leader, or not leader."
+  },
+  "agile_funnel": [
+    {
+      "id": "A0",
+      "name": "opportunity_census",
+      "maximum_wall_minutes": 15,
+      "requirements": [
+        "no_behavior_change",
+        "exact_revision_and_input_hashes",
+        "mechanism_specific_opportunity_threshold"
+      ]
+    },
+    {
+      "id": "A1",
+      "name": "unit_generated_and_differential",
+      "maximum_wall_minutes": 30,
+      "requirements": [
+        "zero_disagreements",
+        "deterministic_replay",
+        "resource_caps"
+      ]
+    },
+    {
+      "id": "A2",
+      "name": "paired_micro_ABBA",
+      "maximum_wall_minutes": 30,
+      "requirements": [
+        "same_binary_off_on_switch",
+        "inclusive_setup_cost",
+        "target_gain",
+        "anti_target_nonregression"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "lineage_balanced_family_panel",
+      "maximum_wall_minutes": 120,
+      "requirements": [
+        "candidate_coverage_dominance",
+        "family_cluster_confidence_interval",
+        "no_identity_routing"
+      ]
+    },
+    {
+      "id": "A4",
+      "name": "hot_400_and_full_2s",
+      "maximum_wall_minutes": 360,
+      "requirements": [
+        "all_mandatory_comparators",
+        "complete_accounting",
+        "dashboard_delta"
+      ]
+    },
+    {
+      "id": "A5",
+      "name": "timeout_continuations_60s_1200s",
+      "maximum_wall_minutes": null,
+      "requirements": [
+        "only_prior_timeouts_are_rerun",
+        "immutable_stage_chain",
+        "independent_terminal_audit"
+      ]
+    },
+    {
+      "id": "A6",
+      "name": "second_CPU_and_sealed_holdout",
+      "maximum_wall_minutes": null,
+      "requirements": [
+        "same_direction_on_two_CPU_classes",
+        "lineage_disjoint_or_new_external_data",
+        "no_post_result_threshold_changes"
+      ]
+    }
+  ],
+  "technical_lanes": [
+    {
+      "id": "L0",
+      "rank": 0,
+      "name": "measurement_and_dashboard",
+      "status": "active",
+      "targets": [
+        "all_metrics",
+        "all_families"
+      ],
+      "mechanisms": [
+        "source_bound_evidence_registry",
+        "revision_isolated_scoreboard",
+        "broad_step_delta_reports"
+      ],
+      "next_falsifier": "Recompute the frozen broad analysis and current structural scouts into one revision-isolated dashboard.",
+      "promotion_gate": "Every displayed number is source-bound and no incompatible panel is aggregated."
+    },
+    {
+      "id": "L1",
+      "rank": 1,
+      "name": "fast_head_and_front_end",
+      "status": "active_PGO_pending",
+      "targets": [
+        "p50",
+        "p95",
+        "common_geometric",
+        "instructions",
+        "allocations"
+      ],
+      "mechanisms": [
+        "family_disjoint_LLVM_PGO",
+        "single_pass_typed_IR",
+        "arena_and_compact_ID_layout",
+        "fused_static_traversals",
+        "ticks_based_scheduling"
+      ],
+      "next_falsifier": "WMI job 170902 plus parse/encode/search stage counters on lineage-balanced hot-400.",
+      "promotion_gate": "At least 1.05x common geometric speed with no coverage loss and anti-target p95 at most 1.01x."
+    },
+    {
+      "id": "L2",
+      "rank": 2,
+      "name": "Goel_and_general_Boolean_EUF",
+      "status": "highest_performance_gap",
+      "targets": [
+        "Goel_SAT",
+        "Goel_UNSAT",
+        "QG_qg7",
+        "PAR2",
+        "common_total"
+      ],
+      "mechanisms": [
+        "reverse_term_to_atom_watch_index",
+        "stable_source_term_theory_reasons",
+        "first_UIP_native_nogoods",
+        "nonchronological_backjumping",
+        "lazy_first_model_conflict_control",
+        "SAT_impact_aware_explanations"
+      ],
+      "next_falsifier": "Complete source-stable learning and compare on the frozen 22-deficit panel with same-binary controls.",
+      "promotion_gate": "Convert at least one Yices-only solve, beat Yices2 on target inclusive time, and keep hot-400 p95 at most 1.01x."
+    },
+    {
+      "id": "L3",
+      "rank": 3,
+      "name": "canonical_quotient_frontier",
+      "status": "scalar_census_first",
+      "targets": [
+        "QG_qg7",
+        "repeated_search_states",
+        "UNSAT_tail"
+      ],
+      "mechanisms": [
+        "source_complete_canonical_residual_keys",
+        "checked_cross_history_memoization",
+        "frontier_transition_cache",
+        "optional_bit_slicing_after_scalar_gate"
+      ],
+      "next_falsifier": "Measure exact full-key repetition, avoided work, and key construction cost without behavior changes.",
+      "promotion_gate": "At least 20% exact useful repetition, at least 5% corpus-time relevance, and key cost below 10% of avoided work."
+    },
+    {
+      "id": "L4",
+      "rank": 4,
+      "name": "proof_system_compilation",
+      "status": "target_first",
+      "targets": [
+        "resolution_hard_UNSAT",
+        "Goel_UNSAT",
+        "QG_qg7",
+        "proof_size"
+      ],
+      "mechanisms": [
+        "bounded_equality_resolution",
+        "EUF_specific_extended_resolution",
+        "learned_clause_factoring",
+        "clausal_congruence_closure",
+        "greedy_short_congruence_explanations"
+      ],
+      "next_falsifier": "Produce one independently replayed nontrivial proof DAG or a checked empty clause under frozen work and memory caps.",
+      "promotion_gate": "Beat generic factoring and Yices2 by at least 1.05x on the target, then pass full no-regression gates."
+    },
+    {
+      "id": "L5",
+      "rank": 5,
+      "name": "finite_and_discrete_native_search",
+      "status": "current_targeted_leader_remeasure_broadly",
+      "targets": [
+        "PEQ",
+        "SEQ",
+        "NEQ",
+        "finite_Hall",
+        "unseen_sizes"
+      ],
+      "mechanisms": [
+        "verified_finite_closure",
+        "focused_permutation_support",
+        "native_discrete_CDCL",
+        "Hall_and_PB_explanations",
+        "component_local_class_coding"
+      ],
+      "next_falsifier": "Repeat current family gains on Helios and unseen generated sizes before adding another finite mechanism.",
+      "promotion_gate": "Coverage dominance, at least 1.05x common geometric over Yices2, and independently checked models/proofs."
+    },
+    {
+      "id": "L6",
+      "rank": 6,
+      "name": "semantic_symmetry",
+      "status": "opportunity_shadow_only",
+      "targets": [
+        "finite_models",
+        "combinatorial_UNSAT",
+        "proof_size"
+      ],
+      "mechanisms": [
+        "simplify_order_break_repeat_control",
+        "EUF_rewrite_exposed_typed_automorphisms",
+        "unit_binary_orbit_cuts",
+        "substitution_redundancy_witnesses"
+      ],
+      "next_falsifier": "Find a replay-valid second-round semantic cut absent from one-shot typed and generic SORB controls.",
+      "promotion_gate": "At least 1.10x target PAR2 with proof replay and anti-target p95 at most 1.01x."
+    },
+    {
+      "id": "L7",
+      "rank": 7,
+      "name": "modern_SAT_backend_and_inprocessing",
+      "status": "control_required",
+      "targets": [
+        "general_Boolean",
+        "common_geometric",
+        "PAR2",
+        "proof_generation"
+      ],
+      "mechanisms": [
+        "CaDiCaL_3_style_scheduling",
+        "Kissat_4_control",
+        "vivification_factor_BVA_factorial",
+        "phase_and_restart_schedules",
+        "proof_logging"
+      ],
+      "next_falsifier": "Identical-CNF backend Williams comparison with model/proof checks.",
+      "promotion_gate": "End-to-end gain on two CPU classes; clause counts alone do not pass."
+    },
+    {
+      "id": "L8",
+      "rank": 8,
+      "name": "certification_and_trust",
+      "status": "mandatory_before_superiority",
+      "targets": [
+        "all_SAT",
+        "all_UNSAT",
+        "proof_check_time",
+        "proof_size"
+      ],
+      "mechanisms": [
+        "checker_owned_root_CNF",
+        "independent_model_checker",
+        "representation_neutral_EUF_proofs",
+        "DRAT_or_LRAT_backend_proofs",
+        "proof_trimming"
+      ],
+      "next_falsifier": "Full-corpus shadow with independently reconstructed base CNF and zero unchecked decisive rows.",
+      "promotion_gate": "100% checked decisive outputs and no proof/model mismatch."
+    },
+    {
+      "id": "L9",
+      "rank": 9,
+      "name": "API_and_workflow_surface",
+      "status": "after_single_query_core",
+      "targets": [
+        "incremental",
+        "warm_throughput",
+        "models",
+        "unsat_cores"
+      ],
+      "mechanisms": [
+        "incremental_assertion_scopes",
+        "reusable_term_arena",
+        "assumption_solving",
+        "core_extraction",
+        "stable_model_names"
+      ],
+      "next_falsifier": "SMT_COMP incremental parser/semantic compatibility census.",
+      "promotion_gate": "Separate track leader result; never combine warm or incremental timings with the cold single-query score."
+    },
+    {
+      "id": "L10",
+      "rank": 10,
+      "name": "component_local_migration",
+      "status": "blocked_by_oracle_headroom",
+      "targets": [
+        "heterogeneous_instances"
+      ],
+      "mechanisms": [
+        "proof_carrying_one_way_representation_migration"
+      ],
+      "next_falsifier": "Recompute fixed-arm oracle headroom only after at least two new fixed engines pass; current measured headroom is 3.74%.",
+      "promotion_gate": "95% cluster-bootstrap lower bound at least 10%, selector balanced accuracy at least 0.80, and overhead below 1%."
+    }
+  ],
+  "compute_policy": {
+    "local_mac": "unit tests, generated bounded differentials, micro ABBA, dashboard generation",
+    "WMI": "existing exact-revision PGO holdout and immutable historical campaign continuation",
+    "Helios": {
+      "role": "second CPU class, replicated fast-cycle and broad sharded campaigns",
+      "ssh_alias": "helios",
+      "grant": "plgccaiautore2026",
+      "account": "plgccaiautore2026-cpu",
+      "remote_root": "$SCRATCH/codex-control/projects/euf-viper",
+      "GPU_policy": "No GPU timing claims for the single-core solver; GPUs may be used only for explicitly separated offline analysis whose cost is included or excluded by preregistration."
+    },
+    "resource_rules": [
+      "one_solver_process_per_physical_core",
+      "fixed_CPU_binding",
+      "cold_process_primary",
+      "no_concurrent_comparator_contention",
+      "record_wall_CPU_RSS_and_host_identity",
+      "immutable_raw_logs",
+      "test_only_SLURM_before_submit"
+    ]
+  },
+  "victory_contract": {
+    "V0_validity": "zero wrong answers, errors, missing rows, hash drift, and unchecked decisive outputs",
+    "V1_official_coverage": "equal or exceed every comparator at every declared primary budget",
+    "V2_full_coverage": "equal or exceed every comparator at 2, 60, and 1200 seconds",
+    "V3_time": "at least 1.05x over every comparator in PAR2, common total, and common geometric wall time",
+    "V4_resources": "no material p95 RSS regression and publish instructions/cache metrics on supported hosts",
+    "V5_generalization": "same direction on two CPU classes and a sealed lineage-disjoint or external holdout",
+    "V6_quality": "models and proofs independently checked, novelty ablated against closest prior art",
+    "claim": "best_overall_QF_UF_solver"
+  },
+  "reporting": {
+    "dashboard_input": "docs/dashboard/evidence/registry.json.gz",
+    "dashboard_json": "docs/dashboard/euf-progress.json",
+    "dashboard_html": "docs/dashboard/euf-progress.html",
+    "after_each_broad_step": [
+      "coverage_delta_by_corpus_budget_family_and_status",
+      "PAR2_and_common_speed_delta",
+      "leader_relative_percent_and_required_improvement",
+      "memory_and_proof_delta_if_available",
+      "confidence_interval",
+      "promotion_or_rejection_decision",
+      "next_cheapest_falsifier"
+    ]
+  },
+  "forbidden": [
+    "wrong_or_unchecked_answer",
+    "external_solver_fallback_as_viper",
+    "source_path_family_name_hash_expected_status_or_prior_timing_routing",
+    "mixing_revisions_hosts_or_evidence_classes_in_one_score",
+    "warm_process_numbers_in_cold_process_score",
+    "partial_corpus_superiority_claim",
+    "post_result_gate_changes",
+    "GPU_speed_claim_for_single_core_CPU_solver",
+    "composing_failed_or_unmeasured_mechanisms",
+    "reopening_rejected_tracks_without_new_opportunity_evidence"
+  ]
+}

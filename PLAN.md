@@ -6,6 +6,58 @@ Build the best standalone single-core QF_UF solver overall: sound, certifying,
 faster than Z3, cvc5, Yices2, and OpenSMT, and at least as complete at 2, 60,
 and 1,200 seconds on both official and full-library benchmarks.
 
+The active top-level program is now the metric-complete
+`campaigns/euf-world-leader-2026-07.json`, documented in
+`research-vault/02-design/2026-07-26-euf-world-leader-campaign.md`. It adds a
+revision- and host-isolated progress dashboard, a fixed A0-A6 agile experiment
+funnel, Helios as a second CPU site, and explicit lanes for front-end cost,
+general Boolean/Goel learning, quotient-frontier memoization, proof-system
+compilation, finite/discrete search, semantic symmetry, SAT inprocessing,
+certification, and workflow coverage. Existing narrower contracts remain the
+mechanism-specific authority and cannot be weakened by the top-level program.
+
+Immediate execution order:
+
+1. generate the dashboard from frozen broad and current targeted evidence
+   (**complete: 186 records, 174 claim-isolated panels**);
+2. qualify a promotion-eligible Helios lock with exact taxonomy, separate
+   orchestration/solver provenance, and the official hash-locked comparator
+   bundle (**in progress: live preflight and comparator execution pass**);
+3. replicate the current fast cycle under `plgccaiautore2026-cpu`;
+4. adjudicate WMI PGO/Goel job `170902` when it becomes terminal, without
+   treating that older-route result as quotient-portfolio evidence;
+5. run revision `8368d21` on full and official two-second campaigns;
+6. continue only its timeouts to 60 and 1,200 seconds; and
+7. choose the next isolated mechanism from the measured post-structural gap.
+
+After each A4 or later step, report exact coverage, PAR-2, common timing,
+distribution, resources, confidence, leader-relative percentage, required
+improvement, and an accept/reject/unresolved decision. No composite score may
+hide a wrong answer, coverage loss, missing row, unchecked proof/model, host
+confounder, or holdout failure.
+
+The generated dashboard is `docs/dashboard/euf-progress.html`, with compact
+model `docs/dashboard/euf-progress.json` and canonical compressed evidence
+`docs/dashboard/evidence/registry.json.gz`. The current structural discovery
+panel solves 148/151 versus Yices2 140, Z3 126, and cvc5 113. Its pairwise
+PAR-2 factors are `1.816x`, `3.563x`, and `5.787x`; against Yices2 its
+common-geometric factor is still only `0.751x`, requiring a 24.9% Viper time
+reduction for parity. These rows are provisional one-repeat evidence at
+revision `9a076353`; the audited broad rows remain revision `30828a4` and are
+not combined with them.
+
+The Step 0 audit found and closed two orchestration defects before any timing
+job was submitted: taxonomy had been omitted from the lock, and the candidate
+configuration had been changed from `default` to `quotient-portfolio` after
+freezing. The corrected path freezes the exact command directly and records
+separate orchestration and solver revisions. Helios preflight now passes, and
+its content-addressed official comparator bundle executes Z3 4.16.0, cvc5
+1.3.4, Yices2 2.7.0, and OpenSMT 2.9.2 with every archive, payload, and Z3
+runtime-library hash checked. A scheduler dry run and campaign smoke remain
+required. WMI job `170902` trains and measures `cadical-up`, not the current
+quotient portfolio, so its terminal result is an older-route PGO experiment
+only.
+
 The measured best-overall design remains in
 `research-vault/02-design/2026-07-12-best-overall-qf-uf-campaign.md`. The active
 implementation architecture is
@@ -27,7 +79,7 @@ substrate: verified finite closure, lex symmetry, predicate congruence
 channeling, focused permutation support, and route-local CaDiCaL policy are
 selected only from formula structure. The complete local all-feature suite is
 green at 643 passed and 10 intentionally ignored; Python discovery is green at
-540 tests. These results authorize a clean freeze and fixed WMI comparison,
+616 tests. These results authorize a clean freeze and fixed WMI comparison,
 not a production-default change or an overall-leader claim.
 
 The implementation freeze is commit `8368d21de96eec77f3bb5f6820c11d1363d3041b`,
