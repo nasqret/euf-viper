@@ -24,7 +24,8 @@ Immediate execution order:
    orchestration/solver provenance, and the official hash-locked comparator
    bundle (**complete: terminal smoke job `19954649`, 18/18 rows**);
 3. implement build-once sharding and replicate the current fast cycle under
-   `plgccaiautore2026-cpu` (**in progress**);
+   `plgccaiautore2026-cpu` (**complete: array `19955299`, finalizer `19955300`,
+   byte-identical fetched audit replay**);
 4. adjudicate WMI PGO/Goel job `170902` when it becomes terminal, without
    treating that older-route result as quotient-portfolio evidence;
 5. run revision `8368d21` on full and official two-second campaigns;
@@ -61,7 +62,13 @@ three selected rows. Viper has a `1.462x` PAR-2/common-total factor but a
 `0.651x` common-geometric factor against Yices2, so the analyzer rejects
 promotion. The smoke qualifies orchestration only. Its recursive build-tree
 sealing took 140 seconds after the measured step, making build-once sharding a
-hard prerequisite for broad campaigns. WMI job `170902` trains and measures
+hard prerequisite for broad campaigns. That prerequisite is now satisfied:
+preparation `19955162` built the candidate once, two single-core shards
+completed 18/18 runs, and finalizer `19955300` sealed portable audit v2. The
+fetched audit regenerates byte-for-byte with SHA-256
+`f6e3f570...24b69cb8`. This qualifies execution mechanics only; its selected
+three-instance analysis still rejects promotion against Yices2. WMI job
+`170902` trains and measures
 `cadical-up`, not the current quotient portfolio, so its terminal result is an
 older-route PGO experiment only; it remains pending with zero runtime.
 
@@ -86,7 +93,7 @@ substrate: verified finite closure, lex symmetry, predicate congruence
 channeling, focused permutation support, and route-local CaDiCaL policy are
 selected only from formula structure. The complete local all-feature suite is
 green at 643 passed and 10 intentionally ignored; Python discovery is green at
-616 tests. These results authorize a clean freeze and fixed WMI comparison,
+621 tests. These results authorize a clean freeze and fixed WMI comparison,
 not a production-default change or an overall-leader claim.
 
 The implementation freeze is commit `8368d21de96eec77f3bb5f6820c11d1363d3041b`,

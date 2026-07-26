@@ -2291,3 +2291,33 @@
   `research-vault/06-results/helios/quotient-smoke-19954649/`, including the
   all-comparator 10,000-replicate analysis. WMI PGO job `170902` remains
   pending with no node and zero runtime.
+
+# 2026-07-26 - Helios build-once sharding qualification
+
+- Added a two-phase Helios runner. One preparation allocation builds and
+  freezes the exact candidate and deterministic child locks; a later Slurm
+  array binds one CPU per shard and a dependency-gated finalizer performs one
+  global all-comparator analysis and hash audit.
+- Hardened the dispatch boundary: test-only validation precedes every real
+  submission, a missing finalizer cancels its array, rejected statistical
+  promotion remains valid completed evidence, and every task receipt binds its
+  prepared lock, bound lock, raw rows, summary, toolchain, binary, and resource
+  capture.
+- First live preparation `19954911`, array `19954999`, and finalizer `19955000`
+  completed `0:0`. The run produced exactly 18/18 records and exposed one audit
+  portability issue: v1 recorded absolute Helios paths. The evidence and 4.5 MB
+  candidate are preserved under
+  `research-vault/06-results/helios/quotient-sharded-smoke-19954999/`.
+- Audit v2 records evidence-relative paths. Preparation `19955162` completed in
+  4:41, array `19955299` completed both one-core shards, and finalizer
+  `19955300` completed in six seconds. The fetched bundle regenerated the live
+  audit byte-for-byte at SHA-256 `f6e3f570...24b69cb8`; analysis SHA-256 is
+  `9ab940b8...b26468a8` and candidate SHA-256 remains
+  `c146a7be...e9772e0`.
+- Viper and Yices2 again solve 3/3; both Z3 configurations solve 2/3; cvc5 and
+  OpenSMT solve 1/3. Viper's Yices2 factors are `1.474x` PAR-2/common-total and
+  `0.655x` common-geometric, so promotion is correctly rejected. The smoke
+  qualifies sharded execution, not broad superiority.
+- Validation after sharding: Python discovery passes 621/621; Rust all-feature
+  testing passes 643 with ten intentional ignores and zero failures. WMI PGO
+  job `170902` remains pending with no node and zero runtime.
