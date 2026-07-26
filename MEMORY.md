@@ -1338,3 +1338,19 @@
   semantic dense-six CaDiCaL route and generalized split-revision Helios
   launcher. Keep the measured `8368d21` dashboard baseline immutable; only a
   complete fixed all-solver campaign may assign broad performance to `b5f78fb`.
+- Supersede that pending-candidate note with terminal Helios run
+  `19961039`/`19961244`/`19961245`, run
+  `20260726T230513Z-b32e204e6fe5-b5f78fb6`. Portable audit SHA-256 is
+  `c0bfd9f526063c74e9cfce18d0874043c321244275927c25f1864489bd7f7728`.
+  Viper solves 7,458/7,503, Yices2 7,490, Z3 default 7,447, Z3
+  `sat.euf=true` 7,458, cvc5 7,362, and OpenSMT 7,283. The broad dense-six
+  campaign closes 22 solves and 40.74% of the old Yices coverage gap, but
+  overall promotion is rejected: Yices remains 32 solves ahead and Viper's
+  Yices factors are `0.330391x` PAR-2, `0.313928x` common total, and
+  `0.392835x` common geometric.
+- Next opportunity: all 418 qg7 sources share a proved domain-seven shape,
+  zero Boolean applications, zero guarded disequalities, and 315-350 explicit
+  disequality edges. A provisional same-binary scout over the 36 current
+  Yices-only qg7 rows changes plain/UNSAT-safe coverage from 3/36 to 17/36
+  with no wrong/error and `1.3363x`/`1.1630x` common total/geometric speed.
+  Do not route or claim this gain until complete qg7 and anti-target gates pass.

@@ -18,17 +18,18 @@ Viper is considered the overall leader only if it has:
 - a closest-prior-art audit and ingredient ablation for differentiated work.
 
 The current broad result does not pass those gates. The complete Helios 2 s
-campaign for revision `8368d21` has 7,503 instances and six solver
-configurations. Viper solves 7,436, Yices2 7,490, Z3 default 7,446, Z3
-`sat.euf=true` 7,459, cvc5 7,364, and OpenSMT 7,289. Viper therefore trails
-Yices2 by 54 solves and Z3 default by 10. Its common-geometric factors are
-`0.393x` against Yices2 and `0.886x` against Z3 default.
+campaign for revision `b5f78fb` has 7,503 instances and six solver
+configurations. Viper solves 7,458, Yices2 7,490, Z3 default 7,447, Z3
+`sat.euf=true` 7,458, cvc5 7,362, and OpenSMT 7,283. Viper therefore leads Z3
+default by 11 solves and ties Z3 `sat.euf` in coverage, but trails Yices2 by
+32. Its common-geometric factors are `0.393x` against Yices2 and `0.883x`
+against Z3 default.
 
 The generated evidence dashboard is available at
 `../dashboard/euf-progress.html`. Its canonical compressed registry contains
-212 evidence records rendered as 200 claim-isolated panels, including separate
+238 evidence records rendered as 226 claim-isolated panels, including separate
 SAT and UNSAT strata. The exact current panel is
-`panel-cce4ebc63bc3a66e`; historical 60 s and 1,200 s panels still measure
+`panel-370c5109acd7ed26`; historical 60 s and 1,200 s panels still measure
 revision `30828a4` and remain separate.
 
 The first post-baseline candidate recognizes a proved finite carrier of size
@@ -36,9 +37,19 @@ six with no Boolean applications, no guarded disequalities, and at least 200
 explicit disequality edges. It routes only that semantic shape to CaDiCaL's
 UNSAT-oriented preprocessing configuration. A same-binary local ABBA on all
 244 qg6 sources changes coverage from 192 to 244 and records `1.897x`
-common-total and `1.206x` common-geometric speed. The all-solver Helios run is
-still required: the current Helios route has only 21 qg6 timeouts, so the local
-52-solve gain cannot be added to the broad score.
+common-total and `1.206x` common-geometric speed. The all-solver Helios run
+closed 19 of the 21 prior qg6 timeouts and increased broad coverage by 22 after
+ordinary two-second boundary variation. It reduced the Yices coverage gap by
+`40.74%`, but did not improve common-geometric speed and therefore did not pass
+overall promotion.
+
+The next bounded opportunity is the analogous domain-seven finite shape. All
+418 qg7 sources have proved carrier size seven, no Boolean applications, no
+guarded disequalities, and 315-350 explicit disequality edges. A same-binary
+plain-versus-UNSAT-safe scout on the 36 current Yices-only qg7 rows changes
+coverage from 3 to 17 with zero wrong/error and `1.336x` common-total speed.
+This is provisional arm64 evidence; complete qg7 and anti-target gates are
+required before any route change.
 
 ## Metric Model
 

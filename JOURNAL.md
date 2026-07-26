@@ -2369,3 +2369,34 @@
   `b5f78fb6cfef648178089a680bf365ff4367b075`. The campaign contract now names
   that exact candidate while preserving `8368d21` as the measured broad
   baseline. This is an orchestration checkpoint, not new performance evidence.
+
+# 2026-07-26 - Dense-six broad adjudication and qg7 opportunity
+
+- Helios preparation `19961039`, array `19961244`, and finalizer `19961245`
+  completed `0:0`. The fixed run binds orchestration `b32e204`, solver
+  `b5f78fb`, six solver configurations, 7,503 sources, and 45,018/45,018 rows.
+- Local portable replay reproduced audit SHA-256
+  `c0bfd9f526063c74e9cfce18d0874043c321244275927c25f1864489bd7f7728`
+  byte-for-byte. Analysis SHA-256 is
+  `741dd531fa1048cb9f949a91f3db70bd8c8ef004bda3130b11f416a19393599c`;
+  candidate binary SHA-256 is
+  `6137acfaee46cf13b828a3bb356b39e9a0420df797a94e2188490b48edba01fd`.
+- Viper solves 7,458, Yices2 7,490, Z3 default 7,447, Z3 `sat.euf=true` 7,458,
+  cvc5 7,362, and OpenSMT 7,283. The dense-six step gains 22 broad solves,
+  closes 40.74% of the prior Yices coverage gap, leads Z3 default by 11, and
+  ties Z3 `sat.euf` in coverage.
+- Overall promotion is rejected. Against Yices2, factors are `0.330391x`
+  PAR-2, `0.313928x` common total, and `0.392835x` common geometric. The last
+  metric did not improve. The current Yices-only cohort has 39 rows: 36 QG,
+  two PEQ, and one SEQ.
+- Of 21 prior qg6 misses, 19 close and two remain. Other timeout-boundary
+  changes make the total broad delta +22; only the qg6 subset is directly
+  aligned with the new semantic route.
+- A complete qg7 census finds 418/418 proved domain-seven finite shapes with
+  zero Boolean applications, zero guarded disequalities, and 315-350 explicit
+  disequality edges. A same-binary arm64 scout on the 36 current Yices-only
+  qg7 rows changes plain/UNSAT-safe coverage from 3/36 to 17/36 with zero
+  wrong/error and `1.3363x`/`1.1630x` common total/geometric speed. Complete
+  qg7 plus anti-target A0-A2 gates are next; this scout is not a routed gain.
+- Dashboard evidence now has 238 records and 226 claim-isolated panels. The
+  exact current panel is `panel-370c5109acd7ed26`.

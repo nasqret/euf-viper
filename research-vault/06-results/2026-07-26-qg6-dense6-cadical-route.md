@@ -2,7 +2,7 @@
 
 Date: 2026-07-26
 
-Decision: local A0-A2 pass; Helios A3/A4 pending
+Decision: Helios A4 coverage win; overall promotion rejected
 
 ## Mechanism
 
@@ -72,10 +72,32 @@ without regressions, Viper would project to 7,457 solves: 11 ahead of Z3
 default, 2 behind Z3 `sat.euf=true`, and 33 behind Yices2. This projection is
 not dashboard evidence and must not be reported as achieved coverage.
 
-Promotion requires the exact all-solver Helios campaign, complete validity
-accounting, family/status panels, and broad PAR-2/common-time deltas. The local
-run has one repetition on a different CPU architecture and therefore cannot
-establish robustness or a broad lead.
+The exact all-solver Helios campaign is complete. Preparation `19961039`,
+64-shard array `19961244`, and finalizer `19961245` produced 45,018/45,018
+rows at solver revision `b5f78fb6cfef648178089a680bf365ff4367b075`.
+Portable local replay is byte-identical to the remote audit.
+
+| Solver | Correct solves |
+| --- | ---: |
+| euf-viper | 7,458 |
+| Yices2 | 7,490 |
+| Z3 default | 7,447 |
+| Z3 `sat.euf=true` | 7,458 |
+| cvc5 | 7,362 |
+| OpenSMT | 7,283 |
+
+Relative to the preceding `8368d21` Helios panel, Viper gains 22 solves and
+reduces its Yices2 gap from 54 to 32. Nineteen of the 21 prior qg6 timeouts
+close; two remain. Four non-qg6 prior misses also cross below the timeout and
+one PEQ row crosses above it, so the broad `+22` must not be presented as 22
+causally routed solves. The dashboard coverage index against Yices2 improves
+from `99.279%` to `99.573%`.
+
+The Yices2 factors are `0.330391x` PAR-2, `0.313928x` common total, and
+`0.392835x` common geometric. The route therefore passes as a broad coverage
+improvement but fails the overall-leader gate: Yices2 retains 32 more solves
+and a large timing lead. Viper leads Z3 default by 11 solves and ties Z3
+`sat.euf` in coverage, but remains slower than both on common solves.
 
 ## Artifacts
 
@@ -90,3 +112,5 @@ establish robustness or a broad lead.
 | `2026-07-26-qg6-finite-structure-census.json` | `8d2b39cdfa78e3b918a38d4d85436af260908ed27d0b962ce4de3dad04090e90` |
 | `2026-07-26-loops6-finite-structure-census.json` | `760b75e25560e8d8e990139f8362d9622e4e15c25827def8912acc029ef77515` |
 | `2026-07-26-peq-finite-structure-census.json` | `f0776bafee5f5a41d56620063c195eb5239bc009fca71f1a645b5557a8849241` |
+| `helios/quotient-full-2s-19961244/campaign/audit-index.json` | `c0bfd9f526063c74e9cfce18d0874043c321244275927c25f1864489bd7f7728` |
+| `helios/quotient-full-2s-19961244/campaign/analysis.json` | `741dd531fa1048cb9f949a91f3db70bd8c8ef004bda3130b11f416a19393599c` |

@@ -19,7 +19,7 @@ mechanism-specific authority and cannot be weakened by the top-level program.
 Immediate execution order:
 
 1. generate the dashboard from frozen broad and current targeted evidence
-   (**complete: 212 records, 200 claim-isolated panels**);
+   (**complete: 238 records, 226 claim-isolated panels**);
 2. qualify a promotion-eligible Helios lock with exact taxonomy, separate
    orchestration/solver provenance, and the official hash-locked comparator
    bundle (**complete**);
@@ -31,9 +31,11 @@ Immediate execution order:
    (**complete: 61 Yices-only rows; about `704x` faster bootstrap analysis**);
 6. run the semantic dense-six CaDiCaL route through local A0-A2
    (**complete: qg6 192/244 -> 244/244, zero wrong/error**) and execute its
-   all-solver Helios A3/A4 campaign (**next**);
-7. run the current official two-second selection, then continue only current
-   timeouts to 60 and 1,200 seconds; and
+   all-solver Helios A3/A4 campaign (**complete: preparation `19961039`, array
+   `19961244`, finalizer `19961245`; broad coverage 7,436 -> 7,458**);
+7. gate the observed domain-seven UNSAT-safe backend opportunity on complete
+   qg7 and anti-target populations, then run the current official two-second
+   selection and continue only current timeouts to 60 and 1,200 seconds; and
 8. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
 
@@ -46,12 +48,14 @@ confounder, or holdout failure.
 The generated dashboard is `docs/dashboard/euf-progress.html`, with compact
 model `docs/dashboard/euf-progress.json` and canonical compressed evidence
 `docs/dashboard/evidence/registry.json.gz`. The authoritative current panel is
-`panel-cce4ebc63bc3a66e` at revision `8368d21`: Viper solves 7,436/7,503,
-Yices2 7,490, Z3 default 7,446, Z3 `sat.euf=true` 7,459, cvc5 7,364, and
-OpenSMT 7,289. Against Yices2, Viper needs reductions of `69.94%` PAR-2,
-`71.11%` common total, and `60.66%` common geometric. Against Z3 default the
-corresponding reductions are `23.85%`, `27.62%`, and `11.42%`. Viper is not
-the broad leader.
+`panel-370c5109acd7ed26` at revision `b5f78fb`: Viper solves 7,458/7,503,
+Yices2 7,490, Z3 default 7,447, Z3 `sat.euf=true` 7,458, cvc5 7,362, and
+OpenSMT 7,283. Against Yices2, Viper needs reductions of `66.96%` PAR-2,
+`68.61%` common total, and `60.72%` common geometric. Against Z3 default the
+corresponding reductions are `16.65%`, `25.46%`, and `11.74%`. Viper now
+leads Z3 default by 11 solves and ties Z3 `sat.euf` in coverage, but it is not
+the broad leader because Yices2 solves 32 more rows and remains substantially
+faster.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate
@@ -108,8 +112,9 @@ The latest measured baseline freeze is commit
 `refs/heads/research/quotient-jit-lcg`; hosted Campaign contract run
 `30207588244` passed on that exact revision. The first post-baseline candidate
 is frozen at `b5f78fb6cfef648178089a680bf365ff4367b075`; it contains the semantic
-dense-six route and has no full-corpus score until the fixed Helios comparison
-finishes. The preregistered,
+dense-six route. Its complete fixed Helios comparison is locally replayed and
+records 7,458 solves, a 22-solve broad increase, but rejects overall promotion.
+The preregistered,
 source-family-disjoint PGO/Goel holdout is WMI job `170902`, submitted with one
 CPU and exact hashes for Rust, LLVM profile tooling, Z3, Yices2, and cvc5. It
 is currently `PENDING` because eligible nodes are down, drained, or reserved.
@@ -118,23 +123,27 @@ change PGO status; the submission itself is no performance evidence.
 
 ## Current Truth
 
-Authoritative current fast-tail campaign: Helios preparation `19955431`,
-64-shard array `19955828`, and finalizer `19955833`, solver revision
-`8368d21`, with all six configurations and all 7,503 sources hash-bound.
+Authoritative current fast-tail campaign: Helios preparation `19961039`,
+64-shard array `19961244`, and finalizer `19961245`, solver revision
+`b5f78fb`, with all six configurations and all 7,503 sources hash-bound.
 
 | Solver configuration | Current full 2s |
 | --- | ---: |
-| euf-viper | 7,436 |
-| cvc5 | 7,364 |
-| OpenSMT | 7,289 |
+| euf-viper | 7,458 |
+| cvc5 | 7,362 |
+| OpenSMT | 7,283 |
 | Yices2 | 7,490 |
-| Z3 default | 7,446 |
-| Z3 `sat.euf=true` | 7,459 |
+| Z3 default | 7,447 |
+| Z3 `sat.euf=true` | 7,458 |
 
 The current campaign contains zero wrong answers, execution errors, missing
-rows, or hash drift. Viper has seven Viper-only and 61 Yices-only solves. The
-Yices-only set is 57 QG, one Goel, two PEQ, and one SEQ; 52 are UNSAT. This
-frozen cohort determines the next architectural experiments.
+rows, or hash drift. Viper has seven Viper-only and 39 Yices-only solves. The
+Yices-only set is 36 QG, two PEQ, and one SEQ; 32 are UNSAT. Relative to the
+previous current-route panel, the leader gap fell from 54 to 32, closing
+`40.74%` of the deficit; the leader-relative coverage index rose from
+`99.279%` to `99.573%`. Nineteen of 21 prior qg6 misses closed. Common
+geometric speed versus Yices2 did not improve, so the frozen residual and the
+front-end cost profile determine the next experiments.
 
 The longer-budget and official-selection table below remains the authoritative
 historical `30828a4` campaign. It must not be pooled with the current 2 s row.

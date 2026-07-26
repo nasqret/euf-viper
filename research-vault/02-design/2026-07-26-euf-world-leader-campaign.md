@@ -32,14 +32,15 @@ veriT, SMTInterpol, MathSAT5, and Alt-Ergo releases.
 
 ## Starting Position
 
-The authoritative fast-tail baseline is now the complete Helios campaign for
-revision `8368d21`. Longer-budget and official-selection rows still measure
+The authoritative fast-tail result is now the complete Helios campaign for
+revision `b5f78fb`. Longer-budget and official-selection rows still measure
 the older `30828a4` revision and remain historical controls until continued
 current-route runs replace them.
 
 | Evidence/revision | Corpus/budget | Viper | Yices2 | Z3 default | Z3 sat.euf | Interpretation |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| current `8368d21` | Full 2 s | 7,436 | 7,490 | 7,446 | 7,459 | 54 behind Yices, 10 behind Z3 default |
+| current `b5f78fb` | Full 2 s | 7,458 | 7,490 | 7,447 | 7,458 | 32 behind Yices, 11 ahead of Z3 default |
+| prior `8368d21` | Full 2 s | 7,436 | 7,490 | 7,446 | 7,459 | 54 behind Yices, 10 behind Z3 default |
 | historical `30828a4` | Full 60 s | 7,480 | 7,500 | 7,489 | 7,483 | 20 behind Yices |
 | historical `30828a4` | Full 1,200 s | 7,502 | 7,503 | 7,500 | 7,492 | nearly complete |
 | historical `30828a4` | Official 2 s | 3,400 | 3,490 | 3,474 | 3,469 | current revision not yet measured |
@@ -47,37 +48,36 @@ current-route runs replace them.
 | historical `30828a4` | Official 1,200 s | 3,520 | 3,521 | 3,520 | 3,516 | current revision not yet measured |
 
 On the current full 2 s panel, matching Yices2 requires Viper reductions of
-`69.94%` in PAR-2, `71.11%` in common-total time, and `60.66%` in
-common-geometric time. Matching Z3 default requires `23.85%`, `27.62%`, and
-`11.42%`, respectively. These are architectural targets, not PGO targets.
+`66.96%` in PAR-2, `68.61%` in common-total time, and `60.72%` in
+common-geometric time. Matching Z3 default requires `16.65%`, `25.46%`, and
+`11.74%`, respectively. These are architectural targets, not PGO targets.
 
 The current structural route solves 148 of 151 PEQ/SEQ/NEQ rows versus 140 for
 Yices2, 126 for Z3, and 113 for cvc5 in the local discovery panel. The first
 post-baseline candidate is a semantic dense-six route: a same-binary local qg6
 ABBA changes coverage from 192/244 to 244/244 with `1.897x` common-total and
-`1.206x` common-geometric speed. Its projected broad effect is at most the 21
-qg6 timeouts in the Helios baseline, not the 52 local arm64 timeouts. If all 21
-close without regressions, projected coverage is 7,457: ahead of Z3 default,
-two behind Z3 `sat.euf=true`, and 33 behind Yices2. This remains a projection
-until the new all-solver Helios campaign completes.
+`1.206x` common-geometric speed. The all-solver Helios campaign closes 19 of
+the 21 prior qg6 misses. Broad coverage rises to 7,458, but common-geometric
+speed against Yices2 is unchanged within noise and the overall promotion gate
+rejects the candidate.
 
 ## Measurement-Closure Audit
 
 The current dashboard snapshot is complete at
-`docs/dashboard/euf-progress.html`. Its 212 evidence records render as 200
+`docs/dashboard/euf-progress.html`. Its 238 evidence records render as 226
 claim-isolated panels, including separate SAT and UNSAT strata, and keep the
-verified `8368d21` Helios baseline separate from historical `30828a4` and
-provisional local structural evidence. Its canonical input is the compressed strict
+verified `b5f78fb` Helios candidate separate from `8368d21`, historical
+`30828a4`, and provisional local structural evidence. Its canonical input is the compressed strict
 registry `docs/dashboard/evidence/registry.json.gz`; each broad observation was
 reconstructed from source-record hashes after checking the parent lock, raw
 shard hash, record hash, source lock, origin budget, result classification,
 and staged carry-forward.
 
-The exact current panel is `panel-cce4ebc63bc3a66e`: 7,503 instances, six
-solver configurations, and 45,018 rows. Viper solves 7,436, Yices2 7,490, Z3
-default 7,446, Z3 `sat.euf=true` 7,459, cvc5 7,364, and OpenSMT 7,289. The 61
-Yices-only rows are 57 QG-classification, one Goel, two PEQ, and one SEQ; 52
-are UNSAT. This is the frozen optimization target.
+The exact current panel is `panel-370c5109acd7ed26`: 7,503 instances, six
+solver configurations, and 45,018 rows. Viper solves 7,458, Yices2 7,490, Z3
+default 7,447, Z3 `sat.euf=true` 7,458, cvc5 7,362, and OpenSMT 7,283. The 39
+Yices-only rows are 36 QG-classification, two PEQ, and one SEQ; 32 are UNSAT.
+This is the frozen optimization target.
 
 On the combined 151-instance structural discovery set, pairwise results are:
 
@@ -174,11 +174,13 @@ snapshot and a user decision packet.
    campaign.
 4. **Done:** derive exact solver-only gap cohorts and family/status panels.
 5. **Done:** accelerate analysis and add a content-addressed taxonomy cache.
-6. **Running next:** run the dense-six candidate as a complete all-solver
-   Helios campaign and update the dashboard from immutable evidence.
-7. **Pending:** run the current official 2 s selection and continue only
+6. **Done:** run the dense-six candidate as a complete all-solver Helios
+   campaign and update the dashboard from immutable evidence.
+7. **Running next:** gate domain-seven UNSAT-safe selection on all qg7 and
+   anti-target sources; route only if A0-A2 pass.
+8. **Pending:** run the current official 2 s selection and continue only
    current-route timeouts to 60 and 1,200 seconds.
-8. **Independent side result:** adjudicate WMI PGO/Goel job `170902` exactly
+9. **Independent side result:** adjudicate WMI PGO/Goel job `170902` exactly
    once; it is not evidence for the quotient route.
 
 This is the first broad step. Its score delta determines the actual remaining
