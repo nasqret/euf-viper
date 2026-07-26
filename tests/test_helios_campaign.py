@@ -108,6 +108,7 @@ class HeliosShellContractTests(unittest.TestCase):
         self.assertIn('"$(uname -m)" = x86_64', toolchain)
         self.assertIn("module --redirect --location show", toolchain)
         self.assertIn("hash_file \"$location\"", toolchain)
+        self.assertIn('done <<EOF\n$RUST_MODULE_GCC\n$RUST_MODULE\nEOF', toolchain)
 
     def test_sync_requires_a_clean_exact_revision_and_uses_rsync(self) -> None:
         source = SUBMIT.read_text(encoding="utf-8")

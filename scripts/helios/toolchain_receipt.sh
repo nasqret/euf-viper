@@ -50,7 +50,10 @@ while IFS= read -r specification; do
   location="$(module_location "$specification")"
   printf 'module\t%s\t%s\t%s\n' \
     "$specification" "$location" "$(hash_file "$location")"
-done <<<"$LOADED_MODULES"
+done <<EOF
+$RUST_MODULE_GCC
+$RUST_MODULE
+EOF
 
 for binding in \
   bash:bash \
