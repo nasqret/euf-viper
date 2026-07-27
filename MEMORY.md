@@ -1367,5 +1367,19 @@
   `preprocesslight=0` cuts the exact qg7 residual from 17/36 to 8/36;
   `preprocesslight=1` restores parity, while `factor=1` reaches only 14/36.
   Do not upgrade the embedded backend or enable factor from this evidence.
+- Staged qg7 revision `e9fef17` is default-off and not promoted. Exact Helios
+  threshold job `19968141` found 10 Kissat conflicts best on the 36-row
+  residual (two solves), but complete qg7 job `19968275` rejected broad use:
+  380/418 baseline versus 374/418 staged, two UNSAT gains, eight SAT losses,
+  and `0.939291x`/`0.711269x` common aggregate/geometric speed. Both audits
+  replay exactly with zero wrong answers or execution errors.
+- The qg7 structure census is complete 418/418. A 52-row minimal core has
+  exactly 147 binary table applications, and contains both staged gains and no
+  measured loss; the first loss appears at 154. Post-hoc arm recombination
+  projects 382/418, no loss, and `0.978319x`/`0.970901x` common speed. The
+  production selector now adds `binary_table_applications <= 147`, but this is
+  discovery evidence from exposed qg7 outcomes. Require a fresh exact-binary
+  full-qg7 confirmation before any 7,503-row run; keep `b5f78fb` and
+  `panel-370c5109acd7ed26` as the authoritative broad best meanwhile.
 - WMI PGO/Goel job `170902` is still pending with zero runtime because eligible
   nodes are down, drained, or reserved. It remains older-route evidence only.

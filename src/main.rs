@@ -3006,6 +3006,8 @@ fn finite_structural_default_safe_candidate(
 const FINITE_DENSE6_MIN_DISEQUALITY_EDGES: usize = 200;
 #[cfg(feature = "finite-symmetry")]
 const FINITE_DENSE7_MIN_DISEQUALITY_EDGES: usize = 315;
+#[cfg(feature = "finite-symmetry")]
+const FINITE_DENSE7_STAGED_MAX_BINARY_APPLICATIONS: usize = 147;
 
 #[cfg(feature = "finite-symmetry")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3064,6 +3066,22 @@ fn finite_dense7_cadical_signature(
 }
 
 #[cfg(feature = "finite-symmetry")]
+fn finite_dense7_staged_signature(
+    domain_size: usize,
+    boolean_applications: usize,
+    binary_table_applications: usize,
+    disequality_edges: usize,
+    guarded_disequality_clauses: usize,
+) -> bool {
+    finite_dense7_cadical_signature(
+        domain_size,
+        boolean_applications,
+        disequality_edges,
+        guarded_disequality_clauses,
+    ) && binary_table_applications <= FINITE_DENSE7_STAGED_MAX_BINARY_APPLICATIONS
+}
+
+#[cfg(feature = "finite-symmetry")]
 fn finite_dense_cadical_candidate(
     context: &mut finite_analysis::FiniteAnalysisContext,
     arena: &TermArena,
@@ -3079,6 +3097,7 @@ fn finite_dense_cadical_candidate(
     finite_dense_cadical_route_for_signature(
         analysis.discovered_domain_size,
         analysis.boolean_applications,
+        analysis.binary_table_applications,
         analysis.disequality_graph_edges,
         analysis.guarded_disequality_clauses,
         dense6_enabled,
@@ -3091,6 +3110,7 @@ fn finite_dense_cadical_candidate(
 fn finite_dense_cadical_route_for_signature(
     domain_size: usize,
     boolean_applications: usize,
+    binary_table_applications: usize,
     disequality_edges: usize,
     guarded_disequality_clauses: usize,
     dense6_enabled: bool,
@@ -3106,7 +3126,17 @@ fn finite_dense_cadical_route_for_signature(
         )
     {
         Some(FiniteDenseCadicalRoute::Domain6)
-    } else if (dense7_enabled || dense7_staged_enabled)
+    } else if dense7_staged_enabled
+        && finite_dense7_staged_signature(
+            domain_size,
+            boolean_applications,
+            binary_table_applications,
+            disequality_edges,
+            guarded_disequality_clauses,
+        )
+    {
+        Some(FiniteDenseCadicalRoute::Domain7Staged)
+    } else if dense7_enabled
         && finite_dense7_cadical_signature(
             domain_size,
             boolean_applications,
@@ -3114,11 +3144,7 @@ fn finite_dense_cadical_route_for_signature(
             guarded_disequality_clauses,
         )
     {
-        if dense7_staged_enabled {
-            Some(FiniteDenseCadicalRoute::Domain7Staged)
-        } else {
-            Some(FiniteDenseCadicalRoute::Domain7Direct)
-        }
+        Some(FiniteDenseCadicalRoute::Domain7Direct)
     } else {
         None
     }
@@ -11194,16 +11220,22 @@ mod tests {
         assert!(!finite_dense7_cadical_signature(6, 0, 315, 0));
         assert!(!finite_dense7_cadical_signature(7, 1, 315, 0));
         assert!(!finite_dense7_cadical_signature(7, 0, 315, 1));
+        assert!(finite_dense7_staged_signature(7, 0, 147, 315, 0));
+        assert!(!finite_dense7_staged_signature(7, 0, 148, 315, 0));
         assert_eq!(
-            finite_dense_cadical_route_for_signature(7, 0, 315, 0, false, true, false),
+            finite_dense_cadical_route_for_signature(7, 0, usize::MAX, 315, 0, false, true, false,),
             Some(FiniteDenseCadicalRoute::Domain7Direct),
         );
         assert_eq!(
-            finite_dense_cadical_route_for_signature(7, 0, 315, 0, false, false, true),
+            finite_dense_cadical_route_for_signature(7, 0, 147, 315, 0, false, false, true),
             Some(FiniteDenseCadicalRoute::Domain7Staged),
         );
         assert_eq!(
-            finite_dense_cadical_route_for_signature(7, 0, 314, 0, false, false, true),
+            finite_dense_cadical_route_for_signature(7, 0, 148, 315, 0, false, false, true),
+            None,
+        );
+        assert_eq!(
+            finite_dense_cadical_route_for_signature(7, 0, 147, 314, 0, false, false, true),
             None,
         );
         assert_eq!(

@@ -2432,3 +2432,43 @@
   geometric timing regressed to `0.84207x`. This is insufficient and risks
   overfitting. The next mechanism is staged search: bounded Kissat first,
   explicit UNKNOWN on conflict-budget exhaustion, then CaDiCaL fallback.
+
+# 2026-07-27 - Staged qg7 threshold and structural narrowing
+
+- Revision `e9fef17` adds a default-off bounded Kissat call that returns
+  explicit UNKNOWN at its conflict limit and hands the unchanged CNF to the
+  existing CaDiCaL UNSAT-safe route. Helios preparation `19968090` produced
+  solver binary SHA-256 `68855954...a9d`; all matrix tasks used one physical
+  AMD EPYC 9654 core and parser-inclusive two-second subprocess timing.
+- Threshold array `19968141` ran 1,296 complete Williams-scheduled observations
+  over the exact 36 Yices-only qg7 residual. Baseline, staged-0, staged-10,
+  staged-100, staged-1000, and staged-10000 solved respectively 0, 1, 2, 1,
+  0, and 0 rows. There were zero wrong answers and zero execution errors.
+  Audit self-hash `3d2248b0...9983` replays byte-for-byte, selecting budget 10
+  for the complete qg7 gate.
+- Full qg7 array `19968275` ran 1,672 observations over all 418 sources.
+  Baseline solved 380 and staged-10 solved 374. The stage gained UNSAT
+  `gensys_icl002` and `gensys_icl004`, but lost eight SAT
+  `iso_brn_nogen_sk{006,007,008,009,016,017,018,020}` rows. On 372 common
+  solves its aggregate/geometric factors were `0.939291x` and `0.711269x`.
+  Zero wrong/error rows and audit self-hash `58a58622...c85` make the rejection
+  conclusive: broad staged qg7 is disabled and no full campaign is authorized.
+- A fresh 418/418 finite-structure census found 52 minimal-core rows with
+  exactly 147 binary table applications, 154 recognized finite terms, 105
+  equality vertices, seven constants, and 315 or 322 disequality edges. Both
+  gains lie in this cohort. The first measured loss appears at 154 binary
+  applications. A hash-bound post-hoc recombination at threshold 147 projects
+  382/418 coverage, two gains, no losses, `0.978319x` common aggregate, and
+  `0.970901x` common geometric. Projection self-hash is
+  `6c0cb0e4...eab0`.
+- The production selector now keeps the broad semantic dense-seven guard and
+  additionally requires at most 147 binary table applications for staged
+  execution. Direct dense-seven remains behaviorally independent. This is a
+  path-free structural selector, but the threshold was discovered after seeing
+  all qg7 outcomes; it is not independent holdout evidence. A fresh exact-
+  revision Helios qg7 confirmation is mandatory before broad timing.
+- Local qualification passes 635 Python tests, 643 Rust all-feature tests with
+  ten intentional ignores, no-default Rust checking, seven vendored Kissat
+  unit/doc tests, release compilation, formatting, diff checks, and the full
+  Jupyter Book build. The matrix auditor also replays both archived Helios
+  audits byte-for-byte in its regression suite.

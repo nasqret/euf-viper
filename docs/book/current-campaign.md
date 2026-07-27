@@ -897,3 +897,47 @@ against 17/36 for 2.2.1. Explicit `preprocesslight=1` restores parity and
 `factor=1` regresses to 14/36. Neither change is promoted. The next registered
 mechanism preserves Kissat's SAT-friendly behavior for a bounded conflict
 budget and calls CaDiCaL only after an explicit UNKNOWN handoff.
+
+## Staged qg7 search
+
+The bounded handoff has now been tested rather than inferred. Revision
+`e9fef17` runs Kissat for a fixed conflict budget and, only on explicit UNKNOWN,
+starts the existing CaDiCaL UNSAT-safe search on the same CNF. It remains
+default-off.
+
+The exact 36-row Yices-only qg7 threshold matrix used six arms and six complete
+Williams blocks on Helios job `19968141`. Coverage for budgets 0, 10, 100,
+1,000, and 10,000 was respectively 1, 2, 1, 0, and 0, versus zero for the
+unstaged baseline. Budget 10 therefore advanced to all 418 qg7 sources.
+
+| Full qg7 metric | Baseline | Staged-10 |
+| --- | ---: | ---: |
+| Correct at 2s | 380/418 | 374/418 |
+| SAT correct | 294 | 286 |
+| UNSAT correct | 86 | 88 |
+| Gains | - | 2 |
+| Losses | - | 8 |
+| Common aggregate factor | `1.0x` | `0.939291x` |
+| Common geometric factor | `1.0x` | `0.711269x` |
+
+Job `19968275` contains 1,672 parser-inclusive observations, zero wrong answers,
+and zero execution errors. Broad staging is rejected: the two new UNSAT solves
+do not compensate for eight lost SAT solves or the timing regression.
+
+The complete finite-structure census exposes a sharper hypothesis. Fifty-two
+qg7 formulas form a discrete minimal core with exactly 147 binary table
+applications, 154 recognized finite terms, 105 equality vertices, and seven
+constants. Both gains are inside this core; the first measured loss is at 154
+binary applications. Selecting only this core projects 382/418 correct with no
+loss, but remains `0.978319x` in common aggregate and `0.970901x` in common
+geometric timing. The production experiment therefore adds the path-free guard
+
+\[
+  |\{f(a,b)\text{ applications}\}| \le 147
+\]
+
+to the existing semantic dense-seven signature. The projection is post-hoc:
+the threshold was chosen after observing the complete qg7 matrix. It is not a
+new benchmark result and does not update the broad dashboard. A fresh exact-
+binary qg7 confirmation must match its two-gain, zero-loss prediction before a
+full-corpus campaign can start.

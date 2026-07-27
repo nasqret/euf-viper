@@ -38,8 +38,11 @@ Immediate execution order:
    selection (**complete and rejected: 7,458 -> 7,449 solves; four gains,
    thirteen losses**);
 8. implement and sweep a bounded Kissat-first/explicit-UNKNOWN/CaDiCaL-second
-   dense-seven stage, require no qg7 or anti-target loss, and run a full
-   campaign only if the complete targeted gate passes; and
+   dense-seven stage (**broad qg7 arm complete and rejected: 380 -> 374 solves,
+   two gains, eight losses**); confirm the post-hoc 52-row minimal-core selector
+   on a fresh exact binary before any full campaign (**in progress; projection
+   only is 380 -> 382 with no loss, but is 2.2% slower in common aggregate**);
+   and
 9. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
 
@@ -66,6 +69,19 @@ The latest evaluated candidate panel is `panel-fa429821e71877f6` at revision
 new current best. Its direct dense-seven route gains four solves and loses
 thirteen against `b5f78fb`, while improving common-correct aggregate time by
 only `1.008512x`. The route is rejected and must be disabled by default.
+
+The staged successor at revision `e9fef17` is also default-off. Helios threshold
+job `19968141` selected a 10-conflict Kissat prefix, but complete qg7 job
+`19968275` rejected broad staging: baseline solved 380/418 and staged-10 solved
+374/418, with two UNSAT gains, eight SAT losses, `0.939291x` common-total
+speed, and `0.711269x` common-geometric speed. A complete structural census
+found a discrete minimal core of 52 rows at exactly 147 binary table
+applications. Recombining the already measured arms only on that cohort
+projects 382/418 with no coverage loss, `0.978319x` common-total speed, and
+`0.970901x` common-geometric speed. This is post-hoc discovery evidence, not a
+measured candidate result. The exact narrowed binary must reproduce the qg7
+projection before a 7,503-row campaign is authorized. Until then the broad
+dashboard and current-best panel remain unchanged.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate
@@ -113,7 +129,7 @@ channeling, focused permutation support, and route-local CaDiCaL policy are
 selected only from formula structure. The new dense-six candidate adds a
 semantic backend hint, not a family or identity route. The complete local
 all-feature suite is green at 643 passed and 10 intentionally ignored; Python
-discovery is green at 627 tests. These results authorize a clean freeze and
+discovery is green at 635 tests. These results authorize a clean freeze and
 fixed Helios comparison, not a production-default change or an overall-leader
 claim.
 
