@@ -2533,3 +2533,27 @@
   the candidate closes inside the prefix and records no Kissat handoff. The
   single-run solve times (15.879 ms baseline, 14.574 ms candidate) are only a
   configuration-equivalence canary, not promotion evidence.
+
+# 2026-07-27 - Plain braid rejection and lazy UNSAT sprint
+
+- Revision `9f86254`, preparation `19970724`, and matrix `19971085` completed
+  1,872 balanced observations on the same exact 52 rows. Local audit replay is
+  byte-identical at self-hash `edc65c5d...95aa`; there are zero wrong answers
+  and zero execution errors.
+- Baseline and all five Plain-prefix arms cover 48/52. Aggregate factors range
+  from `0.871391x` to `0.919691x`; geometric factors range from `0.845856x` to
+  `0.895778x`. Reject every arm and do not run complete qg7.
+- The missing gains establish that the preceding experiment's two solves came
+  from resumed UNSAT-configured CaDiCaL, not ten-conflict Kissat. Direct local
+  profiles solve `gensys_icl002` in 66,445 UNSAT-mode conflicts and
+  `gensys_icl004` in 58,920.
+- Preparation accidentally used the tracked `smtcomp-2025` source manifest
+  instead of the prior `smtlib-2025` source manifest. The content-addressed
+  corpus inventory is identical, and the matrix independently binds all 52
+  source hashes, but `19970724` is build provenance only and cannot continue
+  the broad panel.
+- The next default-off phase braid runs a Plain prefix, lazily builds a second
+  UNSAT-configured CaDiCaL for a 70,000-conflict sprint after interruption, and
+  resumes the original Plain solver if the sprint abstains. Prefix 1,000 solves
+  the first target locally in about 1.02 seconds of measured SAT phases while
+  preserving the 281-conflict easy canary path.

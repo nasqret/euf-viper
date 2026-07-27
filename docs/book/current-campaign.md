@@ -1019,3 +1019,26 @@ qg7 `gensys_brn003`, baseline and a 10,000-conflict braid prefix both finish at
 281 conflicts and 323 decisions, with no handoff. This confirms search-shape
 equivalence on the canary; only a fresh balanced 52-row Helios experiment can
 establish timing or promotion eligibility.
+
+## Plain braid result and phase braid
+
+Revision `9f86254` was measured by Helios array `19971085` over the same 52
+sources and 1,872 Williams-balanced observations. Every Plain-prefix arm stays
+at 48/52, with zero wrong answers and zero execution errors.
+
+| Arm | Correct | Aggregate factor | Geometric factor |
+| --- | ---: | ---: | ---: |
+| Baseline | 48/52 | `1.0x` | `1.0x` |
+| Prefix 0 | 48/52 | `0.890629x` | `0.863136x` |
+| Prefix 10 | 48/52 | `0.871391x` | `0.845856x` |
+| Prefix 100 | 48/52 | `0.880287x` | `0.863259x` |
+| Prefix 1,000 | 48/52 | `0.906712x` | `0.887639x` |
+| Prefix 10,000 | 48/52 | `0.919691x` | `0.895778x` |
+
+The byte-identical audit (`edc65c5d...95aa`) proves that bounded Kissat did not
+produce the preceding sweep's two gains. Those gains came from CaDiCaL's UNSAT
+configuration, which local profiles show closes the two targets in 66,445 and
+58,920 conflicts. The successor therefore uses a retained Plain prefix, creates
+an UNSAT-configured CaDiCaL lazily for a 70,000-conflict sprint, and resumes the
+original Plain solver only if that sprint abstains. This keeps the intervention
+off the completed easy path while retaining both search regimes.

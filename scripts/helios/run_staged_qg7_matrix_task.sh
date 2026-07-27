@@ -143,6 +143,7 @@ add_arm() {
   local braided="$3"
   local cadical_prefix="$4"
   local kissat_conflicts="$5"
+  local cadical_sprint="$6"
   ARGUMENTS+=(
     --arm "$name"
     --arm-arg "$SOLVER_BINARY"
@@ -153,32 +154,33 @@ add_arm() {
     --arm-env EUF_VIPER_FINITE_DENSE7=0
     --arm-env "EUF_VIPER_FINITE_DENSE7_BRAIDED=$braided"
     --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS=$cadical_prefix"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS=$cadical_sprint"
     --arm-env "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS=$kissat_conflicts"
     --arm-env "EUF_VIPER_FINITE_DENSE7_STAGED=$staged"
   )
 }
 
-add_arm baseline 0 0 1000 1000
+add_arm baseline 0 0 1000 1000 0
 case "$MATRIX_MODE" in
   threshold)
-    add_arm staged-0 1 0 1000 0
-    add_arm staged-10 1 0 1000 10
-    add_arm staged-100 1 0 1000 100
-    add_arm staged-1000 1 0 1000 1000
-    add_arm staged-10000 1 0 1000 10000
+    add_arm staged-0 1 0 1000 0 0
+    add_arm staged-10 1 0 1000 10 0
+    add_arm staged-100 1 0 1000 100 0
+    add_arm staged-1000 1 0 1000 1000 0
+    add_arm staged-10000 1 0 1000 10000 0
     ;;
   confirm-stage10)
-    add_arm staged-10 1 0 1000 10
+    add_arm staged-10 1 0 1000 10 0
     ;;
   braid-threshold)
-    add_arm braid-0 0 1 0 10
-    add_arm braid-10 0 1 10 10
-    add_arm braid-100 0 1 100 10
-    add_arm braid-1000 0 1 1000 10
-    add_arm braid-10000 0 1 10000 10
+    add_arm braid-0 0 1 0 0 70000
+    add_arm braid-10 0 1 10 0 70000
+    add_arm braid-100 0 1 100 0 70000
+    add_arm braid-1000 0 1 1000 0 70000
+    add_arm braid-10000 0 1 10000 0 70000
     ;;
   confirm-braid)
-    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 10
+    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 0 70000
     ;;
 esac
 ARGUMENTS+=(

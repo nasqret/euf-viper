@@ -2216,6 +2216,7 @@ struct CnfProblem {
     finite_cadical_search_hint: CadicalSearchHint,
     finite_kissat_conflict_limit: Option<u32>,
     finite_cadical_prefix_conflict_limit: Option<u32>,
+    finite_cadical_sprint_conflict_limit: Option<u32>,
 }
 
 #[cfg(feature = "certificates")]
@@ -2315,6 +2316,7 @@ impl CnfProblem {
             finite_cadical_search_hint: CadicalSearchHint::None,
             finite_kissat_conflict_limit: None,
             finite_cadical_prefix_conflict_limit: None,
+            finite_cadical_sprint_conflict_limit: None,
         }
     }
 
@@ -2876,10 +2878,10 @@ fn add_finite_domain_axioms_with_context(
                                 finite_dense7_staged_kissat_conflicts;
                         }
                         FiniteDenseCadicalRoute::Domain7Braided => {
-                            let (cadical, kissat) = finite_dense7_braided_conflicts
+                            let (prefix, sprint) = finite_dense7_braided_conflicts
                                 .expect("braided route requires configured limits");
-                            cnf.finite_cadical_prefix_conflict_limit = Some(cadical);
-                            cnf.finite_kissat_conflict_limit = Some(kissat);
+                            cnf.finite_cadical_prefix_conflict_limit = Some(prefix);
+                            cnf.finite_cadical_sprint_conflict_limit = Some(sprint);
                         }
                         FiniteDenseCadicalRoute::Domain6
                         | FiniteDenseCadicalRoute::Domain7Direct => {}
@@ -5285,6 +5287,20 @@ fn prepare_cadical_euf_solver(
     arena: &TermArena,
     eager_congruence: bool,
 ) -> Option<(CadicalSolver<'static, 'static>, Option<u32>)> {
+    prepare_cadical_euf_solver_with_hint(
+        cnf,
+        arena,
+        eager_congruence,
+        cnf.finite_cadical_search_hint,
+    )
+}
+
+fn prepare_cadical_euf_solver_with_hint(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    eager_congruence: bool,
+    search_hint: CadicalSearchHint,
+) -> Option<(CadicalSolver<'static, 'static>, Option<u32>)> {
     let transitivity_start = Instant::now();
     let transitivity = equality_transitivity_clauses(cnf, arena.terms.len());
     profile_phase("transitivity", transitivity_start, transitivity.len());
@@ -5314,11 +5330,7 @@ fn prepare_cadical_euf_solver(
 
     let load_start = Instant::now();
     let mut solver = CadicalSolver::default();
-    configure_cadical_with_hint(
-        &mut solver,
-        prefer_unsat_search,
-        cnf.finite_cadical_search_hint,
-    )?;
+    configure_cadical_with_hint(&mut solver, prefer_unsat_search, search_hint)?;
     for clause in &cnf.clauses {
         solver.add_clause(rustsat_clause(clause)).ok()?;
     }
@@ -5402,7 +5414,7 @@ struct BraidedSolveOutcome {
     sat_calls: usize,
 }
 
-fn solve_cadical_kissat_braid(
+fn solve_cadical_phase_braid(
     cnf: &CnfProblem,
     arena: &TermArena,
     true_term: TermId,
@@ -5453,32 +5465,46 @@ fn solve_cadical_kissat_braid(
         CadicalSolveStep::Interrupted => {}
     }
 
-    let kissat_limit = cnf.finite_kissat_conflict_limit.unwrap_or(0);
+    let sprint_limit = cnf.finite_cadical_sprint_conflict_limit.unwrap_or(0);
     profile_measurement(
-        "finite_dense7_braided_kissat_budget",
-        kissat_limit as u128,
+        "finite_dense7_braided_cadical_sprint_budget",
+        sprint_limit as u128,
         cnf.clauses.len(),
     );
-    match solve_kissat_euf_once_with_conflict_limit(
+    let mut sat_calls = 1usize;
+    if let Some((mut sprint_solver, _)) = prepare_cadical_euf_solver_with_hint(
         cnf,
         arena,
-        true_term,
-        false_term,
         eager_congruence,
-        Some(kissat_limit),
+        CadicalSearchHint::UnsatSafe,
     ) {
-        EagerSolveOutcome::Solved(result) => {
-            profile_measurement("finite_dense7_braided_handoff", 1, 0);
-            return BraidedSolveOutcome {
-                result: Some(result),
-                sat_calls: 2,
-            };
-        }
-        EagerSolveOutcome::InvalidTheoryModel(evidence) => {
-            profile_measurement("finite_dense7_braided_handoff", 2, evidence.conflicts.len());
-        }
-        EagerSolveOutcome::Unavailable => {
-            profile_measurement("finite_dense7_braided_handoff", 2, 0);
+        if sprint_solver.limit_conflicts(Some(sprint_limit)).is_ok() {
+            let sprint_start_conflicts = sprint_solver.conflicts();
+            if let Some(step) =
+                solve_loaded_cadical_euf(&mut sprint_solver, cnf, arena, true_term, false_term)
+            {
+                sat_calls += 1;
+                let sprint_conflicts = sprint_solver
+                    .conflicts()
+                    .saturating_sub(sprint_start_conflicts);
+                profile_measurement(
+                    "finite_dense7_braided_cadical_sprint",
+                    sprint_conflicts as u128,
+                    sprint_limit as usize,
+                );
+                if let CadicalSolveStep::Solved(result) = step {
+                    profile_measurement("finite_dense7_braided_handoff", 1, 0);
+                    return BraidedSolveOutcome {
+                        result: Some(result),
+                        sat_calls,
+                    };
+                }
+                profile_measurement(
+                    "finite_dense7_braided_handoff",
+                    2,
+                    sprint_conflicts as usize,
+                );
+            }
         }
     }
 
@@ -5489,7 +5515,7 @@ fn solve_cadical_kissat_braid(
     if limit_result.is_err() {
         return BraidedSolveOutcome {
             result: None,
-            sat_calls: 2,
+            sat_calls,
         };
     }
     let result =
@@ -5501,7 +5527,7 @@ fn solve_cadical_kissat_braid(
         });
     BraidedSolveOutcome {
         result,
-        sat_calls: 3,
+        sat_calls: sat_calls + 1,
     }
 }
 
@@ -6476,8 +6502,11 @@ const FINITE_DENSE7_BRAIDED_ENV: &str = "EUF_VIPER_FINITE_DENSE7_BRAIDED";
 const FINITE_DENSE7_KISSAT_CONFLICTS_ENV: &str = "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS";
 const FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS_ENV: &str =
     "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS";
+const FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV: &str =
+    "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS";
 const DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS: u32 = 1_000;
 const DEFAULT_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS: u32 = 1_000;
+const DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS: u32 = 70_000;
 const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
 const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
@@ -7054,6 +7083,24 @@ fn finite_dense7_cadical_prefix_conflicts() -> Result<u32, String> {
     }
 }
 
+fn finite_dense7_cadical_sprint_conflicts() -> Result<u32, String> {
+    match env::var(FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV) {
+        Ok(value) => parse_nonnegative_u32_setting(
+            FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV,
+            Some(&value),
+            DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS,
+        ),
+        Err(env::VarError::NotPresent) => parse_nonnegative_u32_setting(
+            FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV,
+            None,
+            DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS,
+        ),
+        Err(env::VarError::NotUnicode(_)) => Err(format!(
+            "{FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV} must be a nonnegative 32-bit integer"
+        )),
+    }
+}
+
 fn finite_structural_predicate_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_STRUCTURAL_PREDICATE_ENV, true)
 }
@@ -7106,6 +7153,7 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
     }
     let finite_dense7_kissat_conflicts = finite_dense7_kissat_conflicts()?;
     let finite_dense7_cadical_prefix_conflicts = finite_dense7_cadical_prefix_conflicts()?;
+    let finite_dense7_cadical_sprint_conflicts = finite_dense7_cadical_sprint_conflicts()?;
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
@@ -7118,7 +7166,7 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
             .then_some(finite_dense7_kissat_conflicts),
         finite_dense7_braided_conflicts: finite_dense7_braided.then_some((
             finite_dense7_cadical_prefix_conflicts,
-            finite_dense7_kissat_conflicts,
+            finite_dense7_cadical_sprint_conflicts,
         )),
         force_finite_predicate_channeling: false,
         force_finite_permutation_support: false,
@@ -7433,7 +7481,7 @@ fn solve_bool_problem(
         if backend == "auto"
             && cnf.finite_cadical_search_hint == CadicalSearchHint::BraidedPlainSafe
         {
-            let outcome = solve_cadical_kissat_braid(
+            let outcome = solve_cadical_phase_braid(
                 &cnf,
                 arena,
                 bool_problem.true_term,
@@ -10902,6 +10950,32 @@ mod tests {
     }
 
     #[test]
+    fn cadical_phase_braid_can_solve_in_lazy_unsat_sprint() {
+        const PIGEONS: usize = 8;
+        const HOLES: usize = 7;
+        let mut cnf = CnfProblem::new();
+        let variables = (0..PIGEONS)
+            .map(|_| (0..HOLES).map(|_| cnf.new_var(None)).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        for pigeon in &variables {
+            cnf.add_clause(pigeon.clone());
+        }
+        for hole in 0..HOLES {
+            for left in 0..PIGEONS {
+                for right in left + 1..PIGEONS {
+                    cnf.add_clause(vec![-variables[left][hole], -variables[right][hole]]);
+                }
+            }
+        }
+        cnf.finite_cadical_search_hint = CadicalSearchHint::BraidedPlainSafe;
+        cnf.finite_cadical_prefix_conflict_limit = Some(0);
+        cnf.finite_cadical_sprint_conflict_limit = Some(10_000);
+        let outcome = solve_cadical_phase_braid(&cnf, &TermArena::default(), 0, 0, false);
+        assert_eq!(outcome.result, Some(SolveResult::Unsat));
+        assert_eq!(outcome.sat_calls, 2);
+    }
+
+    #[test]
     fn detects_direct_disequality_conflict() {
         let input = "
             (set-logic QF_UF)
@@ -11665,6 +11739,14 @@ mod tests {
                 DEFAULT_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS,
             ),
             Ok(DEFAULT_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS),
+        );
+        assert_eq!(
+            parse_nonnegative_u32_setting(
+                FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV,
+                None,
+                DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS,
+            ),
+            Ok(DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS),
         );
         for invalid in ["", "-1", "+1", " 1", "1 ", "4294967296"] {
             assert!(

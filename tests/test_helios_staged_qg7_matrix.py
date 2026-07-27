@@ -43,11 +43,11 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
         self.assertIn("EUF_VIPER_FINITE_DENSE7=0", source)
         self.assertIn("threshold|confirm-stage10|braid-threshold|confirm-braid", source)
         self.assertIn("EUF_VIPER_MATRIX_MODE", source)
-        self.assertIn("add_arm baseline 0 0 1000 1000", source)
+        self.assertIn("add_arm baseline 0 0 1000 1000 0", source)
         for budget in (0, 10, 100, 1000, 10000):
-            self.assertIn(f"add_arm staged-{budget} 1 0 1000 {budget}", source)
+            self.assertIn(f"add_arm staged-{budget} 1 0 1000 {budget} 0", source)
 
-    def test_braided_arms_sweep_cadical_before_fixed_kissat(self) -> None:
+    def test_braided_arms_sweep_plain_prefix_before_fixed_unsat_sprint(self) -> None:
         source = TASK.read_text(encoding="utf-8")
         self.assertIn("EUF_VIPER_FINITE_DENSE7_BRAIDED=$braided", source)
         self.assertIn(
@@ -55,11 +55,11 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS=$kissat_conflicts",
+            "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS=$cadical_sprint",
             source,
         )
         for budget in (0, 10, 100, 1000, 10000):
-            self.assertIn(f"add_arm braid-{budget} 0 1 {budget} 10", source)
+            self.assertIn(f"add_arm braid-{budget} 0 1 {budget} 0 70000", source)
         self.assertIn('add_arm "braid-$BRAIDED_CADICAL_PREFIX"', source)
 
 

@@ -117,6 +117,16 @@ This is a canary only. Promotion still requires the fresh balanced 52-row
 Helios matrix to preserve both gains with no losses and meet both aggregate and
 geometric timing gates.
 
+The fresh Plain-prefix matrix is now complete and rejected. Revision
+`9f86254` and array `19971085` keep baseline coverage at 48/52 for every prefix
+and are slower on both timing metrics; the best factors are only `0.919691x`
+aggregate and `0.895778x` geometric. This isolates the earlier gains to
+UNSAT-configured CaDiCaL rather than Kissat. The next bounded candidate is a
+three-phase solver: retained Plain prefix, lazily constructed 70,000-conflict
+UNSAT CaDiCaL sprint, then resume the original Plain state on abstention. Sweep
+the same prefix budgets on the exact 52 rows. Complete qg7 remains unauthorized
+until one arm gains both target proofs, loses none, and passes both timing gates.
+
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate
 configuration had been changed from `default` to `quotient-portfolio` after

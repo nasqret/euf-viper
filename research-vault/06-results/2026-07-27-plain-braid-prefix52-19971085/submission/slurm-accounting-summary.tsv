@@ -1,0 +1,3 @@
+job_id	role	state	exit_code	elapsed	max_rss_kib	note
+19970724	preparation	COMPLETED	0:0	00:11:47	2856820	alternate-manifest taxonomy rebuild
+19971085	matrix-array	COMPLETED	0:0	00:01:57	84656	maximum task elapsed and step RSS

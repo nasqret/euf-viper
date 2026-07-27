@@ -1,0 +1,1 @@
+coverage baseline=2/3, braid-0=2/3, braid-10=2/3, braid-100=2/3, braid-1000=2/3, braid-10000=2/3; common=2/3; wrong=0; errors=0; timeouts=36

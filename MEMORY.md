@@ -1403,3 +1403,14 @@
   Audit self-hash is `65412fbf...4635` and replay is byte-identical. Baseline
   uses CaDiCaL Plain while this rejected braid used UNSAT configuration; test a
   Plain-prefix retained-state braid before attempting a structural classifier.
+- Plain-prefix revision `9f86254` is terminal negative evidence from Helios
+  matrix `19971085`: baseline and every arm cover 48/52, with best aggregate
+  `0.919691x` and best geometric `0.895778x`. Audit `edc65c5d...95aa` replays
+  byte-identically with zero wrong/error. Therefore bounded Kissat caused none
+  of the earlier two gains; resumed UNSAT-configured CaDiCaL caused both.
+  Target profiles require 66,445 and 58,920 UNSAT-mode conflicts. Test a lazy
+  70,000-conflict UNSAT CaDiCaL sprint after a Plain prefix, then resume the
+  retained Plain solver on abstention. Preparation `19970724` used the alternate
+  tracked `smtcomp-2025` manifest and is build provenance only, not a broad-panel
+  continuation, although its corpus inventory and all matrix source hashes are
+  unchanged.
