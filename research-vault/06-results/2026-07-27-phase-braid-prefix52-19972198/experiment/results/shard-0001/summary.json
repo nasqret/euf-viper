@@ -1,0 +1,1774 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 36,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 6,
+  "arm_order": [
+    "baseline",
+    "braid-0",
+    "braid-10",
+    "braid-100",
+    "braid-1000",
+    "braid-10000"
+  ],
+  "arms": {
+    "baseline": {
+      "common_aggregate_speedup_vs_reference": 1.0,
+      "common_geometric_speedup_vs_reference": 1.0,
+      "common_total_time_s": 0.8551288430171553,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 0,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 3,
+      "timeout_runs": 6,
+      "total_time_s": 17.331878152035642,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "braid-0": {
+      "common_aggregate_speedup_vs_reference": 0.8449958955815126,
+      "common_geometric_speedup_vs_reference": 0.7802066257069182,
+      "common_total_time_s": 1.011991712017334,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 1,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 18.654084277019138,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 2,
+      "wrong_runs": 0
+    },
+    "braid-10": {
+      "common_aggregate_speedup_vs_reference": 0.7198214885233982,
+      "common_geometric_speedup_vs_reference": 0.6783487554099916,
+      "common_total_time_s": 1.1879734859976452,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 1,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 19.15956417794223,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 2,
+      "wrong_runs": 0
+    },
+    "braid-100": {
+      "common_aggregate_speedup_vs_reference": 0.881056203293571,
+      "common_geometric_speedup_vs_reference": 0.8147753699773116,
+      "common_total_time_s": 0.9705724105006084,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 1,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 18.80875102695427,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 2,
+      "wrong_runs": 0
+    },
+    "braid-1000": {
+      "common_aggregate_speedup_vs_reference": 0.9891762905305012,
+      "common_geometric_speedup_vs_reference": 0.9470719888175542,
+      "common_total_time_s": 0.864485786005389,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 1,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 17.473509265022585,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 2,
+      "wrong_runs": 0
+    },
+    "braid-10000": {
+      "common_aggregate_speedup_vs_reference": 0.9863659696067913,
+      "common_geometric_speedup_vs_reference": 0.9679369048419015,
+      "common_total_time_s": 0.8669488499872386,
+      "correct_runs": 18,
+      "coverage": 0.75,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 6,
+      "losses_vs_reference": 2,
+      "paths": 4,
+      "result_counts": {
+        "sat": 12,
+        "timeout": 6,
+        "unsat": 6
+      },
+      "runs": 24,
+      "ties_vs_reference": 0,
+      "timeout_runs": 6,
+      "total_time_s": 17.40795016696211,
+      "uncovered_runs": 6,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      },
+      "braid-0": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      },
+      "braid-10": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      },
+      "braid-100": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      },
+      "braid-1000": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      },
+      "braid-10000": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+          "sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+          "size_bytes": 4638928
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+        "expected_status": "sat",
+        "id": 6927,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+        "row_index": 0,
+        "sha256": "aa3607cc8a57998edf083281c84580657a4b56b86dbcec7f51818a3d00913058",
+        "size_bytes": 810804
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "expected_status": "unsat",
+        "id": 7036,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "row_index": 1,
+        "sha256": "a57fafad05d0b8b6e2d39cb37b8c1a190462d8daf4b9edefe08fcc0275a121f3",
+        "size_bytes": 812658
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+        "expected_status": "sat",
+        "id": 7102,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+        "row_index": 2,
+        "sha256": "f8b7edd9a2a299c90a09146db1c699f5129e672debad40061a74e50bddd79ee1",
+        "size_bytes": 6009433
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+        "expected_status": "unsat",
+        "id": 7310,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+        "row_index": 3,
+        "sha256": "05295ac0b0b9d7757b3c2b68184ab0504fc90d56582fb97cc891b8a990bf23ac",
+        "size_bytes": 6013089
+      }
+    ],
+    "manifest": {
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/shards/shard-0001.jsonl",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/shards/shard-0001.jsonl",
+      "sha256": "6a76bd414f69528d339a223459bb52bfd09a36017517d04f2422bc912ea80298",
+      "size_bytes": 2442
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/results/shard-0001/raw.csv",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/results/shard-0001/raw.csv",
+      "sha256": "fcd4459b873cb51313f17e06c8a861a071e521a27f445cc8ada5ee0aac90bf91",
+      "size_bytes": 122765,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/results/shard-0001/summary.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/compare_commands_abba.py",
+        "sha256": "321eae00c2a2cf687145343b986003f2cccf3564fa93f837e539470842540ee2",
+        "size_bytes": 37900
+      },
+      "runner": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/williams_design.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/823342079a7dca7095b88728b4e97af9979bc3cb/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "baseline": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-0": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-10": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-100": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-1000": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-10000": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T103600Z-phase-braid-qg7-8233420/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ]
+  },
+  "common_correct": 3,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2"
+  ],
+  "complete_blocks": 1,
+  "elapsed_s": 108.99975249299314,
+  "environment_overrides": {
+    "baseline": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "0",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-0": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "70000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-10": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "70000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-100": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "100",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "70000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-1000": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "70000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-10000": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "10000",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS": "70000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    }
+  },
+  "executable_sha256": {
+    "baseline": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+    "braid-0": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+    "braid-10": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+    "braid-100": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+    "braid-1000": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+    "braid-10000": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 2,
+      "unsat": 2
+    }
+  },
+  "finished_at": "2026-07-27T10:48:26.479141+00:00",
+  "host": {
+    "cpu_affinity": [
+      109
+    ],
+    "cpu_count": 192,
+    "fqdn": "x1001c0s3b0n0-hsn0.hsn.cm.helios.cyfronet.pl",
+    "git_revision": null,
+    "hostname": "x1001c0s3b0n0",
+    "machine": "x86_64",
+    "platform": "Linux-5.14.0-687.29.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "python": "3.9.25",
+    "release": "5.14.0-687.29.1.el9_8.x86_64",
+    "slurm_array_job_id": "19972198",
+    "slurm_array_task_id": "1",
+    "slurm_job_id": "19972201",
+    "slurm_node_list": "x1001c0s3b0n0",
+    "system": "Linux"
+  },
+  "instances": 4,
+  "manifest": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T104100Z-phase-braid-prefix52-8233420/shards/shard-0001.jsonl",
+  "manifest_order": [
+    "QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2"
+  ],
+  "manifest_sha256": "6a76bd414f69528d339a223459bb52bfd09a36017517d04f2422bc912ea80298",
+  "measured_runs": 144,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.14432155901158694,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3375930755137233,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.5108924959931755,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3036992119887145,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.1870770934910979,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.16174579950165935,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 6927,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn004.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.008619931002613,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.009625948499888,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.0106670954992296,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.009666484504123,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.009790535506909,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": false,
+          "correct_repeats": 0,
+          "covered": false,
+          "error_repeats": 0,
+          "median_time_s": 2.0091307725087972,
+          "results": {
+            "timeout": 6
+          },
+          "timeout_repeats": 6,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7036,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.36025800301285926,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.34236360900104046,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3564412315026857,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3485228355129948,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.34426801350491587,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3610364439955447,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7102,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2",
+      "row_index": 2
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3505492809927091,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3320350275025703,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.32063975850178394,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3183503629988991,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.33314067900937516,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3441666064900346,
+          "results": {
+            "unsat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7310,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2",
+      "row_index": 3
+    }
+  ],
+  "reference_arm": "baseline",
+  "repeats": 6,
+  "runtime_host": "x1001c0s3b0n0",
+  "schedule": {
+    "arm_count": 6,
+    "arms": [
+      "baseline",
+      "braid-0",
+      "braid-10",
+      "braid-100",
+      "braid-1000",
+      "braid-10000"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-1000"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        },
+        "transitions_per_row": 5
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "baseline",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-0",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-10",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-100",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-1000",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-10000",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 6,
+        "expected_length": 6
+      }
+    },
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 6,
+    "rows": [
+      {
+        "order": [
+          "baseline",
+          "braid-0",
+          "braid-10000",
+          "braid-10",
+          "braid-1000",
+          "braid-100"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "braid-0",
+          "braid-10",
+          "baseline",
+          "braid-100",
+          "braid-10000",
+          "braid-1000"
+        ],
+        "repeat": 1
+      },
+      {
+        "order": [
+          "braid-10",
+          "braid-100",
+          "braid-0",
+          "braid-1000",
+          "baseline",
+          "braid-10000"
+        ],
+        "repeat": 2
+      },
+      {
+        "order": [
+          "braid-100",
+          "braid-1000",
+          "braid-10",
+          "braid-10000",
+          "braid-0",
+          "baseline"
+        ],
+        "repeat": 3
+      },
+      {
+        "order": [
+          "braid-1000",
+          "braid-10000",
+          "braid-100",
+          "baseline",
+          "braid-10",
+          "braid-0"
+        ],
+        "repeat": 4
+      },
+      {
+        "order": [
+          "braid-10000",
+          "baseline",
+          "braid-1000",
+          "braid-0",
+          "braid-100",
+          "braid-10"
+        ],
+        "repeat": 5
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "baseline",
+      "braid-0",
+      "braid-10",
+      "braid-100",
+      "braid-1000",
+      "braid-10000"
+    ],
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "6ad653227c3c19559c94ff26e7c6827f5db285b786b909d8b494bd463f6fcf84"
+  },
+  "schedule_sha256": "6ad653227c3c19559c94ff26e7c6827f5db285b786b909d8b494bd463f6fcf84",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/QG-classification/qg7/gensys_brn004.smt2": "aa3607cc8a57998edf083281c84580657a4b56b86dbcec7f51818a3d00913058",
+    "QF_UF/QG-classification/qg7/gensys_icl003.smt2": "a57fafad05d0b8b6e2d39cb37b8c1a190462d8daf4b9edefe08fcc0275a121f3",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen003.smt2": "f8b7edd9a2a299c90a09146db1c699f5129e672debad40061a74e50bddd79ee1",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen002.smt2": "05295ac0b0b9d7757b3c2b68184ab0504fc90d56582fb97cc891b8a990bf23ac"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-27T10:46:37.485074+00:00",
+  "status": "complete",
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 36,
+      "stderr": ""
+    },
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 44,
+      "stderr": ""
+    },
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 52,
+      "stderr": ""
+    },
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 59,
+      "stderr": ""
+    },
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 63,
+      "stderr": ""
+    },
+    {
+      "arm": "baseline",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 67,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 37,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 42,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 50,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 58,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 65,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-0",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-0",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 69,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 39,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 43,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 48,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 56,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 64,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 71,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 41,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 45,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 49,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 54,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 62,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-100",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-100",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 70,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 40,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 47,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 51,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 55,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 60,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-1000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-1000",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 68,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 2,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 38,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 4,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 1,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 46,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 5,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 2,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 53,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 3,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 3,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 57,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 1,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 4,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 61,
+      "stderr": ""
+    },
+    {
+      "arm": "braid-10000",
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "braid-10000",
+      "order_in_repeat": 0,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 5,
+      "result": "timeout",
+      "row_index": 1,
+      "sequence": 66,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

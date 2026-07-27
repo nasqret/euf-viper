@@ -1,0 +1,16 @@
+{
+  "candidate_argv": [
+    "{binary}",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{instance}"
+  ],
+  "candidate_configuration": "quotient-portfolio",
+  "candidate_sha256": "4ec0fb87ce1745b7ed73b60663a7451facfd00ddfff34a4149d7e2bb7bcb0fff",
+  "lock_sha256": "ccde623d79c8968404b4f9ae321e2adeff7c08b8ad40905b8e0733aac74751d8",
+  "orchestration_revision": "823342079a7dca7095b88728b4e97af9979bc3cb",
+  "promotion_eligible": true,
+  "solver_revision": "823342079a7dca7095b88728b4e97af9979bc3cb",
+  "taxonomy_sha256": "120816f65ef25c323f336ad7d58f2689818b67faf8754b78db88d3741e755fcb"
+}

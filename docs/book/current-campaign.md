@@ -1042,3 +1042,33 @@ configuration, which local profiles show closes the two targets in 66,445 and
 an UNSAT-configured CaDiCaL lazily for a 70,000-conflict sprint, and resumes the
 original Plain solver only if that sprint abstains. This keeps the intervention
 off the completed easy path while retaining both search regimes.
+
+## Lazy phase-braid result
+
+The controlled successor is terminal negative evidence. Revision `8233420`
+was built by corrected-manifest preparation `19971632`; Helios array `19972198`
+then completed 1,872 balanced observations over the exact same 52 rows. The
+audit contains zero wrong answers and zero execution errors and regenerates
+byte-for-byte locally.
+
+| Arm | Correct | Common total | Aggregate factor | Geometric factor |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 48/52 | 8.724650s | `1.0x` | `1.0x` |
+| Prefix 0 | 48/52 | 11.829395s | `0.737540x` | `0.726381x` |
+| Prefix 10 | 49/52 | 12.296532s | `0.709521x` | `0.709376x` |
+| Prefix 100 | 49/52 | 11.325078s | `0.770383x` | `0.769612x` |
+| Prefix 1,000 | 48/52 | 9.599277s | `0.908886x` | `0.895842x` |
+| Prefix 10,000 | 48/52 | 9.550745s | `0.913505x` | `0.900413x` |
+
+Only `gensys_icl002` is gained repeatably. `gensys_icl004` reaches UNSAT in
+five of six repetitions for prefixes 0 and 100, but one process crosses the
+strict two-second cutoff. No arm reaches 50/52 and every arm is slower on both
+common-correct metrics. A larger sprint budget cannot fix the timing failure,
+so complete qg7 and the broad panel remain unauthorized.
+
+The next bounded experiment is diagnostic rather than another blind budget
+sweep. A fixed Plain prefix will expose only source-independent online data:
+conflicts, decisions, propagations, and redundant-clause growth. An UNSAT
+sprint may be admitted only if those measurements separate target proof shapes
+from baseline-solvable rows without using paths, family names, identities, or
+expected results.

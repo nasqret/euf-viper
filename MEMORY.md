@@ -1414,3 +1414,9 @@
   tracked `smtcomp-2025` manifest and is build provenance only, not a broad-panel
   continuation, although its corpus inventory and all matrix source hashes are
   unchanged.
+- The lazy two-CaDiCaL phase braid at revision `8233420` is terminal negative
+  evidence. Correct-manifest preparation `19971632` and matrix `19972198`
+  produced 1,872 balanced observations with zero wrong answers/errors. The best
+  coverage is 49/52, not the required 50/52, and the best timing factors are
+  only `0.913505x` aggregate and `0.900413x` geometric. Archive:
+  `research-vault/06-results/2026-07-27-phase-braid-prefix52-19972198/`.

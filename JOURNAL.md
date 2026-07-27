@@ -2557,3 +2557,25 @@
   resumes the original Plain solver if the sprint abstains. Prefix 1,000 solves
   the first target locally in about 1.02 seconds of measured SAT phases while
   preserving the 281-conflict easy canary path.
+
+# 2026-07-27 - Lazy CaDiCaL phase braid rejection
+
+- Revision `8233420` was prepared by Helios job `19971632` against the corrected
+  `smtlib-2025` manifest, producing exact binary SHA-256 `4ec0fb87...b0fff`.
+  Array `19972198` completed all 16 shards and 1,872 balanced observations with
+  zero wrong answers and zero execution errors.
+- Baseline covers 48/52. Prefixes 10 and 100 cover 49/52 by gaining only
+  `gensys_icl002`; prefixes 0, 1,000, and 10,000 cover 48/52. No arm gains both
+  target proofs and no arm loses a baseline solve.
+- Every arm also fails timing. Common-total factors range from `0.709521x` to
+  `0.913505x`; common-geometric factors range from `0.709376x` to `0.900413x`.
+  `gensys_icl004` proves UNSAT in five of six repeats for two arms but crosses
+  the strict two-second wall once, so a larger sprint is not a robust repair.
+- Audit self-hash is `5f69a5ab...732a1`, exact audit SHA-256 is
+  `31029892...80a`, and local replay is byte-identical. Reject all arms; do not
+  run complete qg7 or the broad panel.
+- The next controlled hypothesis is an online, source-independent probe gate.
+  Collect fixed-prefix conflicts, decisions, propagations, and learned-clause
+  growth on the frozen cohort; invoke the UNSAT sprint only if telemetry
+  separates target proof shapes from common baseline solves. Identity, path,
+  family name, and expected status remain forbidden features.

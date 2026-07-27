@@ -43,7 +43,9 @@ Immediate execution order:
    on a fresh exact binary (**complete and rejected on route-local speed**),
    then test a retained-state CaDiCaL/Kissat braid (**complete and rejected:
    all five prefixes keep both gains but the best common-total factor is only
-   `0.823412x`**); test the baseline-Plain phase braid next;
+   `0.823412x`**); test the baseline-Plain phase braid (**complete and rejected:
+   best coverage 49/52 and best timing `0.913505x` / `0.900413x`**); derive an
+   online probe gate from source-independent prefix telemetry next;
    and
 9. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
@@ -126,6 +128,16 @@ three-phase solver: retained Plain prefix, lazily constructed 70,000-conflict
 UNSAT CaDiCaL sprint, then resume the original Plain state on abstention. Sweep
 the same prefix budgets on the exact 52 rows. Complete qg7 remains unauthorized
 until one arm gains both target proofs, loses none, and passes both timing gates.
+
+The lazy UNSAT-sprint successor is also complete and rejected. Revision
+`8233420`, corrected-manifest preparation `19971632`, and array `19972198`
+produce all 1,872 observations with zero wrong answers or execution errors.
+Prefixes 10 and 100 gain only `gensys_icl002` and reach 49/52; no arm gains
+`gensys_icl004` in all six repeats. The best common-total and common-geometric
+factors are only `0.913505x` and `0.900413x`. Complete qg7 remains unauthorized.
+The next bounded step is diagnostic first: collect fixed-prefix CaDiCaL search
+telemetry over the frozen cohort and admit a sprint only if a path-free rule
+separates the two target proof shapes from baseline-solvable rows.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate
