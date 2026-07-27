@@ -18,6 +18,22 @@ struct Limit {
   int64_t localsearch;   // limit on local search rounds
   int64_t ticks;         // ticks limit if non-negative
 
+  // One-shot in-search classifier used by the Rust wrapper.  An armed probe
+  // interrupts only when its decision delta is inside the configured window;
+  // otherwise it permanently bypasses itself and the same solve continues.
+  struct {
+    int state; // 0 disabled, 1 armed, 2 bypassed, 3 selected
+    int64_t conflict_limit;
+    int64_t base_conflicts;
+    int64_t base_decisions;
+    int64_t min_decisions;
+    int64_t max_decisions;
+    int64_t observed_conflicts;
+    int64_t observed_decisions;
+    int64_t resume_conflict_delta;
+    int64_t resume_conflict_limit;
+  } decision_probe;
+
   int64_t compact;           // conflict limit for next 'compact'
   int64_t condition;         // conflict limit for next 'condition'
   int64_t elim;              // conflict limit for next 'elim'

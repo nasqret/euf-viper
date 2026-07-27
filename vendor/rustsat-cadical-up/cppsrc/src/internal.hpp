@@ -1916,8 +1916,26 @@ inline bool Internal::search_limits_hit () {
   assert (!localsearching);
 
   if (lim.conflicts >= 0 && stats.conflicts >= lim.conflicts) {
-    LOG ("conflict limit %" PRId64 " reached", lim.conflicts);
-    return true;
+    if (lim.decision_probe.state == 1 &&
+        lim.conflicts == lim.decision_probe.conflict_limit) {
+      const int64_t conflicts =
+          stats.conflicts - lim.decision_probe.base_conflicts;
+      const int64_t decisions =
+          stats.decisions - lim.decision_probe.base_decisions;
+      lim.decision_probe.observed_conflicts = conflicts;
+      lim.decision_probe.observed_decisions = decisions;
+      if (decisions >= lim.decision_probe.min_decisions &&
+          decisions <= lim.decision_probe.max_decisions) {
+        lim.decision_probe.state = 3;
+        return true;
+      }
+      lim.decision_probe.state = 2;
+      lim.conflicts = lim.decision_probe.resume_conflict_limit;
+    }
+    if (lim.conflicts >= 0 && stats.conflicts >= lim.conflicts) {
+      LOG ("conflict limit %" PRId64 " reached", lim.conflicts);
+      return true;
+    }
   }
 
   if (lim.decisions >= 0 && stats.decisions >= lim.decisions) {

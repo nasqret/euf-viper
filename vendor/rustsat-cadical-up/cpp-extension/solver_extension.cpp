@@ -26,6 +26,65 @@ int64_t Solver::conflicts() const {
 }
 #endif
 
+bool Solver::configure_decision_probe(int64_t conflict_delta,
+                                      int64_t min_decisions,
+                                      int64_t max_decisions) {
+  REQUIRE_VALID_STATE();
+  if (conflict_delta < 0 || min_decisions < 0 ||
+      min_decisions > max_decisions ||
+      conflict_delta > INT64_MAX - internal->stats.conflicts ||
+      (internal->inc.conflicts >= 0 &&
+       internal->inc.conflicts < conflict_delta) ||
+      (internal->inc.conflicts >= 0 &&
+       internal->inc.conflicts > INT64_MAX - internal->stats.conflicts))
+    return false;
+  Limit &probe_limit = internal->lim;
+  probe_limit.decision_probe.state = 1;
+  probe_limit.decision_probe.conflict_limit =
+      internal->stats.conflicts + conflict_delta;
+  probe_limit.decision_probe.base_conflicts = internal->stats.conflicts;
+  probe_limit.decision_probe.base_decisions = internal->stats.decisions;
+  probe_limit.decision_probe.min_decisions = min_decisions;
+  probe_limit.decision_probe.max_decisions = max_decisions;
+  probe_limit.decision_probe.observed_conflicts = -1;
+  probe_limit.decision_probe.observed_decisions = -1;
+  probe_limit.decision_probe.resume_conflict_delta = internal->inc.conflicts;
+  probe_limit.decision_probe.resume_conflict_limit =
+      internal->inc.conflicts < 0
+          ? -1
+          : internal->stats.conflicts + internal->inc.conflicts;
+  internal->inc.conflicts = conflict_delta;
+  return true;
+}
+
+void Solver::clear_decision_probe() {
+  REQUIRE_VALID_STATE();
+  if (internal->lim.decision_probe.state == 1 &&
+      internal->inc.conflicts ==
+          internal->lim.decision_probe.conflict_limit -
+              internal->lim.decision_probe.base_conflicts)
+    internal->inc.conflicts =
+        internal->lim.decision_probe.resume_conflict_delta;
+  internal->lim.decision_probe.state = 0;
+  internal->lim.decision_probe.observed_conflicts = -1;
+  internal->lim.decision_probe.observed_decisions = -1;
+}
+
+int Solver::decision_probe_state() const {
+  REQUIRE_INITIALIZED();
+  return internal->lim.decision_probe.state;
+}
+
+int64_t Solver::decision_probe_conflicts() const {
+  REQUIRE_INITIALIZED();
+  return internal->lim.decision_probe.observed_conflicts;
+}
+
+int64_t Solver::decision_probe_decisions() const {
+  REQUIRE_INITIALIZED();
+  return internal->lim.decision_probe.observed_decisions;
+}
+
 #ifndef V213
 // Propagate and check
 // This is based on the implementation in PySat

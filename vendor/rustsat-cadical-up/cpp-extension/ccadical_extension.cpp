@@ -118,6 +118,44 @@ int ccadical_solve_mem(CCaDiCaL *wrapper) {
   }
 }
 
+int ccadical_configure_decision_probe(CCaDiCaL *wrapper,
+                                      int64_t conflict_delta,
+                                      int64_t min_decisions,
+                                      int64_t max_decisions) {
+  if (!wrapper)
+    return DECISION_PROBE_ERROR;
+  return ((Wrapper *)wrapper)
+                 ->solver->configure_decision_probe(
+                     conflict_delta, min_decisions, max_decisions)
+             ? 0
+             : DECISION_PROBE_ERROR;
+}
+
+int ccadical_clear_decision_probe(CCaDiCaL *wrapper) {
+  if (!wrapper)
+    return DECISION_PROBE_ERROR;
+  ((Wrapper *)wrapper)->solver->clear_decision_probe();
+  return 0;
+}
+
+int ccadical_decision_probe_state(const CCaDiCaL *wrapper) {
+  if (!wrapper)
+    return DECISION_PROBE_ERROR;
+  return ((const Wrapper *)wrapper)->solver->decision_probe_state();
+}
+
+int64_t ccadical_decision_probe_conflicts(const CCaDiCaL *wrapper) {
+  if (!wrapper)
+    return -1;
+  return ((const Wrapper *)wrapper)->solver->decision_probe_conflicts();
+}
+
+int64_t ccadical_decision_probe_decisions(const CCaDiCaL *wrapper) {
+  if (!wrapper)
+    return -1;
+  return ((const Wrapper *)wrapper)->solver->decision_probe_decisions();
+}
+
 #ifdef V220
 int ccadical_connect_external_propagator_mem(
     CCaDiCaL *wrapper, void *state,

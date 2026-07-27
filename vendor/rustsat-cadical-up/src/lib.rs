@@ -168,6 +168,30 @@ pub struct InvalidApiReturn {
     value: c_int,
 }
 
+/// State of CaDiCaL's one-shot in-search decision probe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionProbeState {
+    /// No probe is configured.
+    Disabled,
+    /// The probe is waiting for its conflict threshold.
+    Armed,
+    /// The threshold was reached outside the decision window, so solving continued.
+    Bypassed,
+    /// The threshold was reached inside the decision window, so solving interrupted.
+    Selected,
+}
+
+/// Observation recorded when an in-search decision probe reaches its threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecisionProbeSnapshot {
+    /// Current probe state.
+    pub state: DecisionProbeState,
+    /// Conflicts since the probe was armed, if the threshold was reached.
+    pub conflicts: Option<u64>,
+    /// Decisions since the probe was armed, if the threshold was reached.
+    pub decisions: Option<u64>,
+}
+
 #[derive(Debug, PartialEq, Eq, Default)]
 enum InternalSolverState {
     #[default]
@@ -436,6 +460,85 @@ impl CaDiCaL<'_, '_> {
             }
             .into())
         }
+    }
+
+    /// Arms a one-shot conflict-threshold probe inside CaDiCaL's search loop.
+    ///
+    /// At the threshold, CaDiCaL interrupts only when the decision delta lies
+    /// in the inclusive window. Otherwise the probe disarms itself and the
+    /// same solve call continues.
+    pub fn configure_decision_probe(
+        &mut self,
+        conflict_delta: u64,
+        min_decisions: u64,
+        max_decisions: u64,
+    ) -> anyhow::Result<()> {
+        let conflict_delta = i64::try_from(conflict_delta)?;
+        let min_decisions = i64::try_from(min_decisions)?;
+        let max_decisions = i64::try_from(max_decisions)?;
+        let result = unsafe {
+            ffi::ccadical_configure_decision_probe(
+                self.handle,
+                conflict_delta,
+                min_decisions,
+                max_decisions,
+            )
+        };
+        match result {
+            0 => Ok(()),
+            ffi::DECISION_PROBE_ERROR => Err(InvalidApiReturn {
+                api_call: "ccadical_configure_decision_probe",
+                value: result,
+            }
+            .into()),
+            value => Err(InvalidApiReturn {
+                api_call: "ccadical_configure_decision_probe",
+                value,
+            }
+            .into()),
+        }
+    }
+
+    /// Clears the in-search decision probe and any recorded observation.
+    pub fn clear_decision_probe(&mut self) -> anyhow::Result<()> {
+        let result = unsafe { ffi::ccadical_clear_decision_probe(self.handle) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(InvalidApiReturn {
+                api_call: "ccadical_clear_decision_probe",
+                value: result,
+            }
+            .into())
+        }
+    }
+
+    /// Returns the current decision-probe state and threshold observation.
+    pub fn decision_probe_snapshot(&self) -> anyhow::Result<DecisionProbeSnapshot> {
+        let state = match unsafe { ffi::ccadical_decision_probe_state(self.handle) } {
+            0 => DecisionProbeState::Disabled,
+            1 => DecisionProbeState::Armed,
+            2 => DecisionProbeState::Bypassed,
+            3 => DecisionProbeState::Selected,
+            value => {
+                return Err(InvalidApiReturn {
+                    api_call: "ccadical_decision_probe_state",
+                    value,
+                }
+                .into())
+            }
+        };
+        let observed = matches!(
+            state,
+            DecisionProbeState::Bypassed | DecisionProbeState::Selected
+        );
+        let conflicts = unsafe { ffi::ccadical_decision_probe_conflicts(self.handle) };
+        let decisions = unsafe { ffi::ccadical_decision_probe_decisions(self.handle) };
+        Ok(DecisionProbeSnapshot {
+            state,
+            conflicts: observed.then(|| u64::try_from(conflicts)).transpose()?,
+            decisions: observed.then(|| u64::try_from(decisions)).transpose()?,
+        })
     }
 
     /// Gets the number of active variables
@@ -1408,10 +1511,27 @@ mod test {
     use rustsat::{
         lit,
         solvers::{Solve, SolverState, StateError},
-        types::TernaryVal,
+        types::{Clause, Lit, TernaryVal},
     };
 
-    use super::{CaDiCaL, Config, Limit, ProofFormat};
+    use super::{CaDiCaL, Config, DecisionProbeState, Limit, ProofFormat};
+
+    fn add_pigeonhole(solver: &mut CaDiCaL<'_, '_>, pigeons: u32, holes: u32) {
+        let variable = |pigeon: u32, hole: u32| Lit::positive(pigeon * holes + hole);
+        for pigeon in 0..pigeons {
+            let clause: Clause = (0..holes).map(|hole| variable(pigeon, hole)).collect();
+            solver.add_clause(clause).unwrap();
+        }
+        for hole in 0..holes {
+            for left in 0..pigeons {
+                for right in left + 1..pigeons {
+                    solver
+                        .add_binary(!variable(left, hole), !variable(right, hole))
+                        .unwrap();
+                }
+            }
+        }
+    }
 
     #[cfg(feature = "_test")]
     rustsat_solvertests::basic_unittests!(CaDiCaL, "cadical-[major].[minor].[patch]");
@@ -1453,6 +1573,42 @@ mod test {
     fn limit() {
         let mut solver = CaDiCaL::default();
         solver.set_limit(Limit::Conflicts(100)).unwrap();
+    }
+
+    #[test]
+    fn decision_probe_selects_without_external_polling() {
+        let mut solver = CaDiCaL::default();
+        solver.set_configuration(Config::Plain).unwrap();
+        add_pigeonhole(&mut solver, 8, 7);
+        solver
+            .configure_decision_probe(0, 0, i64::MAX as u64)
+            .unwrap();
+
+        assert_eq!(solver.solve().unwrap(), rustsat::solvers::SolverResult::Interrupted);
+        let snapshot = solver.decision_probe_snapshot().unwrap();
+        assert_eq!(snapshot.state, DecisionProbeState::Selected);
+        assert_eq!(snapshot.conflicts, Some(0));
+        assert_eq!(snapshot.decisions, Some(0));
+    }
+
+    #[test]
+    fn decision_probe_bypasses_without_returning_from_solve() {
+        let mut solver = CaDiCaL::default();
+        solver.set_configuration(Config::Plain).unwrap();
+        add_pigeonhole(&mut solver, 8, 7);
+        solver.configure_decision_probe(0, 1, 1).unwrap();
+
+        assert_eq!(solver.solve().unwrap(), rustsat::solvers::SolverResult::Unsat);
+        let snapshot = solver.decision_probe_snapshot().unwrap();
+        assert_eq!(snapshot.state, DecisionProbeState::Bypassed);
+        assert_eq!(snapshot.conflicts, Some(0));
+        assert_eq!(snapshot.decisions, Some(0));
+    }
+
+    #[test]
+    fn decision_probe_rejects_an_inverted_window() {
+        let mut solver = CaDiCaL::default();
+        assert!(solver.configure_decision_probe(100, 2, 1).is_err());
     }
 
     #[test]

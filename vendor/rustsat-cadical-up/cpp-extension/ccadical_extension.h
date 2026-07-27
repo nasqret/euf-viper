@@ -4,11 +4,20 @@
 #include <stddef.h>
 
 const int OUT_OF_MEM = 50;
+const int DECISION_PROBE_ERROR = 52;
 
 int ccadical_add_mem(CCaDiCaL *wrapper, int lit);
 int ccadical_assume_mem(CCaDiCaL *wrapper, int lit);
 int ccadical_constrain_mem(CCaDiCaL *wrapper, int lit);
 int ccadical_solve_mem(CCaDiCaL *wrapper);
+int ccadical_configure_decision_probe(CCaDiCaL *wrapper,
+                                      int64_t conflict_delta,
+                                      int64_t min_decisions,
+                                      int64_t max_decisions);
+int ccadical_clear_decision_probe(CCaDiCaL *wrapper);
+int ccadical_decision_probe_state(const CCaDiCaL *wrapper);
+int64_t ccadical_decision_probe_conflicts(const CCaDiCaL *wrapper);
+int64_t ccadical_decision_probe_decisions(const CCaDiCaL *wrapper);
 
 #ifdef V220
 const int EXTERNAL_PROPAGATOR_ERROR = 51;

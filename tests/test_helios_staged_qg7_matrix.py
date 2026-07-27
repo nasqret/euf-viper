@@ -41,8 +41,11 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
     def test_threshold_arms_keep_direct_dense_seven_disabled(self) -> None:
         source = TASK.read_text(encoding="utf-8")
         self.assertIn("EUF_VIPER_FINITE_DENSE7=0", source)
-        self.assertIn("proof-seed-threshold|confirm-proof-seed", source)
+        self.assertIn("confirm-proof-seed|native-probe-confirm", source)
         self.assertIn("EUF_VIPER_MATRIX_MODE", source)
+        self.assertIn(
+            "EUF_VIPER_FINITE_DENSE7_NATIVE_PROBE=$native_probe", source
+        )
         self.assertIn(
             "add_arm baseline 0 0 1000 1000 0 0 4294967295 0", source
         )
@@ -92,6 +95,24 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
         )
         self.assertIn(
             '[ "$PROOF_SEED_MIN_DECISIONS" -le "$PROOF_SEED_MAX_DECISIONS" ]',
+            source,
+        )
+
+    def test_native_probe_confirmation_keeps_the_old_probe_as_control(self) -> None:
+        source = TASK.read_text(encoding="utf-8")
+        self.assertIn("native-probe-confirm)", source)
+        self.assertIn(
+            '"rust-probe-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-'
+            '$PROOF_SEED_MAX_DECISIONS"',
+            source,
+        )
+        self.assertIn(
+            '"native-probe-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-'
+            '$PROOF_SEED_MAX_DECISIONS"',
+            source,
+        )
+        self.assertIn(
+            '"$PROOF_SEED_MIN_DECISIONS" "$PROOF_SEED_MAX_DECISIONS" 0 1',
             source,
         )
 

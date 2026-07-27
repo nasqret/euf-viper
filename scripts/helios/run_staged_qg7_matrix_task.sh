@@ -47,7 +47,7 @@ check_hash() {
 [ "$TASK_ID" -lt "$SHARD_COUNT" ] || die "array task ID exceeds shard count"
 [ "${SLURM_CPUS_PER_TASK:-}" = 1 ] || die "matrix task requires one CPU"
 case "$MATRIX_MODE" in
-  threshold|confirm-stage10|braid-threshold|confirm-braid|proof-seed-threshold|confirm-proof-seed) ;;
+  threshold|confirm-stage10|braid-threshold|confirm-braid|proof-seed-threshold|confirm-proof-seed|native-probe-confirm) ;;
   *) die "unsupported matrix mode" ;;
 esac
 [[ "$BRAIDED_CADICAL_PREFIX" =~ ^[0-9]+$ ]] || \
@@ -165,6 +165,7 @@ add_arm() {
   local probe_min_decisions="$7"
   local probe_max_decisions="$8"
   local learn_max_len="$9"
+  local native_probe="${10}"
   ARGUMENTS+=(
     --arm "$name"
     --arm-arg "$SOLVER_BINARY"
@@ -174,6 +175,7 @@ add_arm() {
     --arm-arg '{input}'
     --arm-env EUF_VIPER_FINITE_DENSE7=0
     --arm-env "EUF_VIPER_FINITE_DENSE7_BRAIDED=$braided"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_NATIVE_PROBE=$native_probe"
     --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS=$cadical_prefix"
     --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS=$cadical_sprint"
     --arm-env "EUF_VIPER_FINITE_DENSE7_PROBE_MIN_DECISIONS=$probe_min_decisions"
@@ -184,38 +186,46 @@ add_arm() {
   )
 }
 
-add_arm baseline 0 0 1000 1000 0 0 4294967295 0
+add_arm baseline 0 0 1000 1000 0 0 4294967295 0 0
 case "$MATRIX_MODE" in
   threshold)
-    add_arm staged-0 1 0 1000 0 0 0 4294967295 0
-    add_arm staged-10 1 0 1000 10 0 0 4294967295 0
-    add_arm staged-100 1 0 1000 100 0 0 4294967295 0
-    add_arm staged-1000 1 0 1000 1000 0 0 4294967295 0
-    add_arm staged-10000 1 0 1000 10000 0 0 4294967295 0
+    add_arm staged-0 1 0 1000 0 0 0 4294967295 0 0
+    add_arm staged-10 1 0 1000 10 0 0 4294967295 0 0
+    add_arm staged-100 1 0 1000 100 0 0 4294967295 0 0
+    add_arm staged-1000 1 0 1000 1000 0 0 4294967295 0 0
+    add_arm staged-10000 1 0 1000 10000 0 0 4294967295 0 0
     ;;
   confirm-stage10)
-    add_arm staged-10 1 0 1000 10 0 0 4294967295 0
+    add_arm staged-10 1 0 1000 10 0 0 4294967295 0 0
     ;;
   braid-threshold)
-    add_arm braid-0 0 1 0 0 70000 0 4294967295 0
-    add_arm braid-10 0 1 10 0 70000 0 4294967295 0
-    add_arm braid-100 0 1 100 0 70000 0 4294967295 0
-    add_arm braid-1000 0 1 1000 0 70000 0 4294967295 0
-    add_arm braid-10000 0 1 10000 0 70000 0 4294967295 0
+    add_arm braid-0 0 1 0 0 70000 0 4294967295 0 0
+    add_arm braid-10 0 1 10 0 70000 0 4294967295 0 0
+    add_arm braid-100 0 1 100 0 70000 0 4294967295 0 0
+    add_arm braid-1000 0 1 1000 0 70000 0 4294967295 0 0
+    add_arm braid-10000 0 1 10000 0 70000 0 4294967295 0 0
     ;;
   confirm-braid)
-    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 0 70000 0 4294967295 0
+    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 0 70000 0 4294967295 0 0
     ;;
   proof-seed-threshold)
     for learn_max_len in 0 4 8 16 32; do
-      add_arm "proof-seed-$learn_max_len" 0 1 100 0 70000 131 150 "$learn_max_len"
+      add_arm "proof-seed-$learn_max_len" 0 1 100 0 70000 131 150 "$learn_max_len" 0
     done
     ;;
   confirm-proof-seed)
     add_arm "proof-seed-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-$PROOF_SEED_MAX_DECISIONS-l$PROOF_SEED_LEARN_MAX_LEN" 0 1 \
       "$PROOF_SEED_PREFIX" 0 70000 \
       "$PROOF_SEED_MIN_DECISIONS" "$PROOF_SEED_MAX_DECISIONS" \
-      "$PROOF_SEED_LEARN_MAX_LEN"
+      "$PROOF_SEED_LEARN_MAX_LEN" 0
+    ;;
+  native-probe-confirm)
+    add_arm "rust-probe-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-$PROOF_SEED_MAX_DECISIONS" 0 1 \
+      "$PROOF_SEED_PREFIX" 0 70000 \
+      "$PROOF_SEED_MIN_DECISIONS" "$PROOF_SEED_MAX_DECISIONS" 0 0
+    add_arm "native-probe-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-$PROOF_SEED_MAX_DECISIONS" 0 1 \
+      "$PROOF_SEED_PREFIX" 0 70000 \
+      "$PROOF_SEED_MIN_DECISIONS" "$PROOF_SEED_MAX_DECISIONS" 0 1
     ;;
 esac
 ARGUMENTS+=(

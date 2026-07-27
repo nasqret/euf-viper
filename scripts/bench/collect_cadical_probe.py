@@ -113,6 +113,7 @@ def run_probe(
             "EUF_VIPER_FINITE_DENSE7": "0",
             "EUF_VIPER_FINITE_DENSE7_STAGED": "0",
             "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+            "EUF_VIPER_FINITE_DENSE7_NATIVE_PROBE": "0",
             "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": str(
                 prefix_conflicts
             ),
