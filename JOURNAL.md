@@ -2472,3 +2472,28 @@
   unit/doc tests, release compilation, formatting, diff checks, and the full
   Jupyter Book build. The matrix auditor also replays both archived Helios
   audits byte-for-byte in its regression suite.
+
+# 2026-07-27 - Narrow staged qg7 confirmation and speed rejection
+
+- Clean revision `bc5f4c3` was pushed before measurement. Helios preparation
+  `19968692` completed `0:0` in 6:21 on one AMD EPYC 9654 core, peaking at
+  1,458,616 KiB and producing candidate binary SHA-256 `989b93ef...78f38`.
+- Hash-pinned array `19968814` completed all 64 tasks and 1,672 parser-inclusive
+  observations over the exact 418-row qg7 selection. Matrix audit self-hash is
+  `63386acc...9add`; it replays byte-for-byte, with zero wrong answers and zero
+  execution errors.
+- Raw arm coverage is 378/418 baseline versus 381/418 narrow staged-10, with
+  no losses. `gensys_icl002` and `gensys_icl004` are the two routed UNSAT
+  gains. The apparent SAT gain `iso_brn_nogen_sk014` is outside the route at
+  170 binary applications and split SAT/timeout at the two-second boundary;
+  it is not attributed to staging.
+- Recombining baseline outside the preregistered 52-row selector gives the
+  causal 380/418 result: two gains, no losses, `0.977533x` aggregate and
+  `0.971368x` geometric speed across all common solves. Inside the selector,
+  the 48 common rows regress to `0.839544x` aggregate and `0.795511x`
+  geometric speed (8.4927s versus 10.1158s).
+- The coverage hypothesis is confirmed but promotion is rejected on timing.
+  No full-corpus campaign is authorized. Preserve `b5f78fb` and
+  `panel-370c5109acd7ed26` as current best. Next test a bounded CaDiCaL-first
+  handoff or an outcome-blind structural difficulty gate; do not hide the
+  Kissat-first overhead with broad-corpus averaging.

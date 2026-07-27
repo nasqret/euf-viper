@@ -941,3 +941,44 @@ the threshold was chosen after observing the complete qg7 matrix. It is not a
 new benchmark result and does not update the broad dashboard. A fresh exact-
 binary qg7 confirmation must match its two-gain, zero-loss prediction before a
 full-corpus campaign can start.
+
+## Narrow qg7 confirmation
+
+The exact confirmation is complete and separates coverage from performance.
+Revision `bc5f4c3` was built by Helios job `19968692`; array `19968814` then
+ran 64 one-core shards and all 1,672 parser-inclusive observations. The audit
+contains no wrong answers or execution errors and replays byte-for-byte.
+
+| Fresh qg7 metric | Baseline | Narrow staged-10 |
+| --- | ---: | ---: |
+| Raw correct at 2s | 378/418 | 381/418 |
+| SAT correct | 291 | 292 |
+| UNSAT correct | 87 | 89 |
+| Common aggregate factor | `1.0x` | `0.972687x` |
+| Common geometric factor | `1.0x` | `0.970395x` |
+
+Only two gains are causal. `gensys_icl002` and `gensys_icl004` satisfy the
+52-row structural guard and repeatably change timeout to UNSAT. The third raw
+gain, `iso_brn_nogen_sk014`, has 170 binary table applications and never enters
+the route; its repetitions straddle the two-second boundary. Replacing the
+candidate observation by baseline outside the guard gives 380/418, exactly two
+gains, no losses, and factors `0.977533x` and `0.971368x`.
+
+The selected cohort exposes the actual cost. Baseline solves 48/52 and staging
+solves 50/52, but the 48 common rows take 8.4927 seconds under baseline and
+10.1158 seconds under Kissat-first staging. Thus the route-local aggregate and
+geometric factors are only
+
+\[
+  S_{\mathrm{agg}} = 0.839544,
+  \qquad
+  S_{\mathrm{geo}} = 0.795511.
+\]
+
+The candidate passes the no-loss coverage gate and fails both speed gates, so
+it does not advance to 7,503 sources. The next architecture should run the
+cheap CaDiCaL-success path first or predict difficulty from source-independent
+structure, invoking bounded Kissat only after evidence that the baseline path
+will not close quickly. The authoritative broad result remains revision
+`b5f78fb`, panel `panel-370c5109acd7ed26`, at 7,458 solves versus Yices2's
+7,490.

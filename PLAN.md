@@ -79,9 +79,21 @@ found a discrete minimal core of 52 rows at exactly 147 binary table
 applications. Recombining the already measured arms only on that cohort
 projects 382/418 with no coverage loss, `0.978319x` common-total speed, and
 `0.970901x` common-geometric speed. This is post-hoc discovery evidence, not a
-measured candidate result. The exact narrowed binary must reproduce the qg7
-projection before a 7,503-row campaign is authorized. Until then the broad
-dashboard and current-best panel remain unchanged.
+measured candidate result.
+
+Fresh exact-binary confirmation is now terminal. Revision `bc5f4c3`,
+preparation `19968692`, and array `19968814` produced all 1,672 observations
+with zero wrong answers or execution errors. The raw matrix measured 378/418
+for baseline and 381/418 for the narrow arm, but one apparent SAT gain is
+outside the selector and is a two-second boundary fluctuation. Hash-bound
+selector attribution gives the causal result: 380/418, two UNSAT gains, no
+losses, `0.977533x` common-total speed, and `0.971368x` common-geometric speed.
+On the 48 common solves inside the 52-row route, the factors fall to
+`0.839544x` and `0.795511x`. Coverage is confirmed; timing is rejected. No
+7,503-row run is authorized. The next gate is a CaDiCaL-first or structural-
+difficulty handoff that preserves both proofs without paying Kissat-first cost
+on the easy selected mass. The broad dashboard and current-best panel remain
+unchanged.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate

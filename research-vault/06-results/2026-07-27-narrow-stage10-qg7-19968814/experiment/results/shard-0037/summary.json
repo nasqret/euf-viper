@@ -1,0 +1,676 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 0,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 2,
+  "arm_order": [
+    "baseline",
+    "staged-10"
+  ],
+  "arms": {
+    "baseline": {
+      "common_aggregate_speedup_vs_reference": 1.0,
+      "common_geometric_speedup_vs_reference": 1.0,
+      "common_total_time_s": 1.022559563993127,
+      "correct_runs": 12,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 6,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 6,
+      "result_counts": {
+        "sat": 10,
+        "unsat": 2
+      },
+      "runs": 12,
+      "ties_vs_reference": 6,
+      "timeout_runs": 0,
+      "total_time_s": 2.045119127986254,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "staged-10": {
+      "common_aggregate_speedup_vs_reference": 0.9976177344509103,
+      "common_geometric_speedup_vs_reference": 1.0075033675800833,
+      "common_total_time_s": 1.0250013894910808,
+      "correct_runs": 12,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 6,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 1,
+      "paths": 6,
+      "result_counts": {
+        "sat": 10,
+        "unsat": 2
+      },
+      "runs": 12,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 2.0500027789821615,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 5,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "sha256": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+          "size_bytes": 4629704
+        },
+        "static_file_arguments": []
+      },
+      "staged-10": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "sha256": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+          "size_bytes": 4629704
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+        "expected_status": "sat",
+        "id": 6963,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+        "row_index": 0,
+        "sha256": "d337a575143cdbd461184736ff5ece2893e4335f22b730f6a9a65b43483fbe83",
+        "size_bytes": 810951
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+        "expected_status": "sat",
+        "id": 7027,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+        "row_index": 1,
+        "sha256": "e76e028ee2a205b792c707226d8beb69e3a7d166e21bc6a34d7977a8bde16483",
+        "size_bytes": 807766
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn046.smt2",
+        "expected_status": "sat",
+        "id": 7091,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn046.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn046.smt2",
+        "row_index": 2,
+        "sha256": "dbc3e770f88e5458d4f0a25f3afe6abd909ea278993c947ca0511c25adfeb966",
+        "size_bytes": 43060
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+        "expected_status": "sat",
+        "id": 7155,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+        "row_index": 3,
+        "sha256": "5490dd5382e45cabe45fa8049e38fbcde909aada1d3f209f0f70c02bdd295870",
+        "size_bytes": 80770
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+        "expected_status": "sat",
+        "id": 7219,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+        "row_index": 4,
+        "sha256": "3e2814e4d70aa8f765c7bb04cfdc9da657f6100f52bac9b0ca60253db374634d",
+        "size_bytes": 60618
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_sk037.smt2",
+        "expected_status": "unsat",
+        "id": 7283,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_sk037.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_sk037.smt2",
+        "row_index": 5,
+        "sha256": "31e9041605117ca9df2b69ed83bf90d0b09d20bda3371914cd14ab1b22ad9371",
+        "size_bytes": 38756
+      }
+    ],
+    "manifest": {
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0037.jsonl",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0037.jsonl",
+      "sha256": "e878420c46574da168932badc53551b52c6776ff3b909d14efe376902c4c5db1",
+      "size_bytes": 3542
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0037/raw.csv",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0037/raw.csv",
+      "sha256": "f328e5c3a9ba52ff88ba5006e33154a18cdfcbc093a1f4cfcd852f41d64d09e3",
+      "size_bytes": 19089,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0037/summary.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_commands_abba.py",
+        "sha256": "321eae00c2a2cf687145343b986003f2cccf3564fa93f837e539470842540ee2",
+        "size_bytes": 37900
+      },
+      "runner": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/williams_design.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "baseline": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "staged-10": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ]
+  },
+  "common_correct": 6,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn046.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_sk037.smt2"
+  ],
+  "complete_blocks": 1,
+  "elapsed_s": 4.149236700992333,
+  "environment_overrides": {
+    "baseline": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "staged-10": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "1"
+    }
+  },
+  "executable_sha256": {
+    "baseline": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+    "staged-10": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 5,
+      "unsat": 1
+    }
+  },
+  "finished_at": "2026-07-27T08:45:03.721615+00:00",
+  "host": {
+    "cpu_affinity": [
+      42
+    ],
+    "cpu_count": 192,
+    "fqdn": "x1001c0s1b0n2-hsn0.hsn.cm.helios.cyfronet.pl",
+    "git_revision": null,
+    "hostname": "x1001c0s1b0n2",
+    "machine": "x86_64",
+    "platform": "Linux-5.14.0-687.29.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "python": "3.9.25",
+    "release": "5.14.0-687.29.1.el9_8.x86_64",
+    "slurm_array_job_id": "19968814",
+    "slurm_array_task_id": "37",
+    "slurm_job_id": "19968861",
+    "slurm_node_list": "x1001c0s1b0n2",
+    "system": "Linux"
+  },
+  "instances": 6,
+  "manifest": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0037.jsonl",
+  "manifest_order": [
+    "QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn046.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_sk037.smt2"
+  ],
+  "manifest_sha256": "e878420c46574da168932badc53551b52c6776ff3b909d14efe376902c4c5db1",
+  "measured_runs": 24,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3121758389970637,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3180241779991775,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 6963,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn040.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.13147466850205092,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.1313358365005115,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7027,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.12840255050105043,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.12764880549366353,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7091,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn046.smt2",
+      "row_index": 2
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.07050637100473978,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.06861068749276455,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7155,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2",
+      "row_index": 3
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3643130959972041,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.36413922299834667,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7219,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2",
+      "row_index": 4
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.0156870389910182,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.015242659006617032,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7283,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_sk037.smt2",
+      "row_index": 5
+    }
+  ],
+  "reference_arm": "baseline",
+  "repeats": 2,
+  "runtime_host": "x1001c0s1b0n2",
+  "schedule": {
+    "arm_count": 2,
+    "arms": [
+      "baseline",
+      "staged-10"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "staged-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "staged-10",
+            "successor": "baseline"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 2,
+          "integer": true,
+          "numerator": 2
+        },
+        "transitions_per_row": 1
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "baseline",
+            "by_position": [
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "staged-10",
+            "by_position": [
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 2,
+          "integer": true,
+          "numerator": 2
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 2,
+        "expected_length": 2
+      }
+    },
+    "complete_block_rows": 2,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 2,
+    "rows": [
+      {
+        "order": [
+          "baseline",
+          "staged-10"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "staged-10",
+          "baseline"
+        ],
+        "repeat": 1
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "baseline",
+      "staged-10"
+    ],
+    "complete_block_rows": 2,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "ae0f9f51875b06d06252e67375eb448bb077cfb33b275b2adfe210a6a9757125"
+  },
+  "schedule_sha256": "ae0f9f51875b06d06252e67375eb448bb077cfb33b275b2adfe210a6a9757125",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/QG-classification/qg7/gensys_brn040.smt2": "d337a575143cdbd461184736ff5ece2893e4335f22b730f6a9a65b43483fbe83",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk049.smt2": "e76e028ee2a205b792c707226d8beb69e3a7d166e21bc6a34d7977a8bde16483",
+    "QF_UF/QG-classification/qg7/iso_brn046.smt2": "dbc3e770f88e5458d4f0a25f3afe6abd909ea278993c947ca0511c25adfeb966",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen018.smt2": "5490dd5382e45cabe45fa8049e38fbcde909aada1d3f209f0f70c02bdd295870",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk028.smt2": "3e2814e4d70aa8f765c7bb04cfdc9da657f6100f52bac9b0ca60253db374634d",
+    "QF_UF/QG-classification/qg7/iso_brn_sk037.smt2": "31e9041605117ca9df2b69ed83bf90d0b09d20bda3371914cd14ab1b22ad9371"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-27T08:44:59.577190+00:00",
+  "status": "complete",
+  "timeout_s": 2.0,
+  "timeouts": [],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

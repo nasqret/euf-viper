@@ -1,0 +1,725 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 0,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 2,
+  "arm_order": [
+    "baseline",
+    "staged-10"
+  ],
+  "arms": {
+    "baseline": {
+      "common_aggregate_speedup_vs_reference": 1.0,
+      "common_geometric_speedup_vs_reference": 1.0,
+      "common_total_time_s": 0.8846893694862956,
+      "correct_runs": 14,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 7,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 7,
+      "result_counts": {
+        "sat": 8,
+        "unsat": 6
+      },
+      "runs": 14,
+      "ties_vs_reference": 7,
+      "timeout_runs": 0,
+      "total_time_s": 1.7693787389725912,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "staged-10": {
+      "common_aggregate_speedup_vs_reference": 1.0071519697366007,
+      "common_geometric_speedup_vs_reference": 1.0037192702701616,
+      "common_total_time_s": 0.8784070289984811,
+      "correct_runs": 14,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 7,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 2,
+      "paths": 7,
+      "result_counts": {
+        "sat": 8,
+        "unsat": 6
+      },
+      "runs": 14,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 1.7568140579969622,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 5,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "sha256": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+          "size_bytes": 4629704
+        },
+        "static_file_arguments": []
+      },
+      "staged-10": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+          "sha256": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+          "size_bytes": 4629704
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+        "expected_status": "sat",
+        "id": 6957,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+        "row_index": 0,
+        "sha256": "b982afecb4894150857c32038cba6b4ed104c99d132c1d8015763bf0ce0c2977",
+        "size_bytes": 810873
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+        "expected_status": "sat",
+        "id": 7021,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+        "row_index": 1,
+        "sha256": "90cedd7197b258b251a3349c57fca942ca5e7ce216eff87d6fd1d9826b19bb2a",
+        "size_bytes": 809819
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn040.smt2",
+        "expected_status": "unsat",
+        "id": 7085,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn040.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn040.smt2",
+        "row_index": 2,
+        "sha256": "46ed99d8ef6f66d2d0b0854069e380231ab945fddd8a355774d26ac5116dabd8",
+        "size_bytes": 47116
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+        "expected_status": "sat",
+        "id": 7149,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+        "row_index": 3,
+        "sha256": "f2c170b2cc6ab5a77b7fe4d4f31a010e6f29569569569dfd2aee6d32b70fa99f",
+        "size_bytes": 78898
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+        "expected_status": "sat",
+        "id": 7213,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+        "row_index": 4,
+        "sha256": "f532e94b4ec4aeb8731d4d5e450bd18b8172a4592e07e6abf331b6e6d7477a91",
+        "size_bytes": 59725
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+        "expected_status": "unsat",
+        "id": 7277,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+        "row_index": 5,
+        "sha256": "58598ed981329097c25877753df52e91d837870eb0000aa876b81b1d1b3640a3",
+        "size_bytes": 44310
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_sk005.smt2",
+        "expected_status": "unsat",
+        "id": 7341,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_sk005.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_sk005.smt2",
+        "row_index": 6,
+        "sha256": "6861acd9e6715816b4dfc981e09a80bfae44568d9812f3440b86f22f0c00c4f4",
+        "size_bytes": 47255
+      }
+    ],
+    "manifest": {
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0031.jsonl",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0031.jsonl",
+      "sha256": "739ffb0ee756be73ed25e10132b102740622cb74ab8d4cb9003a4fab9299933b",
+      "size_bytes": 4132
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0031/raw.csv",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0031/raw.csv",
+      "sha256": "9159d449c731abdbf6497a5eb8e3c68ff225a56b82e2cffbba003548981ff60a",
+      "size_bytes": 22237,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/results/shard-0031/summary.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_commands_abba.py",
+        "sha256": "321eae00c2a2cf687145343b986003f2cccf3564fa93f837e539470842540ee2",
+        "size_bytes": 37900
+      },
+      "runner": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/williams_design.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/bc5f4c37154709a38b70773553bca9f761259d56/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "baseline": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "staged-10": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T082432Z-narrow-qg7-bc5f4c3/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ]
+  },
+  "common_correct": 7,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn040.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_sk005.smt2"
+  ],
+  "complete_blocks": 1,
+  "elapsed_s": 3.580416844008141,
+  "environment_overrides": {
+    "baseline": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "staged-10": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "1"
+    }
+  },
+  "executable_sha256": {
+    "baseline": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38",
+    "staged-10": "989b93eff18d517f6b8b5b71023471886679c28038fa30c9d4126e22ad078f38"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 4,
+      "unsat": 3
+    }
+  },
+  "finished_at": "2026-07-27T08:45:03.893831+00:00",
+  "host": {
+    "cpu_affinity": [
+      107
+    ],
+    "cpu_count": 192,
+    "fqdn": "x1001c0s2b0n2-hsn0.hsn.cm.helios.cyfronet.pl",
+    "git_revision": null,
+    "hostname": "x1001c0s2b0n2",
+    "machine": "x86_64",
+    "platform": "Linux-5.14.0-687.29.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "python": "3.9.25",
+    "release": "5.14.0-687.29.1.el9_8.x86_64",
+    "slurm_array_job_id": "19968814",
+    "slurm_array_task_id": "31",
+    "slurm_job_id": "19968855",
+    "slurm_node_list": "x1001c0s2b0n2",
+    "system": "Linux"
+  },
+  "instances": 7,
+  "manifest": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T084205Z-narrow-qg7-confirm-bc5f4c3/shards/shard-0031.jsonl",
+  "manifest_order": [
+    "QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn040.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_sk005.smt2"
+  ],
+  "manifest_sha256": "739ffb0ee756be73ed25e10132b102740622cb74ab8d4cb9003a4fab9299933b",
+  "measured_runs": 28,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.08116434849944199,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.08148608900228282,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 6957,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn034.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.36460865349363303,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.35876548050146084,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7021,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.11758565100171836,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.11824140849785181,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7085,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn040.smt2",
+      "row_index": 2
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.20552695100195706,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.20459568650403526,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7149,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2",
+      "row_index": 3
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.09201564299291931,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.0916603785008192,
+          "results": {
+            "sat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7213,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2",
+      "row_index": 4
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.013295943499542773,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.01322159049595939,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7277,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_sk031.smt2",
+      "row_index": 5
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.010492178997083101,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "staged-10": {
+          "correct": true,
+          "correct_repeats": 2,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.010436395496071782,
+          "results": {
+            "unsat": 2
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "unsat",
+      "id": 7341,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_sk005.smt2",
+      "row_index": 6
+    }
+  ],
+  "reference_arm": "baseline",
+  "repeats": 2,
+  "runtime_host": "x1001c0s2b0n2",
+  "schedule": {
+    "arm_count": 2,
+    "arms": [
+      "baseline",
+      "staged-10"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "staged-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "staged-10",
+            "successor": "baseline"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 2,
+          "integer": true,
+          "numerator": 2
+        },
+        "transitions_per_row": 1
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "baseline",
+            "by_position": [
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "staged-10",
+            "by_position": [
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 2,
+          "integer": true,
+          "numerator": 2
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 2,
+        "expected_length": 2
+      }
+    },
+    "complete_block_rows": 2,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 2,
+    "rows": [
+      {
+        "order": [
+          "baseline",
+          "staged-10"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "staged-10",
+          "baseline"
+        ],
+        "repeat": 1
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "baseline",
+      "staged-10"
+    ],
+    "complete_block_rows": 2,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "ae0f9f51875b06d06252e67375eb448bb077cfb33b275b2adfe210a6a9757125"
+  },
+  "schedule_sha256": "ae0f9f51875b06d06252e67375eb448bb077cfb33b275b2adfe210a6a9757125",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/QG-classification/qg7/gensys_brn034.smt2": "b982afecb4894150857c32038cba6b4ed104c99d132c1d8015763bf0ce0c2977",
+    "QF_UF/QG-classification/qg7/gensys_brn_sk043.smt2": "90cedd7197b258b251a3349c57fca942ca5e7ce216eff87d6fd1d9826b19bb2a",
+    "QF_UF/QG-classification/qg7/iso_brn040.smt2": "46ed99d8ef6f66d2d0b0854069e380231ab945fddd8a355774d26ac5116dabd8",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen012.smt2": "f2c170b2cc6ab5a77b7fe4d4f31a010e6f29569569569dfd2aee6d32b70fa99f",
+    "QF_UF/QG-classification/qg7/iso_brn_repgen_sk022.smt2": "f532e94b4ec4aeb8731d4d5e450bd18b8172a4592e07e6abf331b6e6d7477a91",
+    "QF_UF/QG-classification/qg7/iso_brn_sk031.smt2": "58598ed981329097c25877753df52e91d837870eb0000aa876b81b1d1b3640a3",
+    "QF_UF/QG-classification/qg7/iso_icl_sk005.smt2": "6861acd9e6715816b4dfc981e09a80bfae44568d9812f3440b86f22f0c00c4f4"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-27T08:45:00.318127+00:00",
+  "status": "complete",
+  "timeout_s": 2.0,
+  "timeouts": [],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}

@@ -1383,3 +1383,13 @@
   `panel-370c5109acd7ed26` as the authoritative broad best meanwhile.
 - WMI PGO/Goel job `170902` is still pending with zero runtime because eligible
   nodes are down, drained, or reserved. It remains older-route evidence only.
+- Narrow staged qg7 confirmation is terminal negative timing evidence.
+  Revision `bc5f4c3`, preparation `19968692`, and array `19968814` completed
+  1,672/1,672 observations with zero wrong/error. Raw coverage is 378/418
+  versus 381/418, but the third apparent gain is outside the route and is
+  timeout-boundary noise. Selector attribution confirms exactly two UNSAT
+  gains and no losses (380/418) at only `0.977533x`/`0.971368x` broad common
+  aggregate/geometric speed; inside the 52-row cohort the factors are
+  `0.839544x`/`0.795511x`. Reject promotion and do not run the full corpus.
+  Keep `b5f78fb`/`panel-370c5109acd7ed26`; pursue CaDiCaL-first handoff or a
+  path-free difficulty gate that avoids Kissat-first cost on easy rows.

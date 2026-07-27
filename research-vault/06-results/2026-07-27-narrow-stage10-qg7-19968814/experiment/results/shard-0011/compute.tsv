@@ -1,0 +1,2 @@
+cpu_model	AMD EPYC 9654 96-Core Processor
+affinity_cpus	1

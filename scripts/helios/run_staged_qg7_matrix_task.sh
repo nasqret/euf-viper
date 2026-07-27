@@ -15,6 +15,7 @@ EXPECTED_TOOLCHAIN_SHA256="${EUF_VIPER_MATRIX_TOOLCHAIN_SHA256:?set toolchain ha
 SHARD_COUNT="${EUF_VIPER_MATRIX_SHARD_COUNT:-6}"
 EXPECTED_CPU_MODEL="${EUF_VIPER_MATRIX_CPU_MODEL:-AMD EPYC 9654}"
 MATRIX_MODE="${EUF_VIPER_MATRIX_MODE:-threshold}"
+BRAIDED_CADICAL_PREFIX="${EUF_VIPER_MATRIX_CADICAL_PREFIX_CONFLICTS:-1000}"
 TASK_ID="${SLURM_ARRAY_TASK_ID:?set array task ID}"
 
 die() {
@@ -41,7 +42,12 @@ check_hash() {
 [[ "$SHARD_COUNT" =~ ^[1-9][0-9]*$ ]] || die "shard count must be positive"
 [ "$TASK_ID" -lt "$SHARD_COUNT" ] || die "array task ID exceeds shard count"
 [ "${SLURM_CPUS_PER_TASK:-}" = 1 ] || die "matrix task requires one CPU"
-case "$MATRIX_MODE" in threshold|confirm-stage10) ;; *) die "unsupported matrix mode" ;; esac
+case "$MATRIX_MODE" in
+  threshold|confirm-stage10|braid-threshold|confirm-braid) ;;
+  *) die "unsupported matrix mode" ;;
+esac
+[[ "$BRAIDED_CADICAL_PREFIX" =~ ^[0-9]+$ ]] || \
+  die "braided CaDiCaL prefix must be nonnegative"
 case "$EXPERIMENT_ROOT" in /*/experiments/*) ;; *) die "matrix root escaped experiment namespace" ;; esac
 case "$ORCHESTRATION_CHECKOUT" in /*/orchestration-checkouts/*) ;; *) die "orchestration checkout escaped namespace" ;; esac
 
@@ -134,7 +140,9 @@ declare -a ARGUMENTS=("$SHARD_MANIFEST")
 add_arm() {
   local name="$1"
   local staged="$2"
-  local conflicts="$3"
+  local braided="$3"
+  local cadical_prefix="$4"
+  local kissat_conflicts="$5"
   ARGUMENTS+=(
     --arm "$name"
     --arm-arg "$SOLVER_BINARY"
@@ -143,22 +151,34 @@ add_arm() {
     --arm-arg quotient-portfolio
     --arm-arg '{input}'
     --arm-env EUF_VIPER_FINITE_DENSE7=0
+    --arm-env "EUF_VIPER_FINITE_DENSE7_BRAIDED=$braided"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS=$cadical_prefix"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS=$kissat_conflicts"
     --arm-env "EUF_VIPER_FINITE_DENSE7_STAGED=$staged"
-    --arm-env "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS=$conflicts"
   )
 }
 
-add_arm baseline 0 1000
+add_arm baseline 0 0 1000 1000
 case "$MATRIX_MODE" in
   threshold)
-    add_arm staged-0 1 0
-    add_arm staged-10 1 10
-    add_arm staged-100 1 100
-    add_arm staged-1000 1 1000
-    add_arm staged-10000 1 10000
+    add_arm staged-0 1 0 1000 0
+    add_arm staged-10 1 0 1000 10
+    add_arm staged-100 1 0 1000 100
+    add_arm staged-1000 1 0 1000 1000
+    add_arm staged-10000 1 0 1000 10000
     ;;
   confirm-stage10)
-    add_arm staged-10 1 10
+    add_arm staged-10 1 0 1000 10
+    ;;
+  braid-threshold)
+    add_arm braid-0 0 1 0 10
+    add_arm braid-10 0 1 10 10
+    add_arm braid-100 0 1 100 10
+    add_arm braid-1000 0 1 1000 10
+    add_arm braid-10000 0 1 10000 10
+    ;;
+  confirm-braid)
+    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 10
     ;;
 esac
 ARGUMENTS+=(
