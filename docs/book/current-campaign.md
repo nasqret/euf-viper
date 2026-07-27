@@ -1072,3 +1072,34 @@ conflicts, decisions, propagations, and redundant-clause growth. An UNSAT
 sprint may be admitted only if those measurements separate target proof shapes
 from baseline-solvable rows without using paths, family names, identities, or
 expected results.
+
+## Decision-gated proof seeding
+
+Revision `2d4a372` turns that telemetry into an online gate. After 100 Plain
+conflicts, only a decision count from 131 through 150 admits the 70,000-conflict
+UNSAT-safe sprint. The experiment also tests whether short clauses learned by
+the Plain prefix should seed the sprint. Helios preparation `19977267` and
+array `19977575` completed all 1,872 balanced observations on the same 52 rows.
+The audit has zero wrong answers and zero execution errors and regenerates
+byte-for-byte.
+
+| Maximum seed length | Correct | Common total | Aggregate factor | Geometric factor |
+| ---: | ---: | ---: | ---: | ---: |
+| Baseline | 48/52 | 8.330135s | `1.0x` | `1.0x` |
+| 0 | 50/52 | 8.829006s | `0.943496x` | `0.920255x` |
+| 4 | 50/52 | 8.930015s | `0.932824x` | `0.912486x` |
+| 8 | 50/52 | 8.870770s | `0.939054x` | `0.917655x` |
+| 16 | 50/52 | 8.880670s | `0.938008x` | `0.918708x` |
+| 32 | 50/52 | 8.870216s | `0.939113x` | `0.919948x` |
+
+The gate is exact on this cohort: every candidate gains `gensys_icl002` and
+`gensys_icl004` and loses nothing. The clause-transfer hypothesis is false;
+the arm importing no clauses is fastest. Its 5.65% aggregate and 7.97%
+geometric regressions localize the remaining overhead to the forced prefix
+interruption and Rust-level return.
+
+No arm advances. The next candidate performs the same decision inside one
+CaDiCaL call. A nonselected row must permanently disarm the probe and continue
+the unbroken Plain search; only a selected row may interrupt and construct the
+UNSAT-safe sprint. This preserves the structural novelty of an online
+proof-shape router while making exact baseline behavior the fast path.

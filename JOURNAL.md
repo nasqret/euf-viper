@@ -2579,3 +2579,33 @@
   growth on the frozen cohort; invoke the UNSAT sprint only if telemetry
   separates target proof shapes from common baseline solves. Identity, path,
   family name, and expected status remain forbidden features.
+
+# 2026-07-27 - Decision-gated proof seeding rejected on timing
+
+- Revision `2d4a372` adds exact CaDiCaL prefix telemetry, an inclusive online
+  decision gate, bounded learned-clause capture, source-variable filtering,
+  and a fresh UNSAT-safe sprint. It also repairs vendored learner detachment so
+  it clears the learner callback rather than the termination callback.
+- Local qualification passes 648 all-feature Rust tests with ten intentional
+  ignores. The 21 targeted Python tests, release build, shell syntax checks,
+  and diff checks also pass.
+- Helios preparation `19977267` completed `0:0` in 5:22 with 1,356,816 KiB
+  maximum step RSS. It produced binary SHA-256 `dcc31a2f...0266` from the
+  required `smtlib-2025` manifest and exact corpus inventory
+  `9b39c70a...eadc`.
+- Array `19977575` completed all 16 one-core children and 1,872
+  Williams-balanced observations on the exact 52-row cohort. The audit has
+  zero wrong answers and zero execution errors, self-hash
+  `92d5e890...5c957`, and exact file SHA-256 `4113349d...b23bf`. Local replay
+  is byte-identical.
+- Baseline covers 48/52. Every arm gated at 100 conflicts and 131..150
+  decisions covers 50/52, gaining exactly `gensys_icl002` and
+  `gensys_icl004` with no losses. Learned-clause limits 0, 4, 8, 16, and 32
+  have common-total factors `0.943496x`, `0.932824x`, `0.939054x`,
+  `0.938008x`, and `0.939113x`; geometric factors are `0.920255x`,
+  `0.912486x`, `0.917655x`, `0.918708x`, and `0.919948x`.
+- Reject every arm and do not run complete qg7. Clause transfer does not help;
+  the seed-free arm is best. The next candidate moves the decision test into
+  the active CaDiCaL solve so a nonselected row never returns to Rust or loses
+  its Plain trajectory. Only a selected row may interrupt and start the
+  UNSAT-safe sprint.

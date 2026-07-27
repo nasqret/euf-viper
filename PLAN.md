@@ -45,7 +45,11 @@ Immediate execution order:
    all five prefixes keep both gains but the best common-total factor is only
    `0.823412x`**); test the baseline-Plain phase braid (**complete and rejected:
    best coverage 49/52 and best timing `0.913505x` / `0.900413x`**); derive an
-   online probe gate from source-independent prefix telemetry next;
+   online probe gate from source-independent prefix telemetry (**complete:
+   decision interval 131..150 identifies both targets**); test decision-gated
+   learned-clause transfer (**complete and rejected: every arm reaches 50/52,
+   but the best timing is only `0.943496x` / `0.920255x`**); implement a native
+   one-solve probe that disarms itself on nonselected rows next;
    and
 9. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
@@ -138,6 +142,20 @@ factors are only `0.913505x` and `0.900413x`. Complete qg7 remains unauthorized.
 The next bounded step is diagnostic first: collect fixed-prefix CaDiCaL search
 telemetry over the frozen cohort and admit a sprint only if a path-free rule
 separates the two target proof shapes from baseline-solvable rows.
+
+The decision-gated proof-seeding matrix is complete and rejected on timing.
+Revision `2d4a372`, corrected-manifest preparation `19977267`, and array
+`19977575` produced all 1,872 balanced observations with zero wrong answers or
+execution errors. A fixed 100-conflict Plain prefix and inclusive 131..150
+decision gate recover both target UNSAT proofs in every arm, taking coverage
+from 48/52 to 50/52 with no losses. Learned-clause limits 4, 8, 16, and 32 do
+not improve the seed-free control. The best arm is seed-free at only
+`0.943496x` common-total and `0.920255x` common-geometric speed. Therefore the
+remaining measured cost is interruption and return, not clause transfer. No
+complete qg7 or broad run is authorized. The next implementation must inspect
+the gate inside one CaDiCaL solve, permanently disarm itself when the decision
+interval misses, and interrupt only selected rows. It advances only if the
+exact 52-row matrix preserves 50/52 and both timing factors are at least one.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate

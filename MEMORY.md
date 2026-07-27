@@ -1420,3 +1420,14 @@
   coverage is 49/52, not the required 50/52, and the best timing factors are
   only `0.913505x` aggregate and `0.900413x` geometric. Archive:
   `research-vault/06-results/2026-07-27-phase-braid-prefix52-19972198/`.
+- Decision-gated proof seeding at revision `2d4a372` is terminal negative
+  timing evidence. Preparation `19977267` and matrix `19977575` produced 1,872
+  balanced observations with zero wrong/error and a byte-identical audit.
+  Every 131..150-decision arm reaches 50/52 with the same two UNSAT gains and
+  no losses, but the best seed-free timing is only `0.943496x` aggregate and
+  `0.920255x` geometric. Limits 4, 8, 16, and 32 are all worse, so learned
+  clauses are not the missing mechanism. Archive:
+  `research-vault/06-results/2026-07-27-proof-seed-prefix52-19977575/`. Keep
+  `b5f78fb` and panel `panel-370c5109acd7ed26` as broad best. Next test a native
+  in-solver gate that disarms on nonselected rows and interrupts only selected
+  rows; do not run qg7 until it reaches 50/52 and both timing factors >= 1.
