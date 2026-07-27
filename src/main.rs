@@ -2786,6 +2786,7 @@ fn add_finite_domain_axioms(
         false,
         false,
         false,
+        false,
     )
 }
 
@@ -2811,6 +2812,7 @@ fn add_finite_domain_axioms_with_context(
     force_finite_symmetry: bool,
     finite_structural_default_safe: bool,
     finite_dense6_cadical: bool,
+    finite_dense7_cadical: bool,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 ) -> usize {
@@ -2848,11 +2850,15 @@ fn add_finite_domain_axioms_with_context(
         {
             if force_finite_symmetry {
                 profile_measurement("finite_structural_symmetry_route", 1, arena.apps.len());
-                if finite_dense6_cadical
-                    && finite_dense6_cadical_candidate(context, arena, bool_problem)
-                {
+                if let Some(route) = finite_dense_cadical_candidate(
+                    context,
+                    arena,
+                    bool_problem,
+                    finite_dense6_cadical,
+                    finite_dense7_cadical,
+                ) {
                     cnf.finite_cadical_search_hint = CadicalSearchHint::UnsatSafe;
-                    profile_measurement("finite_dense6_cadical_route", 1, arena.apps.len());
+                    profile_measurement(route.profile_label(), 1, arena.apps.len());
                 } else if finite_structural_default_safe
                     && finite_structural_default_safe_candidate(context, arena, bool_problem)
                 {
@@ -2988,6 +2994,25 @@ fn finite_structural_default_safe_candidate(
 
 #[cfg(feature = "finite-symmetry")]
 const FINITE_DENSE6_MIN_DISEQUALITY_EDGES: usize = 200;
+#[cfg(feature = "finite-symmetry")]
+const FINITE_DENSE7_MIN_DISEQUALITY_EDGES: usize = 315;
+
+#[cfg(feature = "finite-symmetry")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FiniteDenseCadicalRoute {
+    Domain6,
+    Domain7,
+}
+
+#[cfg(feature = "finite-symmetry")]
+impl FiniteDenseCadicalRoute {
+    fn profile_label(self) -> &'static str {
+        match self {
+            Self::Domain6 => "finite_dense6_cadical_route",
+            Self::Domain7 => "finite_dense7_cadical_route",
+        }
+    }
+}
 
 #[cfg(feature = "finite-symmetry")]
 fn finite_dense6_cadical_signature(
@@ -3003,18 +3028,51 @@ fn finite_dense6_cadical_signature(
 }
 
 #[cfg(feature = "finite-symmetry")]
-fn finite_dense6_cadical_candidate(
+fn finite_dense7_cadical_signature(
+    domain_size: usize,
+    boolean_applications: usize,
+    disequality_edges: usize,
+    guarded_disequality_clauses: usize,
+) -> bool {
+    domain_size == 7
+        && boolean_applications == 0
+        && disequality_edges >= FINITE_DENSE7_MIN_DISEQUALITY_EDGES
+        && guarded_disequality_clauses == 0
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_dense_cadical_candidate(
     context: &mut finite_analysis::FiniteAnalysisContext,
     arena: &TermArena,
     bool_problem: &BoolProblem,
-) -> bool {
+    dense6_enabled: bool,
+    dense7_enabled: bool,
+) -> Option<FiniteDenseCadicalRoute> {
+    if !dense6_enabled && !dense7_enabled {
+        return None;
+    }
     let analysis = context.analyze(arena, bool_problem);
-    finite_dense6_cadical_signature(
-        analysis.discovered_domain_size,
-        analysis.boolean_applications,
-        analysis.disequality_graph_edges,
-        analysis.guarded_disequality_clauses,
-    )
+    if dense6_enabled
+        && finite_dense6_cadical_signature(
+            analysis.discovered_domain_size,
+            analysis.boolean_applications,
+            analysis.disequality_graph_edges,
+            analysis.guarded_disequality_clauses,
+        )
+    {
+        Some(FiniteDenseCadicalRoute::Domain6)
+    } else if dense7_enabled
+        && finite_dense7_cadical_signature(
+            analysis.discovered_domain_size,
+            analysis.boolean_applications,
+            analysis.disequality_graph_edges,
+            analysis.guarded_disequality_clauses,
+        )
+    {
+        Some(FiniteDenseCadicalRoute::Domain7)
+    } else {
+        None
+    }
 }
 
 #[cfg(feature = "finite-symmetry")]
@@ -6092,6 +6150,7 @@ const FINITE_MULTI_ROOK_ENV: &str = "EUF_VIPER_FINITE_MULTI_ROOK";
 const FINITE_STRUCTURAL_EAGER_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_EAGER";
 const FINITE_STRUCTURAL_DEFAULT_SAFE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_DEFAULT_SAFE";
 const FINITE_DENSE6_CADICAL_ENV: &str = "EUF_VIPER_FINITE_DENSE6_CADICAL";
+const FINITE_DENSE7_CADICAL_ENV: &str = "EUF_VIPER_FINITE_DENSE7_CADICAL";
 const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
 const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
@@ -6114,6 +6173,7 @@ struct RootCnfOptions {
     force_finite_symmetry: bool,
     finite_structural_default_safe: bool,
     finite_dense6_cadical: bool,
+    finite_dense7_cadical: bool,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 }
@@ -6128,6 +6188,7 @@ impl RootCnfOptions {
             force_finite_symmetry: false,
             finite_structural_default_safe: false,
             finite_dense6_cadical: false,
+            finite_dense7_cadical: false,
             force_finite_predicate_channeling: false,
             force_finite_permutation_support: false,
         }
@@ -6598,6 +6659,10 @@ fn finite_dense6_cadical_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_DENSE6_CADICAL_ENV, true)
 }
 
+fn finite_dense7_cadical_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_DENSE7_CADICAL_ENV, true)
+}
+
 fn finite_structural_predicate_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_STRUCTURAL_PREDICATE_ENV, true)
 }
@@ -6642,6 +6707,7 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
         force_finite_symmetry: false,
         finite_structural_default_safe: finite_structural_default_safe_enabled()?,
         finite_dense6_cadical: finite_dense6_cadical_enabled()?,
+        finite_dense7_cadical: finite_dense7_cadical_enabled()?,
         force_finite_predicate_channeling: false,
         force_finite_permutation_support: false,
     })
@@ -6898,6 +6964,7 @@ fn solve_bool_problem(
                 root_cnf_options.force_finite_symmetry,
                 root_cnf_options.finite_structural_default_safe,
                 root_cnf_options.finite_dense6_cadical,
+                root_cnf_options.finite_dense7_cadical,
                 root_cnf_options.force_finite_predicate_channeling,
                 root_cnf_options.force_finite_permutation_support,
             );
@@ -9133,6 +9200,7 @@ mod tests {
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
+                finite_dense7_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             }
@@ -9562,6 +9630,7 @@ mod tests {
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
+                finite_dense7_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -9573,6 +9642,7 @@ mod tests {
                 force_finite_symmetry: false,
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
+                finite_dense7_cadical: false,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -10921,6 +10991,11 @@ mod tests {
         assert!(!finite_dense6_cadical_signature(7, 0, 201, 0));
         assert!(!finite_dense6_cadical_signature(6, 1, 201, 0));
         assert!(!finite_dense6_cadical_signature(6, 0, 201, 1));
+        assert!(finite_dense7_cadical_signature(7, 0, 315, 0));
+        assert!(!finite_dense7_cadical_signature(7, 0, 314, 0));
+        assert!(!finite_dense7_cadical_signature(6, 0, 315, 0));
+        assert!(!finite_dense7_cadical_signature(7, 1, 315, 0));
+        assert!(!finite_dense7_cadical_signature(7, 0, 315, 1));
         assert!(auto_prefers_cadical_with_hint(
             10,
             1,
@@ -10963,6 +11038,14 @@ mod tests {
         );
         assert_eq!(
             parse_zero_one_setting_with_default(FINITE_DENSE6_CADICAL_ENV, Some("0"), true),
+            Ok(false),
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, None, true),
+            Ok(true),
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, Some("0"), true),
             Ok(false),
         );
     }
