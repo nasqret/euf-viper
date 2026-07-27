@@ -19,7 +19,7 @@
       "multicore_portfolios"
     ],
     "candidate_branch": "research/quotient-jit-lcg",
-    "candidate_revision": "b5f78fb6cfef648178089a680bf365ff4367b075",
+    "candidate_revision": "d2b45f5ea1263476405ca4da7fdeaf92328f1e8f",
     "language": "Rust"
   },
   "comparators": {
