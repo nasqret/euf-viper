@@ -1,0 +1,4 @@
+job_id	role	state	exit_code	elapsed_or_max_task_elapsed	measured_rows	max_step_rss_kib	note
+19969487	preparation	COMPLETED	0:0	00:05:59	0	1078176	exact binary build
+19969586	failed_premeasurement_array	FAILED	1:0	00:00:07	0	2508	missing results parent; no solver execution
+19969669	braid_threshold_array	COMPLETED	0:0	00:01:53	1872	84112	16 of 16 task receipts complete

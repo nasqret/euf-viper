@@ -1393,3 +1393,13 @@
   `0.839544x`/`0.795511x`. Reject promotion and do not run the full corpus.
   Keep `b5f78fb`/`panel-370c5109acd7ed26`; pursue CaDiCaL-first handoff or a
   path-free difficulty gate that avoids Kissat-first cost on easy rows.
+- Retained-state braid revision `b89c8eb` is also terminal negative timing
+  evidence in its UNSAT-configured form. Preparation `19969487` and corrected
+  array `19969669` produced 1,872/1,872 observations on the exact 52-row cohort
+  with zero wrong/error. Every prefix in 0, 10, 100, 1,000, and 10,000 keeps
+  exactly the two target gains and no losses, but the best aggregate factor is
+  only `0.823412x` and the best geometric factor only `0.792011x`. Failed array
+  `19969586` is pre-measurement evidence only: its namespace lacked `results/`.
+  Audit self-hash is `65412fbf...4635` and replay is byte-identical. Baseline
+  uses CaDiCaL Plain while this rejected braid used UNSAT configuration; test a
+  Plain-prefix retained-state braid before attempting a structural classifier.

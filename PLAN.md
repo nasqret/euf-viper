@@ -40,8 +40,10 @@ Immediate execution order:
 8. implement and sweep a bounded Kissat-first/explicit-UNKNOWN/CaDiCaL-second
    dense-seven stage (**broad qg7 arm complete and rejected: 380 -> 374 solves,
    two gains, eight losses**); confirm the post-hoc 52-row minimal-core selector
-   on a fresh exact binary before any full campaign (**in progress; projection
-   only is 380 -> 382 with no loss, but is 2.2% slower in common aggregate**);
+   on a fresh exact binary (**complete and rejected on route-local speed**),
+   then test a retained-state CaDiCaL/Kissat braid (**complete and rejected:
+   all five prefixes keep both gains but the best common-total factor is only
+   `0.823412x`**); test the baseline-Plain phase braid next;
    and
 9. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
@@ -94,6 +96,26 @@ On the 48 common solves inside the 52-row route, the factors fall to
 difficulty handoff that preserves both proofs without paying Kissat-first cost
 on the easy selected mass. The broad dashboard and current-best panel remain
 unchanged.
+
+The first retained-state braid is also terminal negative evidence. Revision
+`b89c8eb`, preparation `19969487`, and corrected array `19969669` ran 1,872
+Williams-balanced observations on the exact 52-row cohort. Baseline covers
+48/52 and every CaDiCaL-prefix arm covers 50/52 with the same two UNSAT gains,
+no losses, zero wrong answers, and zero execution errors. All arms nevertheless
+fail timing: common-total factors range from `0.770112x` to `0.823412x`, and
+common-geometric factors range from `0.759033x` to `0.792011x`. Profiling
+identifies a configuration confounder: baseline uses CaDiCaL Plain and solves a
+representative easy row in 281 conflicts, while the braided UNSAT profile takes
+20,728 decisions on the same row. The next bounded experiment preserves Plain
+configuration during the prefix and hands off only after interruption. No full
+qg7 or broad run is authorized meanwhile.
+
+The Plain-phase implementation is locally qualified: all 636 Python and 644
+all-feature Rust tests pass, and baseline versus prefix-10,000 profiling on the
+representative easy row is search-identical at 281 conflicts and 323 decisions.
+This is a canary only. Promotion still requires the fresh balanced 52-row
+Helios matrix to preserve both gains with no losses and meet both aggregate and
+geometric timing gates.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate

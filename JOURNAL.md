@@ -2497,3 +2497,39 @@
   `panel-370c5109acd7ed26` as current best. Next test a bounded CaDiCaL-first
   handoff or an outcome-blind structural difficulty gate; do not hide the
   Kissat-first overhead with broad-corpus averaging.
+
+# 2026-07-27 - Retained-state braid rejection and Plain-phase successor
+
+- Revision `b89c8eb` loads CaDiCaL once, runs a bounded prefix, gives Kissat a
+  fixed ten-conflict opportunity only after explicit interruption, and then
+  resumes the same CaDiCaL object with its learned state. Local qualification
+  passed 636 Python tests, 644 all-feature Rust tests, release compilation,
+  no-default checking, formatting, and both Helios scripts.
+- Helios preparation `19969487` completed in 5:59 with 1,078,176 KiB peak RSS
+  and binary SHA-256 `5b6bcede...85882`. Array `19969586` failed before any
+  solver process because the manually created namespace lacked the required
+  empty `results/` parent. Its logs are preserved as orchestration evidence;
+  it contains no timing rows.
+- Corrected array `19969669` completed all 16 one-core shards and 1,872
+  Williams-balanced observations on the exact 52-row selector. Audit self-hash
+  is `65412fbf...4635`, exact file SHA-256 is `5c4bdcfc...09f6`, and local
+  replay is byte-identical. There are zero wrong answers and zero execution
+  errors.
+- Baseline covers 48/52. Prefixes 0, 10, 100, 1,000, and 10,000 all cover
+  50/52, gaining exactly `gensys_icl002` and `gensys_icl004` with no losses.
+  Their common aggregate factors are `0.803706x`, `0.770112x`, `0.784373x`,
+  `0.818930x`, and `0.823412x`; geometric factors are `0.777745x`,
+  `0.759033x`, `0.767061x`, `0.792011x`, and `0.790437x`. Reject all arms and
+  do not run full qg7.
+- A same-binary profile reveals that baseline uses CaDiCaL Plain and solves an
+  easy selected row in 281 conflicts/323 decisions, whereas the braided UNSAT
+  configuration uses 149 conflicts/20,728 decisions. The next candidate keeps
+  the retained-state architecture but starts in the exact baseline Plain phase;
+  an explicit environment override can still force UNSAT-safe behavior.
+- The Plain-phase successor passes 636 Python tests, 644 all-feature Rust
+  tests, no-default compilation, release compilation, formatting, and both
+  shell syntax checks. A release profile on qg7 `gensys_brn003` gives the
+  baseline and braid-prefix-10,000 paths exactly 281 conflicts/323 decisions;
+  the candidate closes inside the prefix and records no Kissat handoff. The
+  single-run solve times (15.879 ms baseline, 14.574 ms candidate) are only a
+  configuration-equivalence canary, not promotion evidence.

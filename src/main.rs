@@ -2202,7 +2202,7 @@ enum CadicalSearchHint {
     DefaultSafe,
     UnsatSafe,
     StagedUnsatSafe,
-    BraidedUnsatSafe,
+    BraidedPlainSafe,
 }
 
 #[derive(Debug)]
@@ -3048,7 +3048,7 @@ impl FiniteDenseCadicalRoute {
     fn search_hint(self) -> CadicalSearchHint {
         match self {
             Self::Domain7Staged => CadicalSearchHint::StagedUnsatSafe,
-            Self::Domain7Braided => CadicalSearchHint::BraidedUnsatSafe,
+            Self::Domain7Braided => CadicalSearchHint::BraidedPlainSafe,
             Self::Domain6 | Self::Domain7Direct => CadicalSearchHint::UnsatSafe,
         }
     }
@@ -4874,7 +4874,7 @@ fn auto_prefers_cadical_with_hint(
         search_hint,
         CadicalSearchHint::UnsatSafe
             | CadicalSearchHint::StagedUnsatSafe
-            | CadicalSearchHint::BraidedUnsatSafe
+            | CadicalSearchHint::BraidedPlainSafe
     ) || auto_prefers_cadical(app_count, finite_added, app_threshold)
 }
 
@@ -5215,30 +5215,49 @@ fn configure_cadical(solver: &mut CadicalSolver<'_, '_>, prefer_unsat_search: bo
     configure_cadical_with_hint(solver, prefer_unsat_search, CadicalSearchHint::None)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CadicalConfigurationProfile {
+    Plain,
+    DefaultSafe,
+    UnsatSafe,
+}
+
+fn cadical_configuration_profile(
+    configured_mode: Option<&str>,
+    search_hint: CadicalSearchHint,
+) -> CadicalConfigurationProfile {
+    match (configured_mode, search_hint) {
+        (Some("default-safe"), _) | (None, CadicalSearchHint::DefaultSafe) => {
+            CadicalConfigurationProfile::DefaultSafe
+        }
+        (Some("unsat-safe"), _)
+        | (None, CadicalSearchHint::UnsatSafe | CadicalSearchHint::StagedUnsatSafe) => {
+            CadicalConfigurationProfile::UnsatSafe
+        }
+        _ => CadicalConfigurationProfile::Plain,
+    }
+}
+
 fn configure_cadical_with_hint(
     solver: &mut CadicalSolver<'_, '_>,
     prefer_unsat_search: bool,
     search_hint: CadicalSearchHint,
 ) -> Option<()> {
     let configured_mode = env::var("EUF_VIPER_CADICAL_MODE").ok();
-    match (configured_mode.as_deref(), search_hint) {
-        (Some("default-safe"), _) | (None, CadicalSearchHint::DefaultSafe) => {
+    match cadical_configuration_profile(configured_mode.as_deref(), search_hint) {
+        CadicalConfigurationProfile::DefaultSafe => {
             solver.set_configuration(CadicalConfig::Default).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
-        (Some("unsat-safe"), _)
-        | (
-            None,
-            CadicalSearchHint::UnsatSafe
-            | CadicalSearchHint::StagedUnsatSafe
-            | CadicalSearchHint::BraidedUnsatSafe,
-        ) => {
+        CadicalConfigurationProfile::UnsatSafe => {
             solver.set_configuration(CadicalConfig::Unsat).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
-        _ => solver.set_configuration(CadicalConfig::Plain).ok()?,
+        CadicalConfigurationProfile::Plain => {
+            solver.set_configuration(CadicalConfig::Plain).ok()?
+        }
     }
     if prefer_unsat_search {
         solver.set_option("stabilize", 0).ok()?;
@@ -7412,7 +7431,7 @@ fn solve_bool_problem(
             );
         let mut auto_prior_sat_calls = 0usize;
         if backend == "auto"
-            && cnf.finite_cadical_search_hint == CadicalSearchHint::BraidedUnsatSafe
+            && cnf.finite_cadical_search_hint == CadicalSearchHint::BraidedPlainSafe
         {
             let outcome = solve_cadical_kissat_braid(
                 &cnf,
@@ -7468,7 +7487,7 @@ fn solve_bool_problem(
         }
         if backend == "auto"
             && auto_uses_cadical
-            && cnf.finite_cadical_search_hint != CadicalSearchHint::BraidedUnsatSafe
+            && cnf.finite_cadical_search_hint != CadicalSearchHint::BraidedPlainSafe
         {
             if let Some(result) = solve_cadical_euf_once(
                 &cnf,
@@ -10865,7 +10884,7 @@ mod tests {
                 }
             }
         }
-        cnf.finite_cadical_search_hint = CadicalSearchHint::BraidedUnsatSafe;
+        cnf.finite_cadical_search_hint = CadicalSearchHint::BraidedPlainSafe;
         let arena = TermArena::default();
         let (mut solver, _) = prepare_cadical_euf_solver(&cnf, &arena, false).unwrap();
         solver.limit_conflicts(Some(0)).unwrap();
@@ -11541,7 +11560,7 @@ mod tests {
         );
         assert_eq!(
             FiniteDenseCadicalRoute::Domain7Braided.search_hint(),
-            CadicalSearchHint::BraidedUnsatSafe,
+            CadicalSearchHint::BraidedPlainSafe,
         );
         assert!(auto_prefers_cadical_with_hint(
             10,
@@ -11559,8 +11578,16 @@ mod tests {
             10,
             1,
             1_000,
-            CadicalSearchHint::BraidedUnsatSafe,
+            CadicalSearchHint::BraidedPlainSafe,
         ));
+        assert_eq!(
+            cadical_configuration_profile(None, CadicalSearchHint::BraidedPlainSafe),
+            CadicalConfigurationProfile::Plain,
+        );
+        assert_eq!(
+            cadical_configuration_profile(Some("unsat-safe"), CadicalSearchHint::BraidedPlainSafe,),
+            CadicalConfigurationProfile::UnsatSafe,
+        );
         assert_eq!(
             auto_prefers_cadical_with_hint(10, 1, 1_000, CadicalSearchHint::None),
             auto_prefers_cadical(10, 1, 1_000),

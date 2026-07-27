@@ -982,3 +982,40 @@ structure, invoking bounded Kissat only after evidence that the baseline path
 will not close quickly. The authoritative broad result remains revision
 `b5f78fb`, panel `panel-370c5109acd7ed26`, at 7,458 solves versus Yices2's
 7,490.
+
+## Retained-state braid
+
+The next experiment removed CaDiCaL reconstruction from the fallback path.
+Revision `b89c8eb` loads one CaDiCaL solver, runs a conflict-bounded prefix,
+offers the unchanged CNF to Kissat for ten conflicts after interruption, and
+then resumes the original CaDiCaL state. Preparation job `19969487` produced
+the exact Linux binary; corrected array `19969669` ran 16 one-core shards and
+all 1,872 balanced observations on the 52-row cohort.
+
+| Arm | Correct | Gains | Losses | Aggregate factor | Geometric factor |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 48/52 | - | - | `1.0x` | `1.0x` |
+| Prefix 0 | 50/52 | 2 | 0 | `0.803706x` | `0.777745x` |
+| Prefix 10 | 50/52 | 2 | 0 | `0.770112x` | `0.759033x` |
+| Prefix 100 | 50/52 | 2 | 0 | `0.784373x` | `0.767061x` |
+| Prefix 1,000 | 50/52 | 2 | 0 | `0.818930x` | `0.792011x` |
+| Prefix 10,000 | 50/52 | 2 | 0 | `0.823412x` | `0.790437x` |
+
+All five arms gain exactly the two target UNSAT rows and lose none, but every
+arm fails both timing gates. Audit self-hash `65412fbf...4635` covers zero
+wrong answers and zero execution errors and replays byte-for-byte locally.
+The earlier array `19969586` created no timing rows: its manually staged
+namespace omitted the empty `results/` parent expected by the task script.
+
+The experiment also isolates a phase-selection error. On a representative
+easy row, baseline CaDiCaL Plain completes after 281 conflicts and 323
+decisions. The UNSAT-configured braid takes 149 conflicts but 20,728 decisions
+before producing the same SAT result. The retained-state idea therefore remains
+testable, but its prefix must preserve the exact baseline Plain configuration.
+No complete qg7 or broad campaign is authorized from the rejected arms.
+
+The Plain-phase successor passes the complete local test and build gate. On
+qg7 `gensys_brn003`, baseline and a 10,000-conflict braid prefix both finish at
+281 conflicts and 323 decisions, with no handoff. This confirms search-shape
+equivalence on the canary; only a fresh balanced 52-row Helios experiment can
+establish timing or promotion eligibility.

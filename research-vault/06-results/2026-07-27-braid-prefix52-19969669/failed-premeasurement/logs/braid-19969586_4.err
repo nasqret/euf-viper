@@ -1,0 +1,5 @@
+ GCCcore/14.3.0 loaded.
+ OpenSSL/3 loaded.
+ Rust/1.88.0 loaded.
+mkdir: cannot create directory ‘/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T091900Z-braid-prefix52-b89c8eb/results/shard-0004’: No such file or directory
+srun: error: x1001c0s3b0n0: task 0: Exited with exit code 1

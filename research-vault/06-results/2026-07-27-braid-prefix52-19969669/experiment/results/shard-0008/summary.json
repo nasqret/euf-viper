@@ -1,0 +1,1182 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 0,
+    "unexpected_results": 0,
+    "wrong_answers": 0
+  },
+  "arm_count": 6,
+  "arm_order": [
+    "baseline",
+    "braid-0",
+    "braid-10",
+    "braid-100",
+    "braid-1000",
+    "braid-10000"
+  ],
+  "arms": {
+    "baseline": {
+      "common_aggregate_speedup_vs_reference": 1.0,
+      "common_geometric_speedup_vs_reference": 1.0,
+      "common_total_time_s": 0.6771169529674808,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 0,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 3,
+      "timeout_runs": 0,
+      "total_time_s": 4.126960958936252,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "braid-0": {
+      "common_aggregate_speedup_vs_reference": 0.7987768379374456,
+      "common_geometric_speedup_vs_reference": 0.7707042455227244,
+      "common_total_time_s": 0.8476922724948963,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 3,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 5.381871459976537,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "braid-10": {
+      "common_aggregate_speedup_vs_reference": 0.7603854047868811,
+      "common_geometric_speedup_vs_reference": 0.73933997472474,
+      "common_total_time_s": 0.8904917804902652,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 3,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 5.613819963909918,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 0,
+      "wrong_runs": 0
+    },
+    "braid-100": {
+      "common_aggregate_speedup_vs_reference": 0.8083957536663686,
+      "common_geometric_speedup_vs_reference": 0.7817537901542443,
+      "common_total_time_s": 0.8376057764980942,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 2,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 5.446270862972597,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    },
+    "braid-1000": {
+      "common_aggregate_speedup_vs_reference": 0.831364347025972,
+      "common_geometric_speedup_vs_reference": 0.8003005676317442,
+      "common_total_time_s": 0.8144647474837257,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 2,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 5.365773321973393,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    },
+    "braid-10000": {
+      "common_aggregate_speedup_vs_reference": 0.8181574924910602,
+      "common_geometric_speedup_vs_reference": 0.7867541962662802,
+      "common_total_time_s": 0.8276119930233108,
+      "correct_runs": 18,
+      "coverage": 1.0,
+      "coverage_delta_vs_reference": 0,
+      "covered_paths": 3,
+      "error_runs": 0,
+      "failed_runs": 0,
+      "losses_vs_reference": 2,
+      "paths": 3,
+      "result_counts": {
+        "sat": 18
+      },
+      "runs": 18,
+      "ties_vs_reference": 0,
+      "timeout_runs": 0,
+      "total_time_s": 5.146873132034671,
+      "uncovered_runs": 0,
+      "unexpected_runs": 0,
+      "unknown_runs": 0,
+      "wins_vs_reference": 1,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      },
+      "braid-0": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      },
+      "braid-10": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      },
+      "braid-100": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      },
+      "braid-1000": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      },
+      "braid-10000": {
+        "argv_template": [
+          "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "requested": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+          "sha256": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+          "size_bytes": 4634440
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+        "expected_status": "sat",
+        "id": 6953,
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+        "row_index": 0,
+        "sha256": "9998d127782ec8c84a0ac9d4e7e522345e3f82b6e98c4c5b7be8931f7b4f1ba6",
+        "size_bytes": 806942
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn008.smt2",
+        "expected_status": "sat",
+        "id": 7053,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn008.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn008.smt2",
+        "row_index": 1,
+        "sha256": "fea00875c0479f5c38f3712c08744e5b15e9219c636d4bcd5448fae2c759bee6",
+        "size_bytes": 60382
+      },
+      {
+        "declared_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2",
+        "expected_status": "sat",
+        "id": 7118,
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/corpora/9b39c70a794d52277a4e5d83731f0ebc50a2f3b804eb1dfc8cf32766a5ebeadc/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2",
+        "row_index": 2,
+        "sha256": "12e2bb10ed753ee75683d9d351b2ade03e0595ad115f22c0f75a57562971dab9",
+        "size_bytes": 6012985
+      }
+    ],
+    "manifest": {
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/shards/shard-0008.jsonl",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/shards/shard-0008.jsonl",
+      "sha256": "818ec5dd84ee5b35840c82dc833a19ed206e990f0eedf1f4c91afc4320e800cb",
+      "size_bytes": 1818
+    },
+    "results_csv": {
+      "atomic_write": true,
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "source_sha256",
+        "source_size_bytes",
+        "expected_status",
+        "schedule_schema_version",
+        "schedule_design",
+        "schedule_sha256",
+        "repeat",
+        "schedule_row",
+        "complete_block",
+        "row_in_block",
+        "order_in_repeat",
+        "arm_position",
+        "label",
+        "arm",
+        "schedule_order_json",
+        "timing_scope",
+        "parser_inclusive",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "error_detail",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/results/shard-0008/raw.csv",
+      "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/results/shard-0008/raw.csv",
+      "sha256": "ed99796a4b5875d02875767bab9dbdd7a9784a95db7807aec53d09c77718114c",
+      "size_bytes": 90197,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    },
+    "summary_json": {
+      "atomic_write": true,
+      "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/results/shard-0008/summary.json"
+    },
+    "tool_sources": {
+      "command_helper": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/compare_commands_abba.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/compare_commands_abba.py",
+        "sha256": "321eae00c2a2cf687145343b986003f2cccf3564fa93f837e539470842540ee2",
+        "size_bytes": 37900
+      },
+      "runner": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/compare_multiarm_williams.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/compare_multiarm_williams.py",
+        "sha256": "22cf14c72e8dc833fa6d6a251e9e911b14e09617e02856caa6474fa5002ab95d",
+        "size_bytes": 51748
+      },
+      "schedule_generator": {
+        "path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/williams_design.py",
+        "resolved_path": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/orchestration-checkouts/b89c8ebca7f3b60de7f5474bdebc3dc2723204e1/scripts/bench/williams_design.py",
+        "sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+        "size_bytes": 16408
+      }
+    }
+  },
+  "benchmark": "multiarm_williams_command",
+  "commands": {
+    "baseline": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-0": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-10": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-100": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-1000": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ],
+    "braid-10000": [
+      "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/runs/20260727T090821Z-braid-qg7-b89c8eb/target/release/euf-viper",
+      "fabric-solve",
+      "--engine",
+      "quotient-portfolio",
+      "{input}"
+    ]
+  },
+  "common_correct": 3,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn008.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2"
+  ],
+  "complete_blocks": 1,
+  "elapsed_s": 31.256768972001737,
+  "environment_overrides": {
+    "baseline": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "0",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-0": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "0",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-10": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-100": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "100",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-1000": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "1000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    },
+    "braid-10000": {
+      "EUF_VIPER_FINITE_DENSE7": "0",
+      "EUF_VIPER_FINITE_DENSE7_BRAIDED": "1",
+      "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS": "10000",
+      "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS": "10",
+      "EUF_VIPER_FINITE_DENSE7_STAGED": "0"
+    }
+  },
+  "executable_sha256": {
+    "baseline": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+    "braid-0": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+    "braid-10": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+    "braid-100": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+    "braid-1000": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882",
+    "braid-10000": "5b6bcede0c02dbef7d1a92b354e27334c206cf09b653ab595f5a432a92c85882"
+  },
+  "execution_errors": [],
+  "expected_results": {
+    "allowed": [
+      "sat",
+      "unknown",
+      "unsat"
+    ],
+    "counts": {
+      "sat": 3
+    }
+  },
+  "finished_at": "2026-07-27T09:29:11.610717+00:00",
+  "host": {
+    "cpu_affinity": [
+      117
+    ],
+    "cpu_count": 192,
+    "fqdn": "x1001c0s3b0n0-hsn0.hsn.cm.helios.cyfronet.pl",
+    "git_revision": null,
+    "hostname": "x1001c0s3b0n0",
+    "machine": "x86_64",
+    "platform": "Linux-5.14.0-687.29.1.el9_8.x86_64-x86_64-with-glibc2.34",
+    "processor": "x86_64",
+    "python": "3.9.25",
+    "release": "5.14.0-687.29.1.el9_8.x86_64",
+    "slurm_array_job_id": "19969669",
+    "slurm_array_task_id": "8",
+    "slurm_job_id": "19969686",
+    "slurm_node_list": "x1001c0s3b0n0",
+    "system": "Linux"
+  },
+  "instances": 3,
+  "manifest": "/net/scratch/hscra/plgrid/plgnasqret/codex-control/projects/euf-viper/experiments/20260727T092628Z-braid-prefix52-b89c8eb/shards/shard-0008.jsonl",
+  "manifest_order": [
+    "QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn008.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2"
+  ],
+  "manifest_sha256": "818ec5dd84ee5b35840c82dc833a19ed206e990f0eedf1f4c91afc4320e800cb",
+  "measured_runs": 108,
+  "parser_inclusive": true,
+  "paths": [
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.147977512984653,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3118698969919933,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.34447645599721,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.30784547500661574,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.2813196195056662,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.29206150051322766,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 6953,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_brn030.smt2",
+      "row_index": 0
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.17314397849258967,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.17908751951472368,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.178055239492096,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.1746286020061234,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.1782158744899789,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.18074452099972405,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7053,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn008.smt2",
+      "row_index": 1
+    },
+    {
+      "arms": {
+        "baseline": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3559954614902381,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-0": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.35673485598817933,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3679600850009592,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-100": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.35513169948535506,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-1000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3549292534880806,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        },
+        "braid-10000": {
+          "correct": true,
+          "correct_repeats": 6,
+          "covered": true,
+          "error_repeats": 0,
+          "median_time_s": 0.3548059715103591,
+          "results": {
+            "sat": 6
+          },
+          "timeout_repeats": 0,
+          "unexpected_repeats": 0,
+          "unknown_repeats": 0,
+          "wrong_repeats": 0
+        }
+      },
+      "expected_status": "sat",
+      "id": 7118,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2",
+      "row_index": 2
+    }
+  ],
+  "reference_arm": "baseline",
+  "repeats": 6,
+  "runtime_host": "x1001c0s3b0n0",
+  "schedule": {
+    "arm_count": 6,
+    "arms": [
+      "baseline",
+      "braid-0",
+      "braid-10",
+      "braid-100",
+      "braid-1000",
+      "braid-10000"
+    ],
+    "balance": {
+      "balanced": true,
+      "directed_predecessor": {
+        "balanced": true,
+        "counts": [
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "baseline",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-0",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-1000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-100",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-1000",
+            "successor": "braid-10000"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "baseline"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-0"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-10"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-100"
+          },
+          {
+            "count": 1,
+            "predecessor": "braid-10000",
+            "successor": "braid-1000"
+          }
+        ],
+        "expected_count_per_pair": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "orientation": "predecessor_to_successor",
+        "self_pairs_included": false,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        },
+        "transitions_per_row": 5
+      },
+      "position": {
+        "balanced": true,
+        "counts": [
+          {
+            "arm": "baseline",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-0",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-10",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-100",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-1000",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "arm": "braid-10000",
+            "by_position": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "expected_count_per_arm_position": 1,
+        "observed_max": 1,
+        "observed_min": 1,
+        "spread": 0,
+        "target": {
+          "denominator": 6,
+          "integer": true,
+          "numerator": 6
+        }
+      },
+      "rows": {
+        "all_exact_length": true,
+        "all_permutations": true,
+        "count": 6,
+        "expected_length": 6
+      }
+    },
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "complete_design": true,
+    "declared_balance_preserved": true,
+    "design": "williams_first_order_carryover",
+    "prefix_rows": 0,
+    "repeats": 6,
+    "rows": [
+      {
+        "order": [
+          "baseline",
+          "braid-0",
+          "braid-10000",
+          "braid-10",
+          "braid-1000",
+          "braid-100"
+        ],
+        "repeat": 0
+      },
+      {
+        "order": [
+          "braid-0",
+          "braid-10",
+          "baseline",
+          "braid-100",
+          "braid-10000",
+          "braid-1000"
+        ],
+        "repeat": 1
+      },
+      {
+        "order": [
+          "braid-10",
+          "braid-100",
+          "braid-0",
+          "braid-1000",
+          "baseline",
+          "braid-10000"
+        ],
+        "repeat": 2
+      },
+      {
+        "order": [
+          "braid-100",
+          "braid-1000",
+          "braid-10",
+          "braid-10000",
+          "braid-0",
+          "baseline"
+        ],
+        "repeat": 3
+      },
+      {
+        "order": [
+          "braid-1000",
+          "braid-10000",
+          "braid-100",
+          "baseline",
+          "braid-10",
+          "braid-0"
+        ],
+        "repeat": 4
+      },
+      {
+        "order": [
+          "braid-10000",
+          "baseline",
+          "braid-1000",
+          "braid-0",
+          "braid-100",
+          "braid-10"
+        ],
+        "repeat": 5
+      }
+    ],
+    "schema_version": 1,
+    "status": "balanced"
+  },
+  "schedule_binding": {
+    "arms": [
+      "baseline",
+      "braid-0",
+      "braid-10",
+      "braid-100",
+      "braid-1000",
+      "braid-10000"
+    ],
+    "complete_block_rows": 6,
+    "complete_blocks": 1,
+    "design": "williams_first_order_carryover",
+    "generator_sha256": "f6ace376eb5eaf738a2b44434232975350c7925ab938b5e89e84ae4d5af9f150",
+    "schema_version": 1,
+    "sha256": "6ad653227c3c19559c94ff26e7c6827f5db285b786b909d8b494bd463f6fcf84"
+  },
+  "schedule_sha256": "6ad653227c3c19559c94ff26e7c6827f5db285b786b909d8b494bd463f6fcf84",
+  "schema_version": 1,
+  "source_sha256": {
+    "QF_UF/QG-classification/qg7/gensys_brn030.smt2": "9998d127782ec8c84a0ac9d4e7e522345e3f82b6e98c4c5b7be8931f7b4f1ba6",
+    "QF_UF/QG-classification/qg7/iso_brn008.smt2": "fea00875c0479f5c38f3712c08744e5b15e9219c636d4bcd5448fae2c759bee6",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen019.smt2": "12e2bb10ed753ee75683d9d351b2ade03e0595ad115f22c0f75a57562971dab9"
+  },
+  "speedup_direction": "reference_time / arm_time",
+  "started_at": "2026-07-27T09:28:40.361203+00:00",
+  "status": "complete",
+  "timeout_s": 2.0,
+  "timeouts": [],
+  "timing_basis": "per-instance median of complete schedule repeats",
+  "timing_scope": "parser_inclusive_subprocess_wall_clock",
+  "unexpected_results": [],
+  "wrong_answers": []
+}
