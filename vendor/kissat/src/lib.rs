@@ -35,6 +35,7 @@ struct kissat {
 extern "C" {
     fn kissat_init() -> *mut kissat;
     fn kissat_add(solver: *mut kissat, lit: c_int);
+    fn kissat_set_conflict_limit(solver: *mut kissat, limit: u32);
     fn kissat_solve(solver: *mut kissat) -> c_int;
     fn kissat_value(solver: *mut kissat, lit: c_int) -> c_int;
     fn kissat_release(solver: *mut kissat);
@@ -115,21 +116,38 @@ impl Solver {
         }
     }
 
-    /// Solve the instance, returning either `Some(Solution)` if the problem is
-    /// SAT or `None` if the problem is UNSAT.
-    pub fn sat(self) -> Option<Solution> {
+    fn solve_with_conflict_limit(
+        self,
+        conflict_limit: Option<u32>,
+    ) -> Result<Option<Solution>, ()> {
         unsafe {
+            if let Some(limit) = conflict_limit {
+                kissat_set_conflict_limit(self.p, limit);
+            }
             let ret = kissat_solve(self.p);
             match ret {
                 10 => {
                     let p = self.p;
                     mem::forget(self);
-                    Some(Solution { p })
+                    Ok(Some(Solution { p }))
                 }
-                20 => None,
-                _ => unreachable!(),
+                20 => Ok(None),
+                0 => Err(()),
+                _ => Err(()),
             }
         }
+    }
+
+    /// Solve the instance, returning either `Some(Solution)` if the problem is
+    /// SAT or `None` if the problem is UNSAT.
+    pub fn sat(self) -> Option<Solution> {
+        self.solve_with_conflict_limit(None)
+            .expect("unlimited Kissat solve returned UNKNOWN")
+    }
+
+    /// Solve under a conflict budget. `Err(())` is an explicit UNKNOWN result.
+    pub fn sat_limited(self, conflict_limit: u32) -> Result<Option<Solution>, ()> {
+        self.solve_with_conflict_limit(Some(conflict_limit))
     }
 
     /// Create a new literal that is true if `a and b`
@@ -251,6 +269,29 @@ mod tests {
         solver.add(&[b]);
         let solution = solver.sat();
         assert!(solution.is_none());
+    }
+
+    #[test]
+    fn limited_solve_reports_unknown_without_conflating_it_with_unsat() {
+        let mut solver = Solver::new();
+        let a = solver.var();
+        let b = solver.var();
+        solver.add(&[a, b]);
+        assert!(solver.sat_limited(0).is_err());
+    }
+
+    #[test]
+    fn limited_solve_preserves_terminal_results() {
+        let mut sat_solver = Solver::new();
+        let a = sat_solver.var();
+        sat_solver.add1(a);
+        assert!(matches!(sat_solver.sat_limited(10), Ok(Some(_))));
+
+        let mut unsat_solver = Solver::new();
+        let b = unsat_solver.var();
+        unsat_solver.add1(b);
+        unsat_solver.add1(!b);
+        assert!(matches!(unsat_solver.sat_limited(10), Ok(None)));
     }
 
     #[test]

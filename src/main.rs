@@ -55,7 +55,7 @@ use rustsat::types::{Clause as RustSatClause, Lit as RustSatLit, TernaryVal};
 use rustsat_cadical::ProofFormat as CadicalProofFormat;
 use rustsat_cadical::{CaDiCaL as CadicalSolver, Config as CadicalConfig};
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver};
+use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver, Limit as KissatLimit};
 #[cfg(feature = "certificates")]
 use serde::Serialize;
 #[cfg(feature = "certificates")]
@@ -2201,6 +2201,7 @@ enum CadicalSearchHint {
     None,
     DefaultSafe,
     UnsatSafe,
+    StagedUnsatSafe,
 }
 
 #[derive(Debug)]
@@ -2212,6 +2213,7 @@ struct CnfProblem {
     finite_equalities_complete: bool,
     finite_predicate_congruence_complete: bool,
     finite_cadical_search_hint: CadicalSearchHint,
+    finite_kissat_conflict_limit: Option<u32>,
 }
 
 #[cfg(feature = "certificates")]
@@ -2309,6 +2311,7 @@ impl CnfProblem {
             finite_equalities_complete: false,
             finite_predicate_congruence_complete: false,
             finite_cadical_search_hint: CadicalSearchHint::None,
+            finite_kissat_conflict_limit: None,
         }
     }
 
@@ -2785,6 +2788,7 @@ fn add_finite_domain_axioms(
         false,
         false,
         false,
+        None,
         false,
         false,
     )
@@ -2813,6 +2817,7 @@ fn add_finite_domain_axioms_with_context(
     finite_structural_default_safe: bool,
     finite_dense6_cadical: bool,
     finite_dense7_cadical: bool,
+    finite_dense7_staged_kissat_conflicts: Option<u32>,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 ) -> usize {
@@ -2856,8 +2861,13 @@ fn add_finite_domain_axioms_with_context(
                     bool_problem,
                     finite_dense6_cadical,
                     finite_dense7_cadical,
+                    finite_dense7_staged_kissat_conflicts.is_some(),
                 ) {
-                    cnf.finite_cadical_search_hint = CadicalSearchHint::UnsatSafe;
+                    cnf.finite_cadical_search_hint = route.search_hint();
+                    cnf.finite_kissat_conflict_limit = route
+                        .is_staged()
+                        .then_some(finite_dense7_staged_kissat_conflicts)
+                        .flatten();
                     profile_measurement(route.profile_label(), 1, arena.apps.len());
                 } else if finite_structural_default_safe
                     && finite_structural_default_safe_candidate(context, arena, bool_problem)
@@ -3001,7 +3011,8 @@ const FINITE_DENSE7_MIN_DISEQUALITY_EDGES: usize = 315;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FiniteDenseCadicalRoute {
     Domain6,
-    Domain7,
+    Domain7Direct,
+    Domain7Staged,
 }
 
 #[cfg(feature = "finite-symmetry")]
@@ -3009,8 +3020,20 @@ impl FiniteDenseCadicalRoute {
     fn profile_label(self) -> &'static str {
         match self {
             Self::Domain6 => "finite_dense6_cadical_route",
-            Self::Domain7 => "finite_dense7_cadical_route",
+            Self::Domain7Direct => "finite_dense7_cadical_route",
+            Self::Domain7Staged => "finite_dense7_staged_route",
         }
+    }
+
+    fn search_hint(self) -> CadicalSearchHint {
+        match self {
+            Self::Domain7Staged => CadicalSearchHint::StagedUnsatSafe,
+            Self::Domain6 | Self::Domain7Direct => CadicalSearchHint::UnsatSafe,
+        }
+    }
+
+    fn is_staged(self) -> bool {
+        self == Self::Domain7Staged
     }
 }
 
@@ -3047,29 +3070,55 @@ fn finite_dense_cadical_candidate(
     bool_problem: &BoolProblem,
     dense6_enabled: bool,
     dense7_enabled: bool,
+    dense7_staged_enabled: bool,
 ) -> Option<FiniteDenseCadicalRoute> {
-    if !dense6_enabled && !dense7_enabled {
+    if !dense6_enabled && !dense7_enabled && !dense7_staged_enabled {
         return None;
     }
     let analysis = context.analyze(arena, bool_problem);
+    finite_dense_cadical_route_for_signature(
+        analysis.discovered_domain_size,
+        analysis.boolean_applications,
+        analysis.disequality_graph_edges,
+        analysis.guarded_disequality_clauses,
+        dense6_enabled,
+        dense7_enabled,
+        dense7_staged_enabled,
+    )
+}
+
+#[cfg(feature = "finite-symmetry")]
+fn finite_dense_cadical_route_for_signature(
+    domain_size: usize,
+    boolean_applications: usize,
+    disequality_edges: usize,
+    guarded_disequality_clauses: usize,
+    dense6_enabled: bool,
+    dense7_enabled: bool,
+    dense7_staged_enabled: bool,
+) -> Option<FiniteDenseCadicalRoute> {
     if dense6_enabled
         && finite_dense6_cadical_signature(
-            analysis.discovered_domain_size,
-            analysis.boolean_applications,
-            analysis.disequality_graph_edges,
-            analysis.guarded_disequality_clauses,
+            domain_size,
+            boolean_applications,
+            disequality_edges,
+            guarded_disequality_clauses,
         )
     {
         Some(FiniteDenseCadicalRoute::Domain6)
-    } else if dense7_enabled
+    } else if (dense7_enabled || dense7_staged_enabled)
         && finite_dense7_cadical_signature(
-            analysis.discovered_domain_size,
-            analysis.boolean_applications,
-            analysis.disequality_graph_edges,
-            analysis.guarded_disequality_clauses,
+            domain_size,
+            boolean_applications,
+            disequality_edges,
+            guarded_disequality_clauses,
         )
     {
-        Some(FiniteDenseCadicalRoute::Domain7)
+        if dense7_staged_enabled {
+            Some(FiniteDenseCadicalRoute::Domain7Staged)
+        } else {
+            Some(FiniteDenseCadicalRoute::Domain7Direct)
+        }
     } else {
         None
     }
@@ -4767,8 +4816,10 @@ fn auto_prefers_cadical_with_hint(
     app_threshold: usize,
     search_hint: CadicalSearchHint,
 ) -> bool {
-    search_hint == CadicalSearchHint::UnsatSafe
-        || auto_prefers_cadical(app_count, finite_added, app_threshold)
+    matches!(
+        search_hint,
+        CadicalSearchHint::UnsatSafe | CadicalSearchHint::StagedUnsatSafe
+    ) || auto_prefers_cadical(app_count, finite_added, app_threshold)
 }
 
 fn cadical_refine_after_invalid_model(setting: Option<&str>) -> bool {
@@ -4887,6 +4938,25 @@ fn solve_kissat_euf_once(
     false_term: TermId,
     eager_congruence: bool,
 ) -> EagerSolveOutcome {
+    solve_kissat_euf_once_with_conflict_limit(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        eager_congruence,
+        None,
+    )
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn solve_kissat_euf_once_with_conflict_limit(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    eager_congruence: bool,
+    conflict_limit: Option<u32>,
+) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::new();
     let variables = (0..cnf.var_count())
@@ -4920,8 +4990,14 @@ fn solve_kissat_euf_once(
     profile_phase("kissat_congruence_load", congruence_load_start, 0);
 
     let sat_start = Instant::now();
-    let result = solver.sat();
+    let result = match conflict_limit {
+        Some(limit) => solver.sat_limited(limit),
+        None => Ok(solver.sat()),
+    };
     profile_phase("kissat_solve", sat_start, 0);
+    let Ok(result) = result else {
+        return EagerSolveOutcome::Unavailable;
+    };
     let Some(solution) = result else {
         return EagerSolveOutcome::Solved(SolveResult::Unsat);
     };
@@ -4970,10 +5046,32 @@ fn solve_kissat_euf_once(
     false_term: TermId,
     eager_congruence: bool,
 ) -> EagerSolveOutcome {
+    solve_kissat_euf_once_with_conflict_limit(
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        eager_congruence,
+        None,
+    )
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn solve_kissat_euf_once_with_conflict_limit(
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    eager_congruence: bool,
+    conflict_limit: Option<u32>,
+) -> EagerSolveOutcome {
     let load_start = Instant::now();
     let mut solver = KissatSolver::default();
     if configure_kissat(&mut solver).is_none() {
         return EagerSolveOutcome::Unavailable;
+    }
+    if let Some(limit) = conflict_limit {
+        solver.set_limit(KissatLimit::Conflicts(limit));
     }
     for clause in &cnf.clauses {
         if solver.add_clause(rustsat_clause(clause)).is_err() {
@@ -5073,7 +5171,8 @@ fn configure_cadical_with_hint(
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
         }
-        (Some("unsat-safe"), _) | (None, CadicalSearchHint::UnsatSafe) => {
+        (Some("unsat-safe"), _)
+        | (None, CadicalSearchHint::UnsatSafe | CadicalSearchHint::StagedUnsatSafe) => {
             solver.set_configuration(CadicalConfig::Unsat).ok()?;
             solver.set_option("sweep", 0).ok()?;
             solver.set_option("inprobing", 0).ok()?;
@@ -6151,6 +6250,9 @@ const FINITE_STRUCTURAL_EAGER_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_EAGER";
 const FINITE_STRUCTURAL_DEFAULT_SAFE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_DEFAULT_SAFE";
 const FINITE_DENSE6_CADICAL_ENV: &str = "EUF_VIPER_FINITE_DENSE6_CADICAL";
 const FINITE_DENSE7_CADICAL_ENV: &str = "EUF_VIPER_FINITE_DENSE7_CADICAL";
+const FINITE_DENSE7_STAGED_ENV: &str = "EUF_VIPER_FINITE_DENSE7_STAGED";
+const FINITE_DENSE7_KISSAT_CONFLICTS_ENV: &str = "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS";
+const DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS: u32 = 1_000;
 const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
 const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
@@ -6174,6 +6276,7 @@ struct RootCnfOptions {
     finite_structural_default_safe: bool,
     finite_dense6_cadical: bool,
     finite_dense7_cadical: bool,
+    finite_dense7_staged_kissat_conflicts: Option<u32>,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 }
@@ -6189,6 +6292,7 @@ impl RootCnfOptions {
             finite_structural_default_safe: false,
             finite_dense6_cadical: false,
             finite_dense7_cadical: false,
+            finite_dense7_staged_kissat_conflicts: None,
             force_finite_predicate_channeling: false,
             force_finite_permutation_support: false,
         }
@@ -6660,7 +6764,45 @@ fn finite_dense6_cadical_enabled() -> Result<bool, String> {
 }
 
 fn finite_dense7_cadical_enabled() -> Result<bool, String> {
-    zero_one_env_setting(FINITE_DENSE7_CADICAL_ENV, true)
+    zero_one_env_setting(FINITE_DENSE7_CADICAL_ENV, false)
+}
+
+fn finite_dense7_staged_enabled() -> Result<bool, String> {
+    zero_one_env_setting(FINITE_DENSE7_STAGED_ENV, false)
+}
+
+fn parse_nonnegative_u32_setting(
+    name: &str,
+    value: Option<&str>,
+    default: u32,
+) -> Result<u32, String> {
+    let Some(value) = value else {
+        return Ok(default);
+    };
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("{name} must be a nonnegative 32-bit integer"));
+    }
+    value
+        .parse::<u32>()
+        .map_err(|_| format!("{name} must be a nonnegative 32-bit integer"))
+}
+
+fn finite_dense7_kissat_conflicts() -> Result<u32, String> {
+    match env::var(FINITE_DENSE7_KISSAT_CONFLICTS_ENV) {
+        Ok(value) => parse_nonnegative_u32_setting(
+            FINITE_DENSE7_KISSAT_CONFLICTS_ENV,
+            Some(&value),
+            DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS,
+        ),
+        Err(env::VarError::NotPresent) => parse_nonnegative_u32_setting(
+            FINITE_DENSE7_KISSAT_CONFLICTS_ENV,
+            None,
+            DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS,
+        ),
+        Err(env::VarError::NotUnicode(_)) => Err(format!(
+            "{FINITE_DENSE7_KISSAT_CONFLICTS_ENV} must be a nonnegative 32-bit integer"
+        )),
+    }
 }
 
 fn finite_structural_predicate_enabled() -> Result<bool, String> {
@@ -6700,6 +6842,14 @@ fn selected_portfolio_stream_frontend(source_bytes: usize) -> Result<bool, Strin
 fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
     direct_negated_root_auto_enabled()?;
     selected_phase_scout_mode()?;
+    let finite_dense7_cadical = finite_dense7_cadical_enabled()?;
+    let finite_dense7_staged = finite_dense7_staged_enabled()?;
+    if finite_dense7_cadical && finite_dense7_staged {
+        return Err(format!(
+            "{FINITE_DENSE7_CADICAL_ENV} and {FINITE_DENSE7_STAGED_ENV} are mutually exclusive"
+        ));
+    }
+    let finite_dense7_kissat_conflicts = finite_dense7_kissat_conflicts()?;
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
@@ -6707,7 +6857,9 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
         force_finite_symmetry: false,
         finite_structural_default_safe: finite_structural_default_safe_enabled()?,
         finite_dense6_cadical: finite_dense6_cadical_enabled()?,
-        finite_dense7_cadical: finite_dense7_cadical_enabled()?,
+        finite_dense7_cadical,
+        finite_dense7_staged_kissat_conflicts: finite_dense7_staged
+            .then_some(finite_dense7_kissat_conflicts),
         force_finite_predicate_channeling: false,
         force_finite_permutation_support: false,
     })
@@ -6965,6 +7117,7 @@ fn solve_bool_problem(
                 root_cnf_options.finite_structural_default_safe,
                 root_cnf_options.finite_dense6_cadical,
                 root_cnf_options.finite_dense7_cadical,
+                root_cnf_options.finite_dense7_staged_kissat_conflicts,
                 root_cnf_options.force_finite_predicate_channeling,
                 root_cnf_options.force_finite_permutation_support,
             );
@@ -7015,6 +7168,40 @@ fn solve_bool_problem(
                 auto_cadical_threshold,
                 cnf.finite_cadical_search_hint,
             );
+        let mut auto_prior_sat_calls = 0usize;
+        if backend == "auto" && cnf.finite_cadical_search_hint == CadicalSearchHint::StagedUnsatSafe
+        {
+            let conflict_limit = cnf.finite_kissat_conflict_limit.unwrap_or(0);
+            profile_measurement(
+                "finite_dense7_staged_kissat_budget",
+                conflict_limit as u128,
+                cnf.clauses.len(),
+            );
+            auto_prior_sat_calls = 1;
+            match solve_kissat_euf_once_with_conflict_limit(
+                &cnf,
+                arena,
+                bool_problem.true_term,
+                bool_problem.false_term,
+                eager_congruence,
+                Some(conflict_limit),
+            ) {
+                EagerSolveOutcome::Solved(result) => {
+                    profile_measurement("finite_dense7_staged_handoff", 0, 0);
+                    return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+                }
+                EagerSolveOutcome::InvalidTheoryModel(evidence) => {
+                    profile_measurement(
+                        "finite_dense7_staged_handoff",
+                        1,
+                        evidence.conflicts.len(),
+                    );
+                }
+                EagerSolveOutcome::Unavailable => {
+                    profile_measurement("finite_dense7_staged_handoff", 1, 0);
+                }
+            }
+        }
         if backend == "auto" && auto_uses_cadical {
             if let Some(result) = solve_cadical_euf_once(
                 &cnf,
@@ -7023,7 +7210,14 @@ fn solve_bool_problem(
                 bool_problem.false_term,
                 eager_congruence,
             ) {
-                return Some((result, cnf.var_count(), cnf.clauses.len(), 0, 1, 0));
+                return Some((
+                    result,
+                    cnf.var_count(),
+                    cnf.clauses.len(),
+                    0,
+                    auto_prior_sat_calls + 1,
+                    0,
+                ));
             }
         }
         if backend == "kissat" || (backend == "auto" && !auto_uses_cadical) {
@@ -7142,6 +7336,7 @@ fn solve_bool_problem(
             cnf.clauses.len(),
             0,
             sat_calls
+                + auto_prior_sat_calls
                 + usize::from(matches!(
                     backend.as_str(),
                     "auto" | "kissat" | "cadical" | "cadical-refine"
@@ -9201,6 +9396,7 @@ mod tests {
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
+                finite_dense7_staged_kissat_conflicts: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             }
@@ -9631,6 +9827,7 @@ mod tests {
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
+                finite_dense7_staged_kissat_conflicts: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -9643,6 +9840,7 @@ mod tests {
                 finite_structural_default_safe: false,
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
+                finite_dense7_staged_kissat_conflicts: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -10996,11 +11194,35 @@ mod tests {
         assert!(!finite_dense7_cadical_signature(6, 0, 315, 0));
         assert!(!finite_dense7_cadical_signature(7, 1, 315, 0));
         assert!(!finite_dense7_cadical_signature(7, 0, 315, 1));
+        assert_eq!(
+            finite_dense_cadical_route_for_signature(7, 0, 315, 0, false, true, false),
+            Some(FiniteDenseCadicalRoute::Domain7Direct),
+        );
+        assert_eq!(
+            finite_dense_cadical_route_for_signature(7, 0, 315, 0, false, false, true),
+            Some(FiniteDenseCadicalRoute::Domain7Staged),
+        );
+        assert_eq!(
+            finite_dense_cadical_route_for_signature(7, 0, 314, 0, false, false, true),
+            None,
+        );
+        assert_eq!(
+            FiniteDenseCadicalRoute::Domain7Staged.search_hint(),
+            CadicalSearchHint::StagedUnsatSafe,
+        );
+        assert!(FiniteDenseCadicalRoute::Domain7Staged.is_staged());
+        assert!(!FiniteDenseCadicalRoute::Domain7Direct.is_staged());
         assert!(auto_prefers_cadical_with_hint(
             10,
             1,
             1_000,
             CadicalSearchHint::UnsatSafe,
+        ));
+        assert!(auto_prefers_cadical_with_hint(
+            10,
+            1,
+            1_000,
+            CadicalSearchHint::StagedUnsatSafe,
         ));
         assert_eq!(
             auto_prefers_cadical_with_hint(10, 1, 1_000, CadicalSearchHint::None),
@@ -11041,13 +11263,43 @@ mod tests {
             Ok(false),
         );
         assert_eq!(
-            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, None, true),
+            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, None, false),
+            Ok(false),
+        );
+        assert_eq!(
+            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, Some("1"), false),
             Ok(true),
         );
         assert_eq!(
-            parse_zero_one_setting_with_default(FINITE_DENSE7_CADICAL_ENV, Some("0"), true),
+            parse_zero_one_setting_with_default(FINITE_DENSE7_STAGED_ENV, None, false),
             Ok(false),
         );
+        assert_eq!(
+            parse_nonnegative_u32_setting(
+                FINITE_DENSE7_KISSAT_CONFLICTS_ENV,
+                None,
+                DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS,
+            ),
+            Ok(DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS),
+        );
+        assert_eq!(
+            parse_nonnegative_u32_setting(
+                FINITE_DENSE7_KISSAT_CONFLICTS_ENV,
+                Some("0"),
+                DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS,
+            ),
+            Ok(0),
+        );
+        for invalid in ["", "-1", "+1", " 1", "1 ", "4294967296"] {
+            assert!(
+                parse_nonnegative_u32_setting(
+                    FINITE_DENSE7_KISSAT_CONFLICTS_ENV,
+                    Some(invalid),
+                    DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS,
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
