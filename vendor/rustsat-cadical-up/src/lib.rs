@@ -946,7 +946,7 @@ impl<'learn> Learn<'learn> for CaDiCaL<'_, 'learn> {
     }
 
     fn detach_learner(&mut self) {
-        self.terminate_cb = None;
+        self.learner_cb = None;
         unsafe { ffi::ccadical_set_learn(self.handle, std::ptr::null_mut(), 0, None) }
     }
 }

@@ -47,7 +47,7 @@ mod stabilizer_order;
 use kissat::{Solver as KissatSolver, Var as KissatVar};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use rustsat::solvers::{
-    GetInternalStats, LimitConflicts, PhaseLit, Solve as RustSatSolve,
+    GetInternalStats, Learn, LimitConflicts, PhaseLit, Solve as RustSatSolve,
     SolverResult as RustSatResult,
 };
 use rustsat::types::{Clause as RustSatClause, Lit as RustSatLit, TernaryVal};
@@ -60,6 +60,7 @@ use rustsat_kissat::{Config as KissatConfig, Kissat as KissatSolver, Limit as Ki
 use serde::Serialize;
 #[cfg(feature = "certificates")]
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::env;
@@ -70,6 +71,7 @@ use std::io::{BufReader, BufWriter, Write};
 #[cfg(feature = "certificates")]
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use std::rc::Rc;
 use std::time::Instant;
 use varisat::{ExtendFormula, Lit, Solver as VarisatSolver};
 
@@ -2205,6 +2207,15 @@ enum CadicalSearchHint {
     BraidedPlainSafe,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CadicalBraidConfig {
+    prefix_conflicts: u32,
+    sprint_conflicts: u32,
+    probe_min_decisions: u32,
+    probe_max_decisions: u32,
+    learn_max_len: u32,
+}
+
 #[derive(Debug)]
 struct CnfProblem {
     clauses: FlatClauses,
@@ -2215,8 +2226,7 @@ struct CnfProblem {
     finite_predicate_congruence_complete: bool,
     finite_cadical_search_hint: CadicalSearchHint,
     finite_kissat_conflict_limit: Option<u32>,
-    finite_cadical_prefix_conflict_limit: Option<u32>,
-    finite_cadical_sprint_conflict_limit: Option<u32>,
+    finite_cadical_braid_config: Option<CadicalBraidConfig>,
 }
 
 #[cfg(feature = "certificates")]
@@ -2315,8 +2325,7 @@ impl CnfProblem {
             finite_predicate_congruence_complete: false,
             finite_cadical_search_hint: CadicalSearchHint::None,
             finite_kissat_conflict_limit: None,
-            finite_cadical_prefix_conflict_limit: None,
-            finite_cadical_sprint_conflict_limit: None,
+            finite_cadical_braid_config: None,
         }
     }
 
@@ -2824,7 +2833,7 @@ fn add_finite_domain_axioms_with_context(
     finite_dense6_cadical: bool,
     finite_dense7_cadical: bool,
     finite_dense7_staged_kissat_conflicts: Option<u32>,
-    finite_dense7_braided_conflicts: Option<(u32, u32)>,
+    finite_dense7_braid_config: Option<CadicalBraidConfig>,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 ) -> usize {
@@ -2869,7 +2878,7 @@ fn add_finite_domain_axioms_with_context(
                     finite_dense6_cadical,
                     finite_dense7_cadical,
                     finite_dense7_staged_kissat_conflicts.is_some(),
-                    finite_dense7_braided_conflicts.is_some(),
+                    finite_dense7_braid_config.is_some(),
                 ) {
                     cnf.finite_cadical_search_hint = route.search_hint();
                     match route {
@@ -2878,10 +2887,10 @@ fn add_finite_domain_axioms_with_context(
                                 finite_dense7_staged_kissat_conflicts;
                         }
                         FiniteDenseCadicalRoute::Domain7Braided => {
-                            let (prefix, sprint) = finite_dense7_braided_conflicts
-                                .expect("braided route requires configured limits");
-                            cnf.finite_cadical_prefix_conflict_limit = Some(prefix);
-                            cnf.finite_cadical_sprint_conflict_limit = Some(sprint);
+                            cnf.finite_cadical_braid_config = Some(
+                                finite_dense7_braid_config
+                                    .expect("braided route requires configured limits"),
+                            );
                         }
                         FiniteDenseCadicalRoute::Domain6
                         | FiniteDenseCadicalRoute::Domain7Direct => {}
@@ -5390,6 +5399,64 @@ fn solve_loaded_cadical_euf(
     }
 }
 
+fn profile_cadical_probe_stats(
+    label: &str,
+    solver: &CadicalSolver<'_, '_>,
+    limit: u32,
+    step: &CadicalSolveStep,
+) {
+    if env::var_os("EUF_VIPER_PROFILE").is_none() {
+        return;
+    }
+    let outcome = match step {
+        CadicalSolveStep::Solved(SolveResult::Sat) => "sat",
+        CadicalSolveStep::Solved(SolveResult::Unsat) => "unsat",
+        CadicalSolveStep::Solved(SolveResult::Unsupported(_)) => "unsupported",
+        CadicalSolveStep::Interrupted => "interrupted",
+        CadicalSolveStep::InvalidTheoryModel => "invalid-theory-model",
+    };
+    eprintln!(
+        "profile_{label} outcome={outcome} limit={limit} conflicts={} decisions={} \
+         propagations={} redundant={} irredundant={}",
+        solver.conflicts(),
+        solver.decisions(),
+        solver.propagations(),
+        solver.get_redundant(),
+        solver.get_irredundant(),
+    );
+}
+
+fn cadical_learned_clause_is_source_only(clause: &RustSatClause, var_count: usize) -> bool {
+    clause.iter().all(|literal| literal.vidx() < var_count)
+}
+
+fn cadical_braid_probe_selected(decisions: usize, config: CadicalBraidConfig) -> bool {
+    decisions >= config.probe_min_decisions as usize
+        && decisions <= config.probe_max_decisions as usize
+}
+
+#[allow(clippy::too_many_arguments)]
+fn profile_cadical_braid_gate(
+    selected: bool,
+    decisions: usize,
+    config: CadicalBraidConfig,
+    captured_clauses: usize,
+    captured_literals: usize,
+    rejected_clauses: usize,
+) {
+    if env::var_os("EUF_VIPER_PROFILE").is_some() {
+        eprintln!(
+            "profile_finite_dense7_braided_gate selected={} decisions={decisions} min={} max={} \
+             learn_max_len={} captured_clauses={captured_clauses} \
+             captured_literals={captured_literals} rejected_clauses={rejected_clauses}",
+            usize::from(selected),
+            config.probe_min_decisions,
+            config.probe_max_decisions,
+            config.learn_max_len,
+        );
+    }
+}
+
 fn solve_cadical_euf_once(
     cnf: &CnfProblem,
     arena: &TermArena,
@@ -5421,6 +5488,13 @@ fn solve_cadical_phase_braid(
     false_term: TermId,
     eager_congruence: bool,
 ) -> BraidedSolveOutcome {
+    const MAX_CAPTURED_LEARNED_CLAUSES: usize = 4_096;
+    let Some(config) = cnf.finite_cadical_braid_config else {
+        return BraidedSolveOutcome {
+            result: None,
+            sat_calls: 0,
+        };
+    };
     let Some((mut solver, resume_limit)) = prepare_cadical_euf_solver(cnf, arena, eager_congruence)
     else {
         return BraidedSolveOutcome {
@@ -5428,7 +5502,21 @@ fn solve_cadical_phase_braid(
             sat_calls: 0,
         };
     };
-    let prefix_limit = cnf.finite_cadical_prefix_conflict_limit.unwrap_or(0);
+    let learned_clauses = Rc::new(RefCell::new(Vec::<RustSatClause>::new()));
+    if config.learn_max_len > 0 {
+        let learned_clauses_sink = Rc::clone(&learned_clauses);
+        solver.attach_learner(
+            move |clause| {
+                if let Ok(mut clauses) = learned_clauses_sink.try_borrow_mut() {
+                    if clauses.len() < MAX_CAPTURED_LEARNED_CLAUSES {
+                        clauses.push(clause);
+                    }
+                }
+            },
+            config.learn_max_len as usize,
+        );
+    }
+    let prefix_limit = config.prefix_conflicts;
     if solver.limit_conflicts(Some(prefix_limit)).is_err() {
         return BraidedSolveOutcome {
             result: None,
@@ -5448,6 +5536,15 @@ fn solve_cadical_phase_braid(
         solver.conflicts().saturating_sub(prefix_start_conflicts) as u128,
         prefix_limit as usize,
     );
+    profile_cadical_probe_stats(
+        "finite_dense7_braided_probe",
+        &solver,
+        prefix_limit,
+        &prefix,
+    );
+    if config.learn_max_len > 0 {
+        solver.detach_learner();
+    }
     match prefix {
         CadicalSolveStep::Solved(result) => {
             profile_measurement("finite_dense7_braided_handoff", 0, 0);
@@ -5465,20 +5562,79 @@ fn solve_cadical_phase_braid(
         CadicalSolveStep::Interrupted => {}
     }
 
-    let sprint_limit = cnf.finite_cadical_sprint_conflict_limit.unwrap_or(0);
+    let decisions = solver.decisions();
+    let probe_selected = cadical_braid_probe_selected(decisions, config);
+    let (seed_clauses, captured_clauses, captured_literals, rejected_clauses) = {
+        let captured = learned_clauses.borrow();
+        let captured_clauses = captured.len();
+        let captured_literals = captured.iter().map(|clause| clause.len()).sum();
+        let rejected_clauses = captured
+            .iter()
+            .filter(|clause| !cadical_learned_clause_is_source_only(clause, cnf.var_count()))
+            .count();
+        let seed_clauses: Vec<RustSatClause> = probe_selected
+            .then(|| {
+                captured
+                    .iter()
+                    .filter(|clause| cadical_learned_clause_is_source_only(clause, cnf.var_count()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (
+            seed_clauses,
+            captured_clauses,
+            captured_literals,
+            rejected_clauses,
+        )
+    };
+    profile_cadical_braid_gate(
+        probe_selected,
+        decisions,
+        config,
+        captured_clauses,
+        captured_literals,
+        rejected_clauses,
+    );
+
+    let sprint_limit = config.sprint_conflicts;
     profile_measurement(
         "finite_dense7_braided_cadical_sprint_budget",
         sprint_limit as u128,
         cnf.clauses.len(),
     );
     let mut sat_calls = 1usize;
-    if let Some((mut sprint_solver, _)) = prepare_cadical_euf_solver_with_hint(
-        cnf,
-        arena,
-        eager_congruence,
-        CadicalSearchHint::UnsatSafe,
-    ) {
-        if sprint_solver.limit_conflicts(Some(sprint_limit)).is_ok() {
+    if probe_selected {
+        if let Some((mut sprint_solver, _)) = prepare_cadical_euf_solver_with_hint(
+            cnf,
+            arena,
+            eager_congruence,
+            CadicalSearchHint::UnsatSafe,
+        ) {
+            let seed_clause_count = seed_clauses.len();
+            let seed_literal_count = seed_clauses
+                .iter()
+                .map(|clause| clause.len())
+                .sum::<usize>();
+            let seed_load_ok = seed_clauses
+                .into_iter()
+                .all(|clause| sprint_solver.add_clause(clause).is_ok());
+            profile_measurement(
+                "finite_dense7_braided_seed_load",
+                seed_clause_count as u128,
+                seed_literal_count,
+            );
+            if !seed_load_ok || sprint_solver.limit_conflicts(Some(sprint_limit)).is_err() {
+                return resume_cadical_phase_braid(
+                    solver,
+                    resume_limit,
+                    cnf,
+                    arena,
+                    true_term,
+                    false_term,
+                    sat_calls,
+                );
+            }
             let sprint_start_conflicts = sprint_solver.conflicts();
             if let Some(step) =
                 solve_loaded_cadical_euf(&mut sprint_solver, cnf, arena, true_term, false_term)
@@ -5508,6 +5664,27 @@ fn solve_cadical_phase_braid(
         }
     }
 
+    resume_cadical_phase_braid(
+        solver,
+        resume_limit,
+        cnf,
+        arena,
+        true_term,
+        false_term,
+        sat_calls,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resume_cadical_phase_braid(
+    mut solver: CadicalSolver<'static, 'static>,
+    resume_limit: Option<u32>,
+    cnf: &CnfProblem,
+    arena: &TermArena,
+    true_term: TermId,
+    false_term: TermId,
+    sat_calls: usize,
+) -> BraidedSolveOutcome {
     let limit_result = match resume_limit {
         Some(limit) => solver.limit_conflicts(Some(limit)),
         None => solver.limit_conflicts(None),
@@ -6504,9 +6681,15 @@ const FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS_ENV: &str =
     "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS";
 const FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS_ENV: &str =
     "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS";
+const FINITE_DENSE7_PROBE_MIN_DECISIONS_ENV: &str = "EUF_VIPER_FINITE_DENSE7_PROBE_MIN_DECISIONS";
+const FINITE_DENSE7_PROBE_MAX_DECISIONS_ENV: &str = "EUF_VIPER_FINITE_DENSE7_PROBE_MAX_DECISIONS";
+const FINITE_DENSE7_LEARN_MAX_LEN_ENV: &str = "EUF_VIPER_FINITE_DENSE7_LEARN_MAX_LEN";
 const DEFAULT_FINITE_DENSE7_KISSAT_CONFLICTS: u32 = 1_000;
 const DEFAULT_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS: u32 = 1_000;
 const DEFAULT_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS: u32 = 70_000;
+const DEFAULT_FINITE_DENSE7_PROBE_MIN_DECISIONS: u32 = 0;
+const DEFAULT_FINITE_DENSE7_PROBE_MAX_DECISIONS: u32 = u32::MAX;
+const DEFAULT_FINITE_DENSE7_LEARN_MAX_LEN: u32 = 0;
 const FINITE_STRUCTURAL_PREDICATE_ENV: &str = "EUF_VIPER_FINITE_STRUCTURAL_PREDICATE";
 const FINITE_DOMAIN_PRECHECK_ENV: &str = "EUF_VIPER_FINITE_DOMAIN_PRECHECK";
 const STREAM_PARSER_ENV: &str = "EUF_VIPER_STREAM_PARSER";
@@ -6531,7 +6714,7 @@ struct RootCnfOptions {
     finite_dense6_cadical: bool,
     finite_dense7_cadical: bool,
     finite_dense7_staged_kissat_conflicts: Option<u32>,
-    finite_dense7_braided_conflicts: Option<(u32, u32)>,
+    finite_dense7_braid_config: Option<CadicalBraidConfig>,
     force_finite_predicate_channeling: bool,
     force_finite_permutation_support: bool,
 }
@@ -6548,7 +6731,7 @@ impl RootCnfOptions {
             finite_dense6_cadical: false,
             finite_dense7_cadical: false,
             finite_dense7_staged_kissat_conflicts: None,
-            finite_dense7_braided_conflicts: None,
+            finite_dense7_braid_config: None,
             force_finite_predicate_channeling: false,
             force_finite_permutation_support: false,
         }
@@ -7101,6 +7284,44 @@ fn finite_dense7_cadical_sprint_conflicts() -> Result<u32, String> {
     }
 }
 
+fn nonnegative_u32_env_setting(name: &str, default: u32) -> Result<u32, String> {
+    match env::var(name) {
+        Ok(value) => parse_nonnegative_u32_setting(name, Some(&value), default),
+        Err(env::VarError::NotPresent) => parse_nonnegative_u32_setting(name, None, default),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err(format!("{name} must be a nonnegative 32-bit integer"))
+        }
+    }
+}
+
+fn finite_dense7_probe_min_decisions() -> Result<u32, String> {
+    nonnegative_u32_env_setting(
+        FINITE_DENSE7_PROBE_MIN_DECISIONS_ENV,
+        DEFAULT_FINITE_DENSE7_PROBE_MIN_DECISIONS,
+    )
+}
+
+fn finite_dense7_probe_max_decisions() -> Result<u32, String> {
+    nonnegative_u32_env_setting(
+        FINITE_DENSE7_PROBE_MAX_DECISIONS_ENV,
+        DEFAULT_FINITE_DENSE7_PROBE_MAX_DECISIONS,
+    )
+}
+
+fn finite_dense7_learn_max_len() -> Result<u32, String> {
+    let max_len = nonnegative_u32_env_setting(
+        FINITE_DENSE7_LEARN_MAX_LEN_ENV,
+        DEFAULT_FINITE_DENSE7_LEARN_MAX_LEN,
+    )?;
+    if max_len > i32::MAX as u32 {
+        return Err(format!(
+            "{FINITE_DENSE7_LEARN_MAX_LEN_ENV} must not exceed {}",
+            i32::MAX
+        ));
+    }
+    Ok(max_len)
+}
+
 fn finite_structural_predicate_enabled() -> Result<bool, String> {
     zero_one_env_setting(FINITE_STRUCTURAL_PREDICATE_ENV, true)
 }
@@ -7154,6 +7375,15 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
     let finite_dense7_kissat_conflicts = finite_dense7_kissat_conflicts()?;
     let finite_dense7_cadical_prefix_conflicts = finite_dense7_cadical_prefix_conflicts()?;
     let finite_dense7_cadical_sprint_conflicts = finite_dense7_cadical_sprint_conflicts()?;
+    let finite_dense7_probe_min_decisions = finite_dense7_probe_min_decisions()?;
+    let finite_dense7_probe_max_decisions = finite_dense7_probe_max_decisions()?;
+    let finite_dense7_learn_max_len = finite_dense7_learn_max_len()?;
+    if finite_dense7_probe_min_decisions > finite_dense7_probe_max_decisions {
+        return Err(format!(
+            "{FINITE_DENSE7_PROBE_MIN_DECISIONS_ENV} must not exceed \
+             {FINITE_DENSE7_PROBE_MAX_DECISIONS_ENV}"
+        ));
+    }
     Ok(RootCnfOptions {
         direct_root_cnf: direct_root_cnf_enabled()?,
         direct_negated_root: direct_negated_root_enabled()?,
@@ -7164,10 +7394,13 @@ fn selected_root_cnf_options() -> Result<RootCnfOptions, String> {
         finite_dense7_cadical,
         finite_dense7_staged_kissat_conflicts: finite_dense7_staged
             .then_some(finite_dense7_kissat_conflicts),
-        finite_dense7_braided_conflicts: finite_dense7_braided.then_some((
-            finite_dense7_cadical_prefix_conflicts,
-            finite_dense7_cadical_sprint_conflicts,
-        )),
+        finite_dense7_braid_config: finite_dense7_braided.then_some(CadicalBraidConfig {
+            prefix_conflicts: finite_dense7_cadical_prefix_conflicts,
+            sprint_conflicts: finite_dense7_cadical_sprint_conflicts,
+            probe_min_decisions: finite_dense7_probe_min_decisions,
+            probe_max_decisions: finite_dense7_probe_max_decisions,
+            learn_max_len: finite_dense7_learn_max_len,
+        }),
         force_finite_predicate_channeling: false,
         force_finite_permutation_support: false,
     })
@@ -7426,7 +7659,7 @@ fn solve_bool_problem(
                 root_cnf_options.finite_dense6_cadical,
                 root_cnf_options.finite_dense7_cadical,
                 root_cnf_options.finite_dense7_staged_kissat_conflicts,
-                root_cnf_options.finite_dense7_braided_conflicts,
+                root_cnf_options.finite_dense7_braid_config,
                 root_cnf_options.force_finite_predicate_channeling,
                 root_cnf_options.force_finite_permutation_support,
             );
@@ -9731,7 +9964,7 @@ mod tests {
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
                 finite_dense7_staged_kissat_conflicts: None,
-                finite_dense7_braided_conflicts: None,
+                finite_dense7_braid_config: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             }
@@ -10163,7 +10396,7 @@ mod tests {
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
                 finite_dense7_staged_kissat_conflicts: None,
-                finite_dense7_braided_conflicts: None,
+                finite_dense7_braid_config: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -10177,7 +10410,7 @@ mod tests {
                 finite_dense6_cadical: false,
                 finite_dense7_cadical: false,
                 finite_dense7_staged_kissat_conflicts: None,
-                finite_dense7_braided_conflicts: None,
+                finite_dense7_braid_config: None,
                 force_finite_predicate_channeling: false,
                 force_finite_permutation_support: false,
             },
@@ -10968,11 +11201,54 @@ mod tests {
             }
         }
         cnf.finite_cadical_search_hint = CadicalSearchHint::BraidedPlainSafe;
-        cnf.finite_cadical_prefix_conflict_limit = Some(0);
-        cnf.finite_cadical_sprint_conflict_limit = Some(10_000);
+        cnf.finite_cadical_braid_config = Some(CadicalBraidConfig {
+            prefix_conflicts: 0,
+            sprint_conflicts: 10_000,
+            probe_min_decisions: 0,
+            probe_max_decisions: u32::MAX,
+            learn_max_len: 8,
+        });
         let outcome = solve_cadical_phase_braid(&cnf, &TermArena::default(), 0, 0, false);
         assert_eq!(outcome.result, Some(SolveResult::Unsat));
         assert_eq!(outcome.sat_calls, 2);
+    }
+
+    #[test]
+    fn cadical_phase_braid_probe_gate_has_inclusive_bounds() {
+        let config = CadicalBraidConfig {
+            prefix_conflicts: 100,
+            sprint_conflicts: 70_000,
+            probe_min_decisions: 131,
+            probe_max_decisions: 150,
+            learn_max_len: 8,
+        };
+        assert!(!cadical_braid_probe_selected(130, config));
+        assert!(cadical_braid_probe_selected(131, config));
+        assert!(cadical_braid_probe_selected(150, config));
+        assert!(!cadical_braid_probe_selected(151, config));
+    }
+
+    #[test]
+    fn cadical_seed_filter_rejects_non_source_variables() {
+        let clause = rustsat_clause(&[1, -3]);
+        assert!(cadical_learned_clause_is_source_only(&clause, 3));
+        assert!(!cadical_learned_clause_is_source_only(&clause, 2));
+    }
+
+    #[test]
+    fn cadical_detach_learner_releases_the_callback() {
+        let marker = Rc::new(());
+        let mut solver = CadicalSolver::default();
+        let callback_marker = Rc::clone(&marker);
+        solver.attach_learner(
+            move |_| {
+                let _ = &callback_marker;
+            },
+            8,
+        );
+        assert_eq!(Rc::strong_count(&marker), 2);
+        solver.detach_learner();
+        assert_eq!(Rc::strong_count(&marker), 1);
     }
 
     #[test]

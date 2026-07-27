@@ -63,6 +63,8 @@ jobs:
             tests.test_build_rust_pgo \
             tests.test_compare_commands_abba \
             tests.test_compare_multiarm_williams \
+            tests.test_collect_cadical_probe \
+            tests.test_helios_staged_qg7_matrix \
             tests.test_install_pinned_competitors \
             tests.test_williams_design \
             tests.test_wmi_fabric_differential \
@@ -97,5 +99,6 @@ jobs:
           bash -n scripts/wmi/submit_fabric_differential.sh
           bash -n scripts/wmi/euf_viper_pgo_holdout.sbatch
           bash -n scripts/wmi/submit_pgo_holdout.sh
+          bash -n scripts/helios/run_staged_qg7_matrix_task.sh
       - name: Test Rust solver
         run: cargo test --all-features

@@ -41,11 +41,16 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
     def test_threshold_arms_keep_direct_dense_seven_disabled(self) -> None:
         source = TASK.read_text(encoding="utf-8")
         self.assertIn("EUF_VIPER_FINITE_DENSE7=0", source)
-        self.assertIn("threshold|confirm-stage10|braid-threshold|confirm-braid", source)
+        self.assertIn("proof-seed-threshold|confirm-proof-seed", source)
         self.assertIn("EUF_VIPER_MATRIX_MODE", source)
-        self.assertIn("add_arm baseline 0 0 1000 1000 0", source)
+        self.assertIn(
+            "add_arm baseline 0 0 1000 1000 0 0 4294967295 0", source
+        )
         for budget in (0, 10, 100, 1000, 10000):
-            self.assertIn(f"add_arm staged-{budget} 1 0 1000 {budget} 0", source)
+            self.assertIn(
+                f"add_arm staged-{budget} 1 0 1000 {budget} 0 0 4294967295 0",
+                source,
+            )
 
     def test_braided_arms_sweep_plain_prefix_before_fixed_unsat_sprint(self) -> None:
         source = TASK.read_text(encoding="utf-8")
@@ -59,8 +64,36 @@ class StagedQG7MatrixContractTests(unittest.TestCase):
             source,
         )
         for budget in (0, 10, 100, 1000, 10000):
-            self.assertIn(f"add_arm braid-{budget} 0 1 {budget} 0 70000", source)
+            self.assertIn(
+                f"add_arm braid-{budget} 0 1 {budget} 0 70000 0 4294967295 0",
+                source,
+            )
         self.assertIn('add_arm "braid-$BRAIDED_CADICAL_PREFIX"', source)
+
+    def test_proof_seed_arms_fix_probe_gate_and_sweep_clause_length(self) -> None:
+        source = TASK.read_text(encoding="utf-8")
+        for setting in (
+            "EUF_VIPER_FINITE_DENSE7_PROBE_MIN_DECISIONS=$probe_min_decisions",
+            "EUF_VIPER_FINITE_DENSE7_PROBE_MAX_DECISIONS=$probe_max_decisions",
+            "EUF_VIPER_FINITE_DENSE7_LEARN_MAX_LEN=$learn_max_len",
+        ):
+            self.assertIn(setting, source)
+        self.assertIn("for learn_max_len in 0 4 8 16 32", source)
+        self.assertIn(
+            'add_arm "proof-seed-$learn_max_len" 0 1 100 0 70000 131 150',
+            source,
+        )
+        self.assertIn("EUF_VIPER_MATRIX_PROOF_SEED_PREFIX_CONFLICTS:-100", source)
+        self.assertIn("EUF_VIPER_MATRIX_PROOF_SEED_LEARN_MAX_LEN", source)
+        self.assertIn(
+            '"proof-seed-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-'
+            '$PROOF_SEED_MAX_DECISIONS-l$PROOF_SEED_LEARN_MAX_LEN"',
+            source,
+        )
+        self.assertIn(
+            '[ "$PROOF_SEED_MIN_DECISIONS" -le "$PROOF_SEED_MAX_DECISIONS" ]',
+            source,
+        )
 
 
 if __name__ == "__main__":

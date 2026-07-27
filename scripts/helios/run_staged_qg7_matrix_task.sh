@@ -16,6 +16,10 @@ SHARD_COUNT="${EUF_VIPER_MATRIX_SHARD_COUNT:-6}"
 EXPECTED_CPU_MODEL="${EUF_VIPER_MATRIX_CPU_MODEL:-AMD EPYC 9654}"
 MATRIX_MODE="${EUF_VIPER_MATRIX_MODE:-threshold}"
 BRAIDED_CADICAL_PREFIX="${EUF_VIPER_MATRIX_CADICAL_PREFIX_CONFLICTS:-1000}"
+PROOF_SEED_PREFIX="${EUF_VIPER_MATRIX_PROOF_SEED_PREFIX_CONFLICTS:-100}"
+PROOF_SEED_MIN_DECISIONS="${EUF_VIPER_MATRIX_PROOF_SEED_MIN_DECISIONS:-131}"
+PROOF_SEED_MAX_DECISIONS="${EUF_VIPER_MATRIX_PROOF_SEED_MAX_DECISIONS:-150}"
+PROOF_SEED_LEARN_MAX_LEN="${EUF_VIPER_MATRIX_PROOF_SEED_LEARN_MAX_LEN:-8}"
 TASK_ID="${SLURM_ARRAY_TASK_ID:?set array task ID}"
 
 die() {
@@ -43,11 +47,25 @@ check_hash() {
 [ "$TASK_ID" -lt "$SHARD_COUNT" ] || die "array task ID exceeds shard count"
 [ "${SLURM_CPUS_PER_TASK:-}" = 1 ] || die "matrix task requires one CPU"
 case "$MATRIX_MODE" in
-  threshold|confirm-stage10|braid-threshold|confirm-braid) ;;
+  threshold|confirm-stage10|braid-threshold|confirm-braid|proof-seed-threshold|confirm-proof-seed) ;;
   *) die "unsupported matrix mode" ;;
 esac
 [[ "$BRAIDED_CADICAL_PREFIX" =~ ^[0-9]+$ ]] || \
   die "braided CaDiCaL prefix must be nonnegative"
+[[ "$PROOF_SEED_PREFIX" =~ ^[0-9]+$ ]] || \
+  die "proof-seed CaDiCaL prefix must be nonnegative"
+[[ "$PROOF_SEED_MIN_DECISIONS" =~ ^[0-9]+$ ]] || \
+  die "proof-seed minimum decisions must be nonnegative"
+[[ "$PROOF_SEED_MAX_DECISIONS" =~ ^[0-9]+$ ]] || \
+  die "proof-seed maximum decisions must be nonnegative"
+[[ "$PROOF_SEED_LEARN_MAX_LEN" =~ ^[0-9]+$ ]] || \
+  die "proof-seed learned-clause length must be nonnegative"
+[ "$PROOF_SEED_MIN_DECISIONS" -le "$PROOF_SEED_MAX_DECISIONS" ] || \
+  die "proof-seed minimum decisions exceeds maximum decisions"
+[ "$PROOF_SEED_MAX_DECISIONS" -le 4294967295 ] || \
+  die "proof-seed maximum decisions exceeds u32"
+[ "$PROOF_SEED_LEARN_MAX_LEN" -le 2147483647 ] || \
+  die "proof-seed learned-clause length exceeds CaDiCaL API bound"
 case "$EXPERIMENT_ROOT" in /*/experiments/*) ;; *) die "matrix root escaped experiment namespace" ;; esac
 case "$ORCHESTRATION_CHECKOUT" in /*/orchestration-checkouts/*) ;; *) die "orchestration checkout escaped namespace" ;; esac
 
@@ -144,6 +162,9 @@ add_arm() {
   local cadical_prefix="$4"
   local kissat_conflicts="$5"
   local cadical_sprint="$6"
+  local probe_min_decisions="$7"
+  local probe_max_decisions="$8"
+  local learn_max_len="$9"
   ARGUMENTS+=(
     --arm "$name"
     --arm-arg "$SOLVER_BINARY"
@@ -155,32 +176,46 @@ add_arm() {
     --arm-env "EUF_VIPER_FINITE_DENSE7_BRAIDED=$braided"
     --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_PREFIX_CONFLICTS=$cadical_prefix"
     --arm-env "EUF_VIPER_FINITE_DENSE7_CADICAL_SPRINT_CONFLICTS=$cadical_sprint"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_PROBE_MIN_DECISIONS=$probe_min_decisions"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_PROBE_MAX_DECISIONS=$probe_max_decisions"
+    --arm-env "EUF_VIPER_FINITE_DENSE7_LEARN_MAX_LEN=$learn_max_len"
     --arm-env "EUF_VIPER_FINITE_DENSE7_KISSAT_CONFLICTS=$kissat_conflicts"
     --arm-env "EUF_VIPER_FINITE_DENSE7_STAGED=$staged"
   )
 }
 
-add_arm baseline 0 0 1000 1000 0
+add_arm baseline 0 0 1000 1000 0 0 4294967295 0
 case "$MATRIX_MODE" in
   threshold)
-    add_arm staged-0 1 0 1000 0 0
-    add_arm staged-10 1 0 1000 10 0
-    add_arm staged-100 1 0 1000 100 0
-    add_arm staged-1000 1 0 1000 1000 0
-    add_arm staged-10000 1 0 1000 10000 0
+    add_arm staged-0 1 0 1000 0 0 0 4294967295 0
+    add_arm staged-10 1 0 1000 10 0 0 4294967295 0
+    add_arm staged-100 1 0 1000 100 0 0 4294967295 0
+    add_arm staged-1000 1 0 1000 1000 0 0 4294967295 0
+    add_arm staged-10000 1 0 1000 10000 0 0 4294967295 0
     ;;
   confirm-stage10)
-    add_arm staged-10 1 0 1000 10 0
+    add_arm staged-10 1 0 1000 10 0 0 4294967295 0
     ;;
   braid-threshold)
-    add_arm braid-0 0 1 0 0 70000
-    add_arm braid-10 0 1 10 0 70000
-    add_arm braid-100 0 1 100 0 70000
-    add_arm braid-1000 0 1 1000 0 70000
-    add_arm braid-10000 0 1 10000 0 70000
+    add_arm braid-0 0 1 0 0 70000 0 4294967295 0
+    add_arm braid-10 0 1 10 0 70000 0 4294967295 0
+    add_arm braid-100 0 1 100 0 70000 0 4294967295 0
+    add_arm braid-1000 0 1 1000 0 70000 0 4294967295 0
+    add_arm braid-10000 0 1 10000 0 70000 0 4294967295 0
     ;;
   confirm-braid)
-    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 0 70000
+    add_arm "braid-$BRAIDED_CADICAL_PREFIX" 0 1 "$BRAIDED_CADICAL_PREFIX" 0 70000 0 4294967295 0
+    ;;
+  proof-seed-threshold)
+    for learn_max_len in 0 4 8 16 32; do
+      add_arm "proof-seed-$learn_max_len" 0 1 100 0 70000 131 150 "$learn_max_len"
+    done
+    ;;
+  confirm-proof-seed)
+    add_arm "proof-seed-p$PROOF_SEED_PREFIX-d$PROOF_SEED_MIN_DECISIONS-$PROOF_SEED_MAX_DECISIONS-l$PROOF_SEED_LEARN_MAX_LEN" 0 1 \
+      "$PROOF_SEED_PREFIX" 0 70000 \
+      "$PROOF_SEED_MIN_DECISIONS" "$PROOF_SEED_MAX_DECISIONS" \
+      "$PROOF_SEED_LEARN_MAX_LEN"
     ;;
 esac
 ARGUMENTS+=(
