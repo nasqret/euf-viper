@@ -1,0 +1,2110 @@
+{
+  "accounting": {
+    "execution_errors": 0,
+    "timeouts": 38,
+    "wrong_answers": 0
+  },
+  "arms": {
+    "baseline": {
+      "correct_runs": 17,
+      "coverage": 0.4722222222222222,
+      "covered_paths": 17,
+      "error_runs": 0,
+      "failed_runs": 19,
+      "paths": 36,
+      "result_counts": {
+        "sat": 9,
+        "timeout": 19,
+        "unsat": 8
+      },
+      "timeout_runs": 19,
+      "uncovered_runs": 19,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    },
+    "candidate": {
+      "correct_runs": 17,
+      "coverage": 0.4722222222222222,
+      "covered_paths": 17,
+      "error_runs": 0,
+      "failed_runs": 19,
+      "paths": 36,
+      "result_counts": {
+        "sat": 9,
+        "timeout": 19,
+        "unsat": 8
+      },
+      "timeout_runs": 19,
+      "uncovered_runs": 19,
+      "unknown_runs": 0,
+      "wrong_runs": 0
+    }
+  },
+  "artifacts": {
+    "commands": {
+      "baseline": {
+        "argv_template": [
+          "/tmp/euf-viper-target-cadical221/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-target-cadical221/release/euf-viper",
+          "requested": "/tmp/euf-viper-target-cadical221/release/euf-viper",
+          "resolved_path": "/private/tmp/euf-viper-target-cadical221/release/euf-viper",
+          "sha256": "421ed78b2677da6f04879e0c92f191303691292e03a31e9ae638655e3dd9a941",
+          "size_bytes": 3820816
+        },
+        "static_file_arguments": []
+      },
+      "candidate": {
+        "argv_template": [
+          "/tmp/euf-viper-target-cadical301/release/euf-viper",
+          "fabric-solve",
+          "--engine",
+          "quotient-portfolio",
+          "{input}"
+        ],
+        "executable": {
+          "path": "/private/tmp/euf-viper-target-cadical301/release/euf-viper",
+          "requested": "/tmp/euf-viper-target-cadical301/release/euf-viper",
+          "resolved_path": "/private/tmp/euf-viper-target-cadical301/release/euf-viper",
+          "sha256": "b5261fcfae11a5b7262a8fcb051519488f225b95d2631569b3b6c8e916e5b9a4",
+          "size_bytes": 3838064
+        },
+        "static_file_arguments": []
+      }
+    },
+    "input_files": [
+      {
+        "id": 7034,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+        "row_index": 0,
+        "sha256": "6fbd8090d743a61312b44fdf58208760771fcb57b6a3b0f74f723307bb108a69",
+        "size_bytes": 812113
+      },
+      {
+        "id": 7035,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+        "row_index": 1,
+        "sha256": "ea97848482057ed53c6551446efc26b8cfbb41d7c804b478fbf361d2b8e76b89",
+        "size_bytes": 811783
+      },
+      {
+        "id": 7036,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+        "row_index": 2,
+        "sha256": "a57fafad05d0b8b6e2d39cb37b8c1a190462d8daf4b9edefe08fcc0275a121f3",
+        "size_bytes": 812658
+      },
+      {
+        "id": 7037,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+        "row_index": 3,
+        "sha256": "7136175cd6dd47a322bb329e0dd1e93d109ee2b86400fe48d6ac2211897f2c15",
+        "size_bytes": 812328
+      },
+      {
+        "id": 7040,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+        "row_index": 4,
+        "sha256": "983958899041ac0f3ad1e269e4703c562678396a53eced7eefc8258b82511297",
+        "size_bytes": 813629
+      },
+      {
+        "id": 7041,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+        "row_index": 5,
+        "sha256": "f54b2b596705e0bb47870467923df4ba0aee0a55262542126b82c2fdf9f953a2",
+        "size_bytes": 808905
+      },
+      {
+        "id": 7042,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+        "row_index": 6,
+        "sha256": "22dd7e1b640e06081ce80790de0f5214cf1976e4b1fb83ebc5c8f978d2635f12",
+        "size_bytes": 809725
+      },
+      {
+        "id": 7043,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+        "row_index": 7,
+        "sha256": "5376f51e837a4f961bae752deca35e40aa99cde13842c395bfddad553df4a5ee",
+        "size_bytes": 811776
+      },
+      {
+        "id": 7044,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+        "row_index": 8,
+        "sha256": "1fe6b3f10aa0548693cb3ee1264c1c6718ecb8e1457d6e09e589019706ec894e",
+        "size_bytes": 812596
+      },
+      {
+        "id": 7047,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+        "row_index": 9,
+        "sha256": "2c664a3b81530af52d8eed9bc73c7d7680cb206dcdbd8f3b96d810259e22ffff",
+        "size_bytes": 811593
+      },
+      {
+        "id": 7121,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+        "row_index": 10,
+        "sha256": "7128e3ba7dbdcf231e2a818ecd7133bdba18752700623f633920c3ddf7db64de",
+        "size_bytes": 6009487
+      },
+      {
+        "id": 7122,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+        "row_index": 11,
+        "sha256": "df3f3c709bd1e6d29c102a1545f270dcd646bd89261b447e0021d231bac34b20",
+        "size_bytes": 6009838
+      },
+      {
+        "id": 7123,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+        "row_index": 12,
+        "sha256": "d7ac6e70c774711e33f23dda9c35718f8ba2af4567dc9ef81a0299f76eaeb0e8",
+        "size_bytes": 6012709
+      },
+      {
+        "id": 7127,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+        "row_index": 13,
+        "sha256": "2142ade95d411e4cf23d56d80a7baaf2ac37efb8f67a70e616b071dd1eda4cc6",
+        "size_bytes": 6012377
+      },
+      {
+        "id": 7129,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+        "row_index": 14,
+        "sha256": "f806604535a909079b30f1abd45c8a116c6f6813e4425fcc8dce219836cff0c7",
+        "size_bytes": 6012776
+      },
+      {
+        "id": 7130,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+        "row_index": 15,
+        "sha256": "991c46e08e6dafd9541a4c361be524c4e7eedbdd0198ea06c4d1dd6c441eb1c4",
+        "size_bytes": 6013183
+      },
+      {
+        "id": 7131,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+        "row_index": 16,
+        "sha256": "920d14ce6d41c98bf638da30efa4d6f9e1ce6e7cbe1387b78d8e63ef9c37137d",
+        "size_bytes": 6014836
+      },
+      {
+        "id": 7133,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+        "row_index": 17,
+        "sha256": "9192909faddf3987576853cb6c4de32331dd7a294dbb905cd69f5eb3fe8f09d1",
+        "size_bytes": 6012718
+      },
+      {
+        "id": 7137,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+        "row_index": 18,
+        "sha256": "24a7efa478566fc722e21d0c3d7d246a8b31113bcb71503dee91f01cd8aff612",
+        "size_bytes": 6011889
+      },
+      {
+        "id": 7315,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+        "row_index": 19,
+        "sha256": "a6c8c7c8a2a8d1b67574674ea78570977245a728743eca52768b52f9ef165675",
+        "size_bytes": 6014935
+      },
+      {
+        "id": 7316,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+        "row_index": 20,
+        "sha256": "175547f0f09d2238085f5621dfede32190411257315b215abcc2857d96d7e78f",
+        "size_bytes": 6010211
+      },
+      {
+        "id": 7317,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+        "row_index": 21,
+        "sha256": "dbcbdc19201c2a39ce2839becb61f4f4191ff1e9738396d894da962b33611c2b",
+        "size_bytes": 6011031
+      },
+      {
+        "id": 7318,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+        "row_index": 22,
+        "sha256": "a9f9ba690dc07f211035fc43da019da8baff81c6366d51467fd64fff016d9514",
+        "size_bytes": 6013082
+      },
+      {
+        "id": 7319,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+        "row_index": 23,
+        "sha256": "72b5e5242f0de636f031840d9e04e4d1cf55203ac1d0653c10e3576d7561e1b8",
+        "size_bytes": 6013902
+      },
+      {
+        "id": 7320,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+        "row_index": 24,
+        "sha256": "d0c7fd4c118d0f4eafec0851bdf82e52508c08ea6c12a962f1e48045aacdd5c8",
+        "size_bytes": 6012398
+      },
+      {
+        "id": 7322,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+        "row_index": 25,
+        "sha256": "fe3693b6f59618083ca4734c299a200c4cfd5b3edcd15457add15e04663781f7",
+        "size_bytes": 6012899
+      },
+      {
+        "id": 7323,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+        "row_index": 26,
+        "sha256": "78ab77e8b84ff92f3c572b01b451e0229239b1729354d76e4608642eadbb0d56",
+        "size_bytes": 59338
+      },
+      {
+        "id": 7324,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+        "row_index": 27,
+        "sha256": "ab529683e2c7e623ce791e86597d32178a15b72584f04074e5ff497161c2b58e",
+        "size_bytes": 59064
+      },
+      {
+        "id": 7325,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+        "row_index": 28,
+        "sha256": "24fbda1849824eb9f7fb731b65065d3c12bee84090f6654e88b841f981076d75",
+        "size_bytes": 59939
+      },
+      {
+        "id": 7326,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2",
+        "row_index": 29,
+        "sha256": "3f56debf9e8234388b9ee6ab746c0a95ebd3393dc890a1fd752f8ed937fc4d1c",
+        "size_bytes": 59497
+      },
+      {
+        "id": 7329,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+        "row_index": 30,
+        "sha256": "a5bd26b22963a90f3ec64008e4e86bd42dd31a387828b975eabae466d3651b72",
+        "size_bytes": 60854
+      },
+      {
+        "id": 7330,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+        "row_index": 31,
+        "sha256": "cdb3c700e70d8f0296130ad5ceaff2fdfa368be068e47c26332ac1bc02810ce2",
+        "size_bytes": 56130
+      },
+      {
+        "id": 7331,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+        "row_index": 32,
+        "sha256": "e6eed4103cbe17f0e97579b7354c5858a54bfa3b9d617088084763cb0918316e",
+        "size_bytes": 57006
+      },
+      {
+        "id": 7332,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+        "row_index": 33,
+        "sha256": "664fe1816ec402cb0c18a0eee34d139001b42852e8ef9f61abe61c1efa287c7b",
+        "size_bytes": 59057
+      },
+      {
+        "id": 7333,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+        "row_index": 34,
+        "sha256": "c381ab9194f0648f672b38291186f1fc1855c67043760d1a4b206d292a518739",
+        "size_bytes": 59765
+      },
+      {
+        "id": 7336,
+        "path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+        "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+        "resolved_path": "/Users/airbartek/codex/z3/benchmarks/smtlib-2025/QF_UF/QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+        "row_index": 35,
+        "sha256": "b4c16684d9445c48f03af3b92dab7048e68add96c0ad0ca5dee4014380aaad30",
+        "size_bytes": 58818
+      }
+    ],
+    "manifest": {
+      "path": "/tmp/euf-viper-qg7-yices-only.jsonl",
+      "resolved_path": "/private/tmp/euf-viper-qg7-yices-only.jsonl",
+      "sha256": "7f6beb21bf96fb891ef4b8d135172ca1e2239bd9c8232cabd01cd76fe2bf77ca",
+      "size_bytes": 17702
+    },
+    "results_csv": {
+      "fieldnames": [
+        "sequence",
+        "row_index",
+        "id",
+        "relative_path",
+        "expected_status",
+        "label",
+        "repeat",
+        "order_in_repeat",
+        "result",
+        "time_s",
+        "exit_code",
+        "process_returncode",
+        "timed_out",
+        "error_kind",
+        "stdout",
+        "stderr",
+        "argv_json"
+      ],
+      "path": "/tmp/euf-viper-qg7-gap-cadical221-vs-301-preprocesslight.csv",
+      "resolved_path": "/private/tmp/euf-viper-qg7-gap-cadical221-vs-301-preprocesslight.csv",
+      "sha256": "c3be2f1f3578f11ed2607ac706ac6eeabe1e74671c25e1cf2822f36df0fd2346",
+      "size_bytes": 24704,
+      "stderr_limit": 4000,
+      "stdout_limit": 1000
+    }
+  },
+  "baseline": [
+    "/tmp/euf-viper-target-cadical221/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{input}"
+  ],
+  "baseline_common_total_time_s": 20.79663037706632,
+  "baseline_correct": 17,
+  "baseline_env": [],
+  "baseline_only_correct": 0,
+  "baseline_only_examples": [],
+  "baseline_sha256": "421ed78b2677da6f04879e0c92f191303691292e03a31e9ae638655e3dd9a941",
+  "baseline_wins": 9,
+  "candidate": [
+    "/tmp/euf-viper-target-cadical301/release/euf-viper",
+    "fabric-solve",
+    "--engine",
+    "quotient-portfolio",
+    "{input}"
+  ],
+  "candidate_common_total_time_s": 20.794746249797754,
+  "candidate_correct": 17,
+  "candidate_env": [
+    "EUF_VIPER_CADICAL_OPTIONS=preprocesslight=1"
+  ],
+  "candidate_geometric_speedup": 1.0003728872826456,
+  "candidate_only_correct": 0,
+  "candidate_only_examples": [],
+  "candidate_sha256": "b5261fcfae11a5b7262a8fcb051519488f225b95d2631569b3b6c8e916e5b9a4",
+  "candidate_speedup_by_total": 1.0000906059273786,
+  "candidate_wins": 8,
+  "common_aggregate_speedup": 1.0000906059273786,
+  "common_correct": 17,
+  "common_correct_paths": [
+    "QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2"
+  ],
+  "common_geometric_speedup": 1.0003728872826456,
+  "coverage_delta": 0,
+  "elapsed_s": 117.82655158289708,
+  "execution_errors": [],
+  "finished_at": "2026-07-27T00:47:03.575020+00:00",
+  "host": {
+    "cpu_affinity": null,
+    "cpu_count": 10,
+    "fqdn": "MacBook-Air-AirBartek.local",
+    "git_revision": null,
+    "hostname": "MacBook-Air-AirBartek.local",
+    "machine": "arm64",
+    "platform": "Darwin-25.0.0-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.6",
+    "release": "25.0.0",
+    "slurm_array_job_id": null,
+    "slurm_array_task_id": null,
+    "slurm_job_id": null,
+    "slurm_node_list": null,
+    "system": "Darwin"
+  },
+  "instances": 36,
+  "manifest": "/tmp/euf-viper-qg7-yices-only.jsonl",
+  "manifest_order": [
+    "QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+    "QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+    "QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+    "QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2"
+  ],
+  "manifest_sha256": "7f6beb21bf96fb891ef4b8d135172ca1e2239bd9c8232cabd01cd76fe2bf77ca",
+  "measured_runs": 72,
+  "paths": [
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0045819169608876,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0042289999546483,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7034,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+      "row_index": 0
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9703222500393167,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9773938748985529,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7035,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl002.smt2",
+      "row_index": 1
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004304916015826,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0042850410100073,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7036,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "row_index": 2
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.8665630000177771,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.8696229580091313,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7037,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl004.smt2",
+      "row_index": 3
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.6969880000688136,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.8012513749999925,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7040,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl007.smt2",
+      "row_index": 4
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0030846670269966,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0041062500094995,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7041,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+      "row_index": 5
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0046026250347495,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0041985840070993,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7042,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+      "row_index": 6
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.00432304199785,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0046245420817286,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7043,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+      "row_index": 7
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.8657194169936702,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.886928541935049,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7044,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk004.smt2",
+      "row_index": 8
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.7793657499132678,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.6984504170250148,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7047,
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk007.smt2",
+      "row_index": 9
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0663897499907762,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.054872625041753,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7121,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk003.smt2",
+      "row_index": 10
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1152705419808626,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1398541670059785,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7122,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk004.smt2",
+      "row_index": 11
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1554687089519575,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1546927499584854,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7123,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk005.smt2",
+      "row_index": 12
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9792922500055283,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9851027500117198,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7127,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk009.smt2",
+      "row_index": 13
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0049762920243666,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9997269999003038,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7129,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk011.smt2",
+      "row_index": 14
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.159885875065811,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1847121249884367,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7130,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk012.smt2",
+      "row_index": 15
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.0327348749851808,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.020473042037338,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7131,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk013.smt2",
+      "row_index": 16
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.1928494579624385,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.199304374982603,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7133,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk015.smt2",
+      "row_index": 17
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9665369170252234,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 0.9573063330026343,
+        "results": {
+          "sat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "sat",
+      "id": 7137,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_brn_nogen_sk019.smt2",
+      "row_index": 18
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.008259209105745,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.009870999958366,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7315,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+      "row_index": 19
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0078627499751747,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.006407625041902,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7316,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+      "row_index": 20
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0070644590305164,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0078343329951167,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7317,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+      "row_index": 21
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.008014791063033,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0077160419896245,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7318,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+      "row_index": 22
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.007992250029929,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.008019500062801,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7319,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+      "row_index": 23
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.2307814169907942,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.2345503750257194,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7320,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk005.smt2",
+      "row_index": 24
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0083323339931667,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.007947917096317,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7322,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+      "row_index": 25
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004546166048385,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0042363330721855,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7323,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+      "row_index": 26
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.2316339169628918,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.205560875008814,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7324,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen002.smt2",
+      "row_index": 27
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004274083999917,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004947458044626,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7325,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+      "row_index": 28
+    },
+    {
+      "baseline": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.4818519580876455,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": true,
+        "correct_repeats": 1,
+        "covered": true,
+        "error_repeats": 0,
+        "median_time_s": 1.4249426659662277,
+        "results": {
+          "unsat": 1
+        },
+        "timeout_repeats": 0,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7326,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen004.smt2",
+      "row_index": 29
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.00447995797731,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004535915912129,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7329,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+      "row_index": 30
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004348707967438,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.002661541919224,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7330,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+      "row_index": 31
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004386791959405,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0041905000107363,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7331,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+      "row_index": 32
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.0033335409825668,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004426624975167,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7332,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+      "row_index": 33
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004361958010122,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004311416996643,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7333,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+      "row_index": 34
+    },
+    {
+      "baseline": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004974916926585,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "candidate": {
+        "correct": false,
+        "correct_repeats": 0,
+        "covered": false,
+        "error_repeats": 0,
+        "median_time_s": 2.004598000086844,
+        "results": {
+          "timeout": 1
+        },
+        "timeout_repeats": 1,
+        "unknown_repeats": 0,
+        "wrong_repeats": 0
+      },
+      "expected_status": "unsat",
+      "id": 7336,
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+      "row_index": 35
+    }
+  ],
+  "repeats": 1,
+  "runtime_host": "MacBook-Air-AirBartek.local",
+  "schema_version": 1,
+  "speedup_direction": "baseline_time / candidate_time",
+  "started_at": "2026-07-27T00:45:05.766467+00:00",
+  "status": "complete",
+  "ties": 0,
+  "timeout_s": 2.0,
+  "timeouts": [
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 0,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 2,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 5,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 5,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 6,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 6,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 7,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/gensys_icl_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 7,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 19,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 19,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 20,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 20,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 21,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 21,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 22,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 22,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 23,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk004.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 23,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 25,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_nogen_sk007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 25,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 26,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 26,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 28,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 28,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 30,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 30,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 31,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk001.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 31,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 32,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk002.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 32,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 33,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk003.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 33,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 34,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk004.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 34,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "baseline",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 35,
+      "stderr": ""
+    },
+    {
+      "error_kind": "timeout",
+      "exit_code": 124,
+      "label": "candidate",
+      "relative_path": "QF_UF/QG-classification/qg7/iso_icl_repgen_sk007.smt2",
+      "repeat": 0,
+      "result": "timeout",
+      "row_index": 35,
+      "stderr": ""
+    }
+  ],
+  "timing_basis": "per-instance median of measured repeats",
+  "warmup": {
+    "execution_errors": [],
+    "runs": 0,
+    "timeouts": [],
+    "wrong_answers": []
+  },
+  "warmups": 0,
+  "wrong_answers": []
+}

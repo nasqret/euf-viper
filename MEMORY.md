@@ -1354,3 +1354,18 @@
   Yices-only qg7 rows changes plain/UNSAT-safe coverage from 3/36 to 17/36
   with no wrong/error and `1.3363x`/`1.1630x` common total/geometric speed.
   Do not route or claim this gain until complete qg7 and anti-target gates pass.
+- Supersede the provisional qg7 opportunity with its full Helios rejection.
+  Solver `d2b45f5`, run `19962547`/`19962695`/`19962708`, solves 7,449 rather
+  than dense-six Viper's 7,458: four gains, thirteen losses, net minus nine.
+  It has zero wrong/error/missing/hash drift and `1.008512x` common-correct
+  aggregate speed, but coverage loss is terminal. Keep dense-six `b5f78fb` and
+  panel `panel-370c5109acd7ed26` as current best; retain rejected candidate
+  panel `panel-fa429821e71877f6` as negative evidence. The next qg7 experiment
+  is bounded Kissat first with explicit UNKNOWN and CaDiCaL fallback, not a
+  static SAT/UNSAT classifier.
+- CaDiCaL 3.0.1 is not a drop-in improvement. Its changed default
+  `preprocesslight=0` cuts the exact qg7 residual from 17/36 to 8/36;
+  `preprocesslight=1` restores parity, while `factor=1` reaches only 14/36.
+  Do not upgrade the embedded backend or enable factor from this evidence.
+- WMI PGO/Goel job `170902` is still pending with zero runtime because eligible
+  nodes are down, drained, or reserved. It remains older-route evidence only.

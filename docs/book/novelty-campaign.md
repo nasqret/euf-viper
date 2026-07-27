@@ -68,6 +68,15 @@ families, expected statuses, hashes, or historical timing.
 The full research contract and mechanism specifications are maintained in the
 dated design and literature notes in the repository knowledge vault.
 
+The first domain-seven backend experiment is now a useful negative result.
+Unconditional structural routing to UNSAT-oriented CaDiCaL loses thirteen
+previous solves while gaining four on the full corpus. A narrower 122-instance
+shape gains three with no coverage loss but is `0.84207x` geometrically on
+common solves, so it is not promoted and is too close to a corpus classifier.
+The successor is mechanism-based: a deterministic Kissat conflict budget,
+explicit UNKNOWN handoff, and CaDiCaL completion. Its novelty and value depend
+on complete qg7 plus anti-target ablations, not the route name.
+
 ## Current Experimental Checkpoint
 
 The first full census rejects the two fixed complete-model scouts: they

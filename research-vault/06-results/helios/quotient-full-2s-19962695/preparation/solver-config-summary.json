@@ -1,0 +1,19 @@
+{
+  "hashes": {
+    "cvc5": "7562a8b0b835e3eaad5f1a7b4616cd762350cf567b6be03d7e8ee24fa5ced5ee",
+    "euf-viper": "9763f35f343b3d4b6b536a81ef6e6520840e332854117dee5e69c44062084cfc",
+    "opensmt": "b7899e9aff299026d3251df7a28f51f56d8bd1e5b0fd7be11bcc72c4f2803a98",
+    "yices2": "eab7efbff2a6f0cce2fcd2c25cb4a94e0e048c902d8ef9e6fd7d7989aa54c501",
+    "z3-default": "a06c2a851d58c5f5a7c1e5de188fd0e1b1135e778112aee83ffd1a433685516b",
+    "z3-sat-euf": "a06c2a851d58c5f5a7c1e5de188fd0e1b1135e778112aee83ffd1a433685516b"
+  },
+  "smoke_checked": true,
+  "solvers": [
+    "euf-viper",
+    "z3-default",
+    "z3-sat-euf",
+    "cvc5",
+    "yices2",
+    "opensmt"
+  ]
+}

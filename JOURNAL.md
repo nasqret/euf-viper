@@ -2400,3 +2400,35 @@
   qg7 plus anti-target A0-A2 gates are next; this scout is not a routed gain.
 - Dashboard evidence now has 238 records and 226 claim-isolated panels. The
   exact current panel is `panel-370c5109acd7ed26`.
+
+# 2026-07-27 - Dense-seven broad rejection and CaDiCaL 3 boundary
+
+- Direct dense-seven solver revision `d2b45f5` was evaluated on Helios with
+  orchestration `fd32ee2`. Preparation `19962547`, 64-task array `19962695`,
+  and finalizer `19962708` completed `0:0`, producing 45,018/45,018 rows.
+  Portable replay reproduces audit SHA-256 `8c39332d...087e` byte-for-byte;
+  analysis SHA-256 is `a842d33d...1218` and the candidate binary is
+  `9763f35f...4cfc`.
+- A prior preparation, `19962244`, failed before timing because the dashboard
+  metric schema was passed to an executable runner requiring the comparator-
+  list schema. The corrected run used
+  `campaigns/best-overall-qf-uf-2026-07.json`; the failed preparation carries
+  no solver evidence.
+- Viper solves 7,449, Yices2 7,490, Z3 default 7,447, Z3 `sat.euf=true` 7,461,
+  cvc5 7,362, and OpenSMT 7,292. Relative to dense-six Viper, the direct route
+  gains four solves and loses thirteen, a net loss of nine, despite a
+  `1.008512x` common-correct aggregate speedup. Promotion is rejected and
+  `b5f78fb` remains the current best.
+- The exact residual now has 48 Yices-only and seven Viper-only rows. Dashboard
+  evidence contains 264 records and 252 claim-isolated panels; rejected
+  candidate panel `panel-fa429821e71877f6` is kept separate from current-best
+  panel `panel-370c5109acd7ed26`.
+- The official CaDiCaL 3.0.1 source at `c6073042` accepts the existing Viper
+  RustSAT patch and passes 643 all-feature tests. On the exact 36-row qg7
+  residual, defaults regress 17/36 to 8/36. Restoring the changed
+  `preprocesslight=1` default returns 17/36 at timing parity; adding `factor=1`
+  falls to 14/36. The backend upgrade and factor option are rejected.
+- A narrow 122-row structural cohort showed three gains and no losses, but
+  geometric timing regressed to `0.84207x`. This is insufficient and risks
+  overfitting. The next mechanism is staged search: bounded Kissat first,
+  explicit UNKNOWN on conflict-budget exhaustion, then CaDiCaL fallback.

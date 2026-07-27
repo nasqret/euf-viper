@@ -19,7 +19,7 @@ mechanism-specific authority and cannot be weakened by the top-level program.
 Immediate execution order:
 
 1. generate the dashboard from frozen broad and current targeted evidence
-   (**complete: 238 records, 226 claim-isolated panels**);
+   (**complete: 264 records, 252 claim-isolated panels**);
 2. qualify a promotion-eligible Helios lock with exact taxonomy, separate
    orchestration/solver provenance, and the official hash-locked comparator
    bundle (**complete**);
@@ -33,10 +33,14 @@ Immediate execution order:
    (**complete: qg6 192/244 -> 244/244, zero wrong/error**) and execute its
    all-solver Helios A3/A4 campaign (**complete: preparation `19961039`, array
    `19961244`, finalizer `19961245`; broad coverage 7,436 -> 7,458**);
-7. gate the observed domain-seven UNSAT-safe backend opportunity on complete
-   qg7 and anti-target populations, then run the current official two-second
-   selection and continue only current timeouts to 60 and 1,200 seconds; and
-8. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
+7. gate the observed direct domain-seven UNSAT-safe backend opportunity on
+   complete qg7 and anti-target populations, then run the official two-second
+   selection (**complete and rejected: 7,458 -> 7,449 solves; four gains,
+   thirteen losses**);
+8. implement and sweep a bounded Kissat-first/explicit-UNKNOWN/CaDiCaL-second
+   dense-seven stage, require no qg7 or anti-target loss, and run a full
+   campaign only if the complete targeted gate passes; and
+9. adjudicate WMI PGO/Goel job `170902` once terminal without treating that
    older-route result as quotient-portfolio evidence.
 
 After each A4 or later step, report exact coverage, PAR-2, common timing,
@@ -47,8 +51,8 @@ confounder, or holdout failure.
 
 The generated dashboard is `docs/dashboard/euf-progress.html`, with compact
 model `docs/dashboard/euf-progress.json` and canonical compressed evidence
-`docs/dashboard/evidence/registry.json.gz`. The authoritative current panel is
-`panel-370c5109acd7ed26` at revision `b5f78fb`: Viper solves 7,458/7,503,
+`docs/dashboard/evidence/registry.json.gz`. The authoritative current-best
+panel is `panel-370c5109acd7ed26` at revision `b5f78fb`: Viper solves 7,458/7,503,
 Yices2 7,490, Z3 default 7,447, Z3 `sat.euf=true` 7,458, cvc5 7,362, and
 OpenSMT 7,283. Against Yices2, Viper needs reductions of `66.96%` PAR-2,
 `68.61%` common total, and `60.72%` common geometric. Against Z3 default the
@@ -56,6 +60,12 @@ corresponding reductions are `16.65%`, `25.46%`, and `11.74%`. Viper now
 leads Z3 default by 11 solves and ties Z3 `sat.euf` in coverage, but it is not
 the broad leader because Yices2 solves 32 more rows and remains substantially
 faster.
+
+The latest evaluated candidate panel is `panel-fa429821e71877f6` at revision
+`d2b45f5`. It solves 7,449 rows and is retained as negative evidence, not as a
+new current best. Its direct dense-seven route gains four solves and loses
+thirteen against `b5f78fb`, while improving common-correct aggregate time by
+only `1.008512x`. The route is rejected and must be disabled by default.
 
 The Step 0 audit found and closed two orchestration defects before any timing
 job was submitted: taxonomy had been omitted from the lock, and the candidate

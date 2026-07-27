@@ -866,3 +866,34 @@ The project closes only when one frozen standalone release:
 Until all five hold, the accurate description is a fast-head QF_UF research
 solver with several independently checked experimental representations, not the
 best solver overall.
+
+## Dense-seven broad adjudication
+
+The direct dense-seven CaDiCaL route has now passed a complete, hash-locked
+Helios experiment and failed promotion. Solver `d2b45f5`, orchestration
+`fd32ee2`, preparation `19962547`, array `19962695`, and finalizer `19962708`
+produced all 45,018 rows with zero invalid results and byte-reproducible audit
+index `8c39332d...087e`.
+
+| Solver configuration | Correct at 2s |
+| --- | ---: |
+| euf-viper dense-seven candidate | 7,449 |
+| Yices2 | 7,490 |
+| Z3 default | 7,447 |
+| Z3 `sat.euf=true` | 7,461 |
+| cvc5 | 7,362 |
+| OpenSMT | 7,292 |
+
+The candidate is two solves above Z3 default, twelve below Z3's EUF mode, and
+41 below Yices2. More importantly, it regresses from the dense-six Viper by
+nine solves: four gains and thirteen losses. Its `1.008512x` common-correct
+aggregate speedup cannot compensate for that loss. The current best therefore
+remains `b5f78fb` at 7,458 solves; the rejected panel
+`panel-fa429821e71877f6` remains visible for falsification history.
+
+CaDiCaL 3.0.1 was also tested as a clean source substitution. It passes the
+full Rust suite, but its release defaults solve only 8/36 frozen qg7 residuals
+against 17/36 for 2.2.1. Explicit `preprocesslight=1` restores parity and
+`factor=1` regresses to 14/36. Neither change is promoted. The next registered
+mechanism preserves Kissat's SAT-friendly behavior for a bounded conflict
+budget and calls CaDiCaL only after an explicit UNKNOWN handoff.
