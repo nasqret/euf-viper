@@ -827,7 +827,7 @@ class T11Stage0AFinalizerTests(unittest.TestCase):
 
         def tracking_close(descriptor):
             nonlocal staging_closed
-            if descriptor == staging_descriptor:
+            if descriptor == staging_descriptor and not staging_closed:
                 staging_closed = True
                 events.append("writer-close")
             return real_close(descriptor)
