@@ -7605,7 +7605,7 @@ const T11_PROJECTION_REJECTED_EXIT: i32 = 3;
 const T11_EXTERNAL_AUDIT_REQUIRED_EXIT: i32 = 4;
 
 #[cfg(feature = "certificates")]
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct T11PublicationBinding {
     artifact: String,
     bytes: u64,
@@ -8310,7 +8310,7 @@ fn write_t11_json_record_atomic<T: Serialize>(
     artifact: &str,
 ) -> Result<(), String> {
     let target = T11PublicationTarget::prepare(destination, artifact)?;
-    write_t11_json_record_to_target(record, &target, artifact, &[])
+    write_t11_json_record_to_target(record, &target, artifact, &[]).map(|_| ())
 }
 
 #[cfg(all(
