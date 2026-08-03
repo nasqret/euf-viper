@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 
-SUBMISSION_SCHEMA = "euf-viper.t11-stage0a-submission.v2"
+SUBMISSION_SCHEMA = "euf-viper.t11-stage0a-submission.v3"
 CANDIDATE_SCHEMA = "euf-viper.t11-stage0a-compute-index.v1"
 SEMANTIC_SCHEMA = "euf-viper.t11-stage0a-validation-candidate.v2"
 SCHEDULER_CANDIDATE_SCHEMA = "euf-viper.t11-stage0a-scheduler-candidate.v1"
@@ -606,6 +606,7 @@ def _validate_control_hashes(value: object) -> dict[str, str]:
         "finalizer_script_sha256",
         "finalizer_sha256",
         "authorizer_sha256",
+        "authorization_request_executor_sha256",
         "validator_sha256",
         "exec_helper_sha256",
         "controller_python_sha256",

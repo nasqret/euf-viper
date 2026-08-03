@@ -241,7 +241,7 @@ if set(record) != {
     "slurm",
 }:
     raise SystemExit("submission record top-level keys differ")
-if record.get("schema") != "euf-viper.t11-stage0a-submission.v2":
+if record.get("schema") != "euf-viper.t11-stage0a-submission.v3":
     raise SystemExit("submission record schema differs")
 if record.get("run_nonce") != nonce:
     raise SystemExit("submission record nonce differs")
@@ -281,6 +281,9 @@ expected_control = {
     "finalizer_script_sha256": finalizer_sbatch_sha256,
     "finalizer_sha256": finalizer_sha256,
     "authorizer_sha256": artifacts.get("authorizer_sha256"),
+    "authorization_request_executor_sha256": artifacts.get(
+        "authorization_request_executor_sha256"
+    ),
     "validator_sha256": artifacts.get("validator_sha256"),
     "exec_helper_sha256": artifacts.get("exec_helper_sha256"),
     "controller_python_sha256": toolchain.get("python", {}).get("sha256"),

@@ -55,7 +55,17 @@ jobs:
             tests.test_wmi_certificate_scripts \
             tests.test_t9_projection_census \
             tests.test_wmi_t9_projection_census \
-            tests.test_t9_stage1
+            tests.test_t9_stage1 \
+            tests.test_analyze_yices_opportunity \
+            tests.test_create_t11_stage0a_launch \
+            tests.test_prepare_t11_prebuilt \
+            tests.test_t11_build_closure \
+            tests.test_exec_t11_stage0a \
+            tests.test_wmi_t11_stage0a \
+            tests.test_t11_stage0a_authorizer \
+            tests.test_t11_stage0a_authorization_request \
+            tests.test_t11_stage0a_finalizer \
+            tests.test_wmi_t11_submission
       - name: Check campaign scripts
         run: |
           bash -n scripts/bench/install_solvers.sh
@@ -80,5 +90,9 @@ jobs:
           bash -n scripts/wmi/submit_typed_parser_parity.sh
           bash -n scripts/wmi/euf_viper_t9_projection_census.sbatch
           bash -n scripts/wmi/euf_viper_t9_stage1.sbatch
+          bash -n scripts/wmi/euf_viper_prepare_t11_prebuilt.sbatch
+          bash -n scripts/wmi/euf_viper_t11_stage0a.sbatch
+          bash -n scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch
+          bash -n scripts/wmi/submit_t11_stage0a.sh
       - name: Test Rust solver
         run: cargo test --locked --all-features

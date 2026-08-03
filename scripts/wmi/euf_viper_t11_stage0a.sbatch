@@ -305,6 +305,8 @@ readonly REPO_RUNNER="$REPO_ROOT/scripts/wmi/euf_viper_t11_stage0a.sbatch"
 readonly FINALIZER_SBATCH="$REPO_ROOT/scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch"
 readonly FINALIZER="$REPO_ROOT/scripts/bench/finalize_t11_stage0a.py"
 readonly AUTHORIZER="$REPO_ROOT/scripts/bench/authorize_t11_stage0a.py"
+readonly AUTHORIZATION_REQUEST_EXECUTOR="$REPO_ROOT/scripts/bench/execute_t11_stage0a_authorization_request.py"
+readonly PREBUILT_PREPARER="$REPO_ROOT/scripts/bench/prepare_t11_prebuilt.py"
 readonly PREBUILT_BUNDLE_TOOL="$REPO_ROOT/scripts/bench/t11_build_closure.py"
 readonly DESIGN_NOTE="$REPO_ROOT/research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md"
 readonly HASH_CONTRACT="$REPO_ROOT/research-vault/02-design/2026-07-17-t11-canonical-hash-contract.md"
@@ -424,7 +426,7 @@ set -e
 chmod 400 "$LAUNCH_VALUES"
 fsync_path "$LAUNCH_VALUES"
 mapfile -d '' -t LAUNCH <"$LAUNCH_VALUES"
-[ "${#LAUNCH[@]}" -eq 41 ] || die "launch inspector returned the wrong field count"
+[ "${#LAUNCH[@]}" -eq 48 ] || die "launch inspector returned the wrong field count"
 
 readonly EXPECTED_REVISION="${LAUNCH[0]}"
 readonly EXPECTED_SOURCE_TREE="${LAUNCH[1]}"
@@ -436,41 +438,52 @@ readonly RUNNER_SHA256="${LAUNCH[6]}"
 readonly FINALIZER_SBATCH_SHA256="${LAUNCH[7]}"
 readonly FINALIZER_SHA256="${LAUNCH[8]}"
 readonly AUTHORIZER_SHA256="${LAUNCH[9]}"
-readonly VALIDATOR_SHA256="${LAUNCH[10]}"
-readonly EXEC_HELPER_SHA256="${LAUNCH[11]}"
-readonly PREBUILT_BUNDLE_TOOL_SHA256="${LAUNCH[12]}"
-readonly DESIGN_NOTE_SHA256="${LAUNCH[13]}"
-readonly HASH_CONTRACT_SHA256="${LAUNCH[14]}"
-readonly AUDIT_CONTRACT_SHA256="${LAUNCH[15]}"
-readonly PREBUILT_BUNDLE="${LAUNCH[16]}"
-readonly PREBUILT_BUNDLE_SHA256="${LAUNCH[17]}"
-readonly PREBUILT_BUNDLE_MANIFEST_SHA256="${LAUNCH[18]}"
-readonly PREBUILT_BUNDLE_SCHEMA="${LAUNCH[19]}"
-readonly PREBUILT_SOURCE_COMMIT="${LAUNCH[20]}"
-readonly PREBUILT_SOURCE_TREE="${LAUNCH[21]}"
-readonly CANDIDATE_SHA256="${LAUNCH[22]}"
-readonly CANDIDATE_BYTES="${LAUNCH[23]}"
-readonly BUILD_RECEIPT_SHA256="${LAUNCH[24]}"
-readonly DEPENDENCY_INVENTORY_SHA256="${LAUNCH[25]}"
-readonly CONTROL_GIT="${LAUNCH[26]}"
-readonly CONTROL_GIT_SHA256="${LAUNCH[27]}"
-readonly CONTROL_GIT_VERSION="${LAUNCH[28]}"
+readonly AUTHORIZATION_REQUEST_EXECUTOR_SHA256="${LAUNCH[10]}"
+readonly VALIDATOR_SHA256="${LAUNCH[11]}"
+readonly EXEC_HELPER_SHA256="${LAUNCH[12]}"
+readonly PREBUILT_PREPARER_SHA256="${LAUNCH[13]}"
+readonly PREBUILT_BUNDLE_TOOL_SHA256="${LAUNCH[14]}"
+readonly DESIGN_NOTE_SHA256="${LAUNCH[15]}"
+readonly HASH_CONTRACT_SHA256="${LAUNCH[16]}"
+readonly AUDIT_CONTRACT_SHA256="${LAUNCH[17]}"
+readonly PREBUILT_BUNDLE="${LAUNCH[18]}"
+readonly PREBUILT_BUNDLE_SHA256="${LAUNCH[19]}"
+readonly PREBUILT_BUNDLE_MANIFEST_SHA256="${LAUNCH[20]}"
+readonly PREBUILT_BUNDLE_SCHEMA="${LAUNCH[21]}"
+readonly PREBUILT_SOURCE_COMMIT="${LAUNCH[22]}"
+readonly PREBUILT_SOURCE_TREE="${LAUNCH[23]}"
+readonly CANDIDATE_SHA256="${LAUNCH[24]}"
+readonly CANDIDATE_BYTES="${LAUNCH[25]}"
+readonly BUILD_RECEIPT_SHA256="${LAUNCH[26]}"
+readonly DEPENDENCY_INVENTORY_SHA256="${LAUNCH[27]}"
+readonly PREBUILT_PREPARATION="${LAUNCH[28]}"
+readonly PREBUILT_PREPARATION_SHA256="${LAUNCH[29]}"
+readonly PREBUILT_PREPARATION_SCHEMA="${LAUNCH[30]}"
+readonly PYTHON_RUNTIME_INVENTORY="${LAUNCH[31]}"
+readonly PYTHON_RUNTIME_INVENTORY_SHA256="${LAUNCH[32]}"
+readonly CONTROL_GIT="${LAUNCH[33]}"
+readonly CONTROL_GIT_SHA256="${LAUNCH[34]}"
+readonly CONTROL_GIT_VERSION="${LAUNCH[35]}"
 
 for digest in \
   "$PYTHON_SHA256" "$RUNNER_SHA256" \
   "$SUBMITTER_SHA256" "$VALIDATOR_SHA256" "$EXEC_HELPER_SHA256" \
   "$FINALIZER_SBATCH_SHA256" "$FINALIZER_SHA256" "$AUTHORIZER_SHA256" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" "$PREBUILT_PREPARER_SHA256" \
   "$PREBUILT_BUNDLE_TOOL_SHA256" "$DESIGN_NOTE_SHA256" \
   "$HASH_CONTRACT_SHA256" "$AUDIT_CONTRACT_SHA256" \
   "$PREBUILT_BUNDLE_SHA256" "$PREBUILT_BUNDLE_MANIFEST_SHA256" \
   "$CANDIDATE_SHA256" "$BUILD_RECEIPT_SHA256" \
-  "$DEPENDENCY_INVENTORY_SHA256" "$CONTROL_GIT_SHA256"; do
+  "$DEPENDENCY_INVENTORY_SHA256" "$PREBUILT_PREPARATION_SHA256" \
+  "$PYTHON_RUNTIME_INVENTORY_SHA256" "$CONTROL_GIT_SHA256"; do
   canonical_sha256 "$digest" || die "manifest contains a malformed SHA-256"
 done
 [ "$VALIDATOR_SHA256" = "$BOOTSTRAP_VALIDATOR_SHA256" ] ||
   die "strict and bootstrap validator bindings differ"
 [ "$PREBUILT_BUNDLE_SCHEMA" = euf-viper.t11-prebuilt-bundle.v1 ] ||
   die "prebuilt bundle schema differs"
+[ "$PREBUILT_PREPARATION_SCHEMA" = euf-viper.t11-prebuilt-preparation.v2 ] ||
+  die "prebuilt preparation schema differs"
 [ "$PREBUILT_SOURCE_COMMIT" = "$EXPECTED_REVISION" ] ||
   die "prebuilt source commit differs from the solver revision"
 [ "$PREBUILT_SOURCE_TREE" = "$EXPECTED_SOURCE_TREE" ] ||
@@ -500,11 +513,19 @@ require_sha256 "$SUBMITTER" "$SUBMITTER_SHA256" submitter
 require_sha256 "$FINALIZER_SBATCH" "$FINALIZER_SBATCH_SHA256" "finalizer runner"
 require_sha256 "$FINALIZER" "$FINALIZER_SHA256" finalizer
 require_sha256 "$AUTHORIZER" "$AUTHORIZER_SHA256" authorizer
+require_sha256 "$AUTHORIZATION_REQUEST_EXECUTOR" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" "authorization-request executor"
 require_sha256 "$VALIDATOR" "$VALIDATOR_SHA256" validator
 require_sha256 "$EXEC_HELPER" "$EXEC_HELPER_SHA256" "execution helper"
+require_sha256 "$PREBUILT_PREPARER" "$PREBUILT_PREPARER_SHA256" \
+  "prebuilt preparer"
 require_sha256 "$PREBUILT_BUNDLE_TOOL" "$PREBUILT_BUNDLE_TOOL_SHA256" \
   "prebuilt-bundle utility"
 require_sha256 "$PREBUILT_BUNDLE" "$PREBUILT_BUNDLE_SHA256" "prebuilt bundle"
+require_sha256 "$PREBUILT_PREPARATION" "$PREBUILT_PREPARATION_SHA256" \
+  "prebuilt preparation report"
+require_sha256 "$PYTHON_RUNTIME_INVENTORY" \
+  "$PYTHON_RUNTIME_INVENTORY_SHA256" "Python runtime inventory"
 require_sha256 "$DESIGN_NOTE" "$DESIGN_NOTE_SHA256" "design note"
 require_sha256 "$HASH_CONTRACT" "$HASH_CONTRACT_SHA256" "hash contract"
 require_sha256 "$AUDIT_CONTRACT" "$AUDIT_CONTRACT_SHA256" "audit contract"
@@ -516,9 +537,13 @@ readonly SUBMITTER_SNAPSHOT="$PROVENANCE_ROOT/submit_t11_stage0a.sh"
 readonly FINALIZER_SBATCH_SNAPSHOT="$PROVENANCE_ROOT/euf_viper_t11_stage0a_finalize.sbatch"
 readonly FINALIZER_SNAPSHOT="$PROVENANCE_ROOT/finalize_t11_stage0a.py"
 readonly AUTHORIZER_SNAPSHOT="$PROVENANCE_ROOT/authorize_t11_stage0a.py"
+readonly AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT="$PROVENANCE_ROOT/execute_t11_stage0a_authorization_request.py"
 readonly CONTROL_GIT_SNAPSHOT="$PROVENANCE_ROOT/git"
+readonly PREBUILT_PREPARER_SNAPSHOT="$PROVENANCE_ROOT/prepare_t11_prebuilt.py"
 readonly PREBUILT_BUNDLE_TOOL_SNAPSHOT="$PROVENANCE_ROOT/t11_build_closure.py"
 readonly PREBUILT_BUNDLE_SNAPSHOT="$PROVENANCE_ROOT/prebuilt-bundle.tar"
+readonly PREBUILT_PREPARATION_SNAPSHOT="$PROVENANCE_ROOT/prebuilt-preparation.json"
+readonly PYTHON_RUNTIME_INVENTORY_SNAPSHOT="$PROVENANCE_ROOT/python-runtime-inventory.json"
 readonly DESIGN_NOTE_SNAPSHOT="$PROVENANCE_ROOT/design-note.md"
 readonly HASH_CONTRACT_SNAPSHOT="$PROVENANCE_ROOT/hash-contract.md"
 readonly AUDIT_CONTRACT_SNAPSHOT="$PROVENANCE_ROOT/audit-contract.md"
@@ -534,14 +559,26 @@ snapshot_file "$FINALIZER" "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" 0500 ||
   die "could not snapshot finalizer"
 snapshot_file "$AUTHORIZER" "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" 0500 ||
   die "could not snapshot authorizer"
+snapshot_file "$AUTHORIZATION_REQUEST_EXECUTOR" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" 0500 ||
+  die "could not snapshot authorization-request executor"
 snapshot_file "$CONTROL_GIT" "$CONTROL_GIT_SNAPSHOT" "$CONTROL_GIT_SHA256" 0500 ||
   die "could not snapshot control git"
 [ "$("$CONTROL_GIT_SNAPSHOT" --version)" = "$CONTROL_GIT_VERSION" ] ||
   die "control git version differs from the launch manifest"
+snapshot_file "$PREBUILT_PREPARER" "$PREBUILT_PREPARER_SNAPSHOT" \
+  "$PREBUILT_PREPARER_SHA256" 0500 || die "could not snapshot prebuilt preparer"
 snapshot_file "$PREBUILT_BUNDLE_TOOL" "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" \
   "$PREBUILT_BUNDLE_TOOL_SHA256" 0500 || die "could not snapshot prebuilt-bundle utility"
 snapshot_file "$PREBUILT_BUNDLE" "$PREBUILT_BUNDLE_SNAPSHOT" \
   "$PREBUILT_BUNDLE_SHA256" 0400 || die "could not snapshot prebuilt bundle"
+snapshot_file "$PREBUILT_PREPARATION" "$PREBUILT_PREPARATION_SNAPSHOT" \
+  "$PREBUILT_PREPARATION_SHA256" 0400 ||
+  die "could not snapshot prebuilt preparation report"
+snapshot_file "$PYTHON_RUNTIME_INVENTORY" "$PYTHON_RUNTIME_INVENTORY_SNAPSHOT" \
+  "$PYTHON_RUNTIME_INVENTORY_SHA256" 0400 ||
+  die "could not snapshot Python runtime inventory"
 snapshot_file "$DESIGN_NOTE" "$DESIGN_NOTE_SNAPSHOT" "$DESIGN_NOTE_SHA256" 0400 ||
   die "could not snapshot design note"
 snapshot_file "$HASH_CONTRACT" "$HASH_CONTRACT_SNAPSHOT" \
@@ -1573,15 +1610,16 @@ write_exec_request() {
   local home="$3"
   local executable="$4"
   local executable_sha256="$5"
-  shift 5
+  local runtime_inventory="$6"
+  shift 6
   pinned_python - "$kind" "$output" "$home" "$executable" \
-    "$executable_sha256" "$@" <<'PY'
+    "$executable_sha256" "$runtime_inventory" "$@" <<'PY'
 import hashlib
 import json
 import os
 import sys
 
-kind, output, home, executable, executable_sha256, *values = sys.argv[1:]
+kind, output, home, executable, executable_sha256, runtime_inventory, *values = sys.argv[1:]
 inputs = []
 argv = None
 index = 0
@@ -1626,6 +1664,40 @@ request = {
     "argv": argv,
     "environment": base_environment,
 }
+if runtime_inventory != "-":
+    encoded_inventory = open(runtime_inventory, "rb").read()
+    inventory = json.loads(encoded_inventory)
+    canonical_inventory = (
+        json.dumps(
+            inventory,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
+    if encoded_inventory != canonical_inventory:
+        raise SystemExit("execution runtime inventory is not canonical")
+    if set(inventory) != {"candidate_sha256", "platform", "runtime_files", "schema"}:
+        raise SystemExit("execution runtime inventory fields differ")
+    if (
+        inventory["schema"] != "euf-viper.t11-binary-dependencies.v1"
+        or inventory["platform"] != "linux-x86_64"
+        or inventory["candidate_sha256"] != executable_sha256
+        or not isinstance(inventory["runtime_files"], list)
+        or not inventory["runtime_files"]
+    ):
+        raise SystemExit("execution runtime inventory contract differs")
+    runtime = []
+    for index, item in enumerate(inventory["runtime_files"]):
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise SystemExit(f"execution runtime entry {index} fields differ")
+        runtime.append({"path": item["path"], "sha256": item["sha256"]})
+    if runtime != sorted(runtime, key=lambda item: item["path"].encode("utf-8")):
+        raise SystemExit("execution runtime entries are not byte-sorted")
+    request["schema"] = "euf-viper.t11-stage0a-exec.v2"
+    request["runtime"] = runtime
 encoded = (
     json.dumps(
         request,
@@ -2211,7 +2283,7 @@ PY
 
 STAGE0A_PHASE=project
 PROJECT_REQUEST_SHA256_VALUE="$(write_exec_request project "$PROJECT_REQUEST" "$RUN_HOME" \
-  "$BINARY" "$BINARY_BEFORE_SHA256" \
+  "$BINARY" "$BINARY_BEFORE_SHA256" "$DEPENDENCY_INVENTORY" \
   --input @SOURCE@ "$SOURCE_SNAPSHOT" "$SOURCE_BEFORE_SHA256" \
   --argv euf-viper project-t11 @SOURCE@ --bundle-out "$BUNDLE")" ||
   die "project request publication failed"
@@ -2244,7 +2316,7 @@ STAGE0A_PHASE=audit
 verify_publication_binding "$PROJECT_STDOUT" "$BUNDLE" bundle >/dev/null ||
   die "bundle changed before external audit"
 AUDIT_REQUEST_SHA256_VALUE="$(write_exec_request audit "$AUDIT_REQUEST" "$RUN_HOME" \
-  "$BINARY" "$BINARY_BEFORE_SHA256" \
+  "$BINARY" "$BINARY_BEFORE_SHA256" "$DEPENDENCY_INVENTORY" \
   --input @SOURCE@ "$SOURCE_SNAPSHOT" "$SOURCE_BEFORE_SHA256" \
   --input @BUNDLE@ "$BUNDLE" "$BUNDLE_PROJECT_SHA256" \
   --argv euf-viper audit-t11 @SOURCE@ --bundle @BUNDLE@ \
@@ -2301,7 +2373,7 @@ readonly PROJECT_STDERR_SHA256="$(sha256_file "$PROJECT_STDERR")"
 readonly AUDIT_STDOUT_SHA256="$(sha256_file "$AUDIT_STDOUT")"
 readonly AUDIT_STDERR_SHA256="$(sha256_file "$AUDIT_STDERR")"
 VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQUEST" "$RUN_HOME" \
-  "$PYTHON_SNAPSHOT" "$PYTHON_SHA256" \
+  "$PYTHON_SNAPSHOT" "$PYTHON_SHA256" "$PYTHON_RUNTIME_INVENTORY_SNAPSHOT" \
   --input @VALIDATOR@ "$VALIDATOR_SNAPSHOT" "$VALIDATOR_SHA256" \
   --input @SOURCE@ "$SOURCE_SNAPSHOT" "$SOURCE_AFTER_SHA256" \
   --input @BUNDLE@ "$BUNDLE" "$BUNDLE_AUDIT_SHA256" \
@@ -2312,6 +2384,8 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --input @BUILD_RECEIPT@ "$BUILD_RECEIPT" "$BUILD_RECEIPT_SHA256" \
   --input @DEPENDENCY_INVENTORY@ "$DEPENDENCY_INVENTORY" "$DEPENDENCY_INVENTORY_SHA256" \
   --input @PREBUILT_BUNDLE@ "$PREBUILT_BUNDLE_SNAPSHOT" "$PREBUILT_BUNDLE_SHA256" \
+  --input @PREBUILT_PREPARATION@ "$PREBUILT_PREPARATION_SNAPSHOT" "$PREBUILT_PREPARATION_SHA256" \
+  --input @PYTHON_RUNTIME_INVENTORY@ "$PYTHON_RUNTIME_INVENTORY_SNAPSHOT" "$PYTHON_RUNTIME_INVENTORY_SHA256" \
   --input @DESIGN_NOTE@ "$DESIGN_NOTE_SNAPSHOT" "$DESIGN_NOTE_SHA256" \
   --input @HASH_CONTRACT@ "$HASH_CONTRACT_SNAPSHOT" "$HASH_CONTRACT_SHA256" \
   --input @AUDIT_CONTRACT@ "$AUDIT_CONTRACT_SNAPSHOT" "$AUDIT_CONTRACT_SHA256" \
@@ -2320,8 +2394,10 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --input @FINALIZER_SBATCH@ "$FINALIZER_SBATCH_SNAPSHOT" "$FINALIZER_SBATCH_SHA256" \
   --input @FINALIZER@ "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" \
   --input @AUTHORIZER@ "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" \
+  --input @AUTHORIZATION_REQUEST_EXECUTOR@ "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" \
   --input @EXEC_HELPER@ "$EXEC_HELPER_SNAPSHOT" "$EXEC_HELPER_SHA256" \
   --input @CONTROL_GIT@ "$CONTROL_GIT_SNAPSHOT" "$CONTROL_GIT_SHA256" \
+  --input @PREBUILT_PREPARER@ "$PREBUILT_PREPARER_SNAPSHOT" "$PREBUILT_PREPARER_SHA256" \
   --input @PREBUILT_BUNDLE_TOOL@ "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" "$PREBUILT_BUNDLE_TOOL_SHA256" \
   --input @PREBUILT_BUNDLE_STDOUT@ "$PREBUILT_BUNDLE_STDOUT" "$PREBUILT_BUNDLE_STDOUT_SHA256" \
   --input @PREBUILT_BUNDLE_STDERR@ "$PREBUILT_BUNDLE_STDERR" "$PREBUILT_BUNDLE_STDERR_SHA256" \
@@ -2350,6 +2426,8 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --artifact build_receipt "$BUILD_RECEIPT" @BUILD_RECEIPT@ \
   --artifact dependency_inventory "$DEPENDENCY_INVENTORY" @DEPENDENCY_INVENTORY@ \
   --artifact prebuilt_bundle "$PREBUILT_BUNDLE" @PREBUILT_BUNDLE@ \
+  --artifact prebuilt_preparation "$PREBUILT_PREPARATION" @PREBUILT_PREPARATION@ \
+  --artifact python_runtime_inventory "$PYTHON_RUNTIME_INVENTORY" @PYTHON_RUNTIME_INVENTORY@ \
   --artifact design_note "$DESIGN_NOTE" @DESIGN_NOTE@ \
   --artifact hash_contract "$HASH_CONTRACT" @HASH_CONTRACT@ \
   --artifact audit_contract "$AUDIT_CONTRACT" @AUDIT_CONTRACT@ \
@@ -2358,9 +2436,11 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --artifact finalizer_sbatch "$FINALIZER_SBATCH" @FINALIZER_SBATCH@ \
   --artifact finalizer "$FINALIZER" @FINALIZER@ \
   --artifact authorizer "$AUTHORIZER" @AUTHORIZER@ \
+  --artifact authorization_request_executor "$AUTHORIZATION_REQUEST_EXECUTOR" @AUTHORIZATION_REQUEST_EXECUTOR@ \
   --artifact validator "$VALIDATOR" @VALIDATOR@ \
   --artifact exec_helper "$EXEC_HELPER" @EXEC_HELPER@ \
   --artifact control_git "$CONTROL_GIT" @CONTROL_GIT@ \
+  --artifact prebuilt_preparer "$PREBUILT_PREPARER" @PREBUILT_PREPARER@ \
   --artifact prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL" @PREBUILT_BUNDLE_TOOL@ \
   --artifact prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" @PREBUILT_BUNDLE_STDOUT@ \
   --artifact prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" @PREBUILT_BUNDLE_STDERR@ \
@@ -2414,12 +2494,16 @@ write_compute_index "$COMPUTE_INDEX" \
   finalizer_sbatch "$FINALIZER_SBATCH_SNAPSHOT" \
   finalizer "$FINALIZER_SNAPSHOT" \
   authorizer "$AUTHORIZER_SNAPSHOT" \
+  authorization_request_executor "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
   launch_manifest "$LAUNCH_MANIFEST_SNAPSHOT" \
   validator "$VALIDATOR_SNAPSHOT" \
   exec_helper "$EXEC_HELPER_SNAPSHOT" \
   control_git "$CONTROL_GIT_SNAPSHOT" \
+  prebuilt_preparer "$PREBUILT_PREPARER_SNAPSHOT" \
   prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" \
   prebuilt_bundle_archive "$PREBUILT_BUNDLE_SNAPSHOT" \
+  prebuilt_preparation "$PREBUILT_PREPARATION_SNAPSHOT" \
+  python_runtime_inventory "$PYTHON_RUNTIME_INVENTORY_SNAPSHOT" \
   prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" \
   prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" \
   python "$PYTHON_SNAPSHOT" \

@@ -126,7 +126,11 @@ def staged_payload() -> dict[str, object]:
     return {
         "schema_version": 1,
         "inputs": {
+            "baseline_ids": [
+                solver for solver in SOLVERS if solver != "euf-viper"
+            ],
             "budgets_s": [60.0],
+            "candidate_id": "euf-viper",
             "carried_forward_observations": 0,
             "instances": 4,
             "observation_provenance": provenance,
@@ -135,9 +139,64 @@ def staged_payload() -> dict[str, object]:
         "input_hashes": {
             "observation_provenance_sha256": hashlib.sha256(
                 ATLAS.canonical_json_bytes(provenance)
-            ).hexdigest()
+            ).hexdigest(),
+            "solver_binary_sha256": {
+                solver: hashlib.sha256(solver.encode("ascii")).hexdigest()
+                for solver in SOLVERS
+            },
         },
     }
+
+
+def instance_pair(
+    relative_path: str,
+    expected_status: str,
+    viper_time: float,
+    yices_time: float,
+) -> ATLAS.InstancePair:
+    family, degree = ATLAS.path_taxonomy(relative_path)
+
+    def observation(solver: str, time_s: float) -> ATLAS.Observation:
+        return ATLAS.Observation(
+            identifier=relative_path,
+            relative_path=relative_path,
+            expected_status=expected_status,
+            solver=solver,
+            result=expected_status,
+            time_s=time_s,
+            exit_code=0,
+            stderr="",
+        )
+
+    return ATLAS.InstancePair(
+        relative_path=relative_path,
+        expected_status=expected_status,
+        family=family,
+        qg_degree=degree,
+        viper=observation("euf-viper", viper_time),
+        yices=observation("yices2", yices_time),
+    )
+
+
+def prospective_manifest_pairs() -> list[ATLAS.InstancePair]:
+    pairs = []
+    for index in range(105):
+        family = "QG-classification" if index % 2 == 0 else "2018-Goel-hwbench"
+        status = "sat" if (index // 2) % 2 == 0 else "unsat"
+        if family == "QG-classification":
+            path = f"QF_UF/{family}/qg7/target-{index:03d}.smt2"
+        else:
+            path = f"QF_UF/{family}/target-{index:03d}.smt2"
+        pairs.append(instance_pair(path, status, 1000.0 - index, 1.0))
+    for index in range(140):
+        family = "QG-classification" if index % 2 == 0 else "2018-Goel-hwbench"
+        status = "sat" if (index // 2) % 2 == 0 else "unsat"
+        if family == "QG-classification":
+            path = f"QF_UF/{family}/qg7/control-{index:03d}.smt2"
+        else:
+            path = f"QF_UF/{family}/control-{index:03d}.smt2"
+        pairs.append(instance_pair(path, status, 0.5, 1.0))
+    return pairs
 
 
 class OpportunityAtlasTests(unittest.TestCase):
@@ -180,6 +239,12 @@ class OpportunityAtlasTests(unittest.TestCase):
             self.assertEqual(overall["viper_only_correct"], 1)
             self.assertAlmostEqual(
                 overall["geometric_yices_over_viper_factor"], math.sqrt(0.5)
+            )
+            self.assertEqual(
+                payload["numeric_serialization"][
+                    "geometric_metric_serialized_significant_decimal_digits"
+                ],
+                ATLAS.GEOMETRIC_SERIALIZATION_SIGNIFICANT_DIGITS,
             )
 
             self.assertEqual(
@@ -255,6 +320,84 @@ class OpportunityAtlasTests(unittest.TestCase):
                 ATLAS.canonical_json_bytes(json.loads(first_json.read_bytes())),
             )
 
+    def test_prospective_manifest_freezes_top_100_and_matched_controls(self) -> None:
+        pairs = prospective_manifest_pairs()
+        dataset_sha256 = "d" * 64
+
+        first = ATLAS.build_atlas(
+            pairs,
+            solvers=["euf-viper", "yices2"],
+            dataset_sha256=dataset_sha256,
+            row_count=len(pairs) * 2,
+            viper_solver="euf-viper",
+            yices_solver="yices2",
+            cohort_fraction=0.10,
+            top_ns=(10, 50, 100),
+        )["prospective_cohort_manifest"]
+        second = ATLAS.build_atlas(
+            list(reversed(pairs)),
+            solvers=["euf-viper", "yices2"],
+            dataset_sha256=dataset_sha256,
+            row_count=len(pairs) * 2,
+            viper_solver="euf-viper",
+            yices_solver="yices2",
+            cohort_fraction=0.10,
+            top_ns=(10, 50, 100),
+        )["prospective_cohort_manifest"]
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first["schema_version"], ATLAS.COHORT_MANIFEST_SCHEMA_VERSION
+        )
+        self.assertEqual(first["source_dataset_sha256"], dataset_sha256)
+        targets = first["target_selection"]["targets"]
+        self.assertEqual(first["target_selection"]["actual_count"], 100)
+        self.assertEqual(
+            [target["relative_path"] for target in targets],
+            [pair.relative_path for pair in pairs[:100]],
+        )
+
+        controls = first["matched_controls"]
+        self.assertFalse(controls["selection_uses_control_timing"])
+        self.assertEqual(controls["actual_count"], 100)
+        for stratum in controls["strata"]:
+            self.assertEqual(stratum["control_count"], stratum["target_count"])
+            self.assertTrue(
+                all(isinstance(path, str) for path in stratum["control_paths"])
+            )
+            self.assertNotIn("wall_time_s", stratum)
+            self.assertNotIn("deficit_s", stratum)
+
+        declared_hash = first["manifest_sha256"]
+        self.assertEqual(declared_hash, ATLAS._cohort_manifest_sha256(first))
+        tampered = json.loads(json.dumps(first))
+        tampered["target_selection"]["targets"][0]["relative_path"] = (
+            "QF_UF/tampered/case.smt2"
+        )
+        self.assertNotEqual(
+            declared_hash,
+            ATLAS._cohort_manifest_sha256(tampered),
+        )
+
+    def test_geometric_serialization_absorbs_platform_ulp_drift(self) -> None:
+        linux_value = 0.654922309988073
+        macos_value = math.nextafter(linux_value, -math.inf)
+
+        self.assertNotEqual(linux_value, macos_value)
+        self.assertEqual(
+            ATLAS._quantize_geometric_metric(linux_value),
+            ATLAS._quantize_geometric_metric(macos_value),
+        )
+        self.assertEqual(
+            ATLAS._quantize_geometric_metric(linux_value),
+            float(
+                format(
+                    linux_value,
+                    f".{ATLAS.GEOMETRIC_SERIALIZATION_SIGNIFICANT_DIGITS}g",
+                )
+            ),
+        )
+
     def test_staged_analysis_uses_hash_bound_effective_budget(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yices atlas staged ") as temp:
             root = Path(temp)
@@ -273,6 +416,15 @@ class OpportunityAtlasTests(unittest.TestCase):
             payload = json.loads(output.read_text(encoding="ascii"))
             self.assertEqual(payload["validation"]["input_format"], "staged-analysis")
             self.assertEqual(payload["validation"]["effective_budget_s"], 60.0)
+            self.assertEqual(
+                payload["validation"]["expected_solvers"], sorted(SOLVERS)
+            )
+            self.assertEqual(
+                payload["validation"]["observed_solvers"], sorted(SOLVERS)
+            )
+            self.assertIn(
+                "candidate_id", payload["validation"]["solver_matrix_source"]
+            )
             self.assertEqual(payload["overall"]["common_correct"], 2)
             self.assertEqual(payload["overall"]["positive_time_deficit_s"], 3.0)
             self.assertEqual(payload["overall"]["yices2_only_correct"], 1)
@@ -317,6 +469,92 @@ class OpportunityAtlasTests(unittest.TestCase):
 
                 self.assertEqual(completed.returncode, 2, completed.stderr)
                 self.assertFalse(output.exists())
+
+    def test_staged_declared_solver_column_removal_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="yices atlas staged column "
+        ) as temp:
+            root = Path(temp)
+            source = root / "full.json"
+            output = root / "atlas.json"
+            payload = staged_payload()
+            rows = payload["inputs"]["observation_provenance"]
+            payload["inputs"]["observation_provenance"] = [
+                row for row in rows if row["solver_id"] != "cvc5"
+            ]
+            payload["input_hashes"]["observation_provenance_sha256"] = (
+                hashlib.sha256(
+                    ATLAS.canonical_json_bytes(
+                        payload["inputs"]["observation_provenance"]
+                    )
+                ).hexdigest()
+            )
+            self.write_staged(source, payload)
+
+            completed = self.run_cli(
+                source,
+                output,
+                "--input-format",
+                "staged-analysis",
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn(
+                "declared staged solver matrix is incomplete", completed.stderr
+            )
+            self.assertFalse(output.exists())
+
+    def test_staged_solver_hash_declaration_must_match_matrix(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="yices atlas staged declaration "
+        ) as temp:
+            root = Path(temp)
+            source = root / "full.json"
+            output = root / "atlas.json"
+            payload = staged_payload()
+            del payload["input_hashes"]["solver_binary_sha256"]["cvc5"]
+            self.write_staged(source, payload)
+
+            completed = self.run_cli(
+                source,
+                output,
+                "--input-format",
+                "staged-analysis",
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn(
+                "does not match the declared comparator matrix", completed.stderr
+            )
+            self.assertFalse(output.exists())
+
+    def test_staged_row_binary_must_match_declared_solver(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yices atlas staged binary ") as temp:
+            root = Path(temp)
+            source = root / "full.json"
+            output = root / "atlas.json"
+            payload = staged_payload()
+            rows = payload["inputs"]["observation_provenance"]
+            cvc5_row = next(row for row in rows if row["solver_id"] == "cvc5")
+            cvc5_row["binary_sha256"] = "f" * 64
+            payload["input_hashes"]["observation_provenance_sha256"] = (
+                hashlib.sha256(ATLAS.canonical_json_bytes(rows)).hexdigest()
+            )
+            self.write_staged(source, payload)
+
+            completed = self.run_cli(
+                source,
+                output,
+                "--input-format",
+                "staged-analysis",
+            )
+
+            self.assertEqual(completed.returncode, 2, completed.stderr)
+            self.assertIn(
+                "binary_sha256 disagrees with the staged solver declaration",
+                completed.stderr,
+            )
+            self.assertFalse(output.exists())
 
     def test_duplicate_pair_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yices atlas duplicate ") as temp:

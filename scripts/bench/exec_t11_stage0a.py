@@ -12,15 +12,18 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
 SCHEMA = "euf-viper.t11-stage0a-exec.v1"
+RUNTIME_SCHEMA = "euf-viper.t11-stage0a-exec.v2"
 PROC_FD_ROOT = "/proc/self/fd"
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_HELPER_BYTES = 4 * 1024 * 1024
 MAX_INPUTS = 32
+MAX_RUNTIME_FILES = 128
 MAX_ARGV = 256
 MAX_STRING_BYTES = 16 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
@@ -74,6 +77,7 @@ class ExecRequest:
     inputs: tuple[InputSpec, ...]
     argv: tuple[str, ...]
     environment: Mapping[str, str]
+    runtime: tuple[FileSpec, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,6 +88,13 @@ class _SealedFile:
     size: int
     mode: int
     seals: int
+    identity: tuple[int, int, int, int, int, int]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetainedRuntime:
+    spec: FileSpec
+    fd: int
     identity: tuple[int, int, int, int, int, int]
 
 
@@ -197,13 +208,40 @@ def _validate_environment(value: object) -> Mapping[str, str]:
 
 
 def parse_request(value: object) -> ExecRequest:
-    record = _exact_keys(
-        value,
-        ("schema", "executable", "inputs", "argv", "environment"),
-        "request",
-    )
-    if record["schema"] != SCHEMA:
-        _fail(f"request.schema must equal {SCHEMA!r}")
+    if type(value) is not dict:
+        _fail("request must be an object")
+    schema = value.get("schema")
+    if schema == SCHEMA:
+        record = _exact_keys(
+            value,
+            ("schema", "executable", "inputs", "argv", "environment"),
+            "request",
+        )
+        runtime: tuple[FileSpec, ...] = ()
+    elif schema == RUNTIME_SCHEMA:
+        record = _exact_keys(
+            value,
+            ("schema", "executable", "inputs", "argv", "environment", "runtime"),
+            "request",
+        )
+        raw_runtime = record["runtime"]
+        if type(raw_runtime) is not list:
+            _fail("request.runtime must be an array")
+        if not 1 <= len(raw_runtime) <= MAX_RUNTIME_FILES:
+            _fail(
+                f"request.runtime must contain between 1 and {MAX_RUNTIME_FILES} entries"
+            )
+        runtime = tuple(
+            _parse_file_spec(item, f"request.runtime[{index}]")
+            for index, item in enumerate(raw_runtime)
+        )
+        paths = [item.path for item in runtime]
+        if len(paths) != len(set(paths)):
+            _fail("request.runtime contains duplicate paths")
+        if paths != sorted(paths, key=lambda item: item.encode("utf-8")):
+            _fail("request.runtime paths are not byte-sorted")
+    else:
+        _fail(f"request.schema must equal {SCHEMA!r} or {RUNTIME_SCHEMA!r}")
 
     executable = _parse_file_spec(record["executable"], "request.executable")
 
@@ -279,6 +317,7 @@ def parse_request(value: object) -> ExecRequest:
         inputs=tuple(inputs),
         argv=argv,
         environment=environment,
+        runtime=runtime,
     )
 
 
@@ -553,6 +592,75 @@ def _snapshot_verified(
         os.close(source_fd)
 
 
+def _require_runtime_path_immutable(path: str, role: str) -> None:
+    canonical = os.path.realpath(path)
+    if canonical != path:
+        _fail(f"{role} path must be canonical and nonsymlinked: {path!r}")
+    current = path
+    while True:
+        try:
+            metadata = os.stat(current, follow_symlinks=False)
+        except OSError as error:
+            _fail(f"cannot inspect {role} path component {current!r}: {error}")
+        if stat.S_ISLNK(metadata.st_mode):
+            _fail(f"{role} path component must not be a symlink: {current!r}")
+        try:
+            writable = os.access(current, os.W_OK, effective_ids=True)
+        except TypeError:  # pragma: no cover - effective_ids is present on Linux
+            writable = os.access(current, os.W_OK)
+        if writable:
+            _fail(
+                f"{role} path is writable by the executing identity: {current!r}"
+            )
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+
+
+def _open_retained_runtime(spec: FileSpec, index: int) -> _RetainedRuntime:
+    role = f"runtime[{index}]"
+    _require_runtime_path_immutable(spec.path, role)
+    descriptor = _open_readonly_regular(spec.path, role)
+    try:
+        before = _stat_identity(os.fstat(descriptor))
+        actual_sha256 = _sha256_fd(descriptor)
+        after = _stat_identity(os.fstat(descriptor))
+        if before != after:
+            _fail(f"{role} changed while it was hashed")
+        if actual_sha256 != spec.sha256:
+            _fail(
+                f"{role} SHA-256 mismatch: expected {spec.sha256}, "
+                f"found {actual_sha256}"
+            )
+        path_metadata = os.stat(spec.path, follow_symlinks=False)
+        if _stat_identity(path_metadata) != before:
+            _fail(f"{role} path and retained descriptor identities differ")
+        return _RetainedRuntime(
+            spec=spec,
+            fd=descriptor,
+            identity=before,
+        )
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _verify_retained_runtime(runtime: _RetainedRuntime, index: int) -> None:
+    role = f"runtime[{index}]"
+    _require_runtime_path_immutable(runtime.spec.path, role)
+    descriptor_identity = _stat_identity(os.fstat(runtime.fd))
+    if descriptor_identity != runtime.identity:
+        _fail(f"retained {role} descriptor metadata changed during execution")
+    if _sha256_fd(runtime.fd) != runtime.spec.sha256:
+        _fail(f"retained {role} bytes changed during execution")
+    path_identity = _stat_identity(
+        os.stat(runtime.spec.path, follow_symlinks=False)
+    )
+    if path_identity != runtime.identity:
+        _fail(f"{role} pathname identity changed during execution")
+
+
 def _require_proc_fd_root() -> None:
     try:
         metadata = os.stat(PROC_FD_ROOT)
@@ -796,10 +904,12 @@ def execute_request(
     request: ExecRequest,
     *,
     execve: Callable[[str, Sequence[str], Mapping[str, str]], Any] = os.execve,
-) -> None:
+    popen: Callable[..., Any] = subprocess.Popen,
+) -> int | None:
     _require_linux_memfd_sealing()
     _require_proc_fd_root()
     sealed_files: list[_SealedFile] = []
+    retained_runtime: list[_RetainedRuntime] = []
     try:
         executable = _snapshot_verified(
             request.executable, "executable", executable=True
@@ -812,12 +922,37 @@ def execute_request(
             sealed_files.append(sealed)
             placeholder_paths[input_spec.placeholder] = _proc_path(sealed.fd)
 
+        for index, runtime_spec in enumerate(request.runtime):
+            retained_runtime.append(
+                _open_retained_runtime(runtime_spec, index)
+            )
+
         argv = [placeholder_paths.get(argument, argument) for argument in request.argv]
         required_fds = {sealed.fd for sealed in sealed_files}
         _set_only_required_inheritable(required_fds)
 
         for sealed in sealed_files:
             _verify_sealed_file_again(sealed)
+
+        for index, runtime in enumerate(retained_runtime):
+            _verify_retained_runtime(runtime, index)
+
+        if retained_runtime:
+            process = popen(
+                argv,
+                executable=_proc_path(executable.fd),
+                env=dict(request.environment),
+                close_fds=True,
+                pass_fds=tuple(sorted(required_fds)),
+            )
+            return_code = process.wait()
+            for index, runtime in enumerate(retained_runtime):
+                _verify_retained_runtime(runtime, index)
+            for sealed in sealed_files:
+                _verify_sealed_file_again(sealed)
+            if return_code < 0:
+                return 128 + min(-return_code, 127)
+            return return_code
 
         execve(
             _proc_path(executable.fd),
@@ -826,6 +961,12 @@ def execute_request(
         )
         _fail("os.execve returned unexpectedly")
     finally:
+        for runtime in reversed(retained_runtime):
+            try:
+                os.close(runtime.fd)
+            except OSError as error:
+                if error.errno != errno.EBADF:
+                    raise
         for sealed in reversed(sealed_files):
             try:
                 os.close(sealed.fd)
@@ -895,7 +1036,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.self_fd,
                 arguments.self_sha256,
             )
-        execute_request(request)
+        result = execute_request(request)
+        if result is not None:
+            return result
     except (Stage0ExecError, OSError) as error:
         print(f"exec_t11_stage0a: rejected: {error}", file=sys.stderr)
         return 2

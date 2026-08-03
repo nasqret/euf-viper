@@ -167,13 +167,17 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
             '--artifact finalizer_sbatch "$FINALIZER_SBATCH" @FINALIZER_SBATCH@',
             '--artifact finalizer "$FINALIZER" @FINALIZER@',
             '--artifact authorizer "$AUTHORIZER" @AUTHORIZER@',
+            '--artifact authorization_request_executor "$AUTHORIZATION_REQUEST_EXECUTOR" @AUTHORIZATION_REQUEST_EXECUTOR@',
             '--artifact validator "$VALIDATOR" @VALIDATOR@',
             '--artifact exec_helper "$EXEC_HELPER" @EXEC_HELPER@',
             '--artifact control_git "$CONTROL_GIT" @CONTROL_GIT@',
+            '--artifact prebuilt_preparer "$PREBUILT_PREPARER" @PREBUILT_PREPARER@',
             '--artifact prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL" @PREBUILT_BUNDLE_TOOL@',
             '--artifact prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" @PREBUILT_BUNDLE_STDOUT@',
             '--artifact prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" @PREBUILT_BUNDLE_STDERR@',
             '--artifact prebuilt_bundle "$PREBUILT_BUNDLE" @PREBUILT_BUNDLE@',
+            '--artifact prebuilt_preparation "$PREBUILT_PREPARATION" @PREBUILT_PREPARATION@',
+            '--artifact python_runtime_inventory "$PYTHON_RUNTIME_INVENTORY" @PYTHON_RUNTIME_INVENTORY@',
             '--artifact build_receipt "$BUILD_RECEIPT" @BUILD_RECEIPT@',
             '--artifact dependency_inventory "$DEPENDENCY_INVENTORY" @DEPENDENCY_INVENTORY@',
             '--artifact launch_manifest "$LAUNCH_MANIFEST" @LAUNCH_MANIFEST@',
@@ -398,9 +402,11 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             "finalizer_sbatch_sha256",
             "finalizer_sha256",
             "authorizer_sha256",
-                "validator_sha256",
-                "exec_helper_sha256",
-                "prebuilt_bundle_tool_sha256",
+            "authorization_request_executor_sha256",
+            "validator_sha256",
+            "exec_helper_sha256",
+            "prebuilt_preparer_sha256",
+            "prebuilt_bundle_tool_sha256",
             "design_note_sha256",
             "hash_contract_sha256",
             "audit_contract_sha256",
@@ -465,6 +471,16 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                         str(prebuilt["candidate_bytes"]),
                         prebuilt["build_receipt_sha256"],
                         prebuilt["dependency_inventory_sha256"],
+                    ]
+                )
+                preparation = manifest["prebuilt_preparation"]
+                values.extend(
+                    [
+                        preparation["path"],
+                        preparation["sha256"],
+                        preparation["schema"],
+                        preparation["python_runtime_inventory_path"],
+                        preparation["python_runtime_inventory_sha256"],
                     ]
                 )
                 for label in ("git", "sbatch", "scontrol", "scancel", "sacct"):
@@ -590,8 +606,12 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         finalizer_sbatch = repo / "scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch"
         finalizer = repo / "scripts/bench/finalize_t11_stage0a.py"
         authorizer = repo / "scripts/bench/authorize_t11_stage0a.py"
+        authorization_request_executor = (
+            repo / "scripts/bench/execute_t11_stage0a_authorization_request.py"
+        )
         validator = repo / "scripts/bench/validate_t11_stage0a.py"
         exec_helper = repo / "scripts/bench/exec_t11_stage0a.py"
+        prebuilt_preparer = repo / "scripts/bench/prepare_t11_prebuilt.py"
         prebuilt_bundle_tool = repo / "scripts/bench/t11_build_closure.py"
         candidate = tools / "euf-viper"
         self._write(runner, runner_text, 0o755)
@@ -599,8 +619,10 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         self._write(finalizer_sbatch, "#!/bin/sh\nexit 0\n", 0o755)
         self._write(finalizer, "#!/usr/bin/python3\n", 0o755)
         self._write(authorizer, "#!/usr/bin/python3\n", 0o755)
+        self._write(authorization_request_executor, "#!/usr/bin/python3\n", 0o755)
         self._write(validator, self._validator_source(python), 0o755)
         self._write(exec_helper, (ROOT / "scripts/bench/exec_t11_stage0a.py").read_bytes(), 0o755)
+        self._write(prebuilt_preparer, "#!/usr/bin/python3\n", 0o755)
         self._write(
             prebuilt_bundle_tool,
             (ROOT / "scripts/bench/t11_build_closure.py").read_bytes(),
@@ -649,6 +671,26 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                 )
                 + "\n"
             ).encode("ascii"),
+        )
+        python_runtime_inventory = case / "python-runtime-inventory.json"
+        self._write(
+            python_runtime_inventory,
+            (
+                json.dumps(
+                    {
+                        "candidate_sha256": self._sha256(python),
+                        "platform": "linux-x86_64",
+                        "runtime_files": [
+                            {"path": str(python), "sha256": self._sha256(python)}
+                        ],
+                        "schema": "euf-viper.t11-binary-dependencies.v1",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("ascii"),
+            0o400,
         )
         build_receipt = case / "build-receipt.json"
         self._write(
@@ -703,21 +745,30 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             )
         )
 
+        prebuilt_preparation = case / "prebuilt-preparation.json"
+        self._write(
+            prebuilt_preparation,
+            b'{"schema":"euf-viper.t11-prebuilt-preparation.v2","status":"verified"}\n',
+            0o400,
+        )
+
         artifact_paths = {
             "submitter_sha256": submitter,
             "runner_sha256": runner,
             "finalizer_sbatch_sha256": finalizer_sbatch,
             "finalizer_sha256": finalizer,
             "authorizer_sha256": authorizer,
+            "authorization_request_executor_sha256": authorization_request_executor,
             "validator_sha256": validator,
             "exec_helper_sha256": exec_helper,
+            "prebuilt_preparer_sha256": prebuilt_preparer,
             "prebuilt_bundle_tool_sha256": prebuilt_bundle_tool,
             "design_note_sha256": design_note,
             "hash_contract_sha256": hash_contract,
             "audit_contract_sha256": audit_contract,
         }
         manifest = {
-            "schema": "euf-viper.t11-stage0a-launch.v4",
+            "schema": "euf-viper.t11-stage0a-launch.v6",
             "solver_revision": revision,
             "solver_source": {"commit": revision, "tree": source_tree},
             "inspect_reject": inspect_reject,
@@ -752,6 +803,15 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                 "dependency_inventory_sha256": closure_report[
                     "dependency_inventory_sha256"
                 ],
+            },
+            "prebuilt_preparation": {
+                "path": str(prebuilt_preparation),
+                "python_runtime_inventory_path": str(python_runtime_inventory),
+                "python_runtime_inventory_sha256": self._sha256(
+                    python_runtime_inventory
+                ),
+                "schema": "euf-viper.t11-prebuilt-preparation.v2",
+                "sha256": self._sha256(prebuilt_preparation),
             },
             "artifacts": {
                 name: self._sha256(path) for name, path in artifact_paths.items()
@@ -977,6 +1037,18 @@ class T11Stage0AValidatorTests(unittest.TestCase):
             ),
             inventory,
         )
+        for count in (0, self.validator.MAX_RUNTIME_FILES + 1):
+            oversized = copy.deepcopy(inventory)
+            oversized["runtime_files"] = [
+                {"path": f"/runtime/{index}", "sha256": "0" * 64}
+                for index in range(count)
+            ]
+            with self.assertRaisesRegex(
+                self.validator.ValidationError, "must contain between"
+            ):
+                self.validator._validate_binary_dependency_inventory(
+                    oversized, candidate_sha256
+                )
         runtime_path.write_bytes(b"changed runtime bytes\n")
         with self.assertRaisesRegex(
             self.validator.ValidationError, "runtime dependency SHA-256 differs"
@@ -1452,23 +1524,39 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         bundle, receipt = self._records()
         self._write_records(bundle, receipt)
         binary = self.root / "euf-viper"
-        binary.write_bytes(b"binary")
+        python_tool = Path(sys.executable).resolve()
+        binary.write_bytes(python_tool.read_bytes())
         binary.chmod(0o500)
-        python_tool = self.root / "python"
-        python_tool.write_bytes(b"python")
-        python_tool.chmod(0o500)
         binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+        python_sha256 = hashlib.sha256(python_tool.read_bytes()).hexdigest()
+        runtime_record = {
+            "path": str(python_tool),
+            "sha256": python_sha256,
+        }
         dependency_inventory = self.root / "dependency_inventory"
         dependency_inventory.write_bytes(
             self._encode(
                 {
                     "candidate_sha256": binary_sha256,
                     "platform": "linux-x86_64",
-                    "runtime_files": [],
+                    "runtime_files": [runtime_record],
                     "schema": self.validator.DEPENDENCY_INVENTORY_SCHEMA,
                 }
             )
         )
+        dependency_inventory.chmod(0o400)
+        python_runtime_inventory = self.root / "python_runtime_inventory"
+        python_runtime_inventory.write_bytes(
+            self._encode(
+                {
+                    "candidate_sha256": python_sha256,
+                    "platform": "linux-x86_64",
+                    "runtime_files": [runtime_record],
+                    "schema": self.validator.DEPENDENCY_INVENTORY_SCHEMA,
+                }
+            )
+        )
+        python_runtime_inventory.chmod(0o400)
         build_receipt = self.root / "build_receipt"
         build_receipt.write_bytes(
             self._encode(
@@ -1490,25 +1578,157 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 }
             )
         )
+        build_receipt.chmod(0o400)
         prebuilt_bundle = self.root / "prebuilt-bundle.tar"
         prebuilt_bundle.write_bytes(b"synthetic prebuilt bundle\n")
         prebuilt_bundle.chmod(0o400)
+        retained_builds: dict[str, dict[str, dict[str, object]]] = {}
+        for label in ("build_a", "build_b"):
+            retained_candidate = self.root / f"{label}-candidate"
+            retained_stdout = self.root / f"{label}-stdout"
+            retained_stderr = self.root / f"{label}-stderr"
+            retained_candidate.write_bytes(binary.read_bytes())
+            retained_stdout.write_bytes(f"{label} stdout\n".encode("ascii"))
+            retained_stderr.write_bytes(f"{label} stderr\n".encode("ascii"))
+            for path in (retained_candidate, retained_stdout, retained_stderr):
+                path.chmod(0o400)
+            retained_builds[label] = {
+                "candidate": {
+                    "bytes": retained_candidate.stat().st_size,
+                    "path": str(retained_candidate),
+                    "sha256": hashlib.sha256(
+                        retained_candidate.read_bytes()
+                    ).hexdigest(),
+                },
+                "stdout": {
+                    "path": str(retained_stdout),
+                    "sha256": hashlib.sha256(retained_stdout.read_bytes()).hexdigest(),
+                },
+                "stderr": {
+                    "path": str(retained_stderr),
+                    "sha256": hashlib.sha256(retained_stderr.read_bytes()).hexdigest(),
+                },
+            }
         artifacts = {
             "source": self.source,
             "binary": binary,
             "build_receipt": build_receipt,
             "dependency_inventory": dependency_inventory,
             "prebuilt_bundle": prebuilt_bundle,
+            "python_runtime_inventory": python_runtime_inventory,
             "python": python_tool,
             "bundle": self.bundle_path,
             "audit_receipt": self.receipt_path,
         }
         for name in self.validator.REQUIRED_ARTIFACTS - set(artifacts) - {
-            "launch_manifest"
+            "launch_manifest",
+            "prebuilt_preparation",
         }:
             path = self.root / name
             path.write_bytes((name + "\n").encode("ascii"))
             artifacts[name] = path
+
+        preparation_report = {
+            "artifacts": {
+                "build_a_candidate": retained_builds["build_a"]["candidate"],
+                "build_a_stderr": retained_builds["build_a"]["stderr"],
+                "build_a_stdout": retained_builds["build_a"]["stdout"],
+                "build_b_candidate": retained_builds["build_b"]["candidate"],
+                "build_b_stderr": retained_builds["build_b"]["stderr"],
+                "build_b_stdout": retained_builds["build_b"]["stdout"],
+                "build_receipt": {
+                    "path": str(build_receipt),
+                    "sha256": hashlib.sha256(build_receipt.read_bytes()).hexdigest(),
+                },
+                "candidate": {
+                    "bytes": binary.stat().st_size,
+                    "path": str(binary),
+                    "sha256": binary_sha256,
+                },
+                "dependency_inventory": {
+                    "path": str(dependency_inventory),
+                    "sha256": hashlib.sha256(
+                        dependency_inventory.read_bytes()
+                    ).hexdigest(),
+                },
+                "prebuilt_bundle": {
+                    "manifest_sha256": self._digest("prebuilt-manifest"),
+                    "path": str(prebuilt_bundle),
+                    "sha256": hashlib.sha256(prebuilt_bundle.read_bytes()).hexdigest(),
+                },
+                "python_runtime_inventory": {
+                    "path": str(python_runtime_inventory),
+                    "sha256": hashlib.sha256(
+                        python_runtime_inventory.read_bytes()
+                    ).hexdigest(),
+                },
+            },
+            "build": {
+                "command": list(self.validator.PREBUILT_BUILD_COMMAND),
+                "first": {
+                    "candidate_sha256": binary_sha256,
+                    "stderr_sha256": retained_builds["build_a"]["stderr"]["sha256"],
+                    "stdout_sha256": retained_builds["build_a"]["stdout"]["sha256"],
+                },
+                "reproducible": True,
+                "second": {
+                    "candidate_sha256": binary_sha256,
+                    "stderr_sha256": retained_builds["build_b"]["stderr"]["sha256"],
+                    "stdout_sha256": retained_builds["build_b"]["stdout"]["sha256"],
+                },
+            },
+            "elf": {
+                label: {
+                    "interpreter": str(python_tool),
+                    "needed": ["runtime"],
+                    "resolved": {"runtime": str(python_tool)},
+                    "runtime_files": 1,
+                }
+                for label in ("candidate", "controller_python")
+            },
+            "schema": self.validator.PREBUILT_PREPARATION_SCHEMA,
+            "smoke": {
+                "help_sha256": self._digest("help"),
+                "python_sha256": self._digest("python-smoke"),
+                "version": "euf-viper 0.1.0",
+                "version_sha256": self._digest("version"),
+            },
+            "source": {"commit": "a" * 40, "tree": "b" * 40},
+            "status": "verified",
+            "tools": {
+                "bundle_tool": {
+                    "path": str(artifacts["prebuilt_bundle_tool"]),
+                    "sha256": hashlib.sha256(
+                        artifacts["prebuilt_bundle_tool"].read_bytes()
+                    ).hexdigest(),
+                },
+                "cargo": {
+                    "path": str(python_tool),
+                    "sha256": python_sha256,
+                    "version": "cargo test-version",
+                },
+                "preparer": {
+                    "path": str(artifacts["prebuilt_preparer"]),
+                    "sha256": hashlib.sha256(
+                        artifacts["prebuilt_preparer"].read_bytes()
+                    ).hexdigest(),
+                },
+                "python": {
+                    "path": str(python_tool),
+                    "sha256": python_sha256,
+                    "version": "python test-version",
+                },
+                "rustc": {
+                    "path": str(python_tool),
+                    "sha256": python_sha256,
+                    "version": "rustc test-version",
+                },
+            },
+        }
+        prebuilt_preparation = self.root / "prebuilt_preparation"
+        prebuilt_preparation.write_bytes(self._encode(preparation_report))
+        prebuilt_preparation.chmod(0o400)
+        artifacts["prebuilt_preparation"] = prebuilt_preparation
         launch_manifest = self.root / "launch_manifest.json"
         manifest = {
             "schema": self.validator.LAUNCH_SCHEMA,
@@ -1546,6 +1766,13 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 "sha256": hashlib.sha256(prebuilt_bundle.read_bytes()).hexdigest(),
                 "source_commit": "a" * 40,
                 "source_tree": "b" * 40,
+            },
+            "prebuilt_preparation": {
+                "path": str(prebuilt_preparation),
+                "schema": self.validator.PREBUILT_PREPARATION_SCHEMA,
+                "sha256": hashlib.sha256(
+                    prebuilt_preparation.read_bytes()
+                ).hexdigest(),
             },
             "control_tools": {
                 label: {
@@ -1653,7 +1880,22 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         self.assertNotIn("authorize_stage0b", json.dumps(payload))
         self.assertEqual(payload["projection"]["project_exit"], 4)
         self.assertEqual(payload["projection"]["audit_exit"], 0)
-        self.assertEqual(payload["artifacts"]["binary"]["sha256"], hashlib.sha256(b"binary").hexdigest())
+        self.assertEqual(payload["artifacts"]["binary"]["sha256"], binary_sha256)
+        self.assertTrue(
+            payload["execution_contract"][
+                "candidate_loader_closure_inventory_validated"
+            ]
+        )
+        self.assertFalse(
+            payload["execution_contract"][
+                "dynamic_loader_objects_descriptor_bound"
+            ]
+        )
+        self.assertTrue(
+            payload["execution_contract"][
+                "python_loader_closure_inventory_validated"
+            ]
+        )
         self.assertNotIn("elapsed", json.dumps(payload))
         self.assertNotIn("timing", json.dumps(payload))
 

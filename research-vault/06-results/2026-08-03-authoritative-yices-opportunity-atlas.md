@@ -16,7 +16,10 @@ evidence. It replaces opportunity estimates taken from the obsolete flat
 
 ## Evidence
 
-- Corpus: 7,503 instances, six solvers, 45,018 effective observations per budget.
+- Corpus: 7,503 instances, six recorded solvers, 45,018 effective observations
+  per budget. The repaired analyzer takes its required comparator matrix from
+  the staged `candidate_id`, `baseline_ids`, and `solver_binary_sha256`
+  declarations rather than inferring it from surviving rows.
 - Source revision: `30828a4f0c1e7e478a9c6f406ccb245eeefc4961`.
 - Continuation chain: base preparation `144990`, chain `147306`.
 - Reconstruction job `218741` produced the hash-bound staged report; its first
@@ -25,6 +28,24 @@ evidence. It replaces opportunity estimates taken from the obsolete flat
   MaxRSS.
 - Local artifact index:
   `results/wmi/yices-opportunity-30828a4-chain147306/index.json`.
+
+## Bounded audit repairs
+
+Atlas schema v2 retains unquantized wall times and deficits for comparisons and
+cohort selection, but serializes geometric factors to 12 significant decimal
+digits. This removes the observed one-ULP Linux/macOS `math.exp` difference from
+canonical JSON without changing any ranking, solve count, or deficit.
+
+Each regenerated atlas also contains a self-hashed prospective cohort manifest
+bound to the selected dataset hash. Its targets are the first 100
+common-correct instances ordered by descending positive
+`Viper time - Yices time`, with `relative_path` ascending as the tie-breaker.
+For every `(source family, expected SAT/UNSAT status)` target stratum, controls
+are selected without replacement from common-correct non-target instances in
+the same stratum. Their order is the ascending SHA-256 of a fixed domain,
+family, status, and path tuple, with path as the digest tie-breaker. Control
+entries contain paths only: their selection makes no baseline timing or deficit
+claim.
 
 ## Direct comparison
 
@@ -55,8 +76,8 @@ The worst 10, 50, 100, and 500 common-correct losses contain respectively
 16.1%, 42.9%, 56.1%, and 78.8% of all positive deficit. This supports two
 parallel optimization lanes:
 
-1. A tail lane over the worst 100 instances plus matched controls can falsify
-   targeted mechanisms quickly.
+1. A prospective tail lane over the frozen worst 100 instances plus the
+   hash-selected matched controls can falsify targeted mechanisms quickly.
 2. A broad QG/Goel lane is mandatory because isolated tail repair cannot close
    a roughly 2x geometric gap across thousands of instances.
 
@@ -70,7 +91,9 @@ fresh full staged comparison against the pinned Yices binary.
 
 ## Consequence for T11
 
-Proof-internal equality resolution can still be novel and valuable for the
-PEQ/SEQ-style tail, but T11 alone cannot establish overall Yices parity. The
-main architectural target remains QG finite-table proof complexity and broad
-per-instance overhead.
+The atlas supports testing proof-internal equality resolution as a T11
+hypothesis on the PEQ/SEQ-style tail; it does not establish that the mechanism
+causes or repairs those deficits. Likewise, QG is a mandatory broad target, but
+finite-table proof complexity and broad per-instance overhead are competing
+causal hypotheses that require profiles and controlled ablations. No T11-only
+result can establish overall Yices parity from this atlas.

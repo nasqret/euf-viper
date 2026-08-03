@@ -2027,6 +2027,39 @@
   resulting two-lane optimization policy are in
   `research-vault/06-results/2026-08-03-authoritative-yices-opportunity-atlas.md`.
 
+## 2026-08-03 - T11 v6 target-free evidence boundary
+
+- Two independent audits returned NO-GO. Reproduced blockers included an
+  impossible sorted launch-manifest encoding, a roughly 60-second default wait
+  for a one-hour job, a missing authorization-request executor binding in the
+  submission, incompatible real authorizer/request-executor output contracts,
+  inherited submit-host control variables, and digest-only reproducibility.
+- Launch/submission/request/preparation schemas are now `v6`/`v3`/`v3`/`v2`.
+  The real authorizer emits the exact published decision; the request executor
+  validates its strict schema, recomputes its authorization ID, and binds nonce,
+  revision, launch, submission, scheduler candidate, cluster, and finalizer job.
+- The submitter uses fixed system SHA-256 utilities to establish the controller
+  Python hash, executes controls under a fixed minimal environment, records the
+  request executor in immutable control hashes, and defaults to a 24-hour
+  polling envelope. File-backed fault injection preserves adversarial tests
+  without ambient `TEST_*` variables.
+- Preparation retains both byte-identical build outputs and their stdout/stderr
+  bytes at mode `0400`. The launch validator checks those six artifacts rather
+  than trusting report digests. Candidate and Python startup-loader inventories
+  are bounded to 1..128 entries.
+- Metadata now states the exact weaker guarantee: loader-closure paths are
+  inventoried, retained, and revalidated, while dynamic-loader objects are not
+  descriptor-bound. The trusted platform boundary is recorded in
+  `research-vault/06-results/2026-08-03-t11-v6-evidence-boundary-audit.md`.
+- Local campaign-contract tests pass 445/445 with 50 expected platform skips.
+  WMI job `218826` passes the complete synchronized Linux matrix, 144/144 in
+  120.735 seconds. The local Rust command cannot run because the installed
+  toolchain lacks `aarch64-apple-darwin`; fresh-target WMI Rust job `218824`
+  passes 420 tests with four ignored in 668 seconds and 2,305,452 KiB MaxRSS.
+- The frozen target was not opened. No launch manifest or Stage 0A scientific
+  job was created. Exact-commit CI, exact-head WMI qualification, final prebuild,
+  producer-to-validator dry run, and independent GO remain mandatory.
+
 ## Next Entry Template
 
 - Benchmark corpus:

@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 
 
-SUBMISSION_SCHEMA = "euf-viper.t11-stage0a-submission.v2"
+SUBMISSION_SCHEMA = "euf-viper.t11-stage0a-submission.v3"
 SCHEDULER_CANDIDATE_SCHEMA = "euf-viper.t11-stage0a-scheduler-candidate.v1"
 AUTHORIZATION_SCHEMA = "euf-viper.t11-stage0a-authorization.v1"
 TERMINAL_ATTESTATION_DECISION = "requires_finalizer_terminal_attestation"
@@ -1112,16 +1112,9 @@ def validate_scheduler_candidate(
     return candidate
 
 
-def _default_command_runner(argv: Sequence[str]) -> CommandOutput:
+def _copy_sealed_executable(source: FileRead, context: str) -> tuple[int, FileRead]:
     if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
         _fail("scheduler execution requires Linux sealed memfd support")
-    source = _stable_read_path(
-        Path(argv[0]),
-        MAX_EXECUTABLE_BYTES,
-        "scheduler executable",
-        require_nonwritable=False,
-        require_executable=True,
-    )
     flags = getattr(os, "MFD_CLOEXEC", 0x0001) | getattr(
         os, "MFD_ALLOW_SEALING", 0x0002
     )
@@ -1143,6 +1136,38 @@ def _default_command_runner(argv: Sequence[str]) -> CommandOutput:
         fcntl.fcntl(descriptor, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
         if fcntl.fcntl(descriptor, getattr(fcntl, "F_GET_SEALS", 1034)) & seals != seals:
             _fail("scheduler executable memfd lacks mandatory seals")
+        sealed = _stable_read_sealed_descriptor(
+            descriptor,
+            MAX_EXECUTABLE_BYTES,
+            context,
+            require_nonwritable=True,
+            require_executable=True,
+        )
+        if (
+            sealed.data != source.data
+            or sealed.sha256 != source.sha256
+            or sealed.size != source.size
+        ):
+            _fail("sealed scheduler executable differs from its bound source")
+        return descriptor, sealed
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _retained_command_runner(
+    descriptor: int, expected: FileRead
+) -> CommandRunner:
+    def run(argv: Sequence[str]) -> CommandOutput:
+        before = _stable_read_sealed_descriptor(
+            descriptor,
+            MAX_EXECUTABLE_BYTES,
+            "scheduler executable",
+            require_nonwritable=True,
+            require_executable=True,
+        )
+        if before != expected:
+            _fail("retained scheduler executable changed before execution")
         completed = subprocess.run(
             list(argv),
             executable=f"/proc/self/fd/{descriptor}",
@@ -1154,18 +1179,35 @@ def _default_command_runner(argv: Sequence[str]) -> CommandOutput:
             pass_fds=(descriptor,),
             timeout=30,
         )
-    finally:
-        os.close(descriptor)
-    current = _stable_read_path(
+        after = _stable_read_sealed_descriptor(
+            descriptor,
+            MAX_EXECUTABLE_BYTES,
+            "scheduler executable",
+            require_nonwritable=True,
+            require_executable=True,
+        )
+        if after != expected:
+            _fail("retained scheduler executable changed during execution")
+        return CommandOutput(
+            tuple(argv), completed.returncode, completed.stdout, completed.stderr
+        )
+
+    return run
+
+
+def _default_command_runner(argv: Sequence[str]) -> CommandOutput:
+    source = _stable_read_path(
         Path(argv[0]),
         MAX_EXECUTABLE_BYTES,
         "scheduler executable",
         require_nonwritable=False,
         require_executable=True,
     )
-    if current != source:
-        _fail("scheduler executable changed during sealed execution")
-    return CommandOutput(tuple(argv), completed.returncode, completed.stdout, completed.stderr)
+    descriptor, sealed = _copy_sealed_executable(source, "scheduler executable")
+    try:
+        return _retained_command_runner(descriptor, sealed)(argv)
+    finally:
+        os.close(descriptor)
 
 
 def _run_scheduler_command(argv: Sequence[str], runner: CommandRunner) -> CommandOutput:
@@ -1213,7 +1255,7 @@ def _parse_sacct_row(
 
 def collect_finalizer_evidence(
     submission: Mapping[str, Any],
-    runner: CommandRunner = _default_command_runner,
+    runner: CommandRunner,
     *,
     sacct_bin: str = "/usr/bin/sacct",
 ) -> FinalizerEvidence:
@@ -1547,7 +1589,7 @@ def _prepare_authorization(
     submission_sha256: str,
     finalizer_module_path: Path,
     finalizer_module_sha256: str,
-    command_runner: CommandRunner,
+    command_runner: CommandRunner | None,
     sacct_bin: str,
     poll_attempts: int,
     poll_interval_seconds: float,
@@ -1595,14 +1637,14 @@ def _prepare_authorization(
     authorizer_binding = _authorizer_source_binding()
     if authorizer_binding.initial.sha256 != submission["control"]["authorizer_sha256"]:
         _fail("authorizer module digest differs from the submission")
-    sacct_binding = _bind_input(
+    sacct_source_binding = _bind_input(
         sacct_path,
         MAX_EXECUTABLE_BYTES,
         "sacct executable",
         require_nonwritable=False,
         require_executable=True,
     )
-    if sacct_binding.initial.sha256 != submission["control"]["sacct_sha256"]:
+    if sacct_source_binding.initial.sha256 != submission["control"]["sacct_sha256"]:
         _fail("sacct executable digest differs from the submission")
 
     _, compute_held_binding = _validate_held_record(submission, "compute")
@@ -1659,22 +1701,34 @@ def _prepare_authorization(
         _fail("scheduler polling parameters are invalid")
     terminal: dict[str, Any] | None = None
     last_pending: SchedulerPending | None = None
-    for attempt in range(poll_attempts):
-        try:
-            terminal = validate_finalizer_evidence(
-                collect_finalizer_evidence(
+    if command_runner is None:
+        sacct_descriptor, sealed_sacct = _copy_sealed_executable(
+            sacct_source_binding.initial, "sacct executable"
+        )
+        effective_runner = _retained_command_runner(sacct_descriptor, sealed_sacct)
+    else:
+        sacct_descriptor = -1
+        effective_runner = command_runner
+    try:
+        for attempt in range(poll_attempts):
+            try:
+                terminal = validate_finalizer_evidence(
+                    collect_finalizer_evidence(
+                        submission,
+                        effective_runner,
+                        sacct_bin=os.fspath(sacct_path),
+                    ),
                     submission,
-                    command_runner,
-                    sacct_bin=os.fspath(sacct_path),
-                ),
-                submission,
-                finalizer_held_record,
-            )
-            break
-        except SchedulerPending as error:
-            last_pending = error
-            if attempt + 1 < poll_attempts:
-                sleeper(poll_interval_seconds)
+                    finalizer_held_record,
+                )
+                break
+            except SchedulerPending as error:
+                last_pending = error
+                if attempt + 1 < poll_attempts:
+                    sleeper(poll_interval_seconds)
+    finally:
+        if sacct_descriptor >= 0:
+            os.close(sacct_descriptor)
     if terminal is None:
         raise last_pending or SchedulerPending("finalizer accounting is unavailable")
 
@@ -1685,7 +1739,6 @@ def _prepare_authorization(
         finalizer_held_binding,
         module_binding,
         authorizer_binding,
-        sacct_binding,
     )
     _revalidate_inputs(inputs)
     revalidate_candidate_root_path()
@@ -1803,7 +1856,7 @@ def build_authorization_payload(
     submission_sha256: str,
     finalizer_module_path: Path,
     finalizer_module_sha256: str,
-    command_runner: CommandRunner = _default_command_runner,
+    command_runner: CommandRunner | None = None,
     sacct_bin: str = "/usr/bin/sacct",
     poll_attempts: int = 1,
     poll_interval_seconds: float = 0.0,
@@ -2024,7 +2077,7 @@ def authorize_and_publish(
     submission_sha256: str,
     finalizer_module_path: Path,
     finalizer_module_sha256: str,
-    command_runner: CommandRunner = _default_command_runner,
+    command_runner: CommandRunner | None = None,
     sacct_bin: str = "/usr/bin/sacct",
     poll_attempts: int = 1,
     poll_interval_seconds: float = 0.0,
@@ -2097,18 +2150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             poll_attempts=args.poll_attempts,
             poll_interval_seconds=args.poll_interval_seconds,
         )
-        encoded = canonical_json_bytes(payload)
-        print(
-            canonical_json_bytes(
-                {
-                    "authorization_id": payload["authorization_id"],
-                    "output": os.fspath(args.output),
-                    "output_sha256": hashlib.sha256(encoded).hexdigest(),
-                    "status": payload["status"],
-                }
-            ).decode("ascii"),
-            end="",
-        )
+        sys.stdout.write(canonical_json_bytes(payload).decode("ascii"))
         return 0
     except (AuthorizationError, OSError) as error:
         print(f"T11 Stage 0A authorization rejected: {error}", file=sys.stderr)

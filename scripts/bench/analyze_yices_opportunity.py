@@ -26,7 +26,8 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
 
-SCHEMA_VERSION = "euf-viper.yices-opportunity-atlas.v1"
+SCHEMA_VERSION = "euf-viper.yices-opportunity-atlas.v2"
+COHORT_MANIFEST_SCHEMA_VERSION = "euf-viper.yices-opportunity-cohort.v1"
 STAGED_OBSERVATION_SCHEMA = "euf-viper.staged-observations.v1"
 CSV_FIELDNAMES = [
     "id",
@@ -45,6 +46,9 @@ RESULT_RE = re.compile(
 INTEGER_RE = re.compile(r"[+-]?[0-9]+\Z")
 QG_DEGREE_RE = re.compile(r"(?:qg|loops)(?P<degree>[0-9]+)\Z")
 DEFAULT_TOP_N = (10, 50, 100, 500)
+PROSPECTIVE_TARGET_COUNT = 100
+GEOMETRIC_SERIALIZATION_SIGNIFICANT_DIGITS = 12
+CONTROL_SELECTION_DOMAIN = "euf-viper.yices-opportunity.control.v1"
 STAGED_PROVENANCE_KEYS = {
     "binary_sha256",
     "budget_s",
@@ -166,6 +170,13 @@ def _clean_float(value: float) -> float:
     if not math.isfinite(value):
         raise AtlasError("internal metric is non-finite")
     return 0.0 if value == 0.0 else value
+
+
+def _quantize_geometric_metric(value: float) -> float:
+    """Round only the serialized geometric metric to a stable precision."""
+    value = _clean_float(value)
+    rendered = format(value, f".{GEOMETRIC_SERIALIZATION_SIGNIFICANT_DIGITS}g")
+    return _clean_float(float(rendered))
 
 
 def _parse_time(value: str, *, source: Path, line_number: int) -> float:
@@ -392,13 +403,83 @@ def _finite_number(value: object, context: str, *, positive: bool = False) -> fl
     return _clean_float(parsed)
 
 
+def _staged_solver_matrix(
+    inputs: dict[str, object],
+    hashes: dict[str, object],
+    *,
+    source: Path,
+    viper_solver: str,
+    yices_solver: str,
+) -> tuple[list[str], dict[str, object], str]:
+    """Read the required comparator matrix from hash-bound staged metadata."""
+    candidate = inputs.get("candidate_id")
+    baselines = inputs.get("baseline_ids")
+    if (
+        type(candidate) is not str
+        or not candidate
+        or candidate.strip() != candidate
+    ):
+        raise AtlasError(f"{source}: staged candidate_id is missing or invalid")
+    if type(baselines) is not list or not baselines:
+        raise AtlasError(f"{source}: staged baseline_ids are missing or invalid")
+    if any(
+        type(item) is not str or not item or item.strip() != item
+        for item in baselines
+    ):
+        raise AtlasError(f"{source}: staged baseline_ids contain an invalid solver id")
+    declared = [candidate, *baselines]
+    if len(set(declared)) != len(declared):
+        raise AtlasError(f"{source}: staged comparator solver ids must be unique")
+    if candidate != viper_solver:
+        raise AtlasError(
+            f"{source}: Viper role {viper_solver!r} disagrees with staged "
+            f"candidate_id {candidate!r}"
+        )
+    if yices_solver not in baselines:
+        raise AtlasError(
+            f"{source}: Yices role {yices_solver!r} is not a staged baseline"
+        )
+
+    solver_hashes = hashes.get("solver_binary_sha256")
+    if type(solver_hashes) is not dict or set(solver_hashes) != set(declared):
+        raise AtlasError(
+            f"{source}: solver_binary_sha256 does not match the declared "
+            "comparator matrix"
+        )
+    for solver, digest in solver_hashes.items():
+        if type(digest) is not str or SHA256_RE.fullmatch(digest) is None:
+            raise AtlasError(
+                f"{source}: solver_binary_sha256[{solver!r}] is invalid"
+            )
+
+    expected_solvers = sorted(declared)
+    declaration = {
+        "baseline_ids": list(baselines),
+        "candidate_id": candidate,
+        "solver_binary_sha256": {
+            solver: solver_hashes[solver] for solver in expected_solvers
+        },
+    }
+    declaration_sha256 = hashlib.sha256(
+        canonical_json_bytes(declaration)
+    ).hexdigest()
+    return expected_solvers, declaration, declaration_sha256
+
+
 def load_staged_analysis(
     source: Path,
     *,
     viper_solver: str,
     yices_solver: str,
     budget_s: float | None,
-) -> tuple[list[InstancePair], list[str], str, int, float]:
+) -> tuple[
+    list[InstancePair],
+    list[str],
+    str,
+    int,
+    float,
+    dict[str, object],
+]:
     """Load one hash-bound effective budget from staged campaign analysis."""
     if viper_solver == yices_solver:
         raise AtlasError("the Viper and Yices solver identifiers must differ")
@@ -419,6 +500,15 @@ def load_staged_analysis(
         raise AtlasError(
             f"{source}: staged observation schema is missing or incompatible"
         )
+    expected_solvers, solver_declaration, solver_matrix_sha256 = (
+        _staged_solver_matrix(
+            inputs,
+            hashes,
+            source=source,
+            viper_solver=viper_solver,
+            yices_solver=yices_solver,
+        )
+    )
     rows = inputs.get("observation_provenance")
     if type(rows) is not list or not rows:
         raise AtlasError(f"{source}: staged analysis has no observation provenance")
@@ -451,6 +541,8 @@ def load_staged_analysis(
     all_paths: dict[str, tuple[str, str]] = {}
     normalized_rows: list[dict[str, object]] = []
     carried_count = 0
+    expected_binary_hashes = solver_declaration["solver_binary_sha256"]
+    assert isinstance(expected_binary_hashes, dict)
     for index, raw in enumerate(rows):
         context = f"{source}: observation_provenance[{index}]"
         if type(raw) is not dict or set(raw) != STAGED_PROVENANCE_KEYS:
@@ -510,6 +602,14 @@ def load_staged_analysis(
         ):
             if type(raw[field]) is not str or SHA256_RE.fullmatch(raw[field]) is None:
                 raise AtlasError(f"{context}.{field} is not a canonical SHA-256")
+        if (
+            solver in expected_binary_hashes
+            and raw["binary_sha256"] != expected_binary_hashes[solver]
+        ):
+            raise AtlasError(
+                f"{context}.binary_sha256 disagrees with the staged solver "
+                "declaration"
+            )
         record_hashes = raw["source_record_sha256s"]
         if (
             type(record_hashes) is not list
@@ -562,14 +662,27 @@ def load_staged_analysis(
     declared_instances = inputs.get("instances")
     if type(declared_instances) is not int or declared_instances != len(all_paths):
         raise AtlasError(f"{source}: instance count disagrees with provenance")
-    expected_total = len(all_paths) * len(all_solvers) * len(budgets)
-    if len(all_keys) != expected_total:
-        raise AtlasError(f"{source}: staged observation matrix is incomplete")
+    missing_matrix_count = 0
+    missing_matrix_first: list[tuple[str, float, str]] = []
+    for relative_path in sorted(all_paths):
+        for budget in budgets:
+            for solver in expected_solvers:
+                key = (relative_path, budget, solver)
+                if key in all_keys:
+                    continue
+                missing_matrix_count += 1
+                if len(missing_matrix_first) < 3:
+                    missing_matrix_first.append(key)
+    if missing_matrix_count:
+        raise AtlasError(
+            f"{source}: declared staged solver matrix is incomplete; "
+            f"missing={missing_matrix_count}, first={missing_matrix_first!r}"
+        )
 
     pairs, expected_solvers = _pairs_from_matrix(
         observations,
         paths,
-        all_solvers,
+        set(expected_solvers),
         source=source,
         viper_solver=viper_solver,
         yices_solver=yices_solver,
@@ -579,11 +692,27 @@ def load_staged_analysis(
     )
     dataset = {
         "budget_s": selected_budget,
+        "expected_solver_matrix_sha256": solver_matrix_sha256,
         "observation_provenance_sha256": actual_hash,
         "rows": normalized_rows,
     }
     dataset_sha256 = hashlib.sha256(canonical_json_bytes(dataset)).hexdigest()
-    return pairs, expected_solvers, dataset_sha256, len(normalized_rows), selected_budget
+    matrix_validation = {
+        "expected_solver_matrix": solver_declaration,
+        "expected_solver_matrix_sha256": solver_matrix_sha256,
+        "observed_solvers": sorted(all_solvers),
+        "solver_matrix_source": (
+            "staged candidate_id, baseline_ids, and solver_binary_sha256"
+        ),
+    }
+    return (
+        pairs,
+        expected_solvers,
+        dataset_sha256,
+        len(normalized_rows),
+        selected_budget,
+        matrix_validation,
+    )
 
 
 def summarize(pairs: Sequence[InstancePair]) -> dict[str, object]:
@@ -595,18 +724,22 @@ def summarize(pairs: Sequence[InstancePair]) -> dict[str, object]:
         for pair in common
         if pair.viper.time_s > 0.0 and pair.yices.time_s > 0.0
     ]
-    factor = None
+    factor_unquantized = None
+    factor_serialized = None
     if log_ratios:
         try:
-            factor = _clean_float(math.exp(math.fsum(log_ratios) / len(log_ratios)))
+            factor_unquantized = _clean_float(
+                math.exp(math.fsum(log_ratios) / len(log_ratios))
+            )
         except OverflowError as error:
             raise AtlasError("geometric timing factor overflowed") from error
+        factor_serialized = _quantize_geometric_metric(factor_unquantized)
     return {
         "common_correct": len(common),
         "euf_viper_faster": sum(deficit < 0.0 for deficit in deficits),
         "equal_time": sum(deficit == 0.0 for deficit in deficits),
         "geometric_pair_count": len(log_ratios),
-        "geometric_yices_over_viper_factor": factor,
+        "geometric_yices_over_viper_factor": factor_serialized,
         "instances": len(ordered),
         "net_time_deficit_s": _clean_float(math.fsum(deficits)),
         "positive_time_deficit_s": _clean_float(
@@ -668,20 +801,26 @@ def _coverage_gaps(pairs: Sequence[InstancePair]) -> dict[str, list[dict[str, st
     }
 
 
+def _ranked_positive_deficits(
+    pairs: Sequence[InstancePair],
+) -> list[tuple[float, InstancePair]]:
+    losses = [
+        (pair.deficit_s, pair)
+        for pair in pairs
+        if pair.common_correct and pair.deficit_s > 0.0
+    ]
+    return sorted(losses, key=lambda item: (-item[0], item[1].relative_path))
+
+
 def _top_n_mass(
     pairs: Sequence[InstancePair], top_ns: Sequence[int]
 ) -> list[dict[str, object]]:
-    losses = sorted(
-        (pair.deficit_s, pair.relative_path)
-        for pair in pairs
-        if pair.common_correct and pair.deficit_s > 0.0
-    )
-    losses.reverse()
+    losses = _ranked_positive_deficits(pairs)
     total = math.fsum(deficit for deficit, _ in losses)
     entries = []
     for requested in top_ns:
         selected = losses[:requested]
-        mass = _clean_float(math.fsum(deficit for deficit, _ in selected))
+        mass = _clean_float(math.fsum(deficit for deficit, _pair in selected))
         entries.append(
             {
                 "actual_count": len(selected),
@@ -691,6 +830,138 @@ def _top_n_mass(
             }
         )
     return entries
+
+
+def _control_selection_key(
+    family: str, expected_status: str, relative_path: str
+) -> tuple[str, str]:
+    material = "\0".join(
+        (
+            CONTROL_SELECTION_DOMAIN,
+            family,
+            expected_status,
+            relative_path,
+        )
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest(), relative_path
+
+
+def _cohort_manifest_sha256(manifest: dict[str, object]) -> str:
+    prepared = dict(manifest)
+    prepared["manifest_sha256"] = ""
+    return hashlib.sha256(canonical_json_bytes(prepared)).hexdigest()
+
+
+def build_prospective_cohort_manifest(
+    pairs: Sequence[InstancePair],
+    *,
+    dataset_sha256: str,
+    target_count: int = PROSPECTIVE_TARGET_COUNT,
+) -> dict[str, object]:
+    """Freeze deficit-selected targets and timing-independent matched controls."""
+    if SHA256_RE.fullmatch(dataset_sha256) is None:
+        raise AtlasError("prospective cohort requires a canonical dataset SHA-256")
+    if (
+        isinstance(target_count, bool)
+        or not isinstance(target_count, int)
+        or target_count < 1
+    ):
+        raise AtlasError("prospective cohort target_count must be positive")
+
+    ranked = _ranked_positive_deficits(pairs)
+    selected_targets = [pair for _deficit, pair in ranked[:target_count]]
+    target_paths = {pair.relative_path for pair in selected_targets}
+    targets = [
+        {
+            "expected_status": pair.expected_status,
+            "rank": rank,
+            "relative_path": pair.relative_path,
+            "source_family": pair.family,
+        }
+        for rank, pair in enumerate(selected_targets, start=1)
+    ]
+
+    targets_by_stratum: dict[tuple[str, str], list[InstancePair]] = defaultdict(list)
+    controls_by_stratum: dict[tuple[str, str], list[InstancePair]] = defaultdict(list)
+    for pair in selected_targets:
+        targets_by_stratum[(pair.family, pair.expected_status)].append(pair)
+    for pair in pairs:
+        if pair.common_correct and pair.relative_path not in target_paths:
+            controls_by_stratum[(pair.family, pair.expected_status)].append(pair)
+
+    strata = []
+    actual_controls = 0
+    for family, expected_status in sorted(targets_by_stratum):
+        stratum_targets = targets_by_stratum[(family, expected_status)]
+        ordered_controls = sorted(
+            controls_by_stratum.get((family, expected_status), []),
+            key=lambda pair: _control_selection_key(
+                family,
+                expected_status,
+                pair.relative_path,
+            ),
+        )
+        selected_controls = ordered_controls[: len(stratum_targets)]
+        actual_controls += len(selected_controls)
+        strata.append(
+            {
+                "control_count": len(selected_controls),
+                "control_paths": [pair.relative_path for pair in selected_controls],
+                "expected_status": expected_status,
+                "requested_control_count": len(stratum_targets),
+                "source_family": family,
+                "target_count": len(stratum_targets),
+                "target_paths": [pair.relative_path for pair in stratum_targets],
+            }
+        )
+
+    manifest: dict[str, object] = {
+        "hash_convention": (
+            "SHA256 of canonical JSON with manifest_sha256 set to the empty string"
+        ),
+        "manifest_sha256": "",
+        "matched_controls": {
+            "actual_count": actual_controls,
+            "eligibility": (
+                "common-correct non-target instances in the same source_family "
+                "and decisive expected_status stratum"
+            ),
+            "no_replacement": True,
+            "selection_key": (
+                "SHA256(domain NUL source_family NUL expected_status NUL "
+                "relative_path), ascending; relative_path breaks digest ties"
+            ),
+            "selection_key_domain": CONTROL_SELECTION_DOMAIN,
+            "selection_uses_control_timing": False,
+            "strata": strata,
+            "timing_claims": (
+                "none; controls freeze paths only and carry no baseline timing or "
+                "deficit claim"
+            ),
+            "underfill_policy": (
+                "use every eligible path in the stratum; never reuse a control or "
+                "cross strata"
+            ),
+        },
+        "schema_version": COHORT_MANIFEST_SCHEMA_VERSION,
+        "source_dataset_sha256": dataset_sha256,
+        "stratification": ["source_family", "expected_status"],
+        "target_selection": {
+            "actual_count": len(targets),
+            "eligibility": (
+                "common-correct instances with unquantized "
+                "euf_viper_time-yices2_time greater than zero"
+            ),
+            "ordering": (
+                "descending unquantized positive deficit, then relative_path "
+                "ascending"
+            ),
+            "requested_count": target_count,
+            "targets": targets,
+        },
+    }
+    manifest["manifest_sha256"] = _cohort_manifest_sha256(manifest)
+    return manifest
 
 
 def _cohort_candidates(
@@ -781,11 +1052,30 @@ def build_atlas(
         "dataset_sha256": dataset_sha256,
         "definitions": {
             "common_correct": "both results equal the decisive expected_status",
-            "geometric_yices_over_viper_factor": "exp(mean(log(yices2_time/euf_viper_time))) over positive-time common-correct rows only",
+            "geometric_yices_over_viper_factor": (
+                "exp(mean(log(yices2_time/euf_viper_time))) over positive-time "
+                "common-correct rows only; serialized at the declared significant-"
+                "digit precision"
+            ),
             "net_time_deficit_s": "sum(euf_viper_time-yices2_time) over common-correct rows",
             "positive_time_deficit_s": "sum(max(euf_viper_time-yices2_time,0)) over common-correct rows",
         },
+        "numeric_serialization": {
+            "geometric_metric_internal": (
+                "timing comparisons and cohort selection use unquantized wall "
+                "times and deficits; quantization is applied only to serialized "
+                "geometric factors"
+            ),
+            "geometric_metric_serialized_significant_decimal_digits": (
+                GEOMETRIC_SERIALIZATION_SIGNIFICANT_DIGITS
+            ),
+            "scope": "geometric metrics only",
+        },
         "overall": overall,
+        "prospective_cohort_manifest": build_prospective_cohort_manifest(
+            pairs,
+            dataset_sha256=dataset_sha256,
+        ),
         "qualifying_path_independent_cohorts": qualifying_cohorts(
             pairs, cohort_fraction
         ),
@@ -795,6 +1085,7 @@ def build_atlas(
             "yices2": yices_solver,
         },
         "validation": {
+            "expected_solvers": list(solvers),
             "instances": len(pairs),
             "rows": row_count,
             "solvers": list(solvers),
@@ -853,6 +1144,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 viper_solver=args.viper_solver,
                 yices_solver=args.yices_solver,
             )
+            matrix_validation = {
+                "observed_solvers": list(solvers),
+                "solver_matrix_source": "flat CSV observed solver ids (legacy)",
+            }
         else:
             (
                 pairs,
@@ -860,6 +1155,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 dataset_sha256,
                 row_count,
                 effective_budget,
+                matrix_validation,
             ) = load_staged_analysis(
                 args.input,
                 viper_solver=args.viper_solver,
@@ -877,6 +1173,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             top_ns=args.top_n,
         )
         payload["validation"]["input_format"] = args.input_format
+        payload["validation"].update(matrix_validation)
         if effective_budget is not None:
             payload["validation"]["effective_budget_s"] = effective_budget
         rendered = canonical_json_bytes(payload)

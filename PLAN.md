@@ -926,6 +926,21 @@ fallback can be an operational portfolio but never a standalone victory.
     explicit manifest path. Proof review was GO. The first publication review's
     test-window NO-GO was repaired with actual pre-`linkat` races, same-length
     corruption, and immediate writable-descriptor closure.
+    Two 2026-08-03 independent audits then found a producer/validator ordering
+    contradiction, a 60-second authorization window, an omitted request-executor
+    submission binding, incompatible authorizer/executor stdout contracts,
+    ambient control environments, unbounded runtime inventories, and
+    self-attested reproducible-build digests. The target-free repair is now
+    launch schema `v6`, submission schema `v3`, authorization-request schema
+    `v3`, and preparation schema `v2`. Preparation retains both independent ELF
+    outputs and all four build streams for validator byte comparison. Metadata
+    explicitly records that loader objects are not descriptor-bound and does
+    not call the Python startup ELF closure a complete runtime inventory. Local
+    campaign-contract qualification passes 445 tests with 50 platform skips;
+    synchronized WMI job `218826` passes all 144 Linux tests in 120.735 seconds.
+    Fresh-target WMI Rust job `218824` passes 420 tests with four ignored in
+    668 seconds and 2,305,452 KiB MaxRSS. This is infrastructure qualification,
+    not target or performance evidence.
 16. Treat the 2026-07-19 temporary-worktree loss as an evidence reset, not a
     scientific result. Restore code only from the two corpus-free WMI review
     roots onto durable branch `perf-t11-equality-resolution`, explicitly exclude
@@ -936,7 +951,9 @@ fallback can be an operational portfolio but never a standalone victory.
     exact-clean-revision review follows only after a scoped commit. Any NO-GO
     returns to local repair and another review. Do not open the frozen target,
     create the launch manifest, or submit Stage 0A until all gates are GO on the
-    committed recovered revision.
+    committed recovered revision. The next gates are a scoped commit, exact-head
+    hosted CI, exact-head WMI Rust/Python qualification, a fresh retained two-build
+    prepackage, a real producer-to-validator launch dry run, and independent GO.
 17. Use the authoritative staged opportunity atlas, not the historical
     pre-parser flat CSV, for all new Yices-directed experiments. At 60 seconds
     the fixed reference is 7,480 Viper solves versus 7,500 Yices solves,

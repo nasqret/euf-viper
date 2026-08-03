@@ -231,6 +231,46 @@ class T11Stage0AExecHelperTests(unittest.TestCase):
             [item.placeholder for item in request.inputs], ["@SOURCE@", "@BUNDLE@"]
         )
         self.assertEqual(dict(request.environment), self._record()["environment"])
+        self.assertEqual(request.runtime, ())
+
+    def test_runtime_request_parses_sorted_hash_bound_files(self) -> None:
+        record = self._record()
+        record["schema"] = self.helper.RUNTIME_SCHEMA
+        record["runtime"] = [
+            {"path": "/runtime/a.so", "sha256": "1" * 64},
+            {"path": "/runtime/b.so", "sha256": "2" * 64},
+        ]
+        request = self.helper.load_request(str(self._write_request(record)))
+        self.assertEqual(
+            [item.path for item in request.runtime],
+            ["/runtime/a.so", "/runtime/b.so"],
+        )
+
+    def test_runtime_request_rejects_unsorted_or_duplicate_paths(self) -> None:
+        for paths, pattern in (
+            (["/runtime/b.so", "/runtime/a.so"], "not byte-sorted"),
+            (["/runtime/a.so", "/runtime/a.so"], "duplicate paths"),
+        ):
+            with self.subTest(paths=paths):
+                record = self._record()
+                record["schema"] = self.helper.RUNTIME_SCHEMA
+                record["runtime"] = [
+                    {"path": path, "sha256": f"{index + 1}" * 64}
+                    for index, path in enumerate(paths)
+                ]
+                with self.assertRaisesRegex(self.helper.Stage0ExecError, pattern):
+                    self.helper.load_request(str(self._write_request(record)))
+
+    def test_runtime_retention_rejects_user_writable_path(self) -> None:
+        runtime = self.root / "runtime.so"
+        runtime.write_bytes(b"runtime")
+        spec = self.helper.FileSpec(
+            path=str(runtime.resolve()), sha256=self._sha256(runtime)
+        )
+        with self.assertRaisesRegex(
+            self.helper.Stage0ExecError, "writable by the executing identity"
+        ):
+            self.helper._open_retained_runtime(spec, 0)
 
     @requires_linux_memfd
     def test_descriptor_mode_parses_without_reopening_helper_or_request_path(self) -> None:
@@ -886,6 +926,43 @@ class T11Stage0AExecHelperTests(unittest.TestCase):
                 }
             ],
             "argv": ["cat-snapshot", "@SOURCE@"],
+            "environment": {"HOME": "/stage0-isolated", "LANG": "C", "TZ": "UTC"},
+        }
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(HELPER),
+                "--request",
+                str(self._write_request(record)),
+            ],
+            check=False,
+            capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode())
+        self.assertEqual(completed.stdout, self.source.read_bytes())
+
+    @requires_linux_memfd
+    def test_runtime_supervisor_retains_and_revalidates_dependency(self) -> None:
+        executable = Path("/bin/cat").resolve(strict=True)
+        if not executable.is_file() or not os.access(executable, os.X_OK):
+            self.skipTest("/bin/cat does not resolve to an executable regular file")
+        record = {
+            "schema": self.helper.RUNTIME_SCHEMA,
+            "executable": {
+                "path": str(executable),
+                "sha256": self._sha256(executable),
+            },
+            "inputs": [
+                {
+                    "placeholder": "@SOURCE@",
+                    "path": str(self.source),
+                    "sha256": self._sha256(self.source),
+                }
+            ],
+            "runtime": [
+                {"path": str(executable), "sha256": self._sha256(executable)}
+            ],
+            "argv": ["cat-supervised", "@SOURCE@"],
             "environment": {"HOME": "/stage0-isolated", "LANG": "C", "TZ": "UTC"},
         }
         completed = subprocess.run(

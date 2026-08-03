@@ -1272,3 +1272,17 @@
 - Production-evidence commit `f223d49` remains isolated and NO-GO. It does not
   apply standalone to the T11 branch and sends numeric-PID signals before
   pidfd/starttime validation, leaving a PID-reuse hazard. Do not cherry-pick it.
+- On 2026-08-03, precommit T11 target-free repair reached launch/submission/
+  request/preparation schemas `v6`/`v3`/`v3`/`v2`. It fixes the impossible
+  launch key order, binds the request executor, aligns the real authorizer with
+  the full-decision executor contract, clears ambient control environments,
+  extends default polling to 24 hours, enforces 1..128 loader files, and retains
+  both independent ELFs plus all four build streams for byte-level validation.
+  Local campaign-contract tests pass 445/445 with 50 platform skips; WMI job
+  `218826` passes 144/144 Linux tests. This is not an exact-commit or scientific
+  result. Fresh WMI Rust job `218824` passes 420 tests with four ignored in 668
+  seconds. The frozen target remains unopened. Commit, hosted CI, exact-head WMI,
+  final two-build preparation, real launch dry run, and independent GO remain
+  mandatory. Runtime claims are deliberately limited to retained/revalidated
+  loader paths; Python imports and actual dynamic-loader objects are not
+  descriptor-bound.

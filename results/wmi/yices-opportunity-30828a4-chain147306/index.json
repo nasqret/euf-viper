@@ -1,10 +1,12 @@
 {
   "atlas_jobs": {
-    "completed": 218746,
+    "completed_v1": 218746,
     "failed_during_validation_development": [
       218744,
       218745
-    ]
+    ],
+    "v2_1200": 218763,
+    "v2_60": 218760
   },
   "base_prepare_job_id": 144990,
   "campaign_revision": "30828a4f0c1e7e478a9c6f406ccb245eeefc4961",
@@ -12,11 +14,11 @@
   "local_artifacts": {
     "1200": {
       "path": "yices-opportunity-1200.json",
-      "sha256": "47ca7a75f2a4d51cd192fe523b8f1bc8be09729b04d98625c5278740448af9d5"
+      "sha256": "8f577362de2ad35cf43585e6a0bc37c0f9670a225cc3f210e4210273fa10aa19"
     },
     "60": {
       "path": "yices-opportunity-60.json",
-      "sha256": "87929847c514a8d567b30a05208120faec7c3dc15277a5c1294558d4a5851313"
+      "sha256": "bbe83d88e20ccbfff022710d6afda2740f73a86fb1d7dcc60ba10fa43483cf63"
     }
   },
   "promotion_eligible": false,
@@ -27,23 +29,23 @@
   },
   "remote_artifacts": {
     "1200": {
-      "path": "/work/bnaskrecki/euf-viper-opportunity-refresh/refresh-30828a4-chain147306-dev20260803/yices-opportunity-1200.json",
-      "sha256": "47ca7a75f2a4d51cd192fe523b8f1bc8be09729b04d98625c5278740448af9d5"
+      "path": "/work/bnaskrecki/euf-viper-opportunity-tools/workspace-cd1de736/atlas-v2-linux-1200.json",
+      "sha256": "8f577362de2ad35cf43585e6a0bc37c0f9670a225cc3f210e4210273fa10aa19"
     },
     "60": {
-      "path": "/work/bnaskrecki/euf-viper-opportunity-refresh/refresh-30828a4-chain147306-dev20260803/yices-opportunity-60.json",
-      "sha256": "87929847c514a8d567b30a05208120faec7c3dc15277a5c1294558d4a5851313"
+      "path": "/work/bnaskrecki/euf-viper-opportunity-tools/workspace-cd1de736/atlas-v2-linux-60.json",
+      "sha256": "bbe83d88e20ccbfff022710d6afda2740f73a86fb1d7dcc60ba10fa43483cf63"
     },
     "staged_analysis": {
       "path": "/work/bnaskrecki/euf-viper-opportunity-refresh/refresh-30828a4-chain147306-dev20260803/staged-analysis.json",
       "sha256": "0cc014af45faa7ee5c848421c1eb46e1eb84a8234805162478098bd11b55a8b1"
     }
   },
-  "schema": "euf-viper.yices-opportunity-refresh-index.v1",
+  "schema": "euf-viper.yices-opportunity-refresh-index.v2",
   "source_policy": "read-only reconstruction from immutable staged campaign evidence",
   "status": "diagnostic_complete",
   "tool_sha256": {
     "analyze_staged_campaign.py": "ff8a98f1bbc73d4c714d40e28142a1c31b527d7b1f0fcd927f890a99695df411",
-    "analyze_yices_opportunity.py": "90c0ef789cdb58a6fc1bf350960ef238bb73db540e81c6fa7281a8457260cab7"
+    "analyze_yices_opportunity.py": "cd1de736506a758a5aa518c852e1dd7aeed08280621e0f9aab152ff4ba2dcfaf"
   }
 }

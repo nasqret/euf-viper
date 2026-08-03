@@ -20,6 +20,9 @@ WMI = ROOT / "scripts" / "wmi"
 SUBMIT = WMI / "submit_t11_stage0a.sh"
 COMPUTE = WMI / "euf_viper_t11_stage0a.sbatch"
 FINALIZER_RUNNER = WMI / "euf_viper_t11_stage0a_finalize.sbatch"
+AUTHORIZATION_REQUEST_EXECUTOR = (
+    ROOT / "scripts/bench/execute_t11_stage0a_authorization_request.py"
+)
 
 
 def sha256(path: Path) -> str:
@@ -90,8 +93,15 @@ class T11SubmissionStaticTests(unittest.TestCase):
         self.assertIn("F_ADD_SEALS", source)
         self.assertIn("FINALIZER_DEPENDENCY_READY", source)
         self.assertIn('"/proc/self/exe"', source)
-        self.assertIn('"-c",\n    bootstrap', source)
-        self.assertIn('f"/proc/self/fd/{authorizer_fd}"', source)
+        self.assertIn("AUTHORIZATION_REQUEST_EXECUTOR", source)
+        self.assertIn('"$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" create', source)
+        self.assertIn('"$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" execute', source)
+        authorization_execute = source.index(
+            '"$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" execute'
+        )
+        submission_complete = source.index("SUBMISSION_COMPLETE=1", authorization_execute)
+        self.assertLess(compute_release, authorization_execute)
+        self.assertLess(authorization_execute, submission_complete)
 
     def test_finalizer_has_explicit_pins_and_sealed_isolated_execution(self) -> None:
         source = FINALIZER_RUNNER.read_text(encoding="utf-8")
@@ -121,7 +131,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.work = Path(self.temporary.name)
+        self.work = Path(self.temporary.name).resolve()
         self.repo = self.work / "repo"
         self.input_root = self.work / "input"
         self.run_base = self.work / "runs"
@@ -152,17 +162,153 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         self.helper = self.repo / "scripts/bench/exec_t11_stage0a.py"
         self.finalizer = self.repo / "scripts/bench/finalize_t11_stage0a.py"
         self.authorizer = self.repo / "scripts/bench/authorize_t11_stage0a.py"
+        self.authorization_request_executor = (
+            self.repo / "scripts/bench/execute_t11_stage0a_authorization_request.py"
+        )
+        self.prebuilt_preparer = self.repo / "scripts/bench/prepare_t11_prebuilt.py"
         write_executable(self.validator, "#!/usr/bin/env python3\nraise SystemExit(0)\n")
         write_executable(self.helper, "#!/usr/bin/env python3\nraise SystemExit(0)\n")
-        shutil.copy2(ROOT / "scripts/bench/authorize_t11_stage0a.py", self.authorizer)
-        self.authorizer.chmod(0o755)
-        if self._testMethodName == "test_linux_authorization_request_executes_end_to_end":
-            shutil.copy2(ROOT / "scripts/bench/finalize_t11_stage0a.py", self.finalizer)
-            self.finalizer.chmod(0o755)
-        else:
-            write_executable(
-                self.finalizer,
-                """
+        write_executable(
+            self.prebuilt_preparer,
+            "#!/usr/bin/env python3\nraise SystemExit(0)\n",
+        )
+        write_executable(
+            self.authorizer,
+            f"""
+            #!/usr/bin/env python3
+            import argparse
+            import hashlib
+            import json
+            import os
+            from pathlib import Path
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--submission", required=True)
+            parser.add_argument("--submission-sha256", required=True)
+            parser.add_argument("--scheduler-candidate", required=True)
+            parser.add_argument("--output", required=True)
+            parser.add_argument("--finalizer-module", required=True)
+            parser.add_argument("--finalizer-module-sha256", required=True)
+            parser.add_argument("--sacct-bin", required=True)
+            parser.add_argument("--poll-attempts", required=True)
+            parser.add_argument("--poll-interval-seconds", required=True)
+            arguments = vars(parser.parse_args())
+            root = Path({os.fspath(self.state_root)!r})
+            if (root / "authorization-fail").exists():
+                raise SystemExit(73)
+            (root / "authorization-invocation.json").write_text(
+                json.dumps(arguments, sort_keys=True, separators=(",", ":")) + "\\n",
+                encoding="ascii",
+            )
+            submission_bytes = Path(arguments["submission"]).read_bytes()
+            submission = json.loads(submission_bytes)
+            candidate_path = Path(arguments["scheduler_candidate"])
+            candidate = {{
+                "attempt_id": "d" * 64,
+                "classification": "scientific_candidate",
+                "policy": {{"sat_calls": 0}},
+            }}
+            candidate_bytes = (
+                json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\\n"
+            ).encode("ascii")
+            candidate_descriptor = os.open(
+                candidate_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400
+            )
+            try:
+                os.write(candidate_descriptor, candidate_bytes)
+                os.fchmod(candidate_descriptor, 0o400)
+                os.fsync(candidate_descriptor)
+            finally:
+                os.close(candidate_descriptor)
+            submission_stat = os.stat(arguments["submission"], follow_symlinks=False)
+            candidate_stat = os.stat(candidate_path, follow_symlinks=False)
+            submission_sha256 = hashlib.sha256(submission_bytes).hexdigest()
+            candidate_sha256 = hashlib.sha256(candidate_bytes).hexdigest()
+            raw_sha256 = {{"allocation": "e" * 64, "batch": "f" * 64}}
+            root_binding = {{
+                "device": 1,
+                "inode": 1,
+                "inventory_sha256": "1" * 64,
+                "mode": "0500",
+                "path": submission["candidate_root"],
+            }}
+            identity = {{
+                "candidate_root": submission["candidate_root"],
+                "candidate_root_binding": root_binding,
+                "cluster": submission["slurm"]["cluster"],
+                "finalizer_job_id": submission["slurm"]["finalizer_job_id"],
+                "finalizer_scheduler_raw_sha256": raw_sha256,
+                "launch_manifest_sha256": submission["launch_manifest_sha256"],
+                "revision": submission["revision"],
+                "run_nonce": submission["run_nonce"],
+                "scheduler_candidate_sha256": candidate_sha256,
+                "submission_sha256": submission_sha256,
+            }}
+            identity_bytes = (
+                json.dumps(identity, sort_keys=True, separators=(",", ":")) + "\\n"
+            ).encode("ascii")
+            payload = {{
+                "authorization_id": hashlib.sha256(identity_bytes).hexdigest(),
+                "candidate_root": submission["candidate_root"],
+                "candidate_root_binding": root_binding,
+                "classification": candidate["classification"],
+                "control": submission["control"],
+                "decision": "authorize_stage0b",
+                "finalizer_scheduler": {{
+                    "allocation": {{
+                        "Cluster": submission["slurm"]["cluster"],
+                        "JobIDRaw": str(submission["slurm"]["finalizer_job_id"]),
+                    }},
+                    "batch": {{}},
+                    "commands": {{}},
+                    "raw_sha256": raw_sha256,
+                }},
+                "launch_manifest_sha256": submission["launch_manifest_sha256"],
+                "policy": candidate["policy"],
+                "revision": submission["revision"],
+                "run_nonce": submission["run_nonce"],
+                "scheduler_candidate": {{
+                    "attempt_id": candidate["attempt_id"],
+                    "bytes": len(candidate_bytes),
+                    "mode": f"{{candidate_stat.st_mode & 0o7777:04o}}",
+                    "path": str(candidate_path),
+                    "sha256": candidate_sha256,
+                }},
+                "schema": "euf-viper.t11-stage0a-authorization.v1",
+                "stage0b_authority": True,
+                "status": "stage0b_authorized",
+                "submission": {{
+                    "bytes": len(submission_bytes),
+                    "mode": f"{{submission_stat.st_mode & 0o7777:04o}}",
+                    "path": arguments["submission"],
+                    "sha256": submission_sha256,
+                }},
+                "submission_evidence": {{
+                    "compute_held_record": submission["slurm"]["compute_held_record"],
+                    "compute_sbatch_argv": submission["slurm"]["compute_sbatch_argv"],
+                    "finalizer_held_record": submission["slurm"]["finalizer_held_record"],
+                    "finalizer_sbatch_argv": submission["slurm"]["finalizer_sbatch_argv"],
+                    "owner_uid": submission["slurm"]["owner_uid"],
+                }},
+            }}
+            encoded = (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\\n"
+            ).encode("ascii")
+            descriptor = os.open(
+                arguments["output"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400
+            )
+            try:
+                os.write(descriptor, encoded)
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            os.write(1, encoded)
+            """,
+        )
+        write_executable(
+            self.finalizer,
+            """
                 #!/usr/bin/env python3
                 import argparse
                 import json
@@ -181,8 +327,16 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 Path(arguments["output"]).write_text(
                     json.dumps(arguments, sort_keys=True) + "\\n", encoding="ascii"
                 )
-                """,
+            """,
+        )
+
+        if sys.platform.startswith("linux") and hasattr(os, "memfd_create"):
+            shutil.copy2(
+                AUTHORIZATION_REQUEST_EXECUTOR, self.authorization_request_executor
             )
+            self.authorization_request_executor.chmod(0o755)
+        else:
+            self._write_nonlinux_request_executor()
 
         self._install_fake_scheduler()
         self.git = Path(shutil.which("git") or "").resolve()
@@ -242,8 +396,12 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "finalizer_sbatch_sha256": sha256(self.finalizer_runner),
                 "finalizer_sha256": sha256(self.finalizer),
                 "authorizer_sha256": sha256(self.authorizer),
+                "authorization_request_executor_sha256": sha256(
+                    self.authorization_request_executor
+                ),
                 "validator_sha256": sha256(self.validator),
                 "exec_helper_sha256": sha256(self.helper),
+                "prebuilt_preparer_sha256": sha256(self.prebuilt_preparer),
             },
         }
         self.manifest.write_text(
@@ -275,6 +433,79 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             )
         return completed
 
+    def _write_nonlinux_request_executor(self) -> None:
+        write_executable(
+            self.authorization_request_executor,
+            f"""
+            #!/usr/bin/env python3
+            import argparse
+            import hashlib
+            import importlib.util
+            import json
+            import os
+            import sys
+            from pathlib import Path
+
+            module_path = Path({os.fspath(AUTHORIZATION_REQUEST_EXECUTOR)!r})
+            spec = importlib.util.spec_from_file_location("real_request_executor", module_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+            if sys.argv[1] == "create":
+                raise SystemExit(module.main(sys.argv[1:]))
+            parser = argparse.ArgumentParser()
+            parser.add_argument("command", choices=("execute",))
+            parser.add_argument("--request", type=Path, required=True)
+            parser.add_argument("--request-sha256", required=True)
+            arguments = parser.parse_args()
+            try:
+                encoded_request = arguments.request.read_bytes()
+                if hashlib.sha256(encoded_request).hexdigest() != arguments.request_sha256:
+                    raise module.RequestError(
+                        "authorization request SHA-256 differs from the caller binding"
+                    )
+                request = module.validate_request(
+                    module._decode_canonical(encoded_request, "authorization request")
+                )
+                root = Path({os.fspath(self.state_root)!r})
+                if (root / "authorization-fail").exists():
+                    raise module.RequestError("test authorizer failed")
+                invocation = {{
+                    "poll_attempts": request["poll"]["attempts"],
+                    "poll_interval_seconds": request["poll"]["interval_seconds"],
+                    "sacct_bin": request["sacct"]["path"],
+                }}
+                (root / "authorization-invocation.json").write_text(
+                    json.dumps(invocation, sort_keys=True, separators=(",", ":")) + "\\n",
+                    encoding="ascii",
+                )
+                payload = {{
+                    "decision": "authorize_stage0b",
+                    "schema": "test.authorization.v1",
+                    "stage0b_authority": True,
+                    "status": "stage0b_authorized",
+                }}
+                encoded = (
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\\n"
+                ).encode("ascii")
+                descriptor = os.open(
+                    request["output_path"],
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o400,
+                )
+                try:
+                    os.write(descriptor, encoded)
+                    os.fchmod(descriptor, 0o400)
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                os.write(1, encoded)
+            except module.RequestError as error:
+                print(f"authorization-request executor rejected: {{error}}", file=sys.stderr)
+                raise SystemExit(2)
+            """,
+        )
+
     def _install_fake_scheduler(self) -> None:
         write_executable(
             self.fake_bin / "sbatch",
@@ -285,8 +516,26 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             import sys
             from pathlib import Path
 
-            root = Path(os.environ["TEST_SCHEDULER_STATE"])
+            root = Path.cwd().resolve().parent / "scheduler-state"
             arguments = sys.argv[1:]
+
+            def setting(name, default=""):
+                path = root / f"setting-{name}"
+                return path.read_text(encoding="ascii").strip() if path.exists() else default
+
+            observed_environment = {
+                name: os.environ.get(name)
+                for name in (
+                    "GIT_CONFIG_GLOBAL",
+                    "LD_LIBRARY_PATH",
+                    "PYTHONPATH",
+                    "SLURM_CONF",
+                )
+            }
+            (root / "control-environment.json").write_text(
+                json.dumps(observed_environment, sort_keys=True) + "\n",
+                encoding="ascii",
+            )
 
             def option(name):
                 prefix = name + "="
@@ -296,7 +545,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             role = "finalizer" if name.endswith("finalize") else "compute"
             with (root / "sbatch.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(arguments) + "\n")
-            if os.environ.get("TEST_SBATCH_FAIL_ROLE") == role:
+            if setting("TEST_SBATCH_FAIL_ROLE") == role:
                 raise SystemExit(19)
             counter_path = root / "counter"
             job_id = int(counter_path.read_text()) + 1
@@ -323,7 +572,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "canceled": False,
             }
             jobs_path.write_text(json.dumps(jobs, sort_keys=True) + "\n")
-            print(f"{job_id};{os.environ['TEST_SLURM_CLUSTER']}")
+            print(f"{job_id};testcluster")
             """,
         )
         write_executable(
@@ -335,9 +584,13 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             import sys
             from pathlib import Path
 
-            root = Path(os.environ["TEST_SCHEDULER_STATE"])
+            root = Path.cwd().resolve().parent / "scheduler-state"
             jobs_path = root / "jobs.json"
             jobs = json.loads(jobs_path.read_text())
+
+            def setting(name, default=""):
+                path = root / f"setting-{name}"
+                return path.read_text(encoding="ascii").strip() if path.exists() else default
             if sys.argv[1:4] == ["show", "job", "-o"]:
                 job_id = sys.argv[4]
                 job = jobs[job_id]
@@ -345,7 +598,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 count = int(count_path.read_text()) + 1 if count_path.exists() else 1
                 count_path.write_text(f"{count}\n")
                 comment = job["comment"]
-                mismatch_after = int(os.environ.get("TEST_SCONTROL_MISMATCH_AFTER", "0"))
+                mismatch_after = int(setting("TEST_SCONTROL_MISMATCH_AFTER", "0"))
                 if (
                     mismatch_after
                     and count >= mismatch_after
@@ -363,7 +616,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                     )
                     dependency_count_path.write_text(f"{dependency_count}\n")
                     transient_reads = int(
-                        os.environ.get("TEST_SCONTROL_TRANSIENT_NONE_READS", "0")
+                        setting("TEST_SCONTROL_TRANSIENT_NONE_READS", "0")
                     )
                     reason = (
                         "None" if dependency_count <= transient_reads else "Dependency"
@@ -372,10 +625,10 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                     reason = "None"
                 dependency = job["dependency"]
                 if (
-                    os.environ.get("TEST_SCONTROL_DEPENDENCY_OVERRIDE")
+                    setting("TEST_SCONTROL_DEPENDENCY_OVERRIDE")
                     and job["job_name"] == "euf-t11-stage0a-finalize"
                 ):
-                    dependency = os.environ["TEST_SCONTROL_DEPENDENCY_OVERRIDE"]
+                    dependency = setting("TEST_SCONTROL_DEPENDENCY_OVERRIDE")
                 fields = {
                     "JobId": job_id,
                     "JobName": job["job_name"],
@@ -398,6 +651,31 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 jobs_path.write_text(json.dumps(jobs, sort_keys=True) + "\n")
                 with (root / "release.log").open("a", encoding="ascii") as handle:
                     handle.write(job_id + "\n")
+                if jobs[job_id]["job_name"] == "euf-t11-stage0a":
+                    control = Path(jobs[job_id]["command"]).parent
+                    tamper = setting("TEST_TAMPER_AUTHORIZATION_REQUEST")
+                    if tamper:
+                        request_path = control / "authorization-request.json"
+                        request_path.chmod(0o600)
+                        if tamper == "argv":
+                            request = json.loads(request_path.read_text(encoding="ascii"))
+                            request["argv"].append("--tampered")
+                            request_path.write_text(
+                                json.dumps(request, sort_keys=True, separators=(",", ":"))
+                                + "\n",
+                                encoding="ascii",
+                            )
+                        else:
+                            request_path.write_bytes(request_path.read_bytes() + b" ")
+                        request_path.chmod(0o400)
+                    if setting("TEST_REPLACE_AUTHORIZER_AFTER_RELEASE"):
+                        authorizer = control / "authorize_t11_stage0a.py"
+                        authorizer.chmod(0o700)
+                        authorizer.write_text(
+                            "raise SystemExit('replacement executed')\n",
+                            encoding="ascii",
+                        )
+                        authorizer.chmod(0o500)
                 raise SystemExit(0)
             raise SystemExit(91)
             """,
@@ -411,7 +689,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             import sys
             from pathlib import Path
 
-            root = Path(os.environ["TEST_SCHEDULER_STATE"])
+            root = Path.cwd().resolve().parent / "scheduler-state"
             job_id = sys.argv[1]
             path = root / "jobs.json"
             jobs = json.loads(path.read_text())
@@ -476,18 +754,24 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "EUF_VIPER_T11_PARTITION": "test_idle",
                 "EUF_VIPER_T11_RUN_NONCE": "0123456789abcdef0123456789abcdef",
                 "EUF_VIPER_T11_FINALIZER_PATH": str(self.finalizer),
-                "TEST_SCHEDULER_STATE": str(self.state_root),
-                "TEST_SLURM_CLUSTER": "testcluster",
             }
         )
         environment.update(updates)
         return environment
 
     def _submit(self, **updates: str) -> subprocess.CompletedProcess[str]:
+        environment_updates: dict[str, str] = {}
+        for name, value in updates.items():
+            if name.startswith("TEST_"):
+                (self.state_root / f"setting-{name}").write_text(
+                    value, encoding="ascii"
+                )
+            else:
+                environment_updates[name] = value
         return subprocess.run(
             ["bash", str(self.submitter)],
             cwd=self.repo,
-            env=self._environment(**updates),
+            env=self._environment(**environment_updates),
             text=True,
             capture_output=True,
             check=False,
@@ -772,6 +1056,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         record_path = campaign / "control" / "submission.json"
         orchestration_path = campaign / "control" / "submission-orchestration.json"
         authorization_request_path = campaign / "control" / "authorization-request.json"
+        decision_path = campaign / "stage0b-decision.json"
         encoded = record_path.read_bytes()
         record = json.loads(encoded)
         self.assertEqual(
@@ -810,6 +1095,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "finalizer_script_sha256",
                 "finalizer_sha256",
                 "authorizer_sha256",
+                "authorization_request_executor_sha256",
                 "validator_sha256",
                 "exec_helper_sha256",
                 "controller_python_sha256",
@@ -872,6 +1158,10 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         self.assertEqual(record["control"]["finalizer_sha256"], sha256(self.finalizer))
         self.assertEqual(record["control"]["authorizer_sha256"], sha256(self.authorizer))
         self.assertEqual(
+            record["control"]["authorization_request_executor_sha256"],
+            sha256(self.authorization_request_executor),
+        )
+        self.assertEqual(
             record["launch_manifest_sha256"], sha256(self.manifest)
         )
         orchestration = json.loads(orchestration_path.read_bytes())
@@ -908,6 +1198,13 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             outputs["t11_stage0a_authorization_output"],
             record["final_decision_path"],
         )
+        self.assertEqual(
+            outputs["t11_stage0a_authorization_output_sha256"],
+            sha256(decision_path),
+        )
+        self.assertEqual(
+            outputs["t11_stage0a_authorization_status"], "stage0b_authorized"
+        )
         self.assertEqual(outputs["t11_stage0a_authorizer_sha256"], sha256(self.authorizer))
         request_bytes = authorization_request_path.read_bytes()
         request = json.loads(request_bytes)
@@ -918,15 +1215,18 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             ).encode("ascii"),
         )
         self.assertEqual(
-            request["schema"], "euf-viper.t11-stage0a-authorization-request.v1"
+            request["schema"], "euf-viper.t11-stage0a-authorization-request.v3"
         )
         self.assertEqual(request["submission"]["sha256"], hashlib.sha256(encoded).hexdigest())
+        self.assertEqual(
+            request["poll"], {"attempts": "17280", "interval_seconds": "5"}
+        )
         self.assertEqual(request["argv"][0], str(self.python))
         self.assertEqual(request["argv"][4], "-c")
         compile(request["argv"][5], "authorization-bootstrap", "exec")
         self.assertIn("os.memfd_create", request["argv"][5])
         self.assertIn("executed controller Python digest mismatch", request["argv"][5])
-        self.assertIn("authorizer_fd = copy_sealed", request["argv"][5])
+        self.assertIn("sealed authorizer", request["argv"][5])
         self.assertIn("--submission-sha256", request["argv"])
         self.assertEqual(
             outputs["t11_stage0a_authorization_request"],
@@ -936,6 +1236,20 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             outputs["t11_stage0a_authorization_request_sha256"],
             hashlib.sha256(request_bytes).hexdigest(),
         )
+        self.assertEqual(
+            outputs["t11_stage0a_authorization_request_executor"],
+            str(
+                (
+                    campaign
+                    / "control/execute_t11_stage0a_authorization_request.py"
+                ).resolve()
+            ),
+        )
+        self.assertEqual(
+            outputs["t11_stage0a_authorization_request_executor_sha256"],
+            sha256(self.authorization_request_executor),
+        )
+
         calls = [
             json.loads(line)
             for line in (self.state_root / "sbatch.jsonl").read_text().splitlines()
@@ -958,6 +1272,98 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         self.assertTrue(any(value.startswith("--error=") for value in calls[1]))
         self.assertFalse(self._jobs()["4101"]["held"])
         self.assertFalse(self._jobs()["4102"]["held"])
+        decision = json.loads(decision_path.read_bytes())
+        self.assertEqual(decision["decision"], "authorize_stage0b")
+        self.assertTrue(decision["stage0b_authority"])
+        invocation = json.loads(
+            (self.state_root / "authorization-invocation.json").read_text(
+                encoding="ascii"
+            )
+        )
+        self.assertEqual(invocation["poll_attempts"], "17280")
+        self.assertEqual(invocation["poll_interval_seconds"], "5")
+        self.assertEqual(invocation["sacct_bin"], os.fspath(self.fake_bin / "sacct"))
+
+    def test_submit_control_environment_drops_hostile_inherited_values(self) -> None:
+        completed = self._submit(
+            GIT_CONFIG_GLOBAL="/poison/gitconfig",
+            LD_LIBRARY_PATH="/poison/lib",
+            PYTHONPATH="/poison/python",
+            SLURM_CONF="/poison/slurm.conf",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        observed = json.loads(
+            (self.state_root / "control-environment.json").read_text(
+                encoding="ascii"
+            )
+        )
+        self.assertEqual(
+            observed,
+            {
+                "GIT_CONFIG_GLOBAL": None,
+                "LD_LIBRARY_PATH": None,
+                "PYTHONPATH": None,
+                "SLURM_CONF": None,
+            },
+        )
+
+    def test_authorization_poll_configuration_reaches_request_and_authorizer(self) -> None:
+        completed = self._submit(
+            EUF_VIPER_T11_FINALIZER_POLL_ATTEMPTS="37",
+            EUF_VIPER_T11_FINALIZER_POLL_INTERVAL_SECONDS="0.25",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        campaign = (
+            self.run_base
+            / "t11-stage0a-submission-0123456789abcdef0123456789abcdef"
+        )
+        request = json.loads(
+            (campaign / "control/authorization-request.json").read_bytes()
+        )
+        self.assertEqual(
+            request["poll"], {"attempts": "37", "interval_seconds": "0.25"}
+        )
+        invocation = json.loads(
+            (self.state_root / "authorization-invocation.json").read_text(
+                encoding="ascii"
+            )
+        )
+        self.assertEqual(invocation["poll_attempts"], "37")
+        self.assertEqual(invocation["poll_interval_seconds"], "0.25")
+
+    def test_authorization_failure_cancels_both_proven_owned_jobs(self) -> None:
+        (self.state_root / "authorization-fail").write_text(
+            "fail\n", encoding="ascii"
+        )
+        completed = self._submit()
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("authorization request execution failed", completed.stderr)
+        self.assertEqual(
+            (self.state_root / "cancel.log").read_text().splitlines(),
+            ["4102", "4101"],
+        )
+        jobs = self._jobs()
+        self.assertTrue(jobs["4101"]["canceled"])
+        self.assertTrue(jobs["4102"]["canceled"])
+
+    def test_authorization_request_digest_tamper_fails_closed(self) -> None:
+        completed = self._submit(TEST_TAMPER_AUTHORIZATION_REQUEST="digest")
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("SHA-256 differs from the caller binding", completed.stderr)
+        self.assertIn("authorization request execution failed", completed.stderr)
+        self.assertEqual(
+            (self.state_root / "cancel.log").read_text().splitlines(),
+            ["4102", "4101"],
+        )
+
+    def test_authorization_request_argv_tamper_fails_closed(self) -> None:
+        completed = self._submit(TEST_TAMPER_AUTHORIZATION_REQUEST="argv")
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("SHA-256 differs from the caller binding", completed.stderr)
+        self.assertEqual(
+            (self.state_root / "cancel.log").read_text().splitlines(),
+            ["4102", "4101"],
+        )
 
     def test_finalizer_submission_failure_cancels_only_proven_compute(self) -> None:
         completed = self._submit(TEST_SBATCH_FAIL_ROLE="finalizer")
@@ -1000,127 +1406,49 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         self.assertTrue(jobs["4102"]["canceled"])
 
     @unittest.skipUnless(
-        sys.platform.startswith("linux")
-        and hasattr(os, "memfd_create")
-        and hasattr(os, "O_TMPFILE"),
-        "end-to-end authorization requires Linux memfd and O_TMPFILE support",
+        sys.platform.startswith("linux") and hasattr(os, "memfd_create"),
+        "end-to-end authorization requires Linux memfd support",
     )
-    def test_linux_authorization_request_executes_end_to_end(self) -> None:
-        submitted = self._submit()
-        self.assertEqual(submitted.returncode, 0, submitted.stderr)
-        self.assertFalse((self.state_root / "sacct-invocations.jsonl").exists())
+    def test_linux_submission_consumes_request_through_sealed_authorizer(self) -> None:
+        completed = self._submit()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
         campaign = (
             self.run_base.resolve()
             / "t11-stage0a-submission-0123456789abcdef0123456789abcdef"
         )
-        submission_path = campaign / "control/submission.json"
-        submission = self._publish_compute_candidate(submission_path)
-        self._write_finalizer_sacct(submission)
-
         request_path = campaign / "control/authorization-request.json"
-        request_bytes = request_path.read_bytes()
-        request = json.loads(request_bytes)
-        self.assertEqual(
-            request_bytes,
-            (
-                json.dumps(request, sort_keys=True, separators=(",", ":")) + "\n"
-            ).encode("ascii"),
-        )
-        self.assertEqual(request["submission"]["sha256"], sha256(submission_path))
-        self.assertEqual(request["argv"][0], request["controller_python"]["path"])
-        self.assertEqual(request["argv"][4], "-c")
-        self.assertNotEqual(request["argv"][4], request["authorizer"]["path"])
-        self.assertIn(request["authorizer"]["path"], request["argv"][6:])
-        self.assertEqual(
-            request["argv"][request["argv"].index("--finalizer-module") + 1],
-            request["finalizer_module"]["path"],
-        )
-        self.assertEqual(
-            request["argv"][request["argv"].index("--sacct-bin") + 1],
-            request["sacct"]["path"],
-        )
-        completed = subprocess.run(
-            request["argv"],
-            cwd=self.run_base,
-            env={
-                "HOME": str(self.work),
-                "LANG": "C",
-                "LC_ALL": "C",
-                "PATH": "/usr/bin:/bin",
-            },
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        result = json.loads(completed.stdout)
+        request = json.loads(request_path.read_bytes())
         decision_path = Path(request["output_path"])
-        decision_bytes = decision_path.read_bytes()
-        decision = json.loads(decision_bytes)
-        self.assertEqual(result["status"], "stage0b_authorized")
+        decision = json.loads(decision_path.read_bytes())
+        invocation = json.loads(
+            (self.state_root / "authorization-invocation.json").read_text(
+                encoding="ascii"
+            )
+        )
         self.assertEqual(decision["status"], "stage0b_authorized")
         self.assertEqual(decision["decision"], "authorize_stage0b")
         self.assertTrue(decision["stage0b_authority"])
-        self.assertEqual(
-            decision["submission"]["sha256"], hashlib.sha256(submission_path.read_bytes()).hexdigest()
-        )
-        self.assertEqual(
-            decision["candidate_root_binding"]["path"],
-            submission["candidate_root"],
-        )
-        invocations = [
-            json.loads(line)
-            for line in (self.state_root / "sacct-invocations.jsonl")
-            .read_text(encoding="ascii")
-            .splitlines()
-        ]
-        self.assertEqual(len(invocations), 2)
-        self.assertTrue(all("--duplicates" in argv for argv in invocations))
-        self.assertTrue(
-            all(
-                str(submission["slurm"]["finalizer_job_id"]) in argv
-                or f"{submission['slurm']['finalizer_job_id']}.batch" in argv
-                for argv in invocations
-            )
-        )
         self.assertEqual(stat.S_IMODE(decision_path.stat().st_mode), 0o400)
+        self.assertEqual(invocation["poll_attempts"], request["poll"]["attempts"])
+        self.assertEqual(
+            invocation["poll_interval_seconds"],
+            request["poll"]["interval_seconds"],
+        )
+        self.assertFalse((self.state_root / "sacct-invocations.jsonl").exists())
 
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "memfd_create"),
         "sealed authorization execution requires Linux memfd support",
     )
-    def test_linux_authorization_request_rejects_preexec_authorizer_replacement(self) -> None:
-        submitted = self._submit()
-        self.assertEqual(submitted.returncode, 0, submitted.stderr)
-        campaign = (
-            self.run_base.resolve()
-            / "t11-stage0a-submission-0123456789abcdef0123456789abcdef"
-        )
-        request = json.loads(
-            (campaign / "control/authorization-request.json").read_bytes()
-        )
-        authorizer = Path(request["authorizer"]["path"])
-        authorizer.chmod(0o700)
-        authorizer.write_bytes(b"raise SystemExit('replacement executed')\n")
-        authorizer.chmod(0o500)
-        completed = subprocess.run(
-            request["argv"],
-            cwd=self.run_base,
-            env={
-                "HOME": str(self.work),
-                "LANG": "C",
-                "LC_ALL": "C",
-                "PATH": "/usr/bin:/bin",
-            },
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("authorizer digest mismatch", completed.stderr)
+    def test_linux_authorizer_replacement_before_consumption_fails_closed(self) -> None:
+        completed = self._submit(TEST_REPLACE_AUTHORIZER_AFTER_RELEASE="1")
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("authorizer SHA-256 differs from the request", completed.stderr)
         self.assertNotIn("replacement executed", completed.stderr)
-        self.assertFalse(Path(request["output_path"]).exists())
-
+        self.assertEqual(
+            (self.state_root / "cancel.log").read_text().splitlines(),
+            ["4102", "4101"],
+        )
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "memfd_create"),
         "sealed finalizer execution requires Linux memfd support",
@@ -1151,6 +1479,9 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             self.run_base.resolve()
             / "t11-stage0a-submission-0123456789abcdef0123456789abcdef"
         )
+        candidate_path = campaign / "scheduler-candidate.json"
+        candidate_path.chmod(0o600)
+        candidate_path.unlink()
         runner = campaign / "control/euf_viper_t11_stage0a_finalize.sbatch"
         completed = subprocess.run(
             ["bash", str(runner)],
@@ -1166,12 +1497,14 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             invocation["candidate_root"],
             str(self.run_base.resolve() / "t11-stage0a-4101"),
         )
-        self.assertEqual(invocation["poll_attempts"], "12")
+        self.assertEqual(invocation["poll_attempts"], "17280")
         self.assertEqual(invocation["poll_interval_seconds"], "5")
         self.assertRegex(invocation["sacct_bin"], r"\A/proc/self/fd/[0-9]+\Z")
         self.assertRegex(invocation["scontrol_bin"], r"\A/proc/self/fd/[0-9]+\Z")
         self.assertEqual(invocation["submission_sha256"], sha256(campaign / "control/submission.json"))
-        self.assertFalse((campaign / "stage0b-decision.json").exists())
+        decision = json.loads((campaign / "stage0b-decision.json").read_bytes())
+        self.assertEqual(decision["decision"], "authorize_stage0b")
+        self.assertTrue(decision["stage0b_authority"])
 
 
 if __name__ == "__main__":

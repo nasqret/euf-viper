@@ -72,6 +72,8 @@ readonly REPO_RUNNER="$ROOT/scripts/wmi/euf_viper_t11_stage0a.sbatch"
 readonly REPO_FINALIZER_RUNNER="$ROOT/scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch"
 readonly VALIDATOR="$ROOT/scripts/bench/validate_t11_stage0a.py"
 readonly EXEC_HELPER="$ROOT/scripts/bench/exec_t11_stage0a.py"
+readonly AUTHORIZATION_REQUEST_EXECUTOR="$ROOT/scripts/bench/execute_t11_stage0a_authorization_request.py"
+readonly PREBUILT_PREPARER="$ROOT/scripts/bench/prepare_t11_prebuilt.py"
 readonly FINALIZER="${EUF_VIPER_T11_FINALIZER_PATH:-$ROOT/scripts/bench/finalize_t11_stage0a.py}"
 readonly AUTHORIZER="${EUF_VIPER_T11_AUTHORIZER_PATH:-$ROOT/scripts/bench/authorize_t11_stage0a.py}"
 
@@ -95,7 +97,7 @@ readonly LAUNCH_MANIFEST_SHA256="${EUF_VIPER_T11_LAUNCH_MANIFEST_SHA256:?set the
 readonly EXPECTED_REVISION="${EUF_VIPER_T11_EXPECTED_REVISION:?set the exact 40-hex solver revision}"
 readonly CLUSTER="${EUF_VIPER_T11_CLUSTER:?set the exact Slurm cluster name}"
 readonly PARTITION="${EUF_VIPER_T11_PARTITION:-cpu_idle}"
-readonly FINALIZER_POLL_ATTEMPTS="${EUF_VIPER_T11_FINALIZER_POLL_ATTEMPTS:-12}"
+readonly FINALIZER_POLL_ATTEMPTS="${EUF_VIPER_T11_FINALIZER_POLL_ATTEMPTS:-17280}"
 readonly FINALIZER_POLL_INTERVAL_SECONDS="${EUF_VIPER_T11_FINALIZER_POLL_INTERVAL_SECONDS:-5}"
 
 canonical_sha256 "$CONTROLLER_PYTHON_SHA256" || die "controller Python SHA-256 is malformed"
@@ -125,10 +127,17 @@ for path in "$CONTROLLER_PYTHON" "$GIT" "$SBATCH" "$SCONTROL" "$SCANCEL" "$SACCT
 done
 
 sha256_file() {
-  /usr/bin/env -i HOME=/ LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
-    "$CONTROLLER_PYTHON" -I -S -B -c \
-    'import hashlib,sys; h=hashlib.sha256(); f=open(sys.argv[1],"rb"); [h.update(b) for b in iter(lambda:f.read(1048576),b"")]; print(h.hexdigest())' \
-    "$1"
+  local output
+  if [ -x /usr/bin/sha256sum ]; then
+    output="$(/usr/bin/env -i HOME=/ LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
+      /usr/bin/sha256sum --binary "$1")"
+  elif [ -x /usr/bin/shasum ]; then
+    output="$(/usr/bin/env -i HOME=/ LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
+      /usr/bin/shasum -a 256 -- "$1")"
+  else
+    die "submit host lacks a fixed system SHA-256 utility"
+  fi
+  printf '%s\n' "${output%% *}"
 }
 
 require_sha256() {
@@ -147,12 +156,17 @@ require_sha256 "$SBATCH" "$SBATCH_SHA256" sbatch
 require_sha256 "$SCONTROL" "$SCONTROL_SHA256" scontrol
 require_sha256 "$SCANCEL" "$SCANCEL_SHA256" scancel
 require_sha256 "$SACCT" "$SACCT_SHA256" sacct
+[ -f "$AUTHORIZATION_REQUEST_EXECUTOR" ] && [ ! -L "$AUTHORIZATION_REQUEST_EXECUTOR" ] ||
+  die "authorization-request executor is missing, nonregular, or a symlink"
+[ -f "$PREBUILT_PREPARER" ] && [ ! -L "$PREBUILT_PREPARER" ] ||
+  die "prebuilt preparer is missing, nonregular, or a symlink"
 
 sealed_control() {
   local executable="$1"
   local expected_sha256="$2"
   shift 2
-  "$CONTROLLER_PYTHON" -I -S -B - "$executable" "$expected_sha256" "$@" <<'PY'
+  /usr/bin/env -i HOME=/ LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
+    "$CONTROLLER_PYTHON" -I -S -B - "$executable" "$expected_sha256" "$@" <<'PY'
 import fcntl
 import hashlib
 import os
@@ -231,8 +245,13 @@ try:
         inherited_descriptors = (descriptor,)
     else:
         inherited_descriptors = ()
-    environment = os.environ.copy()
-    environment.update({"LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin", "TZ": "UTC"})
+    environment = {
+        "HOME": "/",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/bin:/bin",
+        "TZ": "UTC",
+    }
     completed = subprocess.run(
         [path, *arguments],
         executable=executable_path,
@@ -259,6 +278,116 @@ if current != identity:
     raise SystemExit("control executable pathname changed during execution")
 raise SystemExit(completed.returncode)
 PY
+}
+
+sealed_python_tool() {
+  local tool="$1"
+  local expected_sha256="$2"
+  shift 2
+  sealed_control "$CONTROLLER_PYTHON" "$CONTROLLER_PYTHON_SHA256" \
+    -I -S -B -c '
+import fcntl
+import hashlib
+import os
+import stat
+import sys
+
+tool, expected, *arguments = sys.argv[1:]
+source = os.open(
+    tool,
+    os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+)
+descriptor = -1
+try:
+    before = os.fstat(source)
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise SystemExit("Python tool is not one regular file")
+    if before.st_mode & 0o222:
+        raise SystemExit("Python tool is writable")
+    if before.st_size < 1 or before.st_size > 16 * 1024 * 1024:
+        raise SystemExit("Python tool size is outside its bound")
+    payload = bytearray()
+    digest = hashlib.sha256()
+    while len(payload) < before.st_size:
+        block = os.pread(
+            source,
+            min(1024 * 1024, before.st_size - len(payload)),
+            len(payload),
+        )
+        if not block:
+            raise SystemExit("Python tool was truncated while copied")
+        payload.extend(block)
+        digest.update(block)
+    after = os.fstat(source)
+    identity = lambda value: (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_nlink,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+    if identity(before) != identity(after):
+        raise SystemExit("Python tool changed while copied")
+    if digest.hexdigest() != expected:
+        raise SystemExit("Python tool digest mismatch")
+finally:
+    os.close(source)
+
+environment = {
+    "HOME": "/",
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "TZ": "UTC",
+}
+if sys.platform.startswith("linux"):
+    if not hasattr(os, "memfd_create"):
+        raise SystemExit("sealed Python-tool execution requires memfd support")
+    descriptor = os.memfd_create(
+        "t11-authorization-request-executor",
+        getattr(os, "MFD_CLOEXEC", 0x0001)
+        | getattr(os, "MFD_ALLOW_SEALING", 0x0002),
+    )
+    offset = 0
+    while offset < len(payload):
+        written = os.write(descriptor, payload[offset:])
+        if written <= 0:
+            raise SystemExit("short sealed Python-tool write")
+        offset += written
+    os.fchmod(descriptor, 0o400)
+    seals = (
+        getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+        | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+        | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+        | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+    )
+    fcntl.fcntl(descriptor, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
+    if fcntl.fcntl(descriptor, getattr(fcntl, "F_GET_SEALS", 1034)) & seals != seals:
+        raise SystemExit("sealed Python tool lacks mandatory seals")
+    os.set_inheritable(descriptor, True)
+    for entry in os.listdir("/proc/self/fd"):
+        if not entry.isdecimal():
+            continue
+        inherited = int(entry)
+        if inherited <= 2 or inherited == descriptor:
+            continue
+        try:
+            os.set_inheritable(inherited, False)
+        except OSError:
+            pass
+    tool_path = f"/proc/self/fd/{descriptor}"
+    python_path = "/proc/self/exe"
+else:
+    tool_path = tool
+    python_path = sys.executable
+os.execve(
+    python_path,
+    ["python3", "-I", "-S", "-B", tool_path, *arguments],
+    environment,
+)
+' "$tool" "$expected_sha256" "$@"
 }
 
 canonical_directory() {
@@ -334,8 +463,10 @@ fields = [
     artifacts.get("finalizer_sbatch_sha256"),
     artifacts.get("finalizer_sha256"),
     artifacts.get("authorizer_sha256"),
+    artifacts.get("authorization_request_executor_sha256"),
     artifacts.get("validator_sha256"),
     artifacts.get("exec_helper_sha256"),
+    artifacts.get("prebuilt_preparer_sha256"),
 ]
 if not isinstance(fields[1], str) or not fields[1].startswith("/"):
     raise SystemExit("launch manifest Python path is malformed")
@@ -347,8 +478,10 @@ for name, value in zip(
         "finalizer_sbatch",
         "finalizer",
         "authorizer",
+        "authorization_request_executor",
         "validator",
         "exec_helper",
+        "prebuilt_preparer",
     ),
     fields[2:],
 ):
@@ -368,7 +501,7 @@ print(" ".join(fields))
 PY
 })"
 set -- $MANIFEST_VALUES
-[ "$#" -eq 20 ] || die "launch manifest inspector returned the wrong field count"
+[ "$#" -eq 22 ] || die "launch manifest inspector returned the wrong field count"
 readonly MANIFEST_REVISION="$1"
 readonly MANIFEST_PYTHON="$2"
 readonly MANIFEST_PYTHON_SHA256="$3"
@@ -377,18 +510,20 @@ readonly RUNNER_SHA256="$5"
 readonly FINALIZER_RUNNER_SHA256="$6"
 readonly FINALIZER_SHA256="$7"
 readonly AUTHORIZER_SHA256="$8"
-readonly VALIDATOR_SHA256="$9"
-readonly EXEC_HELPER_SHA256="${10}"
-readonly MANIFEST_GIT="${11}"
-readonly MANIFEST_GIT_SHA256="${12}"
-readonly MANIFEST_SBATCH="${13}"
-readonly MANIFEST_SBATCH_SHA256="${14}"
-readonly MANIFEST_SCONTROL="${15}"
-readonly MANIFEST_SCONTROL_SHA256="${16}"
-readonly MANIFEST_SCANCEL="${17}"
-readonly MANIFEST_SCANCEL_SHA256="${18}"
-readonly MANIFEST_SACCT="${19}"
-readonly MANIFEST_SACCT_SHA256="${20}"
+readonly AUTHORIZATION_REQUEST_EXECUTOR_SHA256="$9"
+readonly VALIDATOR_SHA256="${10}"
+readonly EXEC_HELPER_SHA256="${11}"
+readonly PREBUILT_PREPARER_SHA256="${12}"
+readonly MANIFEST_GIT="${13}"
+readonly MANIFEST_GIT_SHA256="${14}"
+readonly MANIFEST_SBATCH="${15}"
+readonly MANIFEST_SBATCH_SHA256="${16}"
+readonly MANIFEST_SCONTROL="${17}"
+readonly MANIFEST_SCONTROL_SHA256="${18}"
+readonly MANIFEST_SCANCEL="${19}"
+readonly MANIFEST_SCANCEL_SHA256="${20}"
+readonly MANIFEST_SACCT="${21}"
+readonly MANIFEST_SACCT_SHA256="${22}"
 
 [ "$MANIFEST_REVISION" = "$REVISION" ] || die "launch manifest revision differs from the checkout"
 [ "$MANIFEST_PYTHON" = "$CONTROLLER_PYTHON" ] || die "controller Python differs from the manifest"
@@ -408,8 +543,11 @@ require_sha256 "$REPO_RUNNER" "$RUNNER_SHA256" "compute runner"
 require_sha256 "$REPO_FINALIZER_RUNNER" "$FINALIZER_RUNNER_SHA256" "finalizer runner"
 require_sha256 "$FINALIZER" "$FINALIZER_SHA256" finalizer
 require_sha256 "$AUTHORIZER" "$AUTHORIZER_SHA256" authorizer
+require_sha256 "$AUTHORIZATION_REQUEST_EXECUTOR" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" "authorization-request executor"
 require_sha256 "$VALIDATOR" "$VALIDATOR_SHA256" validator
 require_sha256 "$EXEC_HELPER" "$EXEC_HELPER_SHA256" "execution helper"
+require_sha256 "$PREBUILT_PREPARER" "$PREBUILT_PREPARER_SHA256" "prebuilt preparer"
 
 if [ -n "${EUF_VIPER_T11_RUN_NONCE:-}" ]; then
   readonly RUN_NONCE="$EUF_VIPER_T11_RUN_NONCE"
@@ -521,6 +659,7 @@ readonly COMPUTE_SCRIPT="$CONTROL_ROOT/euf_viper_t11_stage0a.sbatch"
 readonly FINALIZER_SCRIPT="$CONTROL_ROOT/euf_viper_t11_stage0a_finalize.sbatch"
 readonly FINALIZER_SNAPSHOT="$CONTROL_ROOT/finalize_t11_stage0a.py"
 readonly AUTHORIZER_SNAPSHOT="$CONTROL_ROOT/authorize_t11_stage0a.py"
+readonly AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT="$CONTROL_ROOT/execute_t11_stage0a_authorization_request.py"
 readonly VALIDATOR_SNAPSHOT="$CONTROL_ROOT/validate_t11_stage0a.py"
 readonly EXEC_HELPER_SNAPSHOT="$CONTROL_ROOT/exec_t11_stage0a.py"
 readonly MANIFEST_SNAPSHOT="$CONTROL_ROOT/launch-manifest.json"
@@ -528,6 +667,9 @@ snapshot_file "$REPO_RUNNER" "$COMPUTE_SCRIPT" "$RUNNER_SHA256" 0500
 snapshot_file "$REPO_FINALIZER_RUNNER" "$FINALIZER_SCRIPT" "$FINALIZER_RUNNER_SHA256" 0500
 snapshot_file "$FINALIZER" "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" 0500
 snapshot_file "$AUTHORIZER" "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" 0500
+snapshot_file "$AUTHORIZATION_REQUEST_EXECUTOR" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" 0500
 snapshot_file "$VALIDATOR" "$VALIDATOR_SNAPSHOT" "$VALIDATOR_SHA256" 0500
 snapshot_file "$EXEC_HELPER" "$EXEC_HELPER_SNAPSHOT" "$EXEC_HELPER_SHA256" 0500
 snapshot_file "$LAUNCH_MANIFEST_INPUT" "$MANIFEST_SNAPSHOT" "$LAUNCH_MANIFEST_SHA256" 0400
@@ -890,6 +1032,8 @@ publish_submission_record() {
     "$FINALIZER_SCRIPT" "$FINALIZER_RUNNER_SHA256" \
     "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" \
     "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" \
+    "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+    "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" \
     "$VALIDATOR" "$VALIDATOR_SHA256" \
     "$EXEC_HELPER" "$EXEC_HELPER_SHA256" \
     "$CONTROLLER_PYTHON" "$CONTROLLER_PYTHON_SHA256" \
@@ -930,6 +1074,7 @@ control_names = (
     "finalizer_script",
     "finalizer",
     "authorizer",
+    "authorization_request_executor",
     "validator",
     "exec_helper",
     "controller_python",
@@ -950,7 +1095,7 @@ compute_argv = [control["sbatch"]["path"], *remaining[:compute_count]]
 finalizer_argv = [control["sbatch"]["path"], *remaining[compute_count:]]
 
 payload = {
-    "schema": "euf-viper.t11-stage0a-submission.v2",
+    "schema": "euf-viper.t11-stage0a-submission.v3",
     "run_nonce": nonce,
     "revision": revision,
     "launch_manifest_sha256": manifest_sha256,
@@ -963,6 +1108,9 @@ payload = {
         "finalizer_script_sha256": control["finalizer_script"]["sha256"],
         "finalizer_sha256": control["finalizer"]["sha256"],
         "authorizer_sha256": control["authorizer"]["sha256"],
+        "authorization_request_executor_sha256": control[
+            "authorization_request_executor"
+        ]["sha256"],
         "validator_sha256": control["validator"]["sha256"],
         "exec_helper_sha256": control["exec_helper"]["sha256"],
         "controller_python_sha256": control["controller_python"]["sha256"],
@@ -1136,259 +1284,31 @@ canonical_sha256 "$ORCHESTRATION_RECORD_SHA256" || die "orchestration record pub
 [ "$(sha256_file "$ORCHESTRATION_RECORD")" = "$ORCHESTRATION_RECORD_SHA256" ] ||
   die "orchestration record changed after publication"
 
-readonly AUTHORIZATION_REQUEST_SHA256="$({
-  /usr/bin/env -i HOME=/ LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
-    "$CONTROLLER_PYTHON" -I -S -B - \
-    "$AUTHORIZATION_REQUEST" "$RUN_NONCE" \
-    "$CONTROLLER_PYTHON" "$CONTROLLER_PYTHON_SHA256" \
-    "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" \
-    "$SUBMISSION_RECORD" "$SUBMISSION_RECORD_SHA256" \
-    "$SCHEDULER_CANDIDATE" "$FINAL_DECISION" \
-    "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" \
-    "$SACCT" "$SACCT_SHA256" <<'PY'
-import hashlib
-import json
-import os
-import sys
-
-(
-    output,
-    nonce,
-    python_path,
-    python_sha256,
-    authorizer,
-    authorizer_sha256,
-    submission,
-    submission_sha256,
-    scheduler_candidate,
-    decision,
-    finalizer,
-    finalizer_sha256,
-    sacct,
-    sacct_sha256,
-) = sys.argv[1:]
-bootstrap = r'''import fcntl
-import hashlib
-import os
-import stat
-import sys
-
-python_path, python_sha256, authorizer_path, authorizer_sha256, *arguments = sys.argv[1:]
-required_seals = (
-    getattr(fcntl, "F_SEAL_WRITE", 0x0008)
-    | getattr(fcntl, "F_SEAL_GROW", 0x0004)
-    | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
-    | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
-)
-
-
-def identity(metadata):
-    return (
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_mode,
-        metadata.st_size,
-        metadata.st_mtime_ns,
-        metadata.st_ctime_ns,
-    )
-
-
-def hash_descriptor(descriptor):
-    digest = hashlib.sha256()
-    offset = 0
-    size = os.fstat(descriptor).st_size
-    while offset < size:
-        block = os.pread(descriptor, min(1024 * 1024, size - offset), offset)
-        if not block:
-            raise SystemExit("sealed authorization bootstrap input was truncated")
-        digest.update(block)
-        offset += len(block)
-    if os.pread(descriptor, 1, offset):
-        raise SystemExit("sealed authorization bootstrap input grew while hashing")
-    return digest.hexdigest()
-
-
-def copy_sealed(path, expected, mode, maximum, role):
-    source = os.open(
-        path,
-        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-    )
-    snapshot = -1
-    try:
-        before = os.fstat(source)
-        if not stat.S_ISREG(before.st_mode):
-            raise SystemExit(f"{role} is not a regular file")
-        if role == "controller Python" and not before.st_mode & 0o111:
-            raise SystemExit("controller Python is not executable")
-        if before.st_size < 1 or before.st_size > maximum:
-            raise SystemExit(f"{role} size is outside its bound")
-        snapshot = os.memfd_create(
-            f"t11-authorization-{role}",
-            getattr(os, "MFD_CLOEXEC", 0x0001)
-            | getattr(os, "MFD_ALLOW_SEALING", 0x0002),
-        )
-        offset = 0
-        digest = hashlib.sha256()
-        while offset < before.st_size:
-            block = os.pread(source, min(1024 * 1024, before.st_size - offset), offset)
-            if not block:
-                raise SystemExit(f"{role} was truncated while copied")
-            digest.update(block)
-            written_offset = 0
-            while written_offset < len(block):
-                written = os.write(snapshot, block[written_offset:])
-                if written <= 0:
-                    raise SystemExit(f"short sealed {role} write")
-                written_offset += written
-            offset += len(block)
-        after = os.fstat(source)
-        if identity(before) != identity(after):
-            raise SystemExit(f"{role} changed while copied")
-        if digest.hexdigest() != expected:
-            raise SystemExit(f"{role} digest mismatch")
-        os.fchmod(snapshot, mode)
-        fcntl.fcntl(snapshot, getattr(fcntl, "F_ADD_SEALS", 1033), required_seals)
-        if (
-            fcntl.fcntl(snapshot, getattr(fcntl, "F_GET_SEALS", 1034))
-            & required_seals
-            != required_seals
-        ):
-            raise SystemExit(f"sealed {role} lacks mandatory seals")
-        if hash_descriptor(snapshot) != expected:
-            raise SystemExit(f"sealed {role} digest mismatch")
-        result = snapshot
-        snapshot = -1
-        return result
-    finally:
-        if snapshot >= 0:
-            os.close(snapshot)
-        os.close(source)
-
-
-if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
-    raise SystemExit("authorization execution requires Linux sealed memfd support")
-running = os.open(
-    "/proc/self/exe",
-    os.O_RDONLY | os.O_CLOEXEC,
-)
-try:
-    if hash_descriptor(running) != python_sha256:
-        raise SystemExit("executed controller Python digest mismatch")
-finally:
-    os.close(running)
-python_fd = copy_sealed(
-    python_path, python_sha256, 0o500, 1024 * 1024 * 1024, "controller Python"
-)
-authorizer_fd = copy_sealed(
-    authorizer_path, authorizer_sha256, 0o400, 16 * 1024 * 1024, "authorizer"
-)
-os.set_inheritable(authorizer_fd, True)
-for entry in os.listdir("/proc/self/fd"):
-    if not entry.isdecimal():
-        continue
-    descriptor = int(entry)
-    if descriptor <= 2 or descriptor == authorizer_fd:
-        continue
-    try:
-        os.set_inheritable(descriptor, False)
-    except OSError:
-        pass
-environment = {
-    "HOME": os.environ.get("HOME", "/"),
-    "LANG": "C",
-    "LC_ALL": "C",
-    "PATH": "/usr/bin:/bin",
-    "TZ": "UTC",
-}
-os.execve(
-    f"/proc/self/fd/{python_fd}",
-    [
-        "python3",
-        "-I",
-        "-S",
-        "-B",
-        f"/proc/self/fd/{authorizer_fd}",
-        *arguments,
-    ],
-    environment,
-)
-'''
-authorizer_argv = [
-    "--submission",
-    submission,
-    "--submission-sha256",
-    submission_sha256,
-    "--scheduler-candidate",
-    scheduler_candidate,
-    "--output",
-    decision,
-    "--finalizer-module",
-    finalizer,
-    "--finalizer-module-sha256",
-    finalizer_sha256,
-    "--sacct-bin",
-    sacct,
-    "--poll-attempts",
-    "12",
-    "--poll-interval-seconds",
-    "5",
-]
-argv = [
-    python_path,
-    "-I",
-    "-S",
-    "-B",
-    "-c",
-    bootstrap,
-    python_path,
-    python_sha256,
-    authorizer,
-    authorizer_sha256,
-    *authorizer_argv,
-]
-payload = {
-    "argv": argv,
-    "authorizer": {"path": authorizer, "sha256": authorizer_sha256},
-    "controller_python": {"path": python_path, "sha256": python_sha256},
-    "finalizer_module": {"path": finalizer, "sha256": finalizer_sha256},
-    "output_path": decision,
-    "run_nonce": nonce,
-    "sacct": {"path": sacct, "sha256": sacct_sha256},
-    "scheduler_candidate_path": scheduler_candidate,
-    "schema": "euf-viper.t11-stage0a-authorization-request.v1",
-    "status": "await_finalizer_terminal_accounting",
-    "submission": {"path": submission, "sha256": submission_sha256},
-}
-encoded = (
-    json.dumps(payload, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
-    + "\n"
-).encode("ascii")
-parent_fd = os.open(os.path.dirname(output), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-try:
-    descriptor = os.open(
-        os.path.basename(output),
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-        0o400,
-        dir_fd=parent_fd,
-    )
-    try:
-        offset = 0
-        while offset < len(encoded):
-            written = os.write(descriptor, encoded[offset:])
-            if written <= 0:
-                raise RuntimeError("short authorization-request write")
-            offset += written
-        os.fsync(descriptor)
-        os.fchmod(descriptor, 0o400)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    os.fsync(parent_fd)
-finally:
-    os.close(parent_fd)
-print(hashlib.sha256(encoded).hexdigest())
-PY
-})"
+set +e
+AUTHORIZATION_REQUEST_SHA256_VALUE="$(sealed_python_tool \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" create \
+  --output "$AUTHORIZATION_REQUEST" \
+  --controller-python "$CONTROLLER_PYTHON" \
+  --controller-python-sha256 "$CONTROLLER_PYTHON_SHA256" \
+  --authorizer "$AUTHORIZER_SNAPSHOT" \
+  --authorizer-sha256 "$AUTHORIZER_SHA256" \
+  --submission "$SUBMISSION_RECORD" \
+  --submission-sha256 "$SUBMISSION_RECORD_SHA256" \
+  --scheduler-candidate "$SCHEDULER_CANDIDATE" \
+  --decision "$FINAL_DECISION" \
+  --finalizer-module "$FINALIZER_SNAPSHOT" \
+  --finalizer-module-sha256 "$FINALIZER_SHA256" \
+  --sacct "$SACCT" \
+  --sacct-sha256 "$SACCT_SHA256" \
+  --run-nonce "$RUN_NONCE" \
+  --poll-attempts "$FINALIZER_POLL_ATTEMPTS" \
+  --poll-interval-seconds "$FINALIZER_POLL_INTERVAL_SECONDS")"
+AUTHORIZATION_REQUEST_CREATE_EXIT=$?
+set -e
+[ "$AUTHORIZATION_REQUEST_CREATE_EXIT" -eq 0 ] ||
+  die "authorization request creation failed"
+readonly AUTHORIZATION_REQUEST_SHA256="$AUTHORIZATION_REQUEST_SHA256_VALUE"
 canonical_sha256 "$AUTHORIZATION_REQUEST_SHA256" ||
   die "authorization request publication failed"
 [ "$(sha256_file "$AUTHORIZATION_REQUEST")" = "$AUTHORIZATION_REQUEST_SHA256" ] ||
@@ -1417,6 +1337,8 @@ require_sha256 "$COMPUTE_SCRIPT" "$RUNNER_SHA256" "compute script snapshot"
 require_sha256 "$FINALIZER_SCRIPT" "$FINALIZER_RUNNER_SHA256" "finalizer script snapshot"
 require_sha256 "$FINALIZER_SNAPSHOT" "$FINALIZER_SHA256" "finalizer snapshot"
 require_sha256 "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" "authorizer snapshot"
+require_sha256 "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" "authorization-request executor snapshot"
 [ "$(sha256_file "$AUTHORIZATION_REQUEST")" = "$AUTHORIZATION_REQUEST_SHA256" ] ||
   die "authorization request changed before release"
 require_sha256 "$VALIDATOR" "$VALIDATOR_SHA256" validator
@@ -1461,6 +1383,23 @@ REVISION_VALUE="$(sealed_control "$GIT" "$GIT_SHA256" rev-parse --verify 'HEAD^{
   die "checkout revision changed at the release boundary"
 
 sealed_control "$SCONTROL" "$SCONTROL_SHA256" release "$COMPUTE_JOB_ID"
+set +e
+AUTHORIZATION_RESULT="$(sealed_python_tool \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT" \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256" execute \
+  --request "$AUTHORIZATION_REQUEST" \
+  --request-sha256 "$AUTHORIZATION_REQUEST_SHA256")"
+AUTHORIZATION_EXECUTE_EXIT=$?
+set -e
+[ "$AUTHORIZATION_EXECUTE_EXIT" -eq 0 ] ||
+  die "authorization request execution failed"
+[ "$(sha256_file "$AUTHORIZATION_REQUEST")" = "$AUTHORIZATION_REQUEST_SHA256" ] ||
+  die "authorization request changed during execution"
+[ -f "$FINAL_DECISION" ] && [ ! -L "$FINAL_DECISION" ] ||
+  die "authorization request execution omitted the final decision"
+readonly FINAL_DECISION_SHA256="$(sha256_file "$FINAL_DECISION")"
+canonical_sha256 "$FINAL_DECISION_SHA256" ||
+  die "final authorization decision SHA-256 is malformed"
 SUBMISSION_COMPLETE=1
 trap - EXIT HUP INT TERM
 
@@ -1472,8 +1411,14 @@ printf 't11_stage0a_compute_job_id=%s\n' "$COMPUTE_JOB_ID"
 printf 't11_stage0a_finalizer_job_id=%s\n' "$FINALIZER_JOB_ID"
 printf 't11_stage0a_authorization_request=%s\n' "$AUTHORIZATION_REQUEST"
 printf 't11_stage0a_authorization_request_sha256=%s\n' "$AUTHORIZATION_REQUEST_SHA256"
+printf 't11_stage0a_authorization_request_executor=%s\n' \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SNAPSHOT"
+printf 't11_stage0a_authorization_request_executor_sha256=%s\n' \
+  "$AUTHORIZATION_REQUEST_EXECUTOR_SHA256"
 printf 't11_stage0a_scheduler_candidate=%s\n' "$SCHEDULER_CANDIDATE"
 printf 't11_stage0a_authorization_output=%s\n' "$FINAL_DECISION"
+printf 't11_stage0a_authorization_output_sha256=%s\n' "$FINAL_DECISION_SHA256"
+printf 't11_stage0a_authorization_status=%s\n' stage0b_authorized
 printf 't11_stage0a_authorizer=%s\n' "$AUTHORIZER_SNAPSHOT"
 printf 't11_stage0a_authorizer_sha256=%s\n' "$AUTHORIZER_SHA256"
 printf 't11_stage0a_finalizer_module=%s\n' "$FINALIZER_SNAPSHOT"

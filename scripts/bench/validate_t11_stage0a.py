@@ -17,10 +17,11 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 SCHEMA = "euf-viper.t11-stage0a-validation-candidate.v2"
-LAUNCH_SCHEMA = "euf-viper.t11-stage0a-launch.v4"
+LAUNCH_SCHEMA = "euf-viper.t11-stage0a-launch.v6"
 PREBUILT_BUNDLE_SCHEMA = "euf-viper.t11-prebuilt-bundle.v1"
 BUILD_RECEIPT_SCHEMA = "euf-viper.t11-prebuilt-build-receipt.v1"
 DEPENDENCY_INVENTORY_SCHEMA = "euf-viper.t11-binary-dependencies.v1"
+PREBUILT_PREPARATION_SCHEMA = "euf-viper.t11-prebuilt-preparation.v2"
 PREBUILT_BUILD_COMMAND = [
     "cargo",
     "build",
@@ -201,6 +202,8 @@ REQUIRED_ARTIFACTS = {
     "build_receipt",
     "dependency_inventory",
     "prebuilt_bundle",
+    "prebuilt_preparation",
+    "python_runtime_inventory",
     "design_note",
     "hash_contract",
     "audit_contract",
@@ -209,10 +212,12 @@ REQUIRED_ARTIFACTS = {
     "finalizer_sbatch",
     "finalizer",
     "authorizer",
+    "authorization_request_executor",
     "control_git",
     "validator",
     "exec_helper",
     "prebuilt_bundle_tool",
+    "prebuilt_preparer",
     "launch_manifest",
     "prebuilt_bundle_stdout",
     "prebuilt_bundle_stderr",
@@ -245,6 +250,7 @@ LAUNCH_FIELDS = (
     "baseline",
     "toolchain",
     "prebuilt_bundle",
+    "prebuilt_preparation",
     "control_tools",
     "artifacts",
 )
@@ -255,8 +261,10 @@ PINNED_ARTIFACT_HASH_FIELDS = {
     "finalizer_sbatch_sha256": "finalizer_sbatch",
     "finalizer_sha256": "finalizer",
     "authorizer_sha256": "authorizer",
+    "authorization_request_executor_sha256": "authorization_request_executor",
     "validator_sha256": "validator",
     "exec_helper_sha256": "exec_helper",
+    "prebuilt_preparer_sha256": "prebuilt_preparer",
     "prebuilt_bundle_tool_sha256": "prebuilt_bundle_tool",
     "design_note_sha256": "design_note",
     "hash_contract_sha256": "hash_contract",
@@ -265,6 +273,7 @@ PINNED_ARTIFACT_HASH_FIELDS = {
 
 MAX_JSON_BYTES = 256 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 1024 * 1024 * 1024
+MAX_RUNTIME_FILES = 128
 F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
 REQUIRED_MEMFD_SEALS = (
     getattr(fcntl, "F_SEAL_WRITE", 0x0008)
@@ -521,6 +530,11 @@ def _validate_binary_dependency_inventory(
     raw_files = inventory["runtime_files"]
     if not isinstance(raw_files, list):
         _fail("binary dependency inventory.runtime_files must be an array")
+    if not 1 <= len(raw_files) <= MAX_RUNTIME_FILES:
+        _fail(
+            "binary dependency inventory.runtime_files must contain between "
+            f"1 and {MAX_RUNTIME_FILES} entries"
+        )
     runtime_files: list[dict[str, str]] = []
     for index, raw_record in enumerate(raw_files):
         record = dict(
@@ -564,6 +578,447 @@ def _validate_binary_dependency_inventory(
         _fail("binary dependency inventory runtime files are duplicated or unsorted")
     inventory["runtime_files"] = runtime_files
     return inventory
+
+
+def _preparation_file_record(value: object, context: str) -> dict[str, Any]:
+    record = dict(_exact_keys(value, ("path", "sha256"), context))
+    if (
+        not isinstance(record["path"], str)
+        or not os.path.isabs(record["path"])
+        or os.path.normpath(record["path"]) != record["path"]
+        or os.path.realpath(record["path"]) != record["path"]
+        or "\n" in record["path"]
+        or "\0" in record["path"]
+    ):
+        _fail(f"{context}.path must be canonical, absolute, and nonsymlinked")
+    record["sha256"] = _canonical_sha256(
+        record["sha256"], f"{context}.sha256"
+    )
+    return record
+
+
+def _validate_preparation_elf_record(value: object, context: str) -> dict[str, Any]:
+    record = dict(
+        _exact_keys(
+            value,
+            ("interpreter", "needed", "resolved", "runtime_files"),
+            context,
+        )
+    )
+    interpreter = record["interpreter"]
+    if (
+        not isinstance(interpreter, str)
+        or not os.path.isabs(interpreter)
+        or "\n" in interpreter
+        or "\0" in interpreter
+    ):
+        _fail(f"{context}.interpreter must be one absolute path")
+    needed = record["needed"]
+    if (
+        not isinstance(needed, list)
+        or any(
+            not isinstance(item, str)
+            or not item
+            or "/" in item
+            or "\n" in item
+            or "\0" in item
+            for item in needed
+        )
+        or len(needed) != len(set(needed))
+    ):
+        _fail(f"{context}.needed must contain unique safe ELF names")
+    resolved = record["resolved"]
+    if not isinstance(resolved, dict) or any(
+        not isinstance(name, str)
+        or not name
+        or "/" in name
+        or "\n" in name
+        or "\0" in name
+        or not isinstance(path, str)
+        or not os.path.isabs(path)
+        or os.path.realpath(path) != path
+        for name, path in resolved.items()
+    ):
+        _fail(f"{context}.resolved is malformed")
+    if not set(needed).issubset(resolved):
+        _fail(f"{context}.resolved must bind every direct DT_NEEDED name")
+    record["runtime_files"] = _u64(
+        record["runtime_files"], f"{context}.runtime_files"
+    )
+    if record["runtime_files"] == 0:
+        _fail(f"{context}.runtime_files must be positive")
+    return record
+
+
+def _validate_prebuilt_preparation(
+    launch_record: object,
+    *,
+    solver_source: Mapping[str, Any],
+    toolchain: Mapping[str, Any],
+    prebuilt_bundle: Mapping[str, Any],
+    artifact_hashes: Mapping[str, str],
+) -> dict[str, Any]:
+    launch = dict(
+        _exact_keys(
+            launch_record,
+            ("path", "schema", "sha256"),
+            "launch prebuilt_preparation",
+        )
+    )
+    if launch["schema"] != PREBUILT_PREPARATION_SCHEMA:
+        _fail("launch prebuilt preparation schema differs")
+    preparation_file = _preparation_file_record(
+        {"path": launch["path"], "sha256": launch["sha256"]},
+        "launch prebuilt_preparation",
+    )
+    launch.update(preparation_file)
+    report, encoded, metadata, resolved_report = _load_exact_json(
+        Path(launch["path"])
+    )
+    if resolved_report != Path(launch["path"]):
+        _fail("prebuilt preparation path changed while read")
+    if stat.S_IMODE(metadata.st_mode) != 0o400:
+        _fail("prebuilt preparation report must be mode 0400")
+    if hashlib.sha256(encoded).hexdigest() != launch["sha256"]:
+        _fail("prebuilt preparation report SHA-256 differs")
+    report = dict(
+        _exact_keys(
+            report,
+            ("artifacts", "build", "elf", "schema", "smoke", "source", "status", "tools"),
+            "prebuilt preparation report",
+        )
+    )
+    if (
+        report["schema"] != PREBUILT_PREPARATION_SCHEMA
+        or report["status"] != "verified"
+        or report["source"] != solver_source
+    ):
+        _fail("prebuilt preparation identity or status differs")
+
+    tools = dict(
+        _exact_keys(
+            report["tools"],
+            ("bundle_tool", "cargo", "preparer", "python", "rustc"),
+            "prebuilt preparation tools",
+        )
+    )
+    for label in ("bundle_tool", "preparer"):
+        tools[label] = _preparation_file_record(
+            tools[label], f"prebuilt preparation tools.{label}"
+        )
+    for label in ("cargo", "python", "rustc"):
+        tool = dict(
+            _exact_keys(
+                tools[label],
+                ("path", "sha256", "version"),
+                f"prebuilt preparation tools.{label}",
+            )
+        )
+        base = _preparation_file_record(
+            {"path": tool["path"], "sha256": tool["sha256"]},
+            f"prebuilt preparation tools.{label}",
+        )
+        if (
+            not isinstance(tool["version"], str)
+            or not tool["version"]
+            or "\n" in tool["version"]
+        ):
+            _fail(f"prebuilt preparation tools.{label}.version is malformed")
+        tools[label] = {**base, "version": tool["version"]}
+    if tools["bundle_tool"]["sha256"] != artifact_hashes["prebuilt_bundle_tool_sha256"]:
+        _fail("prebuilt preparation bundle tool differs from the launch artifact")
+    if tools["preparer"]["sha256"] != artifact_hashes["prebuilt_preparer_sha256"]:
+        _fail("prebuilt preparation producer differs from the launch artifact")
+    python = toolchain["python"]
+    for field in ("path", "sha256", "version"):
+        if tools["python"][field] != python[field]:
+            _fail(f"prebuilt preparation Python {field} differs from the launch toolchain")
+    for label in ("bundle_tool", "cargo", "preparer", "python", "rustc"):
+        payload, _, actual_path = _read_stable_regular(
+            Path(tools[label]["path"]), maximum_bytes=MAX_ARTIFACT_BYTES
+        )
+        if actual_path != Path(tools[label]["path"]):
+            _fail(f"prebuilt preparation tool path changed: {label}")
+        if hashlib.sha256(payload).hexdigest() != tools[label]["sha256"]:
+            _fail(f"prebuilt preparation tool SHA-256 differs: {label}")
+
+    artifacts = dict(
+        _exact_keys(
+            report["artifacts"],
+            (
+                "build_a_candidate",
+                "build_a_stderr",
+                "build_a_stdout",
+                "build_b_candidate",
+                "build_b_stderr",
+                "build_b_stdout",
+                "build_receipt",
+                "candidate",
+                "dependency_inventory",
+                "prebuilt_bundle",
+                "python_runtime_inventory",
+            ),
+            "prebuilt preparation artifacts",
+        )
+    )
+    for label in (
+        "build_a_stderr",
+        "build_a_stdout",
+        "build_b_stderr",
+        "build_b_stdout",
+        "build_receipt",
+        "dependency_inventory",
+        "python_runtime_inventory",
+    ):
+        artifacts[label] = _preparation_file_record(
+            artifacts[label], f"prebuilt preparation artifacts.{label}"
+        )
+    for label in ("build_a_candidate", "build_b_candidate"):
+        retained = dict(
+            _exact_keys(
+                artifacts[label],
+                ("bytes", "path", "sha256"),
+                f"prebuilt preparation artifacts.{label}",
+            )
+        )
+        retained_base = _preparation_file_record(
+            {"path": retained["path"], "sha256": retained["sha256"]},
+            f"prebuilt preparation artifacts.{label}",
+        )
+        retained["bytes"] = _u64(
+            retained["bytes"], f"prebuilt preparation artifacts.{label}.bytes"
+        )
+        retained.update(retained_base)
+        artifacts[label] = retained
+    candidate = dict(
+        _exact_keys(
+            artifacts["candidate"],
+            ("bytes", "path", "sha256"),
+            "prebuilt preparation artifacts.candidate",
+        )
+    )
+    candidate_base = _preparation_file_record(
+        {"path": candidate["path"], "sha256": candidate["sha256"]},
+        "prebuilt preparation artifacts.candidate",
+    )
+    candidate["bytes"] = _u64(
+        candidate["bytes"], "prebuilt preparation artifacts.candidate.bytes"
+    )
+    candidate.update(candidate_base)
+    artifacts["candidate"] = candidate
+    bundle_artifact = dict(
+        _exact_keys(
+            artifacts["prebuilt_bundle"],
+            ("manifest_sha256", "path", "sha256"),
+            "prebuilt preparation artifacts.prebuilt_bundle",
+        )
+    )
+    bundle_base = _preparation_file_record(
+        {"path": bundle_artifact["path"], "sha256": bundle_artifact["sha256"]},
+        "prebuilt preparation artifacts.prebuilt_bundle",
+    )
+    bundle_artifact.update(bundle_base)
+    bundle_artifact["manifest_sha256"] = _canonical_sha256(
+        bundle_artifact["manifest_sha256"],
+        "prebuilt preparation artifacts.prebuilt_bundle.manifest_sha256",
+    )
+    artifacts["prebuilt_bundle"] = bundle_artifact
+    expected_candidate = {
+        "bytes": prebuilt_bundle["candidate_bytes"],
+        "sha256": prebuilt_bundle["candidate_sha256"],
+    }
+    for field, expected in expected_candidate.items():
+        if candidate[field] != expected:
+            _fail(f"prebuilt preparation candidate {field} differs from the launch")
+    if (
+        bundle_artifact["path"] != prebuilt_bundle["path"]
+        or bundle_artifact["sha256"] != prebuilt_bundle["sha256"]
+        or bundle_artifact["manifest_sha256"] != prebuilt_bundle["manifest_sha256"]
+    ):
+        _fail("prebuilt preparation bundle differs from the launch")
+    if artifacts["build_receipt"]["sha256"] != prebuilt_bundle["build_receipt_sha256"]:
+        _fail("prebuilt preparation receipt differs from the launch")
+    if artifacts["dependency_inventory"]["sha256"] != prebuilt_bundle["dependency_inventory_sha256"]:
+        _fail("prebuilt preparation dependency inventory differs from the launch")
+
+    candidate_bytes, _, candidate_path = _read_stable_regular(
+        Path(candidate["path"]), maximum_bytes=MAX_ARTIFACT_BYTES
+    )
+    if (
+        candidate_path != Path(candidate["path"])
+        or len(candidate_bytes) != candidate["bytes"]
+        or hashlib.sha256(candidate_bytes).hexdigest() != candidate["sha256"]
+        or not candidate_bytes.startswith(b"\x7fELF\x02\x01\x01")
+    ):
+        _fail("prebuilt preparation candidate bytes or ELF identity differ")
+    for label in ("build_a_candidate", "build_b_candidate"):
+        retained = artifacts[label]
+        retained_bytes, retained_metadata, retained_path = _read_stable_regular(
+            Path(retained["path"]), maximum_bytes=MAX_ARTIFACT_BYTES
+        )
+        if (
+            retained_path != Path(retained["path"])
+            or stat.S_IMODE(retained_metadata.st_mode) != 0o400
+            or len(retained_bytes) != retained["bytes"]
+            or hashlib.sha256(retained_bytes).hexdigest() != retained["sha256"]
+            or retained_bytes != candidate_bytes
+        ):
+            _fail(f"prebuilt preparation {label} differs from the published candidate")
+    retained_logs: dict[str, bytes] = {}
+    for label in (
+        "build_a_stderr",
+        "build_a_stdout",
+        "build_b_stderr",
+        "build_b_stdout",
+    ):
+        log = artifacts[label]
+        log_bytes, log_metadata, log_path = _read_stable_regular(
+            Path(log["path"]), maximum_bytes=MAX_ARTIFACT_BYTES
+        )
+        if (
+            log_path != Path(log["path"])
+            or stat.S_IMODE(log_metadata.st_mode) != 0o400
+            or hashlib.sha256(log_bytes).hexdigest() != log["sha256"]
+        ):
+            _fail(f"prebuilt preparation {label} bytes or mode differ")
+        retained_logs[label] = log_bytes
+    receipt, receipt_bytes, receipt_metadata, _ = _load_exact_json(
+        Path(artifacts["build_receipt"]["path"])
+    )
+    inventory, inventory_bytes, inventory_metadata, _ = _load_exact_json(
+        Path(artifacts["dependency_inventory"]["path"])
+    )
+    python_inventory, python_inventory_bytes, python_inventory_metadata, _ = _load_exact_json(
+        Path(artifacts["python_runtime_inventory"]["path"])
+    )
+    for label, value, expected, metadata_value in (
+        ("build receipt", receipt_bytes, artifacts["build_receipt"]["sha256"], receipt_metadata),
+        ("dependency inventory", inventory_bytes, artifacts["dependency_inventory"]["sha256"], inventory_metadata),
+        ("Python runtime inventory", python_inventory_bytes, artifacts["python_runtime_inventory"]["sha256"], python_inventory_metadata),
+    ):
+        if hashlib.sha256(value).hexdigest() != expected or stat.S_IMODE(metadata_value.st_mode) != 0o400:
+            _fail(f"prebuilt preparation {label} bytes or mode differ")
+    _validate_prebuilt_build_receipt(receipt, solver_source, prebuilt_bundle)
+    candidate_inventory = _validate_binary_dependency_inventory(
+        inventory, prebuilt_bundle["candidate_sha256"]
+    )
+    python_inventory = _validate_binary_dependency_inventory(
+        python_inventory, python["sha256"]
+    )
+    if not candidate_inventory["runtime_files"] or not python_inventory["runtime_files"]:
+        _fail("prebuilt preparation runtime inventories must be nonempty")
+
+    build = dict(
+        _exact_keys(
+            report["build"],
+            ("command", "first", "reproducible", "second"),
+            "prebuilt preparation build",
+        )
+    )
+    if build["command"] != PREBUILT_BUILD_COMMAND or build["reproducible"] is not True:
+        _fail("prebuilt preparation did not attest the exact reproducible build")
+    for label in ("first", "second"):
+        item = dict(
+            _exact_keys(
+                build[label],
+                ("candidate_sha256", "stderr_sha256", "stdout_sha256"),
+                f"prebuilt preparation build.{label}",
+            )
+        )
+        for field in item:
+            item[field] = _canonical_sha256(
+                item[field], f"prebuilt preparation build.{label}.{field}"
+            )
+        if item["candidate_sha256"] != prebuilt_bundle["candidate_sha256"]:
+            _fail(f"prebuilt preparation build.{label} candidate differs")
+        build[label] = item
+    retained_build_evidence = {
+        "first": (
+            artifacts["build_a_candidate"]["sha256"],
+            artifacts["build_a_stderr"]["sha256"],
+            artifacts["build_a_stdout"]["sha256"],
+        ),
+        "second": (
+            artifacts["build_b_candidate"]["sha256"],
+            artifacts["build_b_stderr"]["sha256"],
+            artifacts["build_b_stdout"]["sha256"],
+        ),
+    }
+    for label, expected in retained_build_evidence.items():
+        actual = (
+            build[label]["candidate_sha256"],
+            build[label]["stderr_sha256"],
+            build[label]["stdout_sha256"],
+        )
+        if actual != expected:
+            _fail(f"prebuilt preparation build.{label} differs from retained artifacts")
+
+    elf = dict(
+        _exact_keys(
+            report["elf"],
+            ("candidate", "controller_python"),
+            "prebuilt preparation ELF",
+        )
+    )
+    elf["candidate"] = _validate_preparation_elf_record(
+        elf["candidate"], "prebuilt preparation ELF.candidate"
+    )
+    elf["controller_python"] = _validate_preparation_elf_record(
+        elf["controller_python"], "prebuilt preparation ELF.controller_python"
+    )
+    if elf["candidate"]["runtime_files"] != len(candidate_inventory["runtime_files"]):
+        _fail("prebuilt preparation candidate runtime count differs")
+    if elf["controller_python"]["runtime_files"] != len(python_inventory["runtime_files"]):
+        _fail("prebuilt preparation Python runtime count differs")
+    for label, inventory_value in (
+        ("candidate", candidate_inventory),
+        ("controller Python", python_inventory),
+    ):
+        elf_record = elf[
+            "candidate" if label == "candidate" else "controller_python"
+        ]
+        inventory_paths = {
+            item["path"] for item in inventory_value["runtime_files"]
+        }
+        attested_paths = set(elf_record["resolved"].values())
+        attested_paths.add(os.path.realpath(elf_record["interpreter"]))
+        if attested_paths != inventory_paths:
+            _fail(
+                f"prebuilt preparation {label} ELF resolution differs from "
+                "its runtime inventory"
+            )
+
+    smoke = dict(
+        _exact_keys(
+            report["smoke"],
+            ("help_sha256", "python_sha256", "version", "version_sha256"),
+            "prebuilt preparation smoke",
+        )
+    )
+    for field in ("help_sha256", "python_sha256", "version_sha256"):
+        smoke[field] = _canonical_sha256(
+            smoke[field], f"prebuilt preparation smoke.{field}"
+        )
+    if (
+        not isinstance(smoke["version"], str)
+        or re.fullmatch(r"euf-viper [0-9]+\.[0-9]+\.[0-9]+", smoke["version"])
+        is None
+    ):
+        _fail("prebuilt preparation smoke.version is malformed")
+
+    report["artifacts"] = artifacts
+    report["build"] = build
+    report["elf"] = elf
+    report["smoke"] = smoke
+    report["tools"] = tools
+    launch["python_runtime_inventory_path"] = artifacts[
+        "python_runtime_inventory"
+    ]["path"]
+    launch["python_runtime_inventory_sha256"] = artifacts[
+        "python_runtime_inventory"
+    ]["sha256"]
+    launch["report"] = report
+    return launch
 
 
 def _validate_hash_bindings(value: object, source_sha256: str, context: str) -> dict[str, str]:
@@ -1658,11 +2113,19 @@ def _validate_launch_manifest(
         artifacts[field] = _canonical_sha256(
             artifacts[field], f"launch artifacts.{field}"
         )
+    prebuilt_preparation = _validate_prebuilt_preparation(
+        record["prebuilt_preparation"],
+        solver_source=solver_source,
+        toolchain=toolchain,
+        prebuilt_bundle=prebuilt_bundle,
+        artifact_hashes=artifacts,
+    )
     record["solver_source"] = solver_source
     record["target"] = target
     record["baseline"] = baseline
     record["toolchain"] = toolchain
     record["prebuilt_bundle"] = prebuilt_bundle
+    record["prebuilt_preparation"] = prebuilt_preparation
     record["control_tools"] = control_tools
     record["artifacts"] = artifacts
     return record, exact_sha256, resolved
@@ -1700,6 +2163,16 @@ def inspect_launch_main(argv: Sequence[str]) -> int:
                 str(prebuilt["candidate_bytes"]),
                 prebuilt["build_receipt_sha256"],
                 prebuilt["dependency_inventory_sha256"],
+            )
+        )
+        preparation = launch["prebuilt_preparation"]
+        values.extend(
+            (
+                preparation["path"],
+                preparation["sha256"],
+                preparation["schema"],
+                preparation["python_runtime_inventory_path"],
+                preparation["python_runtime_inventory_sha256"],
             )
         )
         for label in ("git", "sbatch", "scontrol", "scancel", "sacct"):
@@ -1825,6 +2298,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             _fail("executed binary differs from the launch-pinned prebuilt candidate")
         if artifact_records["prebuilt_bundle"]["sha256"] != prebuilt["sha256"]:
             _fail("prebuilt bundle artifact differs from the launch manifest")
+        preparation = launch["prebuilt_preparation"]
+        if (
+            artifact_records["prebuilt_preparation"]["sha256"]
+            != preparation["sha256"]
+        ):
+            _fail("prebuilt preparation artifact differs from the launch manifest")
+        if (
+            artifact_records["python_runtime_inventory"]["sha256"]
+            != preparation["python_runtime_inventory_sha256"]
+        ):
+            _fail("Python runtime inventory artifact differs from the preparation")
         if (
             artifact_records["build_receipt"]["sha256"]
             != prebuilt["build_receipt_sha256"]
@@ -1848,6 +2332,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         dependency_inventory = _validate_binary_dependency_inventory(
             dependency_inventory_value, prebuilt["candidate_sha256"]
         )
+        if not dependency_inventory["runtime_files"]:
+            _fail("candidate runtime inventory must be nonempty")
+        python_inventory_value, _, _, _ = _load_exact_json(
+            artifacts["python_runtime_inventory"][1]
+        )
+        python_runtime_inventory = _validate_binary_dependency_inventory(
+            python_inventory_value, launch["toolchain"]["python"]["sha256"]
+        )
+        if not python_runtime_inventory["runtime_files"]:
+            _fail("Python runtime inventory must be nonempty")
 
         for manifest_field, artifact_name in PINNED_ARTIFACT_HASH_FIELDS.items():
             if (
@@ -1898,11 +2392,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "binary_source": "launch-pinned-prebuilt-bundle",
                 "build_during_stage0a": False,
                 "candidate_sealed_before_exec": True,
-                "runtime_dependencies_revalidated": True,
+                "candidate_loader_closure_inventory_validated": True,
+                "dynamic_loader_objects_descriptor_bound": False,
+                "python_loader_closure_inventory_validated": True,
+                "runtime_dependency_paths_retained": True,
+                "runtime_dependency_paths_revalidated": True,
             },
             "prebuilt_bundle": prebuilt,
+            "prebuilt_preparation": {
+                "path": preparation["path"],
+                "schema": preparation["schema"],
+                "sha256": preparation["sha256"],
+            },
             "build_receipt": build_receipt,
             "dependency_inventory": dependency_inventory,
+            "python_runtime_inventory": python_runtime_inventory,
             "control_tools": launch["control_tools"],
             "target": {
                 "relative_path": TARGET_RELATIVE_PATH,

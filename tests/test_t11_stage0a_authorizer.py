@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import contextlib
 import errno
 import hashlib
 import importlib.util
+import io
 import os
 import stat
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -51,7 +54,41 @@ class AuthorizerFixture:
         AUTHORIZER.__file__ = os.fspath(self.authorizer_module_path)
 
         self.sacct_path = self.base / "sacct"
-        self.sacct_path.write_bytes(b"#!/bin/sh\nexit 97\n")
+        self.sacct_state_path = self.base / "sacct-state.json"
+        self.sacct_swap_trigger = self.base / "sacct-swap-trigger"
+        self.sacct_swap_log = self.base / "sacct-snapshot.log"
+        self.sacct_malicious_executed = self.base / "sacct-malicious-executed"
+        self.sacct_path.write_text(
+            f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+state_path = Path({os.fspath(self.sacct_state_path)!r})
+swap_trigger = Path({os.fspath(self.sacct_swap_trigger)!r})
+swap_log = Path({os.fspath(self.sacct_swap_log)!r})
+executable = Path({os.fspath(self.sacct_path)!r})
+malicious_executed = Path({os.fspath(self.sacct_malicious_executed)!r})
+if not state_path.exists():
+    raise SystemExit(97)
+state = json.loads(state_path.read_text(encoding="ascii"))
+role = "allocation" if "--allocations" in sys.argv else "batch"
+with swap_log.open("a", encoding="ascii") as handle:
+    handle.write(role + "\\n")
+if swap_trigger.exists() and role == "allocation":
+    swap_trigger.unlink()
+    replacement = executable.with_name("sacct-replacement")
+    replacement.write_text(
+        "#!/bin/sh\\ntouch " + str(malicious_executed) + "\\nexit 88\\n",
+        encoding="ascii",
+    )
+    replacement.chmod(0o500)
+    os.replace(replacement, executable)
+sys.stdout.write(state[role])
+""",
+            encoding="ascii",
+        )
         self.sacct_path.chmod(0o500)
 
         control = self.candidate.submission["control"]
@@ -225,6 +262,7 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
         payload = self.fixture.authorize(runner)
         self.assertEqual(payload["schema"], AUTHORIZER.AUTHORIZATION_SCHEMA)
         self.assertEqual(payload["status"], "stage0b_authorized")
+
         self.assertEqual(payload["decision"], AUTHORIZER.AUTHORIZATION_DECISION)
         self.assertTrue(payload["stage0b_authority"])
         self.assertEqual(
@@ -263,6 +301,42 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
         self.assertIn("Requeue", allocation_format)
         encoded = AUTHORIZER.canonical_json_bytes(payload)
         self.assertEqual(AUTHORIZER.decode_canonical_json(encoded, "authorization"), payload)
+
+    def test_cli_stdout_is_the_complete_authorization_payload(self) -> None:
+        payload = {
+            "decision": "authorize_stage0b",
+            "schema": AUTHORIZER.AUTHORIZATION_SCHEMA,
+            "stage0b_authority": True,
+            "status": "stage0b_authorized",
+        }
+        original = AUTHORIZER.authorize_and_publish
+        AUTHORIZER.authorize_and_publish = lambda *args, **kwargs: payload
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                status = AUTHORIZER.main(
+                    [
+                        "--submission",
+                        "/submission",
+                        "--submission-sha256",
+                        "0" * 64,
+                        "--scheduler-candidate",
+                        "/candidate",
+                        "--output",
+                        "/decision",
+                        "--finalizer-module",
+                        "/finalizer",
+                        "--finalizer-module-sha256",
+                        "1" * 64,
+                    ]
+                )
+        finally:
+            AUTHORIZER.authorize_and_publish = original
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            stdout.getvalue().encode("ascii"),
+            AUTHORIZER.canonical_json_bytes(payload),
+        )
 
     def test_nonterminal_and_failed_finalizer_records_reject(self) -> None:
         cases = (
@@ -405,6 +479,53 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b"bound-argument\n")
         self.assertEqual(result.stderr, b"")
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "memfd_create"),
+        "retained scheduler execution requires Linux memfd support",
+    )
+    def test_sacct_swap_and_restore_cannot_change_retained_poll_snapshot(self) -> None:
+        reference = self.fixture.finalizer_runner()
+        evidence = AUTHORIZER.collect_finalizer_evidence(
+            self.fixture.candidate.submission,
+            reference,
+            sacct_bin=os.fspath(self.fixture.sacct_path),
+        )
+        allocation = reference(evidence.allocation_command).stdout.decode("ascii")
+        batch = reference(evidence.batch_command).stdout.decode("ascii")
+        self.fixture.sacct_state_path.write_text(
+            json.dumps(
+                {"allocation": allocation, "batch": batch},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="ascii",
+        )
+        self.fixture.sacct_swap_trigger.write_text("swap\n", encoding="ascii")
+        original = self.fixture.sacct_path.read_bytes()
+        try:
+            payload = AUTHORIZER.build_authorization_payload(
+                self.fixture.candidate.submission_path,
+                self.fixture.scheduler_candidate_path,
+                submission_sha256=digest(
+                    self.fixture.candidate.submission_path.read_bytes()
+                ),
+                finalizer_module_path=self.fixture.finalizer_module_path,
+                finalizer_module_sha256=self.fixture.finalizer_module_sha256,
+                sacct_bin=os.fspath(self.fixture.sacct_path),
+                output_path=self.fixture.output_path,
+            )
+        finally:
+            self.fixture.sacct_path.chmod(0o700)
+            self.fixture.sacct_path.write_bytes(original)
+            self.fixture.sacct_path.chmod(0o500)
+        self.assertEqual(payload["status"], "stage0b_authorized")
+        self.assertEqual(
+            self.fixture.sacct_swap_log.read_text(encoding="ascii").splitlines(),
+            ["allocation", "batch"],
+        )
+        self.assertFalse(self.fixture.sacct_malicious_executed.exists())
 
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),

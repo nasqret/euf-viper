@@ -218,6 +218,7 @@ class CandidateFixture:
                 "finalizer_script_sha256": "4" * 64,
                 "finalizer_sha256": "5" * 64,
                 "authorizer_sha256": "6" * 64,
+                "authorization_request_executor_sha256": "f" * 64,
                 "validator_sha256": "7" * 64,
                 "exec_helper_sha256": "8" * 64,
                 "controller_python_sha256": "9" * 64,
@@ -521,6 +522,14 @@ class T11Stage0AFinalizerTests(unittest.TestCase):
             FINALIZER.decode_canonical_json(b'{"b":2, "a":1}\n', "spaced")
         with self.assertRaisesRegex(FINALIZER.FinalizationError, "non-integral"):
             FINALIZER.decode_canonical_json(b'{"value":1.5}\n', "float")
+
+    def test_submission_requires_authorization_request_executor_binding(self) -> None:
+        submission = json.loads(json.dumps(self.fixture.submission))
+        submission["control"].pop("authorization_request_executor_sha256")
+        with self.assertRaisesRegex(
+            FINALIZER.FinalizationError, "submission.control keys differ"
+        ):
+            FINALIZER.validate_submission(submission)
 
     def test_direct_semantic_candidate_cannot_authorize(self) -> None:
         other = self.base / "direct-authority"
