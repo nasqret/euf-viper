@@ -1532,20 +1532,20 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 },
             },
             "prebuilt_bundle": {
-                "path": str(prebuilt_bundle),
-                "sha256": hashlib.sha256(prebuilt_bundle.read_bytes()).hexdigest(),
-                "manifest_sha256": self._digest("prebuilt-manifest"),
-                "schema": self.validator.PREBUILT_BUNDLE_SCHEMA,
-                "source_commit": "a" * 40,
-                "source_tree": "b" * 40,
-                "candidate_sha256": binary_sha256,
-                "candidate_bytes": binary.stat().st_size,
                 "build_receipt_sha256": hashlib.sha256(
                     build_receipt.read_bytes()
                 ).hexdigest(),
+                "candidate_bytes": binary.stat().st_size,
+                "candidate_sha256": binary_sha256,
                 "dependency_inventory_sha256": hashlib.sha256(
                     dependency_inventory.read_bytes()
                 ).hexdigest(),
+                "manifest_sha256": self._digest("prebuilt-manifest"),
+                "path": str(prebuilt_bundle),
+                "schema": self.validator.PREBUILT_BUNDLE_SCHEMA,
+                "sha256": hashlib.sha256(prebuilt_bundle.read_bytes()).hexdigest(),
+                "source_commit": "a" * 40,
+                "source_tree": "b" * 40,
             },
             "control_tools": {
                 label: {
