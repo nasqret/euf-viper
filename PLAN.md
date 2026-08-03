@@ -937,6 +937,20 @@ fallback can be an operational portfolio but never a standalone victory.
     returns to local repair and another review. Do not open the frozen target,
     create the launch manifest, or submit Stage 0A until all gates are GO on the
     committed recovered revision.
+17. Use the authoritative staged opportunity atlas, not the historical
+    pre-parser flat CSV, for all new Yices-directed experiments. At 60 seconds
+    the fixed reference is 7,480 Viper solves versus 7,500 Yices solves,
+    geometric `Yices/Viper=0.4900898384`, and a `2605.3446s` net deficit over
+    7,478 common-correct rows. Preserve two development lanes: a worst-100
+    tail cohort plus matched controls, covering 56.1% of positive deficit, and
+    a broad QG/Goel cohort because QG alone contributes `1915.29s` of positive
+    deficit across 6,396 instances. Run fast diagnostics as explicitly
+    non-promotable. Advance a mechanism only after same-node ABBA evidence
+    gives at least 1.05x geometric and aggregate improvement on its
+    preregistered cohort with no correctness or coverage regression; then run
+    the complete staged matrix against the pinned Yices binary. T11 may repair
+    equality-heavy tails but cannot by itself close the roughly 2x global
+    geometric gap.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import importlib.util
 import json
 import math
@@ -88,6 +89,57 @@ def fixture_rows() -> list[dict[str, str]]:
     return rows
 
 
+def staged_payload() -> dict[str, object]:
+    provenance = []
+    for index, record in enumerate(fixture_rows()):
+        family, _ = ATLAS.path_taxonomy(record["relative_path"])
+        digest = hashlib.sha256(f"record-{index}".encode("ascii")).hexdigest()
+        provenance.append(
+            {
+                "binary_sha256": hashlib.sha256(
+                    record["solver"].encode("ascii")
+                ).hexdigest(),
+                "budget_s": 60.0,
+                "carried_forward": False,
+                "cpu_time_s": float(record["time_s"]),
+                "expected_status": record["expected_status"],
+                "family": f"QF_UF/{family}",
+                "instance_id": record["id"],
+                "origin_budget_s": 60.0,
+                "relative_path": record["relative_path"],
+                "repetitions": 1,
+                "result": record["result"],
+                "solver_id": record["solver"],
+                "source_lock_sha256": "a" * 64,
+                "source_raw_sha256": "b" * 64,
+                "source_record_sha256s": [digest],
+                "wall_time_s": float(record["time_s"]),
+            }
+        )
+    provenance.sort(
+        key=lambda item: (
+            str(item["relative_path"]),
+            float(item["budget_s"]),
+            str(item["solver_id"]),
+        )
+    )
+    return {
+        "schema_version": 1,
+        "inputs": {
+            "budgets_s": [60.0],
+            "carried_forward_observations": 0,
+            "instances": 4,
+            "observation_provenance": provenance,
+            "observation_provenance_schema": ATLAS.STAGED_OBSERVATION_SCHEMA,
+        },
+        "input_hashes": {
+            "observation_provenance_sha256": hashlib.sha256(
+                ATLAS.canonical_json_bytes(provenance)
+            ).hexdigest()
+        },
+    }
+
+
 class OpportunityAtlasTests(unittest.TestCase):
     def write_csv(self, path: Path, rows: list[dict[str, str]]) -> None:
         with path.open("w", newline="", encoding="utf-8") as handle:
@@ -104,6 +156,9 @@ class OpportunityAtlasTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def write_staged(self, path: Path, payload: dict[str, object]) -> None:
+        path.write_bytes(ATLAS.canonical_json_bytes(payload))
 
     def test_metrics_groups_coverage_and_timeout_exclusion(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yices atlas ") as temp:
@@ -199,6 +254,69 @@ class OpportunityAtlasTests(unittest.TestCase):
                 first_json.read_bytes(),
                 ATLAS.canonical_json_bytes(json.loads(first_json.read_bytes())),
             )
+
+    def test_staged_analysis_uses_hash_bound_effective_budget(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yices atlas staged ") as temp:
+            root = Path(temp)
+            source = root / "full.json"
+            output = root / "atlas.json"
+            self.write_staged(source, staged_payload())
+
+            completed = self.run_cli(
+                source,
+                output,
+                "--input-format",
+                "staged-analysis",
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(output.read_text(encoding="ascii"))
+            self.assertEqual(payload["validation"]["input_format"], "staged-analysis")
+            self.assertEqual(payload["validation"]["effective_budget_s"], 60.0)
+            self.assertEqual(payload["overall"]["common_correct"], 2)
+            self.assertEqual(payload["overall"]["positive_time_deficit_s"], 3.0)
+            self.assertEqual(payload["overall"]["yices2_only_correct"], 1)
+
+    def test_staged_analysis_tampering_and_incomplete_matrix_fail_closed(self) -> None:
+        mutations = {
+            "hash": lambda payload: payload["input_hashes"].update(
+                observation_provenance_sha256="0" * 64
+            ),
+            "matrix": lambda payload: payload["inputs"][
+                "observation_provenance"
+            ].pop(),
+            "schema": lambda payload: payload["inputs"].update(
+                observation_provenance_schema="obsolete"
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory(
+                prefix=f"yices atlas staged {name} "
+            ) as temp:
+                root = Path(temp)
+                source = root / "full.json"
+                output = root / "atlas.json"
+                payload = staged_payload()
+                mutate(payload)
+                if name == "matrix":
+                    payload["input_hashes"]["observation_provenance_sha256"] = (
+                        hashlib.sha256(
+                            ATLAS.canonical_json_bytes(
+                                payload["inputs"]["observation_provenance"]
+                            )
+                        ).hexdigest()
+                    )
+                self.write_staged(source, payload)
+
+                completed = self.run_cli(
+                    source,
+                    output,
+                    "--input-format",
+                    "staged-analysis",
+                )
+
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertFalse(output.exists())
 
     def test_duplicate_pair_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yices atlas duplicate ") as temp:

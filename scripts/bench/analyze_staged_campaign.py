@@ -27,6 +27,9 @@ import analyze_campaign as analyzer  # noqa: E402
 import derive_timeout_continuations as derivation  # noqa: E402
 
 
+OBSERVATION_PROVENANCE_SCHEMA = "euf-viper.staged-observations.v1"
+
+
 class StagedCampaignError(ValueError):
     """Raised when staged evidence is incomplete or not an exact continuation."""
 
@@ -522,22 +525,37 @@ def analyze_staged_campaign(
         key = format(float(observation["origin_budget_s"]), ".17g")
         origin_counts[key] = origin_counts.get(key, 0) + 1
     result["inputs"]["origin_budget_counts"] = dict(sorted(origin_counts.items()))
-    observation_provenance = [
-        {
-            "relative_path": relative_path,
-            "budget_s": budget,
-            "solver_id": solver_id,
-            "result": observation["result"],
-            "origin_budget_s": observation["origin_budget_s"],
-            "carried_forward": observation["carried_forward"],
-            "source_lock_sha256": observation["source_lock_sha256"],
-            "source_raw_sha256": observation["source_raw_sha256"],
-            "source_record_sha256s": observation["source_record_sha256"],
-        }
-        for (relative_path, budget, solver_id), observation in sorted(
-            observations.items()
+    instance_ids = {
+        instance["relative_path"]: instance["id"]
+        for instance in base["lock"]["corpus"]["instances"]
+    }
+    observation_provenance = []
+    for (relative_path, budget, solver_id), observation in sorted(
+        observations.items()
+    ):
+        observation_provenance.append(
+            {
+                "binary_sha256": observation["binary_sha256"],
+                "budget_s": budget,
+                "carried_forward": observation["carried_forward"],
+                "cpu_time_s": observation["cpu_time_s"],
+                "expected_status": observation["expected_status"],
+                "family": observation["family"],
+                "instance_id": instance_ids[relative_path],
+                "origin_budget_s": observation["origin_budget_s"],
+                "relative_path": relative_path,
+                "repetitions": observation["repetitions"],
+                "result": observation["result"],
+                "solver_id": solver_id,
+                "source_lock_sha256": observation["source_lock_sha256"],
+                "source_raw_sha256": observation["source_raw_sha256"],
+                "source_record_sha256s": observation["source_record_sha256"],
+                "wall_time_s": observation["wall_time_s"],
+            }
         )
-    ]
+    result["inputs"]["observation_provenance_schema"] = (
+        OBSERVATION_PROVENANCE_SCHEMA
+    )
     result["inputs"]["observation_provenance"] = observation_provenance
     result["input_hashes"]["observation_provenance_sha256"] = hashlib.sha256(
         canonical_bytes(observation_provenance)

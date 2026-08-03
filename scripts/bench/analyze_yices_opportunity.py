@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Build a deterministic euf-viper versus Yices2 opportunity atlas.
 
-The input is the strict CSV schema emitted by ``compare_solvers.py``.  Timing
-metrics include only instances solved correctly by both selected solvers.
-Coverage gaps are reported separately and never receive timeout-charged times.
+The default input is the strict CSV schema emitted by ``compare_solvers.py``.
+``--input-format staged-analysis`` instead consumes the hash-bound effective
+observations emitted by ``analyze_staged_campaign.py`` and selects one budget.
+Timing metrics include only instances solved correctly by both selected
+solvers.  Coverage gaps are reported separately and never receive
+timeout-charged times.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from typing import Iterable, Sequence
 
 
 SCHEMA_VERSION = "euf-viper.yices-opportunity-atlas.v1"
+STAGED_OBSERVATION_SCHEMA = "euf-viper.staged-observations.v1"
 CSV_FIELDNAMES = [
     "id",
     "relative_path",
@@ -35,10 +39,31 @@ CSV_FIELDNAMES = [
     "stderr",
 ]
 DECISIVE_RESULTS = frozenset({"sat", "unsat"})
-RESULT_RE = re.compile(r"(?:sat|unsat|unknown|timeout|unsupported|exit--?[0-9]+)\Z")
+RESULT_RE = re.compile(
+    r"(?:sat|unsat|unknown|timeout|unsupported|error|invalid|exit--?[0-9]+)\Z"
+)
 INTEGER_RE = re.compile(r"[+-]?[0-9]+\Z")
 QG_DEGREE_RE = re.compile(r"(?:qg|loops)(?P<degree>[0-9]+)\Z")
 DEFAULT_TOP_N = (10, 50, 100, 500)
+STAGED_PROVENANCE_KEYS = {
+    "binary_sha256",
+    "budget_s",
+    "carried_forward",
+    "cpu_time_s",
+    "expected_status",
+    "family",
+    "instance_id",
+    "origin_budget_s",
+    "relative_path",
+    "repetitions",
+    "result",
+    "solver_id",
+    "source_lock_sha256",
+    "source_raw_sha256",
+    "source_record_sha256s",
+    "wall_time_s",
+}
+SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class AtlasError(ValueError):
@@ -188,6 +213,50 @@ def path_taxonomy(relative_path: str) -> tuple[str, str | None]:
     return family, str(int(match.group("degree")))
 
 
+def _pairs_from_matrix(
+    observations: dict[tuple[str, str], Observation],
+    paths: dict[str, tuple[str, str]],
+    solvers: set[str],
+    *,
+    source: Path,
+    viper_solver: str,
+    yices_solver: str,
+) -> tuple[list[InstancePair], list[str]]:
+    required = {viper_solver, yices_solver}
+    missing_required = sorted(required - solvers)
+    if missing_required:
+        raise AtlasError(f"{source}: missing required solvers {missing_required!r}")
+
+    expected_solvers = sorted(solvers)
+    for relative_path in sorted(paths):
+        present = [
+            solver
+            for solver in expected_solvers
+            if (relative_path, solver) in observations
+        ]
+        if present != expected_solvers:
+            missing = sorted(set(expected_solvers) - set(present))
+            raise AtlasError(
+                f"{source}: incomplete solver matrix for {relative_path!r}; "
+                f"missing {missing!r}"
+            )
+
+    pairs = []
+    for relative_path in sorted(paths):
+        family, degree = path_taxonomy(relative_path)
+        pairs.append(
+            InstancePair(
+                relative_path=relative_path,
+                expected_status=paths[relative_path][1],
+                family=family,
+                qg_degree=degree,
+                viper=observations[(relative_path, viper_solver)],
+                yices=observations[(relative_path, yices_solver)],
+            )
+        )
+    return pairs, expected_solvers
+
+
 def load_csv(
     source: Path,
     *,
@@ -276,38 +345,14 @@ def load_csv(
 
     if not observations:
         raise AtlasError(f"{source}: CSV contains no result rows")
-    required = {viper_solver, yices_solver}
-    missing_required = sorted(required - solvers)
-    if missing_required:
-        raise AtlasError(f"{source}: missing required solvers {missing_required!r}")
-
-    expected_solvers = sorted(solvers)
-    for relative_path in sorted(paths):
-        present = [
-            solver
-            for solver in expected_solvers
-            if (relative_path, solver) in observations
-        ]
-        if present != expected_solvers:
-            missing = sorted(set(expected_solvers) - set(present))
-            raise AtlasError(
-                f"{source}: incomplete solver matrix for {relative_path!r}; "
-                f"missing {missing!r}"
-            )
-
-    pairs = []
-    for relative_path in sorted(paths):
-        family, degree = path_taxonomy(relative_path)
-        pairs.append(
-            InstancePair(
-                relative_path=relative_path,
-                expected_status=paths[relative_path][1],
-                family=family,
-                qg_degree=degree,
-                viper=observations[(relative_path, viper_solver)],
-                yices=observations[(relative_path, yices_solver)],
-            )
-        )
+    pairs, expected_solvers = _pairs_from_matrix(
+        observations,
+        paths,
+        solvers,
+        source=source,
+        viper_solver=viper_solver,
+        yices_solver=yices_solver,
+    )
 
     normalized_rows = [
         {
@@ -326,6 +371,219 @@ def load_csv(
     ]
     dataset_sha256 = hashlib.sha256(canonical_json_bytes(normalized_rows)).hexdigest()
     return pairs, expected_solvers, dataset_sha256, row_count
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise AtlasError(f"duplicate JSON key {key!r}")
+        value[key] = item
+    return value
+
+
+def _finite_number(value: object, context: str, *, positive: bool = False) -> float:
+    if type(value) not in {int, float}:
+        raise AtlasError(f"{context} must be a JSON number")
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0 or (positive and parsed <= 0.0):
+        qualifier = "positive and finite" if positive else "nonnegative and finite"
+        raise AtlasError(f"{context} must be {qualifier}")
+    return _clean_float(parsed)
+
+
+def load_staged_analysis(
+    source: Path,
+    *,
+    viper_solver: str,
+    yices_solver: str,
+    budget_s: float | None,
+) -> tuple[list[InstancePair], list[str], str, int, float]:
+    """Load one hash-bound effective budget from staged campaign analysis."""
+    if viper_solver == yices_solver:
+        raise AtlasError("the Viper and Yices solver identifiers must differ")
+    try:
+        with source.open(encoding="ascii") as handle:
+            payload = json.load(handle, object_pairs_hook=_unique_json_object)
+    except AtlasError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise AtlasError(f"cannot read staged analysis {source}: {error}") from error
+    if type(payload) is not dict or payload.get("schema_version") != 1:
+        raise AtlasError(f"{source}: incompatible staged analysis schema")
+    inputs = payload.get("inputs")
+    hashes = payload.get("input_hashes")
+    if type(inputs) is not dict or type(hashes) is not dict:
+        raise AtlasError(f"{source}: staged analysis lacks inputs or input_hashes")
+    if inputs.get("observation_provenance_schema") != STAGED_OBSERVATION_SCHEMA:
+        raise AtlasError(
+            f"{source}: staged observation schema is missing or incompatible"
+        )
+    rows = inputs.get("observation_provenance")
+    if type(rows) is not list or not rows:
+        raise AtlasError(f"{source}: staged analysis has no observation provenance")
+    declared_hash = hashes.get("observation_provenance_sha256")
+    actual_hash = hashlib.sha256(canonical_json_bytes(rows)).hexdigest()
+    if declared_hash != actual_hash:
+        raise AtlasError(f"{source}: observation provenance SHA-256 mismatch")
+
+    raw_budgets = inputs.get("budgets_s")
+    if type(raw_budgets) is not list or not raw_budgets:
+        raise AtlasError(f"{source}: staged analysis has no declared budgets")
+    budgets = [
+        _finite_number(value, f"{source}: budgets_s[{index}]", positive=True)
+        for index, value in enumerate(raw_budgets)
+    ]
+    if budgets != sorted(set(budgets)):
+        raise AtlasError(f"{source}: staged budgets must be unique and increasing")
+    selected_budget = budgets[-1] if budget_s is None else float(budget_s)
+    if not math.isfinite(selected_budget) or selected_budget <= 0.0:
+        raise AtlasError("selected budget must be positive and finite")
+    if selected_budget not in budgets:
+        raise AtlasError(
+            f"{source}: selected budget {selected_budget:g} is not in {budgets!r}"
+        )
+
+    observations: dict[tuple[str, str], Observation] = {}
+    paths: dict[str, tuple[str, str]] = {}
+    all_keys: set[tuple[str, float, str]] = set()
+    all_solvers: set[str] = set()
+    all_paths: dict[str, tuple[str, str]] = {}
+    normalized_rows: list[dict[str, object]] = []
+    carried_count = 0
+    for index, raw in enumerate(rows):
+        context = f"{source}: observation_provenance[{index}]"
+        if type(raw) is not dict or set(raw) != STAGED_PROVENANCE_KEYS:
+            raise AtlasError(f"{context} has an incompatible field set")
+        raw_relative_path = raw["relative_path"]
+        if type(raw_relative_path) is not str:
+            raise AtlasError(f"{context}.relative_path must be a string")
+        relative_path = _validate_relative_path(
+            raw_relative_path, source=source, line_number=index + 1
+        )
+        instance_id = raw["instance_id"]
+        expected_status = raw["expected_status"]
+        family = raw["family"]
+        solver = raw["solver_id"]
+        result = raw["result"]
+        if type(instance_id) is not str or not instance_id or instance_id.strip() != instance_id:
+            raise AtlasError(f"{context}.instance_id must be nonempty and trimmed")
+        if expected_status not in DECISIVE_RESULTS:
+            raise AtlasError(f"{context}.expected_status must be sat or unsat")
+        if type(family) is not str or not family or family.strip() != family:
+            raise AtlasError(f"{context}.family must be nonempty and trimmed")
+        path_family, _ = path_taxonomy(relative_path)
+        if family not in {path_family, f"QF_UF/{path_family}"}:
+            raise AtlasError(f"{context}.family disagrees with relative_path")
+        if type(solver) is not str or not solver or solver.strip() != solver:
+            raise AtlasError(f"{context}.solver_id must be nonempty and trimmed")
+        if type(result) is not str or RESULT_RE.fullmatch(result) is None:
+            raise AtlasError(f"{context}.result is invalid")
+        if result in DECISIVE_RESULTS and result != expected_status:
+            raise AtlasError(f"{context} contains a wrong decisive answer")
+        row_budget = _finite_number(raw["budget_s"], f"{context}.budget_s", positive=True)
+        origin_budget = _finite_number(
+            raw["origin_budget_s"], f"{context}.origin_budget_s", positive=True
+        )
+        if row_budget not in budgets or origin_budget > row_budget:
+            raise AtlasError(f"{context} has inconsistent budget provenance")
+        carried_forward = raw["carried_forward"]
+        if type(carried_forward) is not bool or carried_forward != (
+            origin_budget < row_budget
+        ):
+            raise AtlasError(f"{context}.carried_forward disagrees with origin budget")
+        carried_count += int(carried_forward)
+        cpu_time = _finite_number(raw["cpu_time_s"], f"{context}.cpu_time_s")
+        wall_time = _finite_number(raw["wall_time_s"], f"{context}.wall_time_s")
+        if result in DECISIVE_RESULTS:
+            if wall_time <= 0.0:
+                raise AtlasError(
+                    f"{context}: decisive result requires positive wall time"
+                )
+        repetitions = raw["repetitions"]
+        if type(repetitions) is not int or repetitions < 1:
+            raise AtlasError(f"{context}.repetitions must be a positive integer")
+        for field in (
+            "binary_sha256",
+            "source_lock_sha256",
+            "source_raw_sha256",
+        ):
+            if type(raw[field]) is not str or SHA256_RE.fullmatch(raw[field]) is None:
+                raise AtlasError(f"{context}.{field} is not a canonical SHA-256")
+        record_hashes = raw["source_record_sha256s"]
+        if (
+            type(record_hashes) is not list
+            or len(record_hashes) != repetitions
+            or any(type(item) is not str or SHA256_RE.fullmatch(item) is None for item in record_hashes)
+        ):
+            raise AtlasError(f"{context}.source_record_sha256s is invalid")
+
+        identity = (instance_id, expected_status)
+        previous_identity = all_paths.setdefault(relative_path, identity)
+        if previous_identity != identity:
+            raise AtlasError(f"{context}: path identity changed across observations")
+        key = (relative_path, row_budget, solver)
+        if key in all_keys:
+            raise AtlasError(f"{context}: duplicate staged observation")
+        all_keys.add(key)
+        all_solvers.add(solver)
+        if row_budget != selected_budget:
+            continue
+
+        selected_key = (relative_path, solver)
+        observations[selected_key] = Observation(
+            identifier=instance_id,
+            relative_path=relative_path,
+            expected_status=expected_status,
+            solver=solver,
+            result=result,
+            time_s=wall_time,
+            exit_code=0,
+            stderr="",
+        )
+        paths[relative_path] = identity
+        normalized_rows.append(
+            {
+                "binary_sha256": raw["binary_sha256"],
+                "expected_status": expected_status,
+                "instance_id": instance_id,
+                "origin_budget_s": origin_budget,
+                "relative_path": relative_path,
+                "result": result,
+                "solver_id": solver,
+                "source_record_sha256s": record_hashes,
+                "wall_time_s": wall_time,
+            }
+        )
+
+    declared_carried = inputs.get("carried_forward_observations")
+    if type(declared_carried) is not int or declared_carried != carried_count:
+        raise AtlasError(f"{source}: carried-forward observation count mismatch")
+    declared_instances = inputs.get("instances")
+    if type(declared_instances) is not int or declared_instances != len(all_paths):
+        raise AtlasError(f"{source}: instance count disagrees with provenance")
+    expected_total = len(all_paths) * len(all_solvers) * len(budgets)
+    if len(all_keys) != expected_total:
+        raise AtlasError(f"{source}: staged observation matrix is incomplete")
+
+    pairs, expected_solvers = _pairs_from_matrix(
+        observations,
+        paths,
+        all_solvers,
+        source=source,
+        viper_solver=viper_solver,
+        yices_solver=yices_solver,
+    )
+    normalized_rows.sort(
+        key=lambda item: (str(item["relative_path"]), str(item["solver_id"]))
+    )
+    dataset = {
+        "budget_s": selected_budget,
+        "observation_provenance_sha256": actual_hash,
+        "rows": normalized_rows,
+    }
+    dataset_sha256 = hashlib.sha256(canonical_json_bytes(dataset)).hexdigest()
+    return pairs, expected_solvers, dataset_sha256, len(normalized_rows), selected_budget
 
 
 def summarize(pairs: Sequence[InstancePair]) -> dict[str, object]:
@@ -560,7 +818,17 @@ def parse_top_ns(value: str) -> tuple[int, ...]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv", type=Path)
+    parser.add_argument("input", type=Path)
+    parser.add_argument(
+        "--input-format",
+        choices=("csv", "staged-analysis"),
+        default="csv",
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        help="staged-analysis budget to select (defaults to the largest budget)",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--viper-solver", default="euf-viper")
     parser.add_argument("--yices-solver", default="yices2")
@@ -569,14 +837,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not math.isfinite(args.cohort_fraction) or not 0.0 < args.cohort_fraction <= 1.0:
         parser.error("--cohort-fraction must be finite and in (0, 1]")
+    if args.budget is not None and args.input_format != "staged-analysis":
+        parser.error("--budget requires --input-format staged-analysis")
+    if args.budget is not None and (
+        not math.isfinite(args.budget) or args.budget <= 0.0
+    ):
+        parser.error("--budget must be positive and finite")
 
     try:
-        reject_input_output_alias(args.csv, args.out)
-        pairs, solvers, dataset_sha256, row_count = load_csv(
-            args.csv,
-            viper_solver=args.viper_solver,
-            yices_solver=args.yices_solver,
-        )
+        reject_input_output_alias(args.input, args.out)
+        effective_budget = None
+        if args.input_format == "csv":
+            pairs, solvers, dataset_sha256, row_count = load_csv(
+                args.input,
+                viper_solver=args.viper_solver,
+                yices_solver=args.yices_solver,
+            )
+        else:
+            (
+                pairs,
+                solvers,
+                dataset_sha256,
+                row_count,
+                effective_budget,
+            ) = load_staged_analysis(
+                args.input,
+                viper_solver=args.viper_solver,
+                yices_solver=args.yices_solver,
+                budget_s=args.budget,
+            )
         payload = build_atlas(
             pairs,
             solvers=solvers,
@@ -587,6 +876,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             cohort_fraction=args.cohort_fraction,
             top_ns=args.top_n,
         )
+        payload["validation"]["input_format"] = args.input_format
+        if effective_budget is not None:
+            payload["validation"]["effective_budget_s"] = effective_budget
         rendered = canonical_json_bytes(payload)
         publish_atomic(args.out, rendered)
     except (AtlasError, OSError) as error:

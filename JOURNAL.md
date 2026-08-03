@@ -1992,6 +1992,41 @@
   Slurm job was submitted. Fresh publication, provenance, and proof reviews were
   restarted from the durable branch.
 
+## 2026-08-03 - T11 authorization repair and staged Yices atlas
+
+- Live WMI inspection confirmed that `147316_[6-63%8]` and
+  `147319_[45-63%8]` are explicitly `JobHeldUser`, with priority zero and no
+  allocated resources. Audits `147317` and `147320` remain pending on
+  unfulfilled `afterok` dependencies. The old failed certificate campaign was
+  neither released nor cancelled.
+- T11 commits `660e793` and `98be724` sealed and hash-bound controller Python
+  and authorizer execution, descriptor-bound candidate-root inventory across
+  publication, required finalizer `Requeue=0` and `Restarts=0`, and closed the
+  finalizer staging descriptor after linking. The scoped WMI Linux suite passed
+  56/56. Stage 0A remains NO-GO pending the independently assigned prebuilt
+  binary/runtime closure and a combined exact-revision review.
+- `analyze_staged_campaign.py` now emits a versioned, hash-bound observation
+  table containing effective result and timing data. The Yices opportunity
+  atlas can consume that table at any declared budget and rejects incomplete,
+  tampered, or inconsistent matrices.
+- WMI reconstruction job `218741` read the immutable `30828a4` chain and
+  emitted a 117,752,251-byte staged report. The first atlas pass failed closed
+  on a family-prefix convention; two diagnostic validator jobs exposed a
+  `/bin/sh` wrapper error and nominal-budget timing convention. After those
+  validators were corrected, job `218746` completed both atlases in 46 seconds
+  with 401,360 KiB MaxRSS.
+- At 60 seconds Viper solves 7,480 and Yices2 solves 7,500. On 7,478
+  common-correct instances, Viper wins 1,492 and Yices wins 5,986; the
+  geometric `Yices/Viper` factor is `0.4900898384`, net Viper deficit is
+  `2605.3446s`, and the worst 100 losses contain 56.1% of positive deficit.
+- At 1,200 seconds Viper solves 7,502 and Yices2 solves all 7,503, but the
+  geometric factor is `0.4838250883` and net deficit grows to `4911.1077s`.
+  Coverage convergence therefore does not imply timing convergence.
+- Preserved atlases and their remote provenance are indexed under
+  `results/wmi/yices-opportunity-30828a4-chain147306/`; interpretation and the
+  resulting two-lane optimization policy are in
+  `research-vault/06-results/2026-08-03-authoritative-yices-opportunity-atlas.md`.
+
 ## Next Entry Template
 
 - Benchmark corpus:

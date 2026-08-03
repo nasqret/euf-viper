@@ -192,6 +192,34 @@ class StagedCampaignTests(unittest.TestCase):
         self.assertEqual(carried[0]["origin_budget_s"], 60.0)
         self.assertEqual(len(carried[0]["source_record_sha256s"]), 1)
         self.assertEqual(
+            report["inputs"]["observation_provenance_schema"],
+            STAGED.OBSERVATION_PROVENANCE_SCHEMA,
+        )
+        self.assertEqual(
+            set(carried[0]),
+            {
+                "binary_sha256",
+                "budget_s",
+                "carried_forward",
+                "cpu_time_s",
+                "expected_status",
+                "family",
+                "instance_id",
+                "origin_budget_s",
+                "relative_path",
+                "repetitions",
+                "result",
+                "solver_id",
+                "source_lock_sha256",
+                "source_raw_sha256",
+                "source_record_sha256s",
+                "wall_time_s",
+            },
+        )
+        self.assertEqual(carried[0]["instance_id"], "instance-0")
+        self.assertEqual(carried[0]["expected_status"], "sat")
+        self.assertGreater(carried[0]["wall_time_s"], 0.0)
+        self.assertEqual(
             report["input_hashes"]["observation_provenance_sha256"],
             hashlib.sha256(
                 STAGED.canonical_bytes(
