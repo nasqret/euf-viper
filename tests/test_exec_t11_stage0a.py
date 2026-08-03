@@ -63,6 +63,19 @@ class T11Stage0AExecHelperTests(unittest.TestCase):
         cls.helper = load_helper()
 
     def setUp(self) -> None:
+        self.external_inheritable_fds: list[int] = []
+        if LINUX_MEMFD:
+            for entry in os.listdir("/proc/self/fd"):
+                if not entry.isdecimal() or int(entry) <= 2:
+                    continue
+                fd = int(entry)
+                try:
+                    if os.get_inheritable(fd):
+                        self.external_inheritable_fds.append(fd)
+                        os.set_inheritable(fd, False)
+                except OSError as error:
+                    if error.errno != errno.EBADF:
+                        raise
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.executable = self.root / "probe.py"
@@ -77,7 +90,15 @@ class T11Stage0AExecHelperTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.helper.PROC_FD_ROOT = self.original_proc_fd_root
-        self.temporary.cleanup()
+        try:
+            self.temporary.cleanup()
+        finally:
+            for fd in self.external_inheritable_fds:
+                try:
+                    os.set_inheritable(fd, True)
+                except OSError as error:
+                    if error.errno != errno.EBADF:
+                        raise
 
     @staticmethod
     def _sha256(path: Path) -> str:

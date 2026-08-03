@@ -29,6 +29,13 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def controller_python() -> Path:
+    system_python = Path("/usr/bin/python3")
+    if sys.platform.startswith("linux") and system_python.is_file():
+        return Path(os.path.realpath(system_python))
+    return Path(sys.executable).resolve()
+
+
 def write_executable(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(content).lstrip(), encoding="utf-8")
@@ -365,7 +372,7 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             [str(self.git), "rev-parse", "HEAD"], cwd=self.repo
         ).stdout.strip()
 
-        self.python = Path(sys.executable).resolve()
+        self.python = controller_python()
         self.manifest = self.input_root / "launch-manifest.json"
         manifest = {
             "solver_revision": self.revision,
@@ -373,7 +380,13 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "python": {
                     "path": str(self.python),
                     "sha256": sha256(self.python),
-                    "version": sys.version.split()[0],
+                    "version": subprocess.run(
+                        [str(self.python), "--version"],
+                        check=True,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                    ).stdout.strip(),
                 }
             },
             "control_tools": {

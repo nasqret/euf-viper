@@ -1286,3 +1286,11 @@
   mandatory. Runtime claims are deliberately limited to retained/revalidated
   loader paths; Python imports and actual dynamic-loader objects are not
   descriptor-bound.
+- Exact T11 commit `a49838e` failed hosted campaign-contract run `30813930413`
+  on test-host portability, not scientific execution. The test-only repair
+  quarantines unrelated inherited descriptors, selects Linux system Python for
+  sealed bootstrap fixtures, and capability-gates user/tmpfs namespace tests.
+  Local campaign-contract qualification is 446/446 with 50 platform skips;
+  WMI job `218833` runs the modified Linux slice 86/86 with zero skips. Hosted
+  CI on the repaired exact head, final prebuild, launch dry run, and independent
+  GO remain mandatory; the frozen target remains unopened.

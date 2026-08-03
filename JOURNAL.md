@@ -2060,6 +2060,28 @@
   job was created. Exact-commit CI, exact-head WMI qualification, final prebuild,
   producer-to-validator dry run, and independent GO remain mandatory.
 
+## 2026-08-03 - T11 hosted portability repair
+
+- Hosted campaign-contract run `30813930413` tested exact commit `a49838e` and
+  failed before Rust execution: 24 failures and two errors in the Python step.
+  The distinct causes were GitHub-owned inheritable descriptors, a non-system
+  action Python that could not locate a coherent standard library after sealed
+  minimal-environment execution, and an unavailable unprivileged tmpfs mount
+  namespace. This was a real gate failure and did not authorize a launch.
+- The repair is confined to tests. In-process descriptor tests temporarily
+  clear and restore unrelated inheritable flags; Linux controller fixtures use
+  the real `/usr/bin/python3` executable; Stage 0A dynamic tests probe the exact
+  user/mount/tmpfs capability and skip only when the host cannot provide it.
+  No runner, authorizer, validator, solver, or scientific threshold changed.
+- The complete local campaign-contract matrix passes 446 tests with 50 expected
+  macOS/platform skips. WMI Linux job `218833` passes all 86 modified tests with
+  zero skips in 120.800 seconds and 50,952 KiB MaxRSS, including every memfd,
+  authorization, submission, and namespace-materialization integration path.
+- The repaired commit, hosted CI, exact-head WMI qualification, retained
+  two-build prepackage, producer-to-validator dry run, and independent review
+  remain pending. The frozen target is still unopened and no Stage 0A job has
+  been submitted.
+
 ## Next Entry Template
 
 - Benchmark corpus:

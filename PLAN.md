@@ -940,7 +940,16 @@ fallback can be an operational portfolio but never a standalone victory.
     synchronized WMI job `218826` passes all 144 Linux tests in 120.735 seconds.
     Fresh-target WMI Rust job `218824` passes 420 tests with four ignored in
     668 seconds and 2,305,452 KiB MaxRSS. This is infrastructure qualification,
-    not target or performance evidence.
+    not target or performance evidence. Exact commit `a49838e` then failed
+    hosted run `30813930413` because GitHub retained unrelated inheritable file
+    descriptors, its action Python was not relocatable under the production
+    sealed/minimal-environment bootstrap, and its host denied the user/mount
+    namespace used by Stage 0A. The test-only repair quarantines runner-owned
+    descriptors, uses the real Linux system Python, and capability-gates that
+    namespace integration without weakening production. Local qualification now
+    passes 446 tests with 50 platform skips; WMI job `218833` executes the full
+    modified Linux slice with 86/86 passes and zero skips. A new exact-head
+    hosted run remains mandatory.
 16. Treat the 2026-07-19 temporary-worktree loss as an evidence reset, not a
     scientific result. Restore code only from the two corpus-free WMI review
     roots onto durable branch `perf-t11-equality-resolution`, explicitly exclude

@@ -25,11 +25,18 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def controller_python() -> Path:
+    system_python = Path("/usr/bin/python3")
+    if sys.platform.startswith("linux") and system_python.is_file():
+        return Path(os.path.realpath(system_python))
+    return Path(sys.executable).resolve()
+
+
 class T11Stage0AAuthorizationRequestTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
-        self.python = Path(sys.executable).resolve()
+        self.python = controller_python()
         self.authorizer = self.root / "authorizer.py"
         self.finalizer = self.root / "finalizer.py"
         self.sacct = self.root / "sacct"

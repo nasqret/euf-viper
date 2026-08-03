@@ -30,6 +30,52 @@ def load_validator():
     return module
 
 
+def supports_stage0a_mount_namespace() -> bool:
+    unshare = shutil.which("unshare")
+    mount = shutil.which("mount")
+    bash = shutil.which("bash")
+    if not sys.platform.startswith("linux") or not all((unshare, mount, bash)):
+        return False
+    with tempfile.TemporaryDirectory() as temporary:
+        probe = Path(temporary) / "mount"
+        probe.mkdir(mode=0o700)
+        completed = subprocess.run(
+            [
+                str(unshare),
+                "--user",
+                "--map-root-user",
+                "--mount",
+                "--fork",
+                str(bash),
+                "--noprofile",
+                "--norc",
+                "-c",
+                (
+                    'set -e; "$1" --make-rprivate /; '
+                    '"$1" -t tmpfs -o nodev,nosuid,mode=0700,size=1M tmpfs "$2"'
+                ),
+                "stage0a-namespace-probe",
+                str(mount),
+                str(probe),
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={
+                "HOME": "/",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+                "TZ": "UTC",
+            },
+        )
+        return completed.returncode == 0
+
+
+STAGE0A_MOUNT_NAMESPACE = supports_stage0a_mount_namespace()
+
+
 class T11Stage0AWmiContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -235,8 +281,10 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
     sys.platform.startswith("linux")
     and Path("/usr/bin/python3").is_file()
     and Path("/proc/self/fd").is_dir()
-    and shutil.which("git") is not None,
-    "Stage 0A dynamic pipeline tests require Linux, /proc, Python, and Git",
+    and shutil.which("git") is not None
+    and STAGE0A_MOUNT_NAMESPACE,
+    "Stage 0A dynamic pipeline tests require Linux, /proc, Python, Git, "
+    "and an unprivileged tmpfs mount namespace",
 )
 class T11Stage0ADynamicPipelineTests(unittest.TestCase):
     TARGET_RELATIVE_PATH = (
