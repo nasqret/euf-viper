@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create and verify deterministic, immutable T11 build-closure archives.
+"""Create and verify deterministic, immutable T11 prebuilt-runtime archives.
 
 The archive format is a deliberately small USTAR profile.  It contains one
 canonical JSON manifest followed by a byte-sorted inventory rooted at
@@ -17,11 +17,14 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, BinaryIO, Iterable, Mapping, Sequence
 
 
-SCHEMA = "euf-viper.t11-build-closure.v1"
+SCHEMA = "euf-viper.t11-prebuilt-bundle.v1"
+BUILD_RECEIPT_SCHEMA = "euf-viper.t11-prebuilt-build-receipt.v1"
+DEPENDENCY_INVENTORY_SCHEMA = "euf-viper.t11-binary-dependencies.v1"
 MANIFEST_NAME = "manifest.json"
 PAYLOAD_ROOT = "payload"
 BLOCK_SIZE = 512
@@ -30,26 +33,9 @@ MAX_MANIFEST_BYTES = 128 * 1024 * 1024
 MAX_ENTRIES = 2_000_000
 
 REQUIRED_ROOT_KINDS: Mapping[str, str] = {
-    "cargo-executable": "file",
-    "cargo-home": "directory",
-    "native-archiver": "file",
-    "native-compiler": "file",
-    "native-libs": "directory",
-    "native-linker": "file",
-    "native-loader": "file",
-    "python-runtime": "directory",
-    "rust-sysroot": "directory",
-    "rustc-executable": "file",
-    "source-tree": "directory",
-}
-
-TOOL_ROOT_LABELS: Mapping[str, str] = {
-    "cargo": "cargo-executable",
-    "native-archiver": "native-archiver",
-    "native-compiler": "native-compiler",
-    "native-linker": "native-linker",
-    "native-loader": "native-loader",
-    "rustc": "rustc-executable",
+    "build-receipt": "file",
+    "candidate-binary": "file",
+    "dependency-inventory": "file",
 }
 
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -103,8 +89,18 @@ class _Root:
 class VerificationReport:
     archive_sha256: str
     manifest_sha256: str
-    source_revision: str
+    source_commit: str
+    source_tree: str
+    candidate_sha256: str
+    build_receipt_sha256: str
+    dependency_inventory_sha256: str
     entries: int
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceIdentity:
+    commit: str
+    tree: str
 
 
 def _fail(message: str) -> None:
@@ -448,7 +444,12 @@ def _entry_record(entry: _Entry) -> dict[str, object]:
 
 
 def _manifest_value(
-    source_revision: str, roots: Sequence[_Root], entries: Sequence[_Entry]
+    source: SourceIdentity,
+    roots: Sequence[_Root],
+    entries: Sequence[_Entry],
+    candidate_sha256: str,
+    build_receipt_sha256: str,
+    dependency_inventory_sha256: str,
 ) -> dict[str, object]:
     return {
         "entries": [_entry_record(entry) for entry in entries],
@@ -460,14 +461,16 @@ def _manifest_value(
             }
             for root in sorted(roots, key=lambda item: _path_key(item.label))
         ],
-        "schema": SCHEMA,
-        "source_revision": source_revision,
-        "tools": {
-            role: f"{PAYLOAD_ROOT}/{label}"
-            for role, label in sorted(
-                TOOL_ROOT_LABELS.items(), key=lambda item: _path_key(item[0])
-            )
+        "prebuilt": {
+            "build_receipt": f"{PAYLOAD_ROOT}/build-receipt",
+            "build_receipt_sha256": build_receipt_sha256,
+            "candidate": f"{PAYLOAD_ROOT}/candidate-binary",
+            "candidate_sha256": candidate_sha256,
+            "dependency_inventory": f"{PAYLOAD_ROOT}/dependency-inventory",
+            "dependency_inventory_sha256": dependency_inventory_sha256,
         },
+        "schema": SCHEMA,
+        "source": {"commit": source.commit, "tree": source.tree},
     }
 
 
@@ -476,6 +479,174 @@ def _canonical_json(value: object) -> bytes:
         json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
         + "\n"
     ).encode("ascii")
+
+
+def _run_git(repository: str, *arguments: str) -> str:
+    command = ["git", "-C", repository, *arguments]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"HOME": "/", "LANG": "C", "LC_ALL": "C", "PATH": "/usr/bin:/bin"},
+        )
+    except OSError as error:
+        _fail(f"cannot execute Git while deriving source identity: {error}")
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", "replace").strip()
+        _fail(f"Git source-identity command failed: {detail or arguments[0]}")
+    try:
+        return completed.stdout.decode("ascii", "strict").rstrip("\n")
+    except UnicodeDecodeError:
+        _fail("Git source-identity output is not ASCII")
+
+
+def _derive_clean_source_identity(repository: str) -> SourceIdentity:
+    absolute = os.path.realpath(os.path.abspath(repository))
+    metadata = os.stat(absolute, follow_symlinks=False)
+    if not stat.S_ISDIR(metadata.st_mode):
+        _fail("source repository is not a directory")
+    status = _run_git(absolute, "status", "--porcelain=v1", "--untracked-files=all")
+    if status:
+        _fail("source repository must be completely clean")
+    commit = _run_git(absolute, "rev-parse", "--verify", "HEAD^{commit}")
+    tree = _run_git(absolute, "rev-parse", "--verify", "HEAD^{tree}")
+    if REVISION_RE.fullmatch(commit) is None or REVISION_RE.fullmatch(tree) is None:
+        _fail("Git commit or tree identity is not canonical SHA-1")
+    return SourceIdentity(commit=commit, tree=tree)
+
+
+def _read_canonical_json_file(path: str, label: str) -> tuple[dict[str, Any], bytes]:
+    descriptor = os.open(path, _open_flags(directory=False))
+    try:
+        before = _identity(os.fstat(descriptor))
+        _assert_regular(os.fstat(descriptor), label)
+        if before.size > MAX_MANIFEST_BYTES:
+            _fail(f"{label} exceeds {MAX_MANIFEST_BYTES} bytes")
+        data = bytearray()
+        while len(data) <= before.size:
+            block = os.read(descriptor, min(COPY_CHUNK_BYTES, before.size - len(data) + 1))
+            if not block:
+                break
+            data.extend(block)
+        if len(data) != before.size or _identity(os.fstat(descriptor)) != before:
+            _fail(f"{label} changed while read")
+    finally:
+        os.close(descriptor)
+    try:
+        value = json.loads(
+            bytes(data).decode("ascii", "strict"),
+            object_pairs_hook=_rejecting_object,
+            parse_constant=_reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError) as error:
+        _fail(f"{label} is invalid JSON: {error}")
+    if type(value) is not dict or _canonical_json(value) != bytes(data):
+        _fail(f"{label} is not one canonical JSON object")
+    return value, bytes(data)
+
+
+def _file_digest(path: str, label: str) -> tuple[str, int]:
+    descriptor = os.open(path, _open_flags(directory=False))
+    try:
+        metadata = os.fstat(descriptor)
+        _assert_regular(metadata, label)
+        return _hash_stable_file(descriptor, _identity(metadata), label), metadata.st_size
+    finally:
+        os.close(descriptor)
+
+
+def _validate_dependency_inventory(value: Mapping[str, Any], candidate_sha256: str) -> None:
+    inventory = _exact_keys(
+        value,
+        ("candidate_sha256", "platform", "runtime_files", "schema"),
+        "dependency inventory",
+    )
+    if inventory["schema"] != DEPENDENCY_INVENTORY_SCHEMA:
+        _fail("dependency inventory schema differs")
+    if inventory["candidate_sha256"] != candidate_sha256:
+        _fail("dependency inventory candidate SHA-256 differs")
+    if inventory["platform"] != "linux-x86_64":
+        _fail("dependency inventory platform must be linux-x86_64")
+    files = inventory["runtime_files"]
+    if type(files) is not list:
+        _fail("dependency inventory runtime_files must be an array")
+    normalized: list[tuple[str, str]] = []
+    for index, raw in enumerate(files):
+        record = _exact_keys(raw, ("path", "sha256"), f"runtime_files[{index}]")
+        path = record["path"]
+        digest = record["sha256"]
+        if type(path) is not str or not os.path.isabs(path) or "\0" in path or "\n" in path:
+            _fail(f"runtime_files[{index}].path must be absolute")
+        if os.path.realpath(path) != path:
+            _fail(f"runtime_files[{index}].path must be canonical and nonsymlinked")
+        if type(digest) is not str or SHA256_RE.fullmatch(digest) is None:
+            _fail(f"runtime_files[{index}].sha256 is not canonical")
+        actual, _ = _file_digest(path, f"runtime dependency {path!r}")
+        if actual != digest:
+            _fail(f"runtime dependency SHA-256 differs: {path!r}")
+        normalized.append((path, digest))
+    if normalized != sorted(set(normalized), key=lambda item: item[0].encode("utf-8")):
+        _fail("dependency inventory runtime_files are duplicated or not byte-sorted")
+
+
+def _validate_build_receipt(
+    value: Mapping[str, Any],
+    source: SourceIdentity,
+    candidate_sha256: str,
+    candidate_bytes: int,
+    dependency_inventory_sha256: str,
+    repository: str,
+) -> None:
+    receipt = _exact_keys(
+        value,
+        (
+            "binary_dependencies_sha256",
+            "build_command",
+            "candidate_bytes",
+            "candidate_sha256",
+            "cargo_lock_sha256",
+            "cargo_toml_sha256",
+            "features",
+            "profile",
+            "rust_target",
+            "schema",
+            "source_commit",
+            "source_tree",
+        ),
+        "build receipt",
+    )
+    expected = {
+        "schema": BUILD_RECEIPT_SCHEMA,
+        "source_commit": source.commit,
+        "source_tree": source.tree,
+        "candidate_sha256": candidate_sha256,
+        "candidate_bytes": candidate_bytes,
+        "binary_dependencies_sha256": dependency_inventory_sha256,
+        "rust_target": "x86_64-unknown-linux-gnu",
+        "profile": "release",
+        "features": ["certificates"],
+        "build_command": [
+            "cargo",
+            "build",
+            "--locked",
+            "--features",
+            "certificates",
+            "--release",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+        ],
+    }
+    for field, wanted in expected.items():
+        if receipt[field] != wanted:
+            _fail(f"build receipt {field} differs from the prebuilt contract")
+    for name in ("Cargo.toml", "Cargo.lock"):
+        digest, _ = _file_digest(os.path.join(repository, name), f"repository {name}")
+        field = name.lower().replace(".", "_") + "_sha256"
+        if receipt[field] != digest:
+            _fail(f"build receipt {field} differs from the exact source tree")
 
 
 def _octal_field(value: int, width: int, context: str) -> bytes:
@@ -667,15 +838,48 @@ def _same_inventory(
 def create_archive(
     output_path: str,
     input_paths: Mapping[str, str],
-    source_revision: str,
+    source_repository: str,
 ) -> VerificationReport:
-    """Create a new deterministic closure archive without replacing a path."""
+    """Create a new deterministic prebuilt bundle without replacing a path."""
 
-    if REVISION_RE.fullmatch(source_revision) is None:
-        _fail("source revision must be exactly 40 lowercase hexadecimal digits")
+    source = _derive_clean_source_identity(source_repository)
     roots, entries = _scan_inputs(input_paths)
     _reject_output_inside_inputs(output_path, roots)
-    manifest = _manifest_value(source_revision, roots, entries)
+    by_path = _entry_map(entries)
+    candidate = by_path[f"{PAYLOAD_ROOT}/candidate-binary"]
+    build_receipt_entry = by_path[f"{PAYLOAD_ROOT}/build-receipt"]
+    inventory_entry = by_path[f"{PAYLOAD_ROOT}/dependency-inventory"]
+    if candidate.mode != 0o555 or candidate.sha256 is None:
+        _fail("candidate binary must be executable")
+    assert build_receipt_entry.sha256 is not None
+    assert inventory_entry.sha256 is not None
+    inventory, inventory_bytes = _read_canonical_json_file(
+        input_paths["dependency-inventory"], "dependency inventory"
+    )
+    if hashlib.sha256(inventory_bytes).hexdigest() != inventory_entry.sha256:
+        _fail("dependency inventory changed after input inventory")
+    _validate_dependency_inventory(inventory, candidate.sha256)
+    build_receipt, receipt_bytes = _read_canonical_json_file(
+        input_paths["build-receipt"], "build receipt"
+    )
+    if hashlib.sha256(receipt_bytes).hexdigest() != build_receipt_entry.sha256:
+        _fail("build receipt changed after input inventory")
+    _validate_build_receipt(
+        build_receipt,
+        source,
+        candidate.sha256,
+        candidate.size,
+        inventory_entry.sha256,
+        os.path.abspath(source_repository),
+    )
+    manifest = _manifest_value(
+        source,
+        roots,
+        entries,
+        candidate.sha256,
+        build_receipt_entry.sha256,
+        inventory_entry.sha256,
+    )
     manifest_bytes = _canonical_json(manifest)
     if len(manifest_bytes) > MAX_MANIFEST_BYTES:
         _fail(f"closure manifest exceeds {MAX_MANIFEST_BYTES} bytes")
@@ -711,6 +915,8 @@ def create_archive(
             roots, entries, rescanned_roots, rescanned_entries
         ):
             _fail("closure inputs changed between inventory and archive completion")
+        if _derive_clean_source_identity(source_repository) != source:
+            _fail("source commit or tree changed during archive creation")
 
         os.fchmod(archive_fd, 0o444)
         archive_sha256 = _hash_fd(archive_fd)
@@ -845,14 +1051,15 @@ def _parse_manifest(data: bytes) -> tuple[dict[str, Any], list[_Entry]]:
 
     manifest = _exact_keys(
         value,
-        ("entries", "roots", "schema", "source_revision", "tools"),
+        ("entries", "prebuilt", "roots", "schema", "source"),
         "manifest",
     )
     if manifest["schema"] != SCHEMA:
         _fail(f"manifest.schema must equal {SCHEMA!r}")
-    revision = manifest["source_revision"]
-    if type(revision) is not str or REVISION_RE.fullmatch(revision) is None:
-        _fail("manifest.source_revision is not a canonical Git revision")
+    source = _exact_keys(manifest["source"], ("commit", "tree"), "manifest.source")
+    for field in ("commit", "tree"):
+        if type(source[field]) is not str or REVISION_RE.fullmatch(source[field]) is None:
+            _fail(f"manifest.source.{field} is not a canonical Git identity")
 
     raw_roots = manifest["roots"]
     if type(raw_roots) is not list:
@@ -873,15 +1080,6 @@ def _parse_manifest(data: bytes) -> tuple[dict[str, Any], list[_Entry]]:
             _fail(f"manifest root path differs for {label!r}")
     if observed_labels != expected_labels:
         _fail("manifest roots are missing, duplicated, or not canonically ordered")
-
-    raw_tools = manifest["tools"]
-    if type(raw_tools) is not dict:
-        _fail("manifest.tools must be an object")
-    expected_tools = {
-        role: f"{PAYLOAD_ROOT}/{label}" for role, label in TOOL_ROOT_LABELS.items()
-    }
-    if raw_tools != expected_tools:
-        _fail("manifest.tools does not identify the exact required executables")
 
     raw_entries = manifest["entries"]
     if type(raw_entries) is not list or not raw_entries:
@@ -953,6 +1151,32 @@ def _parse_manifest(data: bytes) -> tuple[dict[str, Any], list[_Entry]]:
         root_entry = by_path.get(f"{PAYLOAD_ROOT}/{label}")
         if root_entry is None or root_entry.kind != expected_kind:
             _fail(f"manifest root entry is missing or has wrong kind: {label!r}")
+    prebuilt = _exact_keys(
+        manifest["prebuilt"],
+        (
+            "build_receipt",
+            "build_receipt_sha256",
+            "candidate",
+            "candidate_sha256",
+            "dependency_inventory",
+            "dependency_inventory_sha256",
+        ),
+        "manifest.prebuilt",
+    )
+    expected_prebuilt = {
+        "build_receipt": f"{PAYLOAD_ROOT}/build-receipt",
+        "build_receipt_sha256": by_path[f"{PAYLOAD_ROOT}/build-receipt"].sha256,
+        "candidate": f"{PAYLOAD_ROOT}/candidate-binary",
+        "candidate_sha256": by_path[f"{PAYLOAD_ROOT}/candidate-binary"].sha256,
+        "dependency_inventory": f"{PAYLOAD_ROOT}/dependency-inventory",
+        "dependency_inventory_sha256": by_path[
+            f"{PAYLOAD_ROOT}/dependency-inventory"
+        ].sha256,
+    }
+    if prebuilt != expected_prebuilt:
+        _fail("manifest.prebuilt does not bind the exact payload files")
+    if by_path[f"{PAYLOAD_ROOT}/candidate-binary"].mode != 0o555:
+        _fail("manifest candidate binary is not executable")
     return manifest, entries
 
 
@@ -1220,7 +1444,13 @@ def _verify_open_archive(
     report = VerificationReport(
         archive_sha256=expected_sha256,
         manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
-        source_revision=manifest["source_revision"],
+        source_commit=manifest["source"]["commit"],
+        source_tree=manifest["source"]["tree"],
+        candidate_sha256=manifest["prebuilt"]["candidate_sha256"],
+        build_receipt_sha256=manifest["prebuilt"]["build_receipt_sha256"],
+        dependency_inventory_sha256=manifest["prebuilt"][
+            "dependency_inventory_sha256"
+        ],
         entries=entries,
     )
     return report, manifest, manifest_bytes
@@ -1386,10 +1616,14 @@ def _parse_input_specs(values: Sequence[str]) -> dict[str, str]:
 def _report_value(report: VerificationReport, **extra: object) -> dict[str, object]:
     value: dict[str, object] = {
         "archive_sha256": report.archive_sha256,
+        "build_receipt_sha256": report.build_receipt_sha256,
+        "candidate_sha256": report.candidate_sha256,
+        "dependency_inventory_sha256": report.dependency_inventory_sha256,
         "entries": report.entries,
         "manifest_sha256": report.manifest_sha256,
         "schema": SCHEMA,
-        "source_revision": report.source_revision,
+        "source_commit": report.source_commit,
+        "source_tree": report.source_tree,
         "status": "verified",
     }
     value.update(extra)
@@ -1400,9 +1634,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    create = subparsers.add_parser("create", help="create a new closure archive")
+    create = subparsers.add_parser("create", help="create a new prebuilt bundle")
     create.add_argument("--output", required=True)
-    create.add_argument("--source-revision", required=True)
+    create.add_argument(
+        "--source-repository",
+        required=True,
+        help="clean Git checkout from which commit and tree identity are derived",
+    )
     create.add_argument(
         "--input",
         action="append",
@@ -1432,7 +1670,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = create_archive(
                 args.output,
                 _parse_input_specs(args.input),
-                args.source_revision,
+                args.source_repository,
             )
             result = _report_value(report, archive=os.path.abspath(args.output))
         elif args.command == "verify":

@@ -39,12 +39,19 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
         self.assertIn("#SBATCH --cpus-per-task=1", self.text)
         self.assertIn("#SBATCH --mem=8G", self.text)
-        self.assertIn("RUSTUP_TOOLCHAIN=1.93.0-x86_64-unknown-linux-gnu", self.text)
-        self.assertIn(
-            'build --manifest-path "$source_root/Cargo.toml"',
-            self.text,
-        )
-        self.assertIn("--locked --offline --features certificates --release", self.text)
+        self.assertIn("euf-viper.t11-prebuilt-bundle.v1", self.text)
+        self.assertIn("euf-viper.t11-prebuilt-materialization.v1", self.text)
+        self.assertIn("candidate_sealed_before_exec", VALIDATOR.read_text(encoding="ascii"))
+        for forbidden in (
+            "RUSTUP_TOOLCHAIN",
+            "CARGO_HOME",
+            "RUSTUP_HOME",
+            "cargo build",
+            "source-tree",
+            "rust-sysroot",
+            "native-compiler",
+        ):
+            self.assertNotIn(forbidden, self.text)
         for namespace_option in (
             '"--user"',
             '"--map-root-user"',
@@ -54,8 +61,8 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
             self.assertIn(namespace_option, self.text)
         self.assertIn("--make-rprivate /", self.text)
         self.assertIn("-t tmpfs -o nodev,nosuid", self.text)
-        self.assertIn("private build state escaped its mount namespace", self.text)
-        self.assertIn("cd /", self.text)
+        self.assertIn("prebuilt state escaped its mount namespace", self.text)
+        self.assertIn("euf-viper.t11-prebuilt-materialization.v1", self.text)
         self.assertIn("project-t11", self.text)
         self.assertIn("audit-t11", self.text)
         self.assertIn("exec_t11_stage0a.py", self.text)
@@ -75,6 +82,7 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
             "EUF_VIPER_T11_LAUNCH_MANIFEST_SHA256:?",
             "inspect-launch",
             "clean_git status --porcelain=v1 --untracked-files=all",
+            "clean_git rev-parse HEAD^{tree}",
             "QF_UF_sokoban.2.prop1_ab_br_max.smt2",
             "cfe0e5e611139004e7f8a06461c4cbf3066bb604786377db1a94d40e797f3112",
             "2fa9cabb8279cf59a9ca73cd254c0c60fe028753e8aa01d1794dd0c645167496",
@@ -115,12 +123,29 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
         self.assertIn('RUN_ROOT="$RUN_BASE/t11-stage0a-$SLURM_JOB_ID"', self.text)
         self.assertIn('mkdir -m 700 "$RUN_ROOT"', self.text)
         self.assertIn('readonly BINARY="$PROVENANCE_ROOT/euf-viper"', self.text)
-        self.assertIn('os.fchmod(output_fd, 0o500)', self.text)
+        self.assertIn('os.fchmod(output_fd, mode)', self.text)
+        self.assertIn(
+            "candidate_binary, binary_out, candidate_sha256, 0o500, \"binary\"",
+            self.text,
+        )
         self.assertIn("chmod -R a-w", self.text)
         self.assertIn("os.O_EXCL", self.text)
         self.assertGreaterEqual(self.text.count('fsync_path "$RUN_BASE"'), 2)
         self.assertIn('fsync_path "$RUN_ROOT"', self.text)
         self.assertNotIn('RUN_ROOT="$PWD/results/', self.text)
+
+    def test_validator_closes_writable_staging_descriptor_before_readback(self) -> None:
+        source = VALIDATOR.read_text(encoding="ascii")
+        start = source.index("def _write_immutable_json(")
+        end = source.index("\ndef ", start + 1)
+        implementation = source[start:end]
+        linked = implementation.index("os.link(")
+        writable_closed = implementation.index("os.close(descriptor)", linked)
+        readonly_flags = implementation.index("final_flags = os.O_RDONLY", writable_closed)
+        readonly_opened = implementation.index("os.open(", readonly_flags)
+        self.assertLess(linked, writable_closed)
+        self.assertLess(writable_closed, readonly_flags)
+        self.assertLess(readonly_flags, readonly_opened)
 
     def test_independent_validator_binds_full_evidence(self) -> None:
         for required in (
@@ -145,44 +170,53 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
             '--artifact validator "$VALIDATOR" @VALIDATOR@',
             '--artifact exec_helper "$EXEC_HELPER" @EXEC_HELPER@',
             '--artifact control_git "$CONTROL_GIT" @CONTROL_GIT@',
-            '--artifact build_closure_tool "$BUILD_CLOSURE_TOOL" @BUILD_CLOSURE_TOOL@',
-            '--artifact build_closure_stdout "$BUILD_CLOSURE_STDOUT" @BUILD_CLOSURE_STDOUT@',
-            '--artifact build_closure_stderr "$BUILD_CLOSURE_STDERR" @BUILD_CLOSURE_STDERR@',
+            '--artifact prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL" @PREBUILT_BUNDLE_TOOL@',
+            '--artifact prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" @PREBUILT_BUNDLE_STDOUT@',
+            '--artifact prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" @PREBUILT_BUNDLE_STDERR@',
+            '--artifact prebuilt_bundle "$PREBUILT_BUNDLE" @PREBUILT_BUNDLE@',
+            '--artifact build_receipt "$BUILD_RECEIPT" @BUILD_RECEIPT@',
+            '--artifact dependency_inventory "$DEPENDENCY_INVENTORY" @DEPENDENCY_INVENTORY@',
             '--artifact launch_manifest "$LAUNCH_MANIFEST" @LAUNCH_MANIFEST@',
-            '--artifact cargo "$CARGO" @CARGO@',
-            '--artifact rustc "$RUSTC" @RUSTC@',
             '--artifact python "$PYTHON" @PYTHON_TOOL@',
         ):
             self.assertIn(required, self.text)
 
     def test_embedded_python_and_line_continuations_are_valid(self) -> None:
         programs = re.findall(r"<<'PY'\n(.*?)\nPY", self.text, flags=re.DOTALL)
-        self.assertEqual(len(programs), 9)
+        self.assertEqual(len(programs), 10)
         for index, program in enumerate(programs):
             compile(program, f"stage0-embedded-{index}.py", "exec")
-        private_python = re.findall(
-            r"<<'PRIVATE_BUILD_REPORT_PY'\n(.*?)\nPRIVATE_BUILD_REPORT_PY",
+        materialization_python = re.findall(
+            r"<<'PREBUILT_MATERIALIZATION_REPORT_PY'\n(.*?)\nPREBUILT_MATERIALIZATION_REPORT_PY",
             self.text,
             flags=re.DOTALL,
         )
-        self.assertEqual(len(private_python), 1)
-        compile(private_python[0], "stage0-private-build-report.py", "exec")
-        private_bootstrap = re.findall(
+        self.assertEqual(len(materialization_python), 1)
+        compile(
+            materialization_python[0],
+            "stage0-prebuilt-materialization-report.py",
+            "exec",
+        )
+        materialization_bootstrap = re.findall(
             r"bootstrap_python -c '\n(.*?)\n' \\\n  \"\$UNSHARE_TOOL\"",
             self.text,
             flags=re.DOTALL,
         )
-        self.assertEqual(len(private_bootstrap), 1)
-        compile(private_bootstrap[0], "stage0-private-build-bootstrap.py", "exec")
-        private_build = re.findall(
-            r"<<'PRIVATE_BUILD'\n(.*?)\nPRIVATE_BUILD\n",
+        self.assertEqual(len(materialization_bootstrap), 1)
+        compile(
+            materialization_bootstrap[0],
+            "stage0-prebuilt-materialization-bootstrap.py",
+            "exec",
+        )
+        materialization_shell = re.findall(
+            r"<<'PREBUILT_MATERIALIZATION'\n(.*?)\nPREBUILT_MATERIALIZATION\n",
             self.text,
             flags=re.DOTALL,
         )
-        self.assertEqual(len(private_build), 1)
+        self.assertEqual(len(materialization_shell), 1)
         subprocess.run(
             ["bash", "-n"],
-            input=private_build[0],
+            input=materialization_shell[0],
             text=True,
             check=True,
         )
@@ -357,64 +391,6 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             """
         )
 
-    def _cargo_source(
-        self, python: Path, solver_source: str, scenario: str
-    ) -> str:
-        return textwrap.dedent(
-            f"""\
-            #!{python}
-            import os
-            import sys
-
-            POISON = {self.POISON!r}
-            SOLVER = {solver_source!r}.encode("ascii")
-            SCENARIO = {scenario!r}
-
-            def write_all(descriptor, payload):
-                offset = 0
-                while offset < len(payload):
-                    written = os.write(descriptor, payload[offset:])
-                    if written <= 0:
-                        raise RuntimeError("short fake-cargo write")
-                    offset += written
-
-            if sys.argv[1:] == ["--version"]:
-                print("cargo 1.93.0 (stage0a-fake)")
-                raise SystemExit(0)
-            if POISON in os.environ:
-                raise SystemExit(81)
-            if os.environ.get("CARGO_NET_OFFLINE") != "true":
-                raise SystemExit(82)
-            target = os.path.join(
-                os.environ["CARGO_TARGET_DIR"], "release", "euf-viper"
-            )
-            os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
-            descriptor = os.open(
-                target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o700
-            )
-            try:
-                write_all(descriptor, SOLVER)
-                os.fsync(descriptor)
-            finally:
-                os.close(descriptor)
-            parent_fd = os.open(
-                os.path.dirname(target), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
-            )
-            try:
-                os.fsync(parent_fd)
-            finally:
-                os.close(parent_fd)
-            if SCENARIO == "unexpected_runner_failure":
-                os.unlink(
-                    os.path.join(
-                        os.path.dirname(os.environ["CARGO_TARGET_DIR"]),
-                        "build.stdout",
-                    )
-                )
-            print("fake offline certificate build")
-            """
-        )
-
     def _validator_source(self, python: Path) -> str:
         artifact_fields = (
             "submitter_sha256",
@@ -422,11 +398,9 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             "finalizer_sbatch_sha256",
             "finalizer_sha256",
             "authorizer_sha256",
-            "validator_sha256",
-            "exec_helper_sha256",
-            "build_closure_tool_sha256",
-            "cargo_toml_sha256",
-            "cargo_lock_sha256",
+                "validator_sha256",
+                "exec_helper_sha256",
+                "prebuilt_bundle_tool_sha256",
             "design_note_sha256",
             "hash_contract_sha256",
             "audit_contract_sha256",
@@ -441,13 +415,6 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
 
             POISON = {self.POISON!r}
             ARTIFACT_FIELDS = {artifact_fields!r}
-            CONFIG_SCOPES = (
-                "repository/config",
-                "repository/config.toml",
-                "cargo_home/config",
-                "cargo_home/config.toml",
-            )
-
             def write_all(descriptor, payload):
                 offset = 0
                 while offset < len(payload):
@@ -477,37 +444,32 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                 if manifest.get("inspect_reject"):
                     print("synthetic manifest contract mismatch", file=sys.stderr)
                     raise SystemExit(3)
-                toolchain = manifest["toolchain"]
                 values = [
                     manifest["solver_revision"],
-                    toolchain["cargo_home"],
-                    toolchain["rustup_home"],
+                    manifest["solver_source"]["tree"],
+                    manifest["toolchain"]["python"]["path"],
+                    manifest["toolchain"]["python"]["sha256"],
+                    manifest["toolchain"]["python"]["version"],
                 ]
-                for label in ("cargo", "rustc", "python"):
-                    values.extend(
-                        [
-                            toolchain[label]["path"],
-                            toolchain[label]["sha256"],
-                            toolchain[label]["version"],
-                        ]
-                    )
                 values.extend(manifest["artifacts"][name] for name in ARTIFACT_FIELDS)
-                build_closure = manifest["build_closure"]
+                prebuilt = manifest["prebuilt_bundle"]
                 values.extend(
                     [
-                        build_closure["path"],
-                        build_closure["sha256"],
-                        build_closure["manifest_sha256"],
-                        build_closure["source_revision"],
+                        prebuilt["path"],
+                        prebuilt["sha256"],
+                        prebuilt["manifest_sha256"],
+                        prebuilt["schema"],
+                        prebuilt["source_commit"],
+                        prebuilt["source_tree"],
+                        prebuilt["candidate_sha256"],
+                        str(prebuilt["candidate_bytes"]),
+                        prebuilt["build_receipt_sha256"],
+                        prebuilt["dependency_inventory_sha256"],
                     ]
                 )
                 for label in ("git", "sbatch", "scontrol", "scancel", "sacct"):
                     tool = manifest["control_tools"][label]
                     values.extend([tool["path"], tool["sha256"], tool["version"]])
-                configs = {{item["scope"]: item for item in toolchain["cargo_configs"]}}
-                for scope in CONFIG_SCOPES:
-                    item = configs[scope]
-                    values.extend([scope, item["state"], item["sha256"] or "-"])
                 output = b"\\0".join(item.encode("ascii") for item in values) + b"\\0"
                 write_all(1, output)
                 raise SystemExit(0)
@@ -586,7 +548,7 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         scenario: str,
         *,
         inspect_reject: bool = False,
-        mutate_cargo_after_manifest: bool = False,
+        mutate_prebuilt_after_manifest: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], Path]:
         self.fixture_index += 1
         case = self.root / f"case-{self.fixture_index}-{scenario}"
@@ -594,24 +556,13 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         run_base = case / "runs"
         corpus = case / "corpus"
         tools = case / "tools"
-        cargo_home = case / "cargo-home"
-        rustup_home = case / "rustup-home"
-        closure_source = case / "closure-source"
-        native_libs = case / "native-libs"
-        python_runtime = case / "python-runtime"
         for directory in (
             repo,
             run_base,
             corpus,
             tools,
-            cargo_home,
-            rustup_home,
-            closure_source,
-            native_libs,
-            python_runtime,
         ):
             directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-        (cargo_home / "registry").mkdir(mode=0o700)
 
         python = Path(os.path.realpath("/usr/bin/python3"))
         python_version_result = subprocess.run(
@@ -641,9 +592,8 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         authorizer = repo / "scripts/bench/authorize_t11_stage0a.py"
         validator = repo / "scripts/bench/validate_t11_stage0a.py"
         exec_helper = repo / "scripts/bench/exec_t11_stage0a.py"
-        build_closure_tool = repo / "scripts/bench/t11_build_closure.py"
-        cargo = tools / "cargo"
-        rustc = tools / "rustc"
+        prebuilt_bundle_tool = repo / "scripts/bench/t11_build_closure.py"
+        candidate = tools / "euf-viper"
         self._write(runner, runner_text, 0o755)
         self._write(submitter, "#!/bin/sh\nexit 0\n", 0o755)
         self._write(finalizer_sbatch, "#!/bin/sh\nexit 0\n", 0o755)
@@ -652,34 +602,11 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         self._write(validator, self._validator_source(python), 0o755)
         self._write(exec_helper, (ROOT / "scripts/bench/exec_t11_stage0a.py").read_bytes(), 0o755)
         self._write(
-            build_closure_tool,
+            prebuilt_bundle_tool,
             (ROOT / "scripts/bench/t11_build_closure.py").read_bytes(),
             0o755,
         )
-        self._write(
-            cargo,
-            self._cargo_source(
-                python, self._solver_source(python, scenario), scenario
-            ),
-            0o755,
-        )
-        self._write(
-            rustc,
-            textwrap.dedent(
-                f"""\
-                #!{python}
-                import os
-                import sys
-                if {self.POISON!r} in os.environ:
-                    raise SystemExit(61)
-                if sys.argv[1:] == ["--version"]:
-                    print("rustc 1.93.0 (stage0a-fake)")
-                    raise SystemExit(0)
-                raise SystemExit(62)
-                """
-            ),
-            0o755,
-        )
+        self._write(candidate, self._solver_source(python, scenario), 0o755)
 
         cargo_toml = repo / "Cargo.toml"
         cargo_lock = repo / "Cargo.lock"
@@ -688,10 +615,6 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         audit_contract = repo / "research-vault/02-design/2026-07-17-t11-external-audit-receipt.md"
         self._write(cargo_toml, "[package]\nname='stage0a-fake'\nversion='0.0.0'\n")
         self._write(cargo_lock, "# stage0a fake lock\n")
-        closure_cargo_toml = closure_source / "Cargo.toml"
-        closure_cargo_lock = closure_source / "Cargo.lock"
-        self._write(closure_cargo_toml, cargo_toml.read_bytes())
-        self._write(closure_cargo_lock, cargo_lock.read_bytes())
         self._write(design_note, "stage0a fake design\n")
         self._write(hash_contract, "stage0a fake hash contract\n")
         self._write(audit_contract, "stage0a fake audit contract\n")
@@ -704,50 +627,77 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
         self._run_command(["git", "add", "."], cwd=repo)
         self._run_command(["git", "commit", "-qm", "stage0a fixture"], cwd=repo)
         revision = self._run_command(["git", "rev-parse", "HEAD"], cwd=repo)
-
-        native_tools = {}
-        for label in (
-            "native-archiver",
-            "native-compiler",
-            "native-linker",
-            "native-loader",
-        ):
-            path = tools / label
-            self._write(path, "#!/bin/sh\nexit 0\n", 0o755)
-            native_tools[label] = path
-        build_closure = case / "build-closure.tar"
+        source_tree = self._run_command(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=repo
+        )
+        candidate_sha256 = self._sha256(candidate)
+        dependency_inventory = case / "dependency-inventory.json"
+        self._write(
+            dependency_inventory,
+            (
+                json.dumps(
+                    {
+                        "candidate_sha256": candidate_sha256,
+                        "platform": "linux-x86_64",
+                        "runtime_files": [
+                            {"path": str(python), "sha256": self._sha256(python)}
+                        ],
+                        "schema": "euf-viper.t11-binary-dependencies.v1",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("ascii"),
+        )
+        build_receipt = case / "build-receipt.json"
+        self._write(
+            build_receipt,
+            (
+                json.dumps(
+                    {
+                        "binary_dependencies_sha256": self._sha256(
+                            dependency_inventory
+                        ),
+                        "build_command": [
+                            "cargo", "build", "--locked", "--features",
+                            "certificates", "--release", "--target",
+                            "x86_64-unknown-linux-gnu",
+                        ],
+                        "candidate_bytes": candidate.stat().st_size,
+                        "candidate_sha256": candidate_sha256,
+                        "cargo_lock_sha256": self._sha256(cargo_lock),
+                        "cargo_toml_sha256": self._sha256(cargo_toml),
+                        "features": ["certificates"],
+                        "profile": "release",
+                        "rust_target": "x86_64-unknown-linux-gnu",
+                        "schema": "euf-viper.t11-prebuilt-build-receipt.v1",
+                        "source_commit": revision,
+                        "source_tree": source_tree,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("ascii"),
+        )
+        prebuilt_bundle = case / "prebuilt-bundle.tar"
         closure_report = json.loads(
             self._run_command(
                 [
                     str(python),
-                    str(build_closure_tool),
+                    str(prebuilt_bundle_tool),
                     "create",
                     "--output",
-                    str(build_closure),
-                    "--source-revision",
-                    revision,
+                    str(prebuilt_bundle),
+                    "--source-repository",
+                    str(repo),
                     "--input",
-                    f"source-tree={closure_source}",
+                    f"candidate-binary={candidate}",
                     "--input",
-                    f"cargo-executable={cargo}",
+                    f"build-receipt={build_receipt}",
                     "--input",
-                    f"cargo-home={cargo_home}",
-                    "--input",
-                    f"rustc-executable={rustc}",
-                    "--input",
-                    f"rust-sysroot={rustup_home}",
-                    "--input",
-                    f"native-archiver={native_tools['native-archiver']}",
-                    "--input",
-                    f"native-compiler={native_tools['native-compiler']}",
-                    "--input",
-                    f"native-linker={native_tools['native-linker']}",
-                    "--input",
-                    f"native-loader={native_tools['native-loader']}",
-                    "--input",
-                    f"native-libs={native_libs}",
-                    "--input",
-                    f"python-runtime={python_runtime}",
+                    f"dependency-inventory={dependency_inventory}",
                 ],
                 cwd=case,
             )
@@ -761,43 +711,22 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             "authorizer_sha256": authorizer,
             "validator_sha256": validator,
             "exec_helper_sha256": exec_helper,
-            "build_closure_tool_sha256": build_closure_tool,
-            "cargo_toml_sha256": cargo_toml,
-            "cargo_lock_sha256": cargo_lock,
+            "prebuilt_bundle_tool_sha256": prebuilt_bundle_tool,
             "design_note_sha256": design_note,
             "hash_contract_sha256": hash_contract,
             "audit_contract_sha256": audit_contract,
         }
         manifest = {
+            "schema": "euf-viper.t11-stage0a-launch.v4",
             "solver_revision": revision,
+            "solver_source": {"commit": revision, "tree": source_tree},
             "inspect_reject": inspect_reject,
             "toolchain": {
-                "cargo_home": str(cargo_home),
-                "rustup_home": str(rustup_home),
-                "cargo": {
-                    "path": str(cargo),
-                    "sha256": self._sha256(cargo),
-                    "version": "cargo 1.93.0 (stage0a-fake)",
-                },
-                "rustc": {
-                    "path": str(rustc),
-                    "sha256": self._sha256(rustc),
-                    "version": "rustc 1.93.0 (stage0a-fake)",
-                },
                 "python": {
                     "path": str(python),
                     "sha256": self._sha256(python),
                     "version": python_version,
                 },
-                "cargo_configs": [
-                    {"scope": scope, "state": "absent", "sha256": None}
-                    for scope in (
-                        "repository/config",
-                        "repository/config.toml",
-                        "cargo_home/config",
-                        "cargo_home/config.toml",
-                    )
-                ],
             },
             "control_tools": {
                 label: {
@@ -810,11 +739,19 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                 }
                 for label in ("git", "sbatch", "scontrol", "scancel", "sacct")
             },
-            "build_closure": {
-                "path": str(build_closure),
+            "prebuilt_bundle": {
+                "path": str(prebuilt_bundle),
                 "sha256": closure_report["archive_sha256"],
                 "manifest_sha256": closure_report["manifest_sha256"],
-                "source_revision": revision,
+                "schema": closure_report["schema"],
+                "source_commit": closure_report["source_commit"],
+                "source_tree": closure_report["source_tree"],
+                "candidate_sha256": closure_report["candidate_sha256"],
+                "candidate_bytes": candidate.stat().st_size,
+                "build_receipt_sha256": closure_report["build_receipt_sha256"],
+                "dependency_inventory_sha256": closure_report[
+                    "dependency_inventory_sha256"
+                ],
             },
             "artifacts": {
                 name: self._sha256(path) for name, path in artifact_paths.items()
@@ -829,10 +766,12 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
             0o400,
         )
         launch_manifest_sha256 = self._sha256(launch_manifest)
-        if mutate_cargo_after_manifest:
-            cargo.chmod(0o700)
-            cargo.write_bytes(cargo.read_bytes() + b"# post-manifest mutation\n")
-            cargo.chmod(0o500)
+        if mutate_prebuilt_after_manifest:
+            prebuilt_bundle.chmod(0o600)
+            prebuilt_bundle.write_bytes(
+                prebuilt_bundle.read_bytes() + b"post-manifest mutation\n"
+            )
+            prebuilt_bundle.chmod(0o400)
 
         job_id = str(9100 + self.fixture_index)
         environment = os.environ.copy()
@@ -916,7 +855,10 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
     def test_manifest_and_tool_mismatches_leave_sealed_infrastructure_records(self) -> None:
         cases = (
             ({"inspect_reject": True}, "strict launch-manifest inspection failed"),
-            ({"mutate_cargo_after_manifest": True}, "cargo SHA-256 mismatch"),
+            (
+                {"mutate_prebuilt_after_manifest": True},
+                "prebuilt bundle SHA-256 mismatch",
+            ),
         )
         for options, expected_reason in cases:
             with self.subTest(options=options):
@@ -930,14 +872,16 @@ class T11Stage0ADynamicPipelineTests(unittest.TestCase):
                 self.assertSealed(record_path)
                 self.assertSealed(run_root)
 
-    def test_private_build_failure_is_captured_as_infrastructure(self) -> None:
-        completed, run_root = self._make_fixture("unexpected_runner_failure")
+    def test_prebuilt_materialization_failure_is_captured_as_infrastructure(self) -> None:
+        completed, run_root = self._make_fixture(
+            "success", mutate_prebuilt_after_manifest=True
+        )
         self.assertNotEqual(completed.returncode, 0, completed.stderr)
         record_path = run_root / "infrastructure-rejection.json"
         record = json.loads(record_path.read_text(encoding="ascii"))
         self.assertEqual(record["classification"], "infrastructure")
-        self.assertEqual(record["phase"], "private_build")
-        self.assertEqual(record["reason"], "private tmpfs certificate build failed")
+        self.assertEqual(record["phase"], "verify_toolchain_and_artifacts")
+        self.assertEqual(record["reason"], "prebuilt bundle SHA-256 mismatch")
         self.assertEqual(record["record_file"], record_path.name)
         self.assertSealed(record_path)
         self.assertSealed(run_root)
@@ -977,6 +921,69 @@ class T11Stage0AValidatorTests(unittest.TestCase):
     @staticmethod
     def _digest(label: str) -> str:
         return hashlib.sha256(label.encode("ascii")).hexdigest()
+
+    def test_prebuilt_receipt_and_runtime_inventory_are_strictly_validated(self) -> None:
+        candidate_sha256 = self._digest("candidate")
+        source = {"commit": "1" * 40, "tree": "2" * 40}
+        dependency_sha256 = self._digest("dependency-inventory")
+        prebuilt = {
+            "candidate_bytes": 123,
+            "candidate_sha256": candidate_sha256,
+            "dependency_inventory_sha256": dependency_sha256,
+        }
+        receipt = {
+            "binary_dependencies_sha256": dependency_sha256,
+            "build_command": list(self.validator.PREBUILT_BUILD_COMMAND),
+            "candidate_bytes": 123,
+            "candidate_sha256": candidate_sha256,
+            "cargo_lock_sha256": self._digest("Cargo.lock"),
+            "cargo_toml_sha256": self._digest("Cargo.toml"),
+            "features": ["certificates"],
+            "profile": "release",
+            "rust_target": "x86_64-unknown-linux-gnu",
+            "schema": self.validator.BUILD_RECEIPT_SCHEMA,
+            "source_commit": source["commit"],
+            "source_tree": source["tree"],
+        }
+        self.assertEqual(
+            self.validator._validate_prebuilt_build_receipt(
+                receipt, source, prebuilt
+            ),
+            receipt,
+        )
+        forged_receipt = copy.deepcopy(receipt)
+        forged_receipt["build_command"] = ["cargo", "build"]
+        with self.assertRaisesRegex(
+            self.validator.ValidationError, "build_command differs"
+        ):
+            self.validator._validate_prebuilt_build_receipt(
+                forged_receipt, source, prebuilt
+            )
+
+        runtime_path = self.root.resolve() / "runtime-dependency"
+        runtime_path.write_bytes(b"exact runtime bytes\n")
+        runtime_sha256 = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+        inventory = {
+            "candidate_sha256": candidate_sha256,
+            "platform": "linux-x86_64",
+            "runtime_files": [
+                {"path": str(runtime_path), "sha256": runtime_sha256}
+            ],
+            "schema": self.validator.DEPENDENCY_INVENTORY_SCHEMA,
+        }
+        self.assertEqual(
+            self.validator._validate_binary_dependency_inventory(
+                inventory, candidate_sha256
+            ),
+            inventory,
+        )
+        runtime_path.write_bytes(b"changed runtime bytes\n")
+        with self.assertRaisesRegex(
+            self.validator.ValidationError, "runtime dependency SHA-256 differs"
+        ):
+            self.validator._validate_binary_dependency_inventory(
+                inventory, candidate_sha256
+            )
 
     def _hashes(self) -> dict[str, str]:
         values = {
@@ -1447,34 +1454,66 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         binary = self.root / "euf-viper"
         binary.write_bytes(b"binary")
         binary.chmod(0o500)
-        tools = {}
-        for name in ("cargo", "rustc", "python"):
-            path = self.root / name
-            path.write_bytes(name.encode("ascii"))
-            path.chmod(0o500)
-            tools[name] = path
+        python_tool = self.root / "python"
+        python_tool.write_bytes(b"python")
+        python_tool.chmod(0o500)
+        binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+        dependency_inventory = self.root / "dependency_inventory"
+        dependency_inventory.write_bytes(
+            self._encode(
+                {
+                    "candidate_sha256": binary_sha256,
+                    "platform": "linux-x86_64",
+                    "runtime_files": [],
+                    "schema": self.validator.DEPENDENCY_INVENTORY_SCHEMA,
+                }
+            )
+        )
+        build_receipt = self.root / "build_receipt"
+        build_receipt.write_bytes(
+            self._encode(
+                {
+                    "binary_dependencies_sha256": hashlib.sha256(
+                        dependency_inventory.read_bytes()
+                    ).hexdigest(),
+                    "build_command": list(self.validator.PREBUILT_BUILD_COMMAND),
+                    "candidate_bytes": binary.stat().st_size,
+                    "candidate_sha256": binary_sha256,
+                    "cargo_lock_sha256": self._digest("Cargo.lock"),
+                    "cargo_toml_sha256": self._digest("Cargo.toml"),
+                    "features": ["certificates"],
+                    "profile": "release",
+                    "rust_target": "x86_64-unknown-linux-gnu",
+                    "schema": self.validator.BUILD_RECEIPT_SCHEMA,
+                    "source_commit": "a" * 40,
+                    "source_tree": "b" * 40,
+                }
+            )
+        )
+        prebuilt_bundle = self.root / "prebuilt-bundle.tar"
+        prebuilt_bundle.write_bytes(b"synthetic prebuilt bundle\n")
+        prebuilt_bundle.chmod(0o400)
         artifacts = {
             "source": self.source,
             "binary": binary,
+            "build_receipt": build_receipt,
+            "dependency_inventory": dependency_inventory,
+            "prebuilt_bundle": prebuilt_bundle,
+            "python": python_tool,
             "bundle": self.bundle_path,
             "audit_receipt": self.receipt_path,
         }
         for name in self.validator.REQUIRED_ARTIFACTS - set(artifacts) - {
             "launch_manifest"
         }:
-            if name in tools:
-                artifacts[name] = tools[name]
-                continue
             path = self.root / name
             path.write_bytes((name + "\n").encode("ascii"))
             artifacts[name] = path
-        build_closure = self.root / "build-closure.tar"
-        build_closure.write_bytes(b"synthetic closure archive\n")
-        build_closure.chmod(0o400)
         launch_manifest = self.root / "launch_manifest.json"
         manifest = {
             "schema": self.validator.LAUNCH_SCHEMA,
             "solver_revision": "a" * 40,
+            "solver_source": {"commit": "a" * 40, "tree": "b" * 40},
             "target": {
                 "relative_path": self.validator.TARGET_RELATIVE_PATH,
                 "sha256": self.source_sha256,
@@ -1486,32 +1525,27 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 "baseline_problem_sha256": self.validator.BASELINE_PROBLEM_SHA256,
             },
             "toolchain": {
-                "rustup_toolchain": "1.93.0-x86_64-unknown-linux-gnu",
-                "cargo_home": str(self.root / "cargo-home"),
-                "rustup_home": str(self.root / "rustup-home"),
-                **{
-                    name: {
-                        "path": str(path),
-                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                        "version": f"{name} test-version",
-                    }
-                    for name, path in tools.items()
+                "python": {
+                    "path": str(python_tool),
+                    "sha256": hashlib.sha256(python_tool.read_bytes()).hexdigest(),
+                    "version": "python test-version",
                 },
-                "cargo_configs": [
-                    {"scope": scope, "state": "absent", "sha256": None}
-                    for scope in (
-                        "repository/config",
-                        "repository/config.toml",
-                        "cargo_home/config",
-                        "cargo_home/config.toml",
-                    )
-                ],
             },
-            "build_closure": {
-                "path": str(build_closure),
-                "sha256": hashlib.sha256(build_closure.read_bytes()).hexdigest(),
-                "manifest_sha256": self._digest("build-closure-manifest"),
-                "source_revision": "a" * 40,
+            "prebuilt_bundle": {
+                "path": str(prebuilt_bundle),
+                "sha256": hashlib.sha256(prebuilt_bundle.read_bytes()).hexdigest(),
+                "manifest_sha256": self._digest("prebuilt-manifest"),
+                "schema": self.validator.PREBUILT_BUNDLE_SCHEMA,
+                "source_commit": "a" * 40,
+                "source_tree": "b" * 40,
+                "candidate_sha256": binary_sha256,
+                "candidate_bytes": binary.stat().st_size,
+                "build_receipt_sha256": hashlib.sha256(
+                    build_receipt.read_bytes()
+                ).hexdigest(),
+                "dependency_inventory_sha256": hashlib.sha256(
+                    dependency_inventory.read_bytes()
+                ).hexdigest(),
             },
             "control_tools": {
                 label: {
@@ -1533,7 +1567,6 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         launch_manifest.write_bytes(self._encode(manifest))
         artifacts["launch_manifest"] = launch_manifest
         metadata = self.root / "metadata.json"
-        binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
         bundle_sha256 = hashlib.sha256(self.bundle_path.read_bytes()).hexdigest()
 
         descriptors: list[int] = []

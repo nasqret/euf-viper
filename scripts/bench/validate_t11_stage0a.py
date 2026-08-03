@@ -17,7 +17,20 @@ from typing import Any, Iterable, Mapping, Sequence
 
 
 SCHEMA = "euf-viper.t11-stage0a-validation-candidate.v2"
-LAUNCH_SCHEMA = "euf-viper.t11-stage0a-launch.v3"
+LAUNCH_SCHEMA = "euf-viper.t11-stage0a-launch.v4"
+PREBUILT_BUNDLE_SCHEMA = "euf-viper.t11-prebuilt-bundle.v1"
+BUILD_RECEIPT_SCHEMA = "euf-viper.t11-prebuilt-build-receipt.v1"
+DEPENDENCY_INVENTORY_SCHEMA = "euf-viper.t11-binary-dependencies.v1"
+PREBUILT_BUILD_COMMAND = [
+    "cargo",
+    "build",
+    "--locked",
+    "--features",
+    "certificates",
+    "--release",
+    "--target",
+    "x86_64-unknown-linux-gnu",
+]
 TARGET_RELATIVE_PATH = (
     "QF_UF/2018-Goel-hwbench/"
     "QF_UF_sokoban.2.prop1_ab_br_max.smt2"
@@ -184,11 +197,10 @@ INTEGRITY_FIELDS = (
 REQUIRED_ARTIFACTS = {
     "source",
     "binary",
-    "cargo",
-    "rustc",
     "python",
-    "cargo_toml",
-    "cargo_lock",
+    "build_receipt",
+    "dependency_inventory",
+    "prebuilt_bundle",
     "design_note",
     "hash_contract",
     "audit_contract",
@@ -200,12 +212,10 @@ REQUIRED_ARTIFACTS = {
     "control_git",
     "validator",
     "exec_helper",
-    "build_closure_tool",
+    "prebuilt_bundle_tool",
     "launch_manifest",
-    "build_stdout",
-    "build_stderr",
-    "build_closure_stdout",
-    "build_closure_stderr",
+    "prebuilt_bundle_stdout",
+    "prebuilt_bundle_stderr",
     "bundle",
     "audit_receipt",
     "project_stdout",
@@ -230,10 +240,11 @@ RECEIPT_FIELDS = (
 LAUNCH_FIELDS = (
     "schema",
     "solver_revision",
+    "solver_source",
     "target",
     "baseline",
     "toolchain",
-    "build_closure",
+    "prebuilt_bundle",
     "control_tools",
     "artifacts",
 )
@@ -246,9 +257,7 @@ PINNED_ARTIFACT_HASH_FIELDS = {
     "authorizer_sha256": "authorizer",
     "validator_sha256": "validator",
     "exec_helper_sha256": "exec_helper",
-    "build_closure_tool_sha256": "build_closure_tool",
-    "cargo_toml_sha256": "cargo_toml",
-    "cargo_lock_sha256": "cargo_lock",
+    "prebuilt_bundle_tool_sha256": "prebuilt_bundle_tool",
     "design_note_sha256": "design_note",
     "hash_contract_sha256": "hash_contract",
     "audit_contract_sha256": "audit_contract",
@@ -422,6 +431,139 @@ def _load_exact_json(path: Path) -> tuple[dict[str, Any], bytes, os.stat_result,
     if encoded != body:
         _fail(f"JSON artifact is not compact canonical JSON: {resolved}")
     return value, data, metadata, resolved
+
+
+def _validate_prebuilt_build_receipt(
+    value: object,
+    solver_source: Mapping[str, Any],
+    prebuilt_bundle: Mapping[str, Any],
+) -> dict[str, Any]:
+    receipt = dict(
+        _exact_keys(
+            value,
+            (
+                "binary_dependencies_sha256",
+                "build_command",
+                "candidate_bytes",
+                "candidate_sha256",
+                "cargo_lock_sha256",
+                "cargo_toml_sha256",
+                "features",
+                "profile",
+                "rust_target",
+                "schema",
+                "source_commit",
+                "source_tree",
+            ),
+            "prebuilt build receipt",
+        )
+    )
+    for field in (
+        "binary_dependencies_sha256",
+        "candidate_sha256",
+        "cargo_lock_sha256",
+        "cargo_toml_sha256",
+    ):
+        receipt[field] = _canonical_sha256(
+            receipt[field], f"prebuilt build receipt.{field}"
+        )
+    receipt["candidate_bytes"] = _u64(
+        receipt["candidate_bytes"], "prebuilt build receipt.candidate_bytes"
+    )
+    for field in ("source_commit", "source_tree"):
+        if (
+            not isinstance(receipt[field], str)
+            or REVISION_RE.fullmatch(receipt[field]) is None
+        ):
+            _fail(f"prebuilt build receipt.{field} is not a canonical Git identity")
+    exact_values = {
+        "schema": BUILD_RECEIPT_SCHEMA,
+        "source_commit": solver_source["commit"],
+        "source_tree": solver_source["tree"],
+        "candidate_sha256": prebuilt_bundle["candidate_sha256"],
+        "candidate_bytes": prebuilt_bundle["candidate_bytes"],
+        "binary_dependencies_sha256": prebuilt_bundle[
+            "dependency_inventory_sha256"
+        ],
+        "build_command": PREBUILT_BUILD_COMMAND,
+        "features": ["certificates"],
+        "profile": "release",
+        "rust_target": "x86_64-unknown-linux-gnu",
+    }
+    for field, expected in exact_values.items():
+        if receipt[field] != expected:
+            _fail(f"prebuilt build receipt.{field} differs from the launch contract")
+    return receipt
+
+
+def _validate_binary_dependency_inventory(
+    value: object, candidate_sha256: str
+) -> dict[str, Any]:
+    inventory = dict(
+        _exact_keys(
+            value,
+            ("candidate_sha256", "platform", "runtime_files", "schema"),
+            "binary dependency inventory",
+        )
+    )
+    if inventory["schema"] != DEPENDENCY_INVENTORY_SCHEMA:
+        _fail("binary dependency inventory schema differs")
+    if inventory["platform"] != "linux-x86_64":
+        _fail("binary dependency inventory platform differs")
+    if (
+        _canonical_sha256(
+            inventory["candidate_sha256"],
+            "binary dependency inventory.candidate_sha256",
+        )
+        != candidate_sha256
+    ):
+        _fail("binary dependency inventory candidate SHA-256 differs")
+    raw_files = inventory["runtime_files"]
+    if not isinstance(raw_files, list):
+        _fail("binary dependency inventory.runtime_files must be an array")
+    runtime_files: list[dict[str, str]] = []
+    for index, raw_record in enumerate(raw_files):
+        record = dict(
+            _exact_keys(
+                raw_record,
+                ("path", "sha256"),
+                f"binary dependency inventory.runtime_files[{index}]",
+            )
+        )
+        raw_path = record["path"]
+        if (
+            not isinstance(raw_path, str)
+            or not os.path.isabs(raw_path)
+            or os.path.normpath(raw_path) != raw_path
+            or os.path.realpath(raw_path) != raw_path
+            or "\n" in raw_path
+            or "\0" in raw_path
+        ):
+            _fail(
+                "binary dependency inventory runtime path must be canonical, "
+                "absolute, and nonsymlinked"
+            )
+        expected_sha256 = _canonical_sha256(
+            record["sha256"],
+            f"binary dependency inventory.runtime_files[{index}].sha256",
+        )
+        dependency, _, resolved = _read_stable_regular(
+            Path(raw_path), maximum_bytes=MAX_ARTIFACT_BYTES
+        )
+        if resolved != Path(raw_path):
+            _fail("binary dependency inventory runtime path changed while read")
+        if hashlib.sha256(dependency).hexdigest() != expected_sha256:
+            _fail(f"runtime dependency SHA-256 differs: {raw_path}")
+        runtime_files.append({"path": raw_path, "sha256": expected_sha256})
+    expected_order = sorted(
+        runtime_files, key=lambda record: record["path"].encode("utf-8")
+    )
+    if runtime_files != expected_order or len(
+        {record["path"] for record in runtime_files}
+    ) != len(runtime_files):
+        _fail("binary dependency inventory runtime files are duplicated or unsorted")
+    inventory["runtime_files"] = runtime_files
+    return inventory
 
 
 def _validate_hash_bindings(value: object, source_sha256: str, context: str) -> dict[str, str]:
@@ -1280,6 +1422,8 @@ def _write_immutable_json(path: Path, payload: Mapping[str, Any]) -> dict[str, A
                 )
             except FileExistsError:
                 _fail("metadata output path ceased to be fresh")
+            os.close(descriptor)
+            descriptor = -1
             os.fsync(directory_fd)
 
             final_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -1311,7 +1455,8 @@ def _write_immutable_json(path: Path, payload: Mapping[str, Any]) -> dict[str, A
             finally:
                 os.close(final_descriptor)
         finally:
-            os.close(descriptor)
+            if descriptor >= 0:
+                os.close(descriptor)
         parent_after = os.fstat(directory_fd)
         if (parent_before.st_dev, parent_before.st_ino) != (
             parent_after.st_dev,
@@ -1353,6 +1498,17 @@ def _validate_launch_manifest(
     revision = record["solver_revision"]
     if not isinstance(revision, str) or REVISION_RE.fullmatch(revision) is None:
         _fail("launch manifest solver revision is not an exact Git commit")
+    solver_source = dict(
+        _exact_keys(record["solver_source"], ("commit", "tree"), "launch solver_source")
+    )
+    for field in ("commit", "tree"):
+        if (
+            not isinstance(solver_source[field], str)
+            or REVISION_RE.fullmatch(solver_source[field]) is None
+        ):
+            _fail(f"launch solver_source.{field} is not a canonical Git identity")
+    if solver_source["commit"] != revision:
+        _fail("launch solver source commit differs from solver_revision")
 
     target = dict(
         _exact_keys(record["target"], ("relative_path", "sha256"), "launch target")
@@ -1385,110 +1541,78 @@ def _validate_launch_manifest(
     toolchain = dict(
         _exact_keys(
             record["toolchain"],
-            (
-                "rustup_toolchain",
-                "cargo_home",
-                "rustup_home",
-                "cargo",
-                "rustc",
-                "python",
-                "cargo_configs",
-            ),
+            ("python",),
             "launch toolchain",
         )
     )
-    if toolchain["rustup_toolchain"] != "1.93.0-x86_64-unknown-linux-gnu":
-        _fail("launch Rust toolchain differs from the frozen toolchain")
-    for directory_field in ("cargo_home", "rustup_home"):
-        value = toolchain[directory_field]
-        if (
-            not isinstance(value, str)
-            or not Path(value).is_absolute()
-            or "\n" in value
-            or "\0" in value
-        ):
-            _fail(f"launch toolchain.{directory_field} must be an absolute path")
-    for label in ("cargo", "rustc", "python"):
-        tool = dict(
-            _exact_keys(
-                toolchain[label], ("path", "sha256", "version"), f"launch {label}"
-            )
-        )
-        if (
-            not isinstance(tool["path"], str)
-            or not Path(tool["path"]).is_absolute()
-            or "\n" in tool["path"]
-            or "\0" in tool["path"]
-        ):
-            _fail(f"launch {label} path must be absolute")
-        _canonical_sha256(tool["sha256"], f"launch {label} SHA-256")
-        if (
-            not isinstance(tool["version"], str)
-            or not tool["version"]
-            or "\n" in tool["version"]
-        ):
-            _fail(f"launch {label} version must be one nonempty line")
-        toolchain[label] = tool
-    cargo_configs = toolchain["cargo_configs"]
-    if not isinstance(cargo_configs, list) or len(cargo_configs) != 4:
-        _fail("launch cargo_configs must contain exactly four candidate records")
-    seen_config_scopes: set[str] = set()
-    normalized_configs: list[dict[str, Any]] = []
-    allowed_scopes = {
-        "repository/config",
-        "repository/config.toml",
-        "cargo_home/config",
-        "cargo_home/config.toml",
-    }
-    for index, config_value in enumerate(cargo_configs):
-        config = dict(
-            _exact_keys(
-                config_value,
-                ("scope", "state", "sha256"),
-                f"launch cargo_configs[{index}]",
-            )
-        )
-        scope = config["scope"]
-        if not isinstance(scope, str) or scope not in allowed_scopes or scope in seen_config_scopes:
-            _fail("launch cargo config scopes are invalid or duplicated")
-        seen_config_scopes.add(scope)
-        if config["state"] == "absent":
-            if config["sha256"] is not None:
-                _fail("absent launch Cargo config must have a null SHA-256")
-        elif config["state"] == "present":
-            _canonical_sha256(
-                config["sha256"], f"launch cargo_configs[{index}].sha256"
-            )
-        else:
-            _fail("launch Cargo config state must be absent or present")
-        normalized_configs.append(config)
-    if seen_config_scopes != allowed_scopes:
-        _fail("launch Cargo config scope set is incomplete")
-    toolchain["cargo_configs"] = normalized_configs
-
-    build_closure = dict(
+    python = dict(
         _exact_keys(
-            record["build_closure"],
-            ("path", "sha256", "manifest_sha256", "source_revision"),
-            "launch build_closure",
+            toolchain["python"], ("path", "sha256", "version"), "launch python"
         )
     )
     if (
-        not isinstance(build_closure["path"], str)
-        or not Path(build_closure["path"]).is_absolute()
-        or "\n" in build_closure["path"]
-        or "\0" in build_closure["path"]
+        not isinstance(python["path"], str)
+        or not Path(python["path"]).is_absolute()
+        or "\n" in python["path"]
+        or "\0" in python["path"]
     ):
-        _fail("launch build_closure.path must be absolute")
-    build_closure["sha256"] = _canonical_sha256(
-        build_closure["sha256"], "launch build_closure.sha256"
+        _fail("launch python path must be absolute")
+    python["sha256"] = _canonical_sha256(
+        python["sha256"], "launch python SHA-256"
     )
-    build_closure["manifest_sha256"] = _canonical_sha256(
-        build_closure["manifest_sha256"],
-        "launch build_closure.manifest_sha256",
+    if (
+        not isinstance(python["version"], str)
+        or not python["version"]
+        or "\n" in python["version"]
+    ):
+        _fail("launch python version must be one nonempty line")
+    toolchain["python"] = python
+
+    prebuilt_bundle = dict(
+        _exact_keys(
+            record["prebuilt_bundle"],
+            (
+                "build_receipt_sha256",
+                "candidate_bytes",
+                "candidate_sha256",
+                "dependency_inventory_sha256",
+                "manifest_sha256",
+                "path",
+                "schema",
+                "sha256",
+                "source_commit",
+                "source_tree",
+            ),
+            "launch prebuilt_bundle",
+        )
     )
-    if build_closure["source_revision"] != revision:
-        _fail("launch build closure revision differs from the solver revision")
+    if (
+        not isinstance(prebuilt_bundle["path"], str)
+        or not Path(prebuilt_bundle["path"]).is_absolute()
+        or "\n" in prebuilt_bundle["path"]
+        or "\0" in prebuilt_bundle["path"]
+    ):
+        _fail("launch prebuilt_bundle.path must be absolute")
+    if prebuilt_bundle["schema"] != PREBUILT_BUNDLE_SCHEMA:
+        _fail("launch prebuilt bundle schema differs")
+    for field in (
+        "sha256",
+        "manifest_sha256",
+        "candidate_sha256",
+        "build_receipt_sha256",
+        "dependency_inventory_sha256",
+    ):
+        prebuilt_bundle[field] = _canonical_sha256(
+            prebuilt_bundle[field], f"launch prebuilt_bundle.{field}"
+        )
+    _u64(prebuilt_bundle["candidate_bytes"], "launch prebuilt_bundle.candidate_bytes")
+    if prebuilt_bundle["candidate_bytes"] == 0:
+        _fail("launch prebuilt bundle candidate must be nonempty")
+    if (
+        prebuilt_bundle["source_commit"] != solver_source["commit"]
+        or prebuilt_bundle["source_tree"] != solver_source["tree"]
+    ):
+        _fail("launch prebuilt bundle source identity differs from solver_source")
 
     control_tools = dict(
         _exact_keys(
@@ -1534,10 +1658,11 @@ def _validate_launch_manifest(
         artifacts[field] = _canonical_sha256(
             artifacts[field], f"launch artifacts.{field}"
         )
+    record["solver_source"] = solver_source
     record["target"] = target
     record["baseline"] = baseline
     record["toolchain"] = toolchain
-    record["build_closure"] = build_closure
+    record["prebuilt_bundle"] = prebuilt_bundle
     record["control_tools"] = control_tools
     record["artifacts"] = artifacts
     return record, exact_sha256, resolved
@@ -1555,45 +1680,31 @@ def inspect_launch_main(argv: Sequence[str]) -> int:
         toolchain = launch["toolchain"]
         values = [
             launch["solver_revision"],
-            toolchain["cargo_home"],
-            toolchain["rustup_home"],
+            launch["solver_source"]["tree"],
+            toolchain["python"]["path"],
+            toolchain["python"]["sha256"],
+            toolchain["python"]["version"],
         ]
-        for label in ("cargo", "rustc", "python"):
-            values.extend(
-                (
-                    toolchain[label]["path"],
-                    toolchain[label]["sha256"],
-                    toolchain[label]["version"],
-                )
-            )
         for field in PINNED_ARTIFACT_HASH_FIELDS:
             values.append(launch["artifacts"][field])
-        build_closure = launch["build_closure"]
+        prebuilt = launch["prebuilt_bundle"]
         values.extend(
             (
-                build_closure["path"],
-                build_closure["sha256"],
-                build_closure["manifest_sha256"],
-                build_closure["source_revision"],
+                prebuilt["path"],
+                prebuilt["sha256"],
+                prebuilt["manifest_sha256"],
+                prebuilt["schema"],
+                prebuilt["source_commit"],
+                prebuilt["source_tree"],
+                prebuilt["candidate_sha256"],
+                str(prebuilt["candidate_bytes"]),
+                prebuilt["build_receipt_sha256"],
+                prebuilt["dependency_inventory_sha256"],
             )
         )
         for label in ("git", "sbatch", "scontrol", "scancel", "sacct"):
             tool = launch["control_tools"][label]
             values.extend((tool["path"], tool["sha256"], tool["version"]))
-        configs = {record["scope"]: record for record in toolchain["cargo_configs"]}
-        for scope in (
-            "repository/config",
-            "repository/config.toml",
-            "cargo_home/config",
-            "cargo_home/config.toml",
-        ):
-            values.extend(
-                (
-                    scope,
-                    configs[scope]["state"],
-                    configs[scope]["sha256"] or "-",
-                )
-            )
         sys.stdout.buffer.write(b"\0".join(value.encode("ascii") for value in values) + b"\0")
         return 0
     except (UnicodeEncodeError, ValidationError) as error:
@@ -1706,6 +1817,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         binary_record = artifact_records["binary"]
         if binary_record["sha256"] != binary_before:
             _fail("binary artifact differs from the executed binary bytes")
+        prebuilt = launch["prebuilt_bundle"]
+        if (
+            binary_record["sha256"] != prebuilt["candidate_sha256"]
+            or binary_record["bytes"] != prebuilt["candidate_bytes"]
+        ):
+            _fail("executed binary differs from the launch-pinned prebuilt candidate")
+        if artifact_records["prebuilt_bundle"]["sha256"] != prebuilt["sha256"]:
+            _fail("prebuilt bundle artifact differs from the launch manifest")
+        if (
+            artifact_records["build_receipt"]["sha256"]
+            != prebuilt["build_receipt_sha256"]
+        ):
+            _fail("build receipt artifact differs from the launch manifest")
+        if (
+            artifact_records["dependency_inventory"]["sha256"]
+            != prebuilt["dependency_inventory_sha256"]
+        ):
+            _fail("dependency inventory artifact differs from the launch manifest")
+
+        build_receipt_value, _, _, _ = _load_exact_json(
+            artifacts["build_receipt"][1]
+        )
+        build_receipt = _validate_prebuilt_build_receipt(
+            build_receipt_value, launch["solver_source"], prebuilt
+        )
+        dependency_inventory_value, _, _, _ = _load_exact_json(
+            artifacts["dependency_inventory"][1]
+        )
+        dependency_inventory = _validate_binary_dependency_inventory(
+            dependency_inventory_value, prebuilt["candidate_sha256"]
+        )
 
         for manifest_field, artifact_name in PINNED_ARTIFACT_HASH_FIELDS.items():
             if (
@@ -1723,28 +1865,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             _fail("artifact control_git differs from the launch manifest")
 
         manifest_toolchain = launch["toolchain"]
-        for label in ("cargo", "rustc", "python"):
-            if Path(artifact_records[label]["path"]) != Path(
-                manifest_toolchain[label]["path"]
-            ):
-                _fail(f"artifact {label} original path differs from the launch manifest")
+        if Path(artifact_records["python"]["path"]) != Path(
+            manifest_toolchain["python"]["path"]
+        ):
+            _fail("artifact python original path differs from the launch manifest")
         toolchain = {
-            label: _tool_record(
-                artifact_records[label],
-                manifest_toolchain[label]["sha256"],
-                manifest_toolchain[label]["version"],
-                label,
+            "python": _tool_record(
+                artifact_records["python"],
+                manifest_toolchain["python"]["sha256"],
+                manifest_toolchain["python"]["version"],
+                "python",
             )
-            for label in ("cargo", "rustc", "python")
         }
-        toolchain.update(
-            {
-                "rustup_toolchain": manifest_toolchain["rustup_toolchain"],
-                "cargo_home": manifest_toolchain["cargo_home"],
-                "rustup_home": manifest_toolchain["rustup_home"],
-                "cargo_configs": manifest_toolchain["cargo_configs"],
-            }
-        )
         # Scheduler completion, runner stdout/stderr, and the final run-root
         # inventory do not exist yet.  This record is therefore deliberately
         # non-authorizing; only the post-job finalizer may promote it.
@@ -1762,16 +1894,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "memory_bytes": 8 * 1024**3,
                 "sat_calls": 0,
             },
-            "build_contract": {
-                "command": (
-                    "cd /; <sealed-cargo> build --manifest-path "
-                    "<read-only-build-closure>/payload/source-tree/Cargo.toml "
-                    "--locked --offline --features certificates --release"
-                ),
-                "rustup_toolchain": manifest_toolchain["rustup_toolchain"],
-                "isolated_environment": True,
+            "execution_contract": {
+                "binary_source": "launch-pinned-prebuilt-bundle",
+                "build_during_stage0a": False,
+                "candidate_sealed_before_exec": True,
+                "runtime_dependencies_revalidated": True,
             },
-            "build_closure": launch["build_closure"],
+            "prebuilt_bundle": prebuilt,
+            "build_receipt": build_receipt,
+            "dependency_inventory": dependency_inventory,
             "control_tools": launch["control_tools"],
             "target": {
                 "relative_path": TARGET_RELATIVE_PATH,

@@ -14,9 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 UTILITY = ROOT / "scripts" / "bench" / "t11_build_closure.py"
-REVISION = "0123456789abcdef0123456789abcdef01234567"
-
-
 def load_utility():
     spec = importlib.util.spec_from_file_location("t11_build_closure", UTILITY)
     assert spec is not None and spec.loader is not None
@@ -34,6 +31,20 @@ class T11BuildClosureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self.repository = self.root / "repository"
+        self._write(
+            self.repository / "Cargo.toml",
+            b'[package]\nname = "closure-probe"\nversion = "0.1.0"\n',
+        )
+        self._write(self.repository / "Cargo.lock", b"# exact lock\n")
+        self._write(self.repository / "src" / "main.rs", b"fn main() {}\n")
+        self._git("init", "-q")
+        self._git("config", "user.name", "T11 Test")
+        self._git("config", "user.email", "t11@example.invalid")
+        self._git("add", ".")
+        self._git("commit", "-qm", "fixture")
+        self.source_commit = self._git("rev-parse", "HEAD^{commit}")
+        self.source_tree = self._git("rev-parse", "HEAD^{tree}")
         self.inputs = self._make_inputs(self.root / "inputs-a", mtime=1_700_000_001)
 
     def tearDown(self) -> None:
@@ -47,72 +58,49 @@ class T11BuildClosureTests(unittest.TestCase):
         os.utime(path, (mtime, mtime))
 
     def _make_inputs(self, base: Path, *, mtime: int) -> dict[str, str]:
-        source = base / "source-tree"
-        cargo_home = base / "cargo-home"
-        sysroot = base / "rust-sysroot"
-        native_libs = base / "native-libs"
-        python_runtime = base / "python-runtime"
-
-        self._write(
-            source / "Cargo.toml",
-            b'[package]\nname = "closure-probe"\nversion = "0.1.0"\n',
-            mtime=mtime,
-        )
-        self._write(source / "src" / "main.rs", b"fn main() {}\n", mtime=mtime + 1)
-        (source / "empty").mkdir(parents=True)
-        self._write(
-            cargo_home / "registry" / "src" / "example-1.0.0" / "src" / "lib.rs",
-            b"pub const VALUE: u8 = 7;\n",
-            mtime=mtime + 2,
-        )
-        self._write(
-            cargo_home / "config.toml",
-            b"[net]\noffline = true\n",
-            mtime=mtime + 3,
-        )
-        self._write(sysroot / "lib" / "rustlib" / "components", b"rust-std\n", mtime=mtime + 4)
-        self._write(sysroot / "lib" / "libstd.rlib", b"rlib\x00data", mtime=mtime + 5)
-        self._write(native_libs / "libc.so", b"libc-image\n", mtime=mtime + 6)
-        self._write(native_libs / "libm.so", b"libm-image\n", mtime=mtime + 7)
-        self._write(
-            python_runtime / "bin" / "python3",
-            b"python-image\n",
-            0o755,
-            mtime + 8,
-        )
-        self._write(
-            python_runtime / "lib" / "python.zip",
-            b"python-library\n",
-            mtime=mtime + 9,
-        )
-
-        file_roots = {
-            "cargo-executable": (b"cargo-image\n", 0o755),
-            "native-archiver": (b"archiver-image\n", 0o755),
-            "native-compiler": (b"compiler-image\n", 0o755),
-            "native-linker": (b"linker-image\n", 0o755),
-            "native-loader": (b"loader-image\n", 0o755),
-            "rustc-executable": (b"rustc-image\n", 0o755),
+        candidate = base / "candidate-binary"
+        self._write(candidate, b"#!/bin/sh\nexit 0\n", 0o755, mtime)
+        candidate_sha256 = self._sha256(candidate)
+        inventory = {
+            "candidate_sha256": candidate_sha256,
+            "platform": "linux-x86_64",
+            "runtime_files": [],
+            "schema": self.utility.DEPENDENCY_INVENTORY_SCHEMA,
         }
-        result = {
-            "cargo-home": str(cargo_home),
-            "native-libs": str(native_libs),
-            "python-runtime": str(python_runtime),
-            "rust-sysroot": str(sysroot),
-            "source-tree": str(source),
+        inventory_path = base / "dependency-inventory"
+        self._write(inventory_path, self.utility._canonical_json(inventory), mtime=mtime + 1)
+        receipt = {
+            "binary_dependencies_sha256": self._sha256(inventory_path),
+            "build_command": [
+                "cargo", "build", "--locked", "--features", "certificates",
+                "--release", "--target", "x86_64-unknown-linux-gnu",
+            ],
+            "candidate_bytes": candidate.stat().st_size,
+            "candidate_sha256": candidate_sha256,
+            "cargo_lock_sha256": self._sha256(self.repository / "Cargo.lock"),
+            "cargo_toml_sha256": self._sha256(self.repository / "Cargo.toml"),
+            "features": ["certificates"],
+            "profile": "release",
+            "rust_target": "x86_64-unknown-linux-gnu",
+            "schema": self.utility.BUILD_RECEIPT_SCHEMA,
+            "source_commit": self.source_commit,
+            "source_tree": self.source_tree,
         }
-        for index, (label, (data, mode)) in enumerate(file_roots.items(), start=10):
-            path = base / label
-            self._write(path, data, mode, mtime + index)
-            result[label] = str(path)
+        receipt_path = base / "build-receipt"
+        self._write(receipt_path, self.utility._canonical_json(receipt), mtime=mtime + 2)
+        return {
+            "build-receipt": str(receipt_path),
+            "candidate-binary": str(candidate),
+            "dependency-inventory": str(inventory_path),
+        }
 
-        for directory in (source, cargo_home, sysroot, native_libs, python_runtime):
-            for path in sorted(
-                (item for item in directory.rglob("*") if item.is_dir()), reverse=True
-            ):
-                os.utime(path, (mtime + 20, mtime + 20))
-            os.utime(directory, (mtime + 20, mtime + 20))
-        return result
+    def _git(self, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(self.repository), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -120,7 +108,9 @@ class T11BuildClosureTests(unittest.TestCase):
 
     def _create(self, name: str = "closure.tar") -> tuple[Path, object]:
         archive = self.root / name
-        report = self.utility.create_archive(str(archive), self.inputs, REVISION)
+        report = self.utility.create_archive(
+            str(archive), self.inputs, str(self.repository)
+        )
         return archive, report
 
     def _members(self, archive: Path) -> list[dict[str, object]]:
@@ -208,28 +198,9 @@ class T11BuildClosureTests(unittest.TestCase):
         self.assertEqual(
             dict(self.utility.REQUIRED_ROOT_KINDS),
             {
-                "cargo-executable": "file",
-                "cargo-home": "directory",
-                "native-archiver": "file",
-                "native-compiler": "file",
-                "native-libs": "directory",
-                "native-linker": "file",
-                "native-loader": "file",
-                "python-runtime": "directory",
-                "rust-sysroot": "directory",
-                "rustc-executable": "file",
-                "source-tree": "directory",
-            },
-        )
-        self.assertEqual(
-            dict(self.utility.TOOL_ROOT_LABELS),
-            {
-                "cargo": "cargo-executable",
-                "native-archiver": "native-archiver",
-                "native-compiler": "native-compiler",
-                "native-linker": "native-linker",
-                "native-loader": "native-loader",
-                "rustc": "rustc-executable",
+                "build-receipt": "file",
+                "candidate-binary": "file",
+                "dependency-inventory": "file",
             },
         )
 
@@ -237,7 +208,9 @@ class T11BuildClosureTests(unittest.TestCase):
         archive_a, report_a = self._create("a.tar")
         inputs_b = self._make_inputs(self.root / "inputs-b", mtime=1_800_000_001)
         archive_b = self.root / "b.tar"
-        report_b = self.utility.create_archive(str(archive_b), inputs_b, REVISION)
+        report_b = self.utility.create_archive(
+            str(archive_b), inputs_b, str(self.repository)
+        )
 
         self.assertEqual(archive_a.read_bytes(), archive_b.read_bytes())
         self.assertEqual(report_a, report_b)
@@ -250,21 +223,21 @@ class T11BuildClosureTests(unittest.TestCase):
         assert isinstance(manifest_bytes, bytes)
         manifest = json.loads(manifest_bytes)
         self.assertEqual(manifest_bytes, self.utility._canonical_json(manifest))
-        self.assertEqual(manifest["source_revision"], REVISION)
+        self.assertEqual(manifest["source"]["commit"], self.source_commit)
+        self.assertEqual(manifest["source"]["tree"], self.source_tree)
         roots = {root["label"]: root for root in manifest["roots"]}
-        self.assertEqual(roots["source-tree"]["kind"], "directory")
-        self.assertEqual(roots["cargo-home"]["kind"], "directory")
-        self.assertEqual(roots["cargo-executable"]["kind"], "file")
-        self.assertEqual(roots["rustc-executable"]["kind"], "file")
+        self.assertEqual(roots["candidate-binary"]["kind"], "file")
+        self.assertEqual(roots["build-receipt"]["kind"], "file")
+        self.assertEqual(roots["dependency-inventory"]["kind"], "file")
         self.assertEqual(
-            manifest["tools"],
+            manifest["prebuilt"],
             {
-                "cargo": "payload/cargo-executable",
-                "native-archiver": "payload/native-archiver",
-                "native-compiler": "payload/native-compiler",
-                "native-linker": "payload/native-linker",
-                "native-loader": "payload/native-loader",
-                "rustc": "payload/rustc-executable",
+                "build_receipt": "payload/build-receipt",
+                "build_receipt_sha256": report_a.build_receipt_sha256,
+                "candidate": "payload/candidate-binary",
+                "candidate_sha256": report_a.candidate_sha256,
+                "dependency_inventory": "payload/dependency-inventory",
+                "dependency_inventory_sha256": report_a.dependency_inventory_sha256,
             },
         )
         self.assertEqual(
@@ -289,12 +262,12 @@ class T11BuildClosureTests(unittest.TestCase):
         )
         self.assertEqual(extracted, report)
         self.assertEqual(
-            (destination / "payload" / "source-tree" / "src" / "main.rs").read_bytes(),
-            b"fn main() {}\n",
+            (destination / "payload" / "candidate-binary").read_bytes(),
+            b"#!/bin/sh\nexit 0\n",
         )
         self.assertEqual(
             stat.S_IMODE(
-                (destination / "payload" / "native-compiler").stat().st_mode
+                (destination / "payload" / "candidate-binary").stat().st_mode
             ),
             0o555,
         )
@@ -347,8 +320,8 @@ class T11BuildClosureTests(unittest.TestCase):
             "create",
             "--output",
             str(archive),
-            "--source-revision",
-            REVISION,
+            "--source-repository",
+            str(self.repository),
         ]
         for label in reversed(sorted(self.inputs)):
             create_command.extend(["--input", f"{label}={self.inputs[label]}"])
@@ -396,76 +369,96 @@ class T11BuildClosureTests(unittest.TestCase):
 
     def test_create_rejects_bad_contract_and_refuses_replacement(self) -> None:
         missing = dict(self.inputs)
-        del missing["source-tree"]
+        del missing["candidate-binary"]
         with self.assertRaisesRegex(self.utility.ClosureError, "labels differ"):
-            self.utility.create_archive(str(self.root / "missing.tar"), missing, REVISION)
+            self.utility.create_archive(
+                str(self.root / "missing.tar"), missing, str(self.repository)
+            )
 
         extra = dict(self.inputs)
-        extra["unexpected"] = self.inputs["source-tree"]
+        extra["unexpected"] = self.inputs["candidate-binary"]
         with self.assertRaisesRegex(self.utility.ClosureError, "labels differ"):
-            self.utility.create_archive(str(self.root / "extra.tar"), extra, REVISION)
+            self.utility.create_archive(
+                str(self.root / "extra.tar"), extra, str(self.repository)
+            )
 
-        with self.assertRaisesRegex(self.utility.ClosureError, "40 lowercase"):
-            self.utility.create_archive(str(self.root / "revision.tar"), self.inputs, "A" * 40)
+        self._write(self.repository / "untracked", b"dirty\n")
+        with self.assertRaisesRegex(self.utility.ClosureError, "completely clean"):
+            self.utility.create_archive(
+                str(self.root / "dirty.tar"), self.inputs, str(self.repository)
+            )
+        (self.repository / "untracked").unlink()
 
         output = self.root / "exists.tar"
         output.write_bytes(b"preserve-me")
         with self.assertRaisesRegex(self.utility.ClosureError, "already exists"):
-            self.utility.create_archive(str(output), self.inputs, REVISION)
+            self.utility.create_archive(str(output), self.inputs, str(self.repository))
         self.assertEqual(output.read_bytes(), b"preserve-me")
 
-        inside = Path(self.inputs["source-tree"]) / "closure.tar"
-        with self.assertRaisesRegex(self.utility.ClosureError, "must not be inside"):
-            self.utility.create_archive(str(inside), self.inputs, REVISION)
-        self.assertFalse(inside.exists())
+    def test_create_rejects_mismatched_prebuilt_provenance(self) -> None:
+        receipt_path = Path(self.inputs["build-receipt"])
+        receipt = json.loads(receipt_path.read_bytes())
+        receipt["source_tree"] = "0" * 40
+        self._write(receipt_path, self.utility._canonical_json(receipt))
+        with self.assertRaisesRegex(
+            self.utility.ClosureError,
+            "build receipt source_tree differs from the prebuilt contract",
+        ):
+            self.utility.create_archive(
+                str(self.root / "bad-source-tree.tar"),
+                self.inputs,
+                str(self.repository),
+            )
+
+        inputs = self._make_inputs(self.root / "inputs-b", mtime=1_700_000_101)
+        inventory_path = Path(inputs["dependency-inventory"])
+        inventory = json.loads(inventory_path.read_bytes())
+        inventory["candidate_sha256"] = "0" * 64
+        self._write(inventory_path, self.utility._canonical_json(inventory))
+        with self.assertRaisesRegex(
+            self.utility.ClosureError,
+            "dependency inventory candidate SHA-256 differs",
+        ):
+            self.utility.create_archive(
+                str(self.root / "bad-inventory.tar"),
+                inputs,
+                str(self.repository),
+            )
 
     def test_create_rejects_symlinks_hardlinks_and_special_files(self) -> None:
-        source = Path(self.inputs["source-tree"])
-        target = source / "Cargo.toml"
-        symlink = source / "Cargo-link.toml"
-        symlink.symlink_to(target)
-        with self.assertRaisesRegex(self.utility.ClosureError, "symlink"):
-            self.utility.create_archive(str(self.root / "symlink.tar"), self.inputs, REVISION)
-        symlink.unlink()
+        candidate = Path(self.inputs["candidate-binary"])
+        candidate_link = self.root / "candidate-link"
+        candidate_link.symlink_to(candidate)
+        linked_inputs = dict(self.inputs)
+        linked_inputs["candidate-binary"] = str(candidate_link)
+        with self.assertRaises(self.utility.ClosureError):
+            self.utility.create_archive(
+                str(self.root / "symlink.tar"), linked_inputs, str(self.repository)
+            )
 
-        hardlink = source / "Cargo-hardlink.toml"
-        os.link(target, hardlink)
+        hardlink = self.root / "candidate-hardlink"
+        os.link(candidate, hardlink)
+        linked_inputs["candidate-binary"] = str(hardlink)
         with self.assertRaisesRegex(self.utility.ClosureError, "physical link|hard link"):
-            self.utility.create_archive(str(self.root / "hardlink.tar"), self.inputs, REVISION)
+            duplicate_inputs = dict(linked_inputs)
+            duplicate_inputs["build-receipt"] = str(candidate)
+            self.utility.create_archive(
+                str(self.root / "hardlink.tar"), duplicate_inputs, str(self.repository)
+            )
         hardlink.unlink()
 
         if hasattr(os, "mkfifo"):
-            fifo = source / "build.pipe"
+            fifo = self.root / "candidate.pipe"
             os.mkfifo(fifo)
-            try:
-                with self.assertRaisesRegex(self.utility.ClosureError, "regular files"):
-                    self.utility.create_archive(
-                        str(self.root / "fifo.tar"), self.inputs, REVISION
-                    )
-            finally:
-                fifo.unlink()
-
-            root_fifo = self.root / "loader.pipe"
-            os.mkfifo(root_fifo)
             fifo_inputs = dict(self.inputs)
-            fifo_inputs["native-loader"] = str(root_fifo)
+            fifo_inputs["candidate-binary"] = str(fifo)
             try:
                 with self.assertRaisesRegex(self.utility.ClosureError, "regular file"):
                     self.utility.create_archive(
-                        str(self.root / "root-fifo.tar"), fifo_inputs, REVISION
+                        str(self.root / "fifo.tar"), fifo_inputs, str(self.repository)
                     )
             finally:
-                root_fifo.unlink()
-
-        compiler = Path(self.inputs["native-compiler"])
-        compiler_link = self.root / "compiler-link"
-        compiler_link.symlink_to(compiler)
-        linked_inputs = dict(self.inputs)
-        linked_inputs["native-compiler"] = str(compiler_link)
-        with self.assertRaises(self.utility.ClosureError):
-            self.utility.create_archive(
-                str(self.root / "root-symlink.tar"), linked_inputs, REVISION
-            )
+                fifo.unlink()
 
     def test_verify_requires_exact_hash_read_only_regular_archive(self) -> None:
         archive, report = self._create()
@@ -595,7 +588,7 @@ class T11BuildClosureTests(unittest.TestCase):
         file_index = next(
             index
             for index, member in enumerate(original)
-            if member["name"] == "payload/native-compiler"
+            if member["name"] == "payload/candidate-binary"
         )
 
         mode = [dict(member) for member in original]

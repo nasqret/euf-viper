@@ -305,7 +305,7 @@ readonly REPO_RUNNER="$REPO_ROOT/scripts/wmi/euf_viper_t11_stage0a.sbatch"
 readonly FINALIZER_SBATCH="$REPO_ROOT/scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch"
 readonly FINALIZER="$REPO_ROOT/scripts/bench/finalize_t11_stage0a.py"
 readonly AUTHORIZER="$REPO_ROOT/scripts/bench/authorize_t11_stage0a.py"
-readonly BUILD_CLOSURE_TOOL="$REPO_ROOT/scripts/bench/t11_build_closure.py"
+readonly PREBUILT_BUNDLE_TOOL="$REPO_ROOT/scripts/bench/t11_build_closure.py"
 readonly DESIGN_NOTE="$REPO_ROOT/research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md"
 readonly HASH_CONTRACT="$REPO_ROOT/research-vault/02-design/2026-07-17-t11-canonical-hash-contract.md"
 readonly AUDIT_CONTRACT="$REPO_ROOT/research-vault/02-design/2026-07-17-t11-external-audit-receipt.md"
@@ -424,68 +424,67 @@ set -e
 chmod 400 "$LAUNCH_VALUES"
 fsync_path "$LAUNCH_VALUES"
 mapfile -d '' -t LAUNCH <"$LAUNCH_VALUES"
-[ "${#LAUNCH[@]}" -eq 56 ] || die "launch inspector returned the wrong field count"
+[ "${#LAUNCH[@]}" -eq 41 ] || die "launch inspector returned the wrong field count"
 
 readonly EXPECTED_REVISION="${LAUNCH[0]}"
-readonly CARGO_HOME="${LAUNCH[1]}"
-readonly RUSTUP_HOME="${LAUNCH[2]}"
-readonly CARGO="${LAUNCH[3]}"
-readonly CARGO_SHA256="${LAUNCH[4]}"
-readonly CARGO_VERSION="${LAUNCH[5]}"
-readonly RUSTC="${LAUNCH[6]}"
-readonly RUSTC_SHA256="${LAUNCH[7]}"
-readonly RUSTC_VERSION="${LAUNCH[8]}"
-readonly PYTHON="${LAUNCH[9]}"
-readonly PYTHON_SHA256="${LAUNCH[10]}"
-readonly PYTHON_VERSION="${LAUNCH[11]}"
-readonly SUBMITTER_SHA256="${LAUNCH[12]}"
-readonly RUNNER_SHA256="${LAUNCH[13]}"
-readonly FINALIZER_SBATCH_SHA256="${LAUNCH[14]}"
-readonly FINALIZER_SHA256="${LAUNCH[15]}"
-readonly AUTHORIZER_SHA256="${LAUNCH[16]}"
-readonly VALIDATOR_SHA256="${LAUNCH[17]}"
-readonly EXEC_HELPER_SHA256="${LAUNCH[18]}"
-readonly BUILD_CLOSURE_TOOL_SHA256="${LAUNCH[19]}"
-readonly CARGO_TOML_SHA256="${LAUNCH[20]}"
-readonly CARGO_LOCK_SHA256="${LAUNCH[21]}"
-readonly DESIGN_NOTE_SHA256="${LAUNCH[22]}"
-readonly HASH_CONTRACT_SHA256="${LAUNCH[23]}"
-readonly AUDIT_CONTRACT_SHA256="${LAUNCH[24]}"
-readonly BUILD_CLOSURE="${LAUNCH[25]}"
-readonly BUILD_CLOSURE_SHA256="${LAUNCH[26]}"
-readonly BUILD_CLOSURE_MANIFEST_SHA256="${LAUNCH[27]}"
-readonly BUILD_CLOSURE_REVISION="${LAUNCH[28]}"
-readonly CONTROL_GIT="${LAUNCH[29]}"
-readonly CONTROL_GIT_SHA256="${LAUNCH[30]}"
-readonly CONTROL_GIT_VERSION="${LAUNCH[31]}"
+readonly EXPECTED_SOURCE_TREE="${LAUNCH[1]}"
+readonly PYTHON="${LAUNCH[2]}"
+readonly PYTHON_SHA256="${LAUNCH[3]}"
+readonly PYTHON_VERSION="${LAUNCH[4]}"
+readonly SUBMITTER_SHA256="${LAUNCH[5]}"
+readonly RUNNER_SHA256="${LAUNCH[6]}"
+readonly FINALIZER_SBATCH_SHA256="${LAUNCH[7]}"
+readonly FINALIZER_SHA256="${LAUNCH[8]}"
+readonly AUTHORIZER_SHA256="${LAUNCH[9]}"
+readonly VALIDATOR_SHA256="${LAUNCH[10]}"
+readonly EXEC_HELPER_SHA256="${LAUNCH[11]}"
+readonly PREBUILT_BUNDLE_TOOL_SHA256="${LAUNCH[12]}"
+readonly DESIGN_NOTE_SHA256="${LAUNCH[13]}"
+readonly HASH_CONTRACT_SHA256="${LAUNCH[14]}"
+readonly AUDIT_CONTRACT_SHA256="${LAUNCH[15]}"
+readonly PREBUILT_BUNDLE="${LAUNCH[16]}"
+readonly PREBUILT_BUNDLE_SHA256="${LAUNCH[17]}"
+readonly PREBUILT_BUNDLE_MANIFEST_SHA256="${LAUNCH[18]}"
+readonly PREBUILT_BUNDLE_SCHEMA="${LAUNCH[19]}"
+readonly PREBUILT_SOURCE_COMMIT="${LAUNCH[20]}"
+readonly PREBUILT_SOURCE_TREE="${LAUNCH[21]}"
+readonly CANDIDATE_SHA256="${LAUNCH[22]}"
+readonly CANDIDATE_BYTES="${LAUNCH[23]}"
+readonly BUILD_RECEIPT_SHA256="${LAUNCH[24]}"
+readonly DEPENDENCY_INVENTORY_SHA256="${LAUNCH[25]}"
+readonly CONTROL_GIT="${LAUNCH[26]}"
+readonly CONTROL_GIT_SHA256="${LAUNCH[27]}"
+readonly CONTROL_GIT_VERSION="${LAUNCH[28]}"
 
 for digest in \
-  "$CARGO_SHA256" "$RUSTC_SHA256" "$PYTHON_SHA256" "$RUNNER_SHA256" \
+  "$PYTHON_SHA256" "$RUNNER_SHA256" \
   "$SUBMITTER_SHA256" "$VALIDATOR_SHA256" "$EXEC_HELPER_SHA256" \
   "$FINALIZER_SBATCH_SHA256" "$FINALIZER_SHA256" "$AUTHORIZER_SHA256" \
-  "$BUILD_CLOSURE_TOOL_SHA256" "$CARGO_TOML_SHA256" \
-  "$CARGO_LOCK_SHA256" "$DESIGN_NOTE_SHA256" "$HASH_CONTRACT_SHA256" \
-  "$AUDIT_CONTRACT_SHA256" "$BUILD_CLOSURE_SHA256" \
-  "$BUILD_CLOSURE_MANIFEST_SHA256" "$CONTROL_GIT_SHA256"; do
+  "$PREBUILT_BUNDLE_TOOL_SHA256" "$DESIGN_NOTE_SHA256" \
+  "$HASH_CONTRACT_SHA256" "$AUDIT_CONTRACT_SHA256" \
+  "$PREBUILT_BUNDLE_SHA256" "$PREBUILT_BUNDLE_MANIFEST_SHA256" \
+  "$CANDIDATE_SHA256" "$BUILD_RECEIPT_SHA256" \
+  "$DEPENDENCY_INVENTORY_SHA256" "$CONTROL_GIT_SHA256"; do
   canonical_sha256 "$digest" || die "manifest contains a malformed SHA-256"
 done
 [ "$VALIDATOR_SHA256" = "$BOOTSTRAP_VALIDATOR_SHA256" ] ||
   die "strict and bootstrap validator bindings differ"
-[ "$BUILD_CLOSURE_REVISION" = "$EXPECTED_REVISION" ] ||
-  die "build closure revision differs from the solver revision"
-case "$BUILD_CLOSURE" in
+[ "$PREBUILT_BUNDLE_SCHEMA" = euf-viper.t11-prebuilt-bundle.v1 ] ||
+  die "prebuilt bundle schema differs"
+[ "$PREBUILT_SOURCE_COMMIT" = "$EXPECTED_REVISION" ] ||
+  die "prebuilt source commit differs from the solver revision"
+[ "$PREBUILT_SOURCE_TREE" = "$EXPECTED_SOURCE_TREE" ] ||
+  die "prebuilt source tree differs from the solver source tree"
+case "$CANDIDATE_BYTES" in ''|*[!0-9]*) die "candidate byte count is malformed" ;; esac
+[ "$CANDIDATE_BYTES" -gt 0 ] || die "candidate binary must be nonempty"
+case "$PREBUILT_BUNDLE" in
   /*) ;;
-  *) die "build closure path must be absolute" ;;
+  *) die "prebuilt bundle path must be absolute" ;;
 esac
-[ -f "$BUILD_CLOSURE" ] && [ ! -L "$BUILD_CLOSURE" ] ||
-  die "build closure is missing, nonregular, or a symlink"
+[ -f "$PREBUILT_BUNDLE" ] && [ ! -L "$PREBUILT_BUNDLE" ] ||
+  die "prebuilt bundle is missing, nonregular, or a symlink"
 [ "$PYTHON" = "$(readlink -f "$PYTHON")" ] ||
   die "manifest Python path must be resolved and nonsymlinked"
-
-readonly CARGO_HOME_CANONICAL="$(canonical_directory "$CARGO_HOME" "Cargo home")"
-readonly RUSTUP_HOME_CANONICAL="$(canonical_directory "$RUSTUP_HOME" "rustup home")"
-[ "$CARGO_HOME" = "$CARGO_HOME_CANONICAL" ] || die "Cargo home is not canonical"
-[ "$RUSTUP_HOME" = "$RUSTUP_HOME_CANONICAL" ] || die "rustup home is not canonical"
 
 pinned_python() {
   /usr/bin/env -i \
@@ -494,8 +493,6 @@ pinned_python() {
 }
 
 STAGE0A_PHASE=verify_toolchain_and_artifacts
-require_sha256 "$CARGO" "$CARGO_SHA256" cargo
-require_sha256 "$RUSTC" "$RUSTC_SHA256" rustc
 require_sha256 "$PYTHON" "$PYTHON_SHA256" Python
 PINNED_PYTHON_READY=1
 require_sha256 "$REPO_RUNNER" "$RUNNER_SHA256" runner
@@ -505,17 +502,14 @@ require_sha256 "$FINALIZER" "$FINALIZER_SHA256" finalizer
 require_sha256 "$AUTHORIZER" "$AUTHORIZER_SHA256" authorizer
 require_sha256 "$VALIDATOR" "$VALIDATOR_SHA256" validator
 require_sha256 "$EXEC_HELPER" "$EXEC_HELPER_SHA256" "execution helper"
-require_sha256 "$BUILD_CLOSURE_TOOL" "$BUILD_CLOSURE_TOOL_SHA256" \
-  "build-closure utility"
-require_sha256 "$REPO_ROOT/Cargo.toml" "$CARGO_TOML_SHA256" Cargo.toml
-require_sha256 "$REPO_ROOT/Cargo.lock" "$CARGO_LOCK_SHA256" Cargo.lock
+require_sha256 "$PREBUILT_BUNDLE_TOOL" "$PREBUILT_BUNDLE_TOOL_SHA256" \
+  "prebuilt-bundle utility"
+require_sha256 "$PREBUILT_BUNDLE" "$PREBUILT_BUNDLE_SHA256" "prebuilt bundle"
 require_sha256 "$DESIGN_NOTE" "$DESIGN_NOTE_SHA256" "design note"
 require_sha256 "$HASH_CONTRACT" "$HASH_CONTRACT_SHA256" "hash contract"
 require_sha256 "$AUDIT_CONTRACT" "$AUDIT_CONTRACT_SHA256" "audit contract"
 require_sha256 "$CONTROL_GIT" "$CONTROL_GIT_SHA256" "control git"
 
-readonly CARGO_SNAPSHOT="$PROVENANCE_ROOT/cargo"
-readonly RUSTC_SNAPSHOT="$PROVENANCE_ROOT/rustc"
 readonly PYTHON_SNAPSHOT="$PROVENANCE_ROOT/python3"
 readonly EXEC_HELPER_SNAPSHOT="$PROVENANCE_ROOT/exec_t11_stage0a.py"
 readonly SUBMITTER_SNAPSHOT="$PROVENANCE_ROOT/submit_t11_stage0a.sh"
@@ -523,16 +517,11 @@ readonly FINALIZER_SBATCH_SNAPSHOT="$PROVENANCE_ROOT/euf_viper_t11_stage0a_final
 readonly FINALIZER_SNAPSHOT="$PROVENANCE_ROOT/finalize_t11_stage0a.py"
 readonly AUTHORIZER_SNAPSHOT="$PROVENANCE_ROOT/authorize_t11_stage0a.py"
 readonly CONTROL_GIT_SNAPSHOT="$PROVENANCE_ROOT/git"
-readonly BUILD_CLOSURE_TOOL_SNAPSHOT="$PROVENANCE_ROOT/t11_build_closure.py"
-readonly CARGO_TOML_SNAPSHOT="$PROVENANCE_ROOT/Cargo.toml"
-readonly CARGO_LOCK_SNAPSHOT="$PROVENANCE_ROOT/Cargo.lock"
+readonly PREBUILT_BUNDLE_TOOL_SNAPSHOT="$PROVENANCE_ROOT/t11_build_closure.py"
+readonly PREBUILT_BUNDLE_SNAPSHOT="$PROVENANCE_ROOT/prebuilt-bundle.tar"
 readonly DESIGN_NOTE_SNAPSHOT="$PROVENANCE_ROOT/design-note.md"
 readonly HASH_CONTRACT_SNAPSHOT="$PROVENANCE_ROOT/hash-contract.md"
 readonly AUDIT_CONTRACT_SNAPSHOT="$PROVENANCE_ROOT/audit-contract.md"
-snapshot_file "$CARGO" "$CARGO_SNAPSHOT" "$CARGO_SHA256" 0500 ||
-  die "could not snapshot cargo"
-snapshot_file "$RUSTC" "$RUSTC_SNAPSHOT" "$RUSTC_SHA256" 0500 ||
-  die "could not snapshot rustc"
 snapshot_file "$PYTHON" "$PYTHON_SNAPSHOT" "$PYTHON_SHA256" 0500 ||
   die "could not snapshot Python"
 snapshot_file "$EXEC_HELPER" "$EXEC_HELPER_SNAPSHOT" "$EXEC_HELPER_SHA256" 0500 ||
@@ -549,12 +538,10 @@ snapshot_file "$CONTROL_GIT" "$CONTROL_GIT_SNAPSHOT" "$CONTROL_GIT_SHA256" 0500 
   die "could not snapshot control git"
 [ "$("$CONTROL_GIT_SNAPSHOT" --version)" = "$CONTROL_GIT_VERSION" ] ||
   die "control git version differs from the launch manifest"
-snapshot_file "$BUILD_CLOSURE_TOOL" "$BUILD_CLOSURE_TOOL_SNAPSHOT" \
-  "$BUILD_CLOSURE_TOOL_SHA256" 0500 || die "could not snapshot build-closure utility"
-snapshot_file "$REPO_ROOT/Cargo.toml" "$CARGO_TOML_SNAPSHOT" \
-  "$CARGO_TOML_SHA256" 0400 || die "could not snapshot Cargo.toml"
-snapshot_file "$REPO_ROOT/Cargo.lock" "$CARGO_LOCK_SNAPSHOT" \
-  "$CARGO_LOCK_SHA256" 0400 || die "could not snapshot Cargo.lock"
+snapshot_file "$PREBUILT_BUNDLE_TOOL" "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" \
+  "$PREBUILT_BUNDLE_TOOL_SHA256" 0500 || die "could not snapshot prebuilt-bundle utility"
+snapshot_file "$PREBUILT_BUNDLE" "$PREBUILT_BUNDLE_SNAPSHOT" \
+  "$PREBUILT_BUNDLE_SHA256" 0400 || die "could not snapshot prebuilt bundle"
 snapshot_file "$DESIGN_NOTE" "$DESIGN_NOTE_SNAPSHOT" "$DESIGN_NOTE_SHA256" 0400 ||
   die "could not snapshot design note"
 snapshot_file "$HASH_CONTRACT" "$HASH_CONTRACT_SNAPSHOT" \
@@ -575,50 +562,8 @@ os.fsync(fd); os.fchmod(fd,0o400); os.fsync(fd); os.close(fd)' \
   "$EXECUTED_RUNNER" "$RUNNER_SNAPSHOT"
 require_sha256 "$RUNNER_SNAPSHOT" "$RUNNER_SHA256" "runner snapshot"
 
-version_in_isolation() {
-  /usr/bin/env -i \
-    HOME="$RUN_HOME" LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
-    CARGO_HOME="$CARGO_HOME" RUSTUP_HOME="$RUSTUP_HOME" \
-    RUSTUP_TOOLCHAIN=1.93.0-x86_64-unknown-linux-gnu \
-    "$1" --version
-}
-[ "$(version_in_isolation "$CARGO_SNAPSHOT")" = "$CARGO_VERSION" ] ||
-  die "cargo version differs from the launch manifest"
-[ "$(version_in_isolation "$RUSTC_SNAPSHOT")" = "$RUSTC_VERSION" ] ||
-  die "rustc version differs from the launch manifest"
 [ "$(pinned_python --version 2>&1)" = "$PYTHON_VERSION" ] ||
   die "Python version differs from the launch manifest"
-
-enforce_cargo_config() {
-  local path="$1"
-  local state="$2"
-  local digest="$3"
-  case "$state" in
-    absent)
-      [ "$digest" = "-" ] || die "absent Cargo config has a digest"
-      [ ! -e "$path" ] && [ ! -L "$path" ] ||
-        die "launch manifest requires absent Cargo config: $path"
-      ;;
-    present)
-      canonical_sha256 "$digest" || die "Cargo config digest is malformed"
-      require_sha256 "$path" "$digest" "Cargo config"
-      ;;
-    *) die "Cargo config state is invalid" ;;
-  esac
-}
-
-[ "${LAUNCH[44]}" = repository/config ] || die "Cargo config scope order differs"
-enforce_cargo_config "$REPO_ROOT/.cargo/config" "${LAUNCH[45]}" "${LAUNCH[46]}"
-[ "${LAUNCH[47]}" = repository/config.toml ] || die "Cargo config scope order differs"
-enforce_cargo_config "$REPO_ROOT/.cargo/config.toml" "${LAUNCH[48]}" "${LAUNCH[49]}"
-[ "${LAUNCH[50]}" = cargo_home/config ] || die "Cargo config scope order differs"
-enforce_cargo_config "$CARGO_HOME/config" "${LAUNCH[51]}" "${LAUNCH[52]}"
-[ "${LAUNCH[53]}" = cargo_home/config.toml ] || die "Cargo config scope order differs"
-enforce_cargo_config "$CARGO_HOME/config.toml" "${LAUNCH[54]}" "${LAUNCH[55]}"
-[ ! -e /.cargo/config ] && [ ! -L /.cargo/config ] ||
-  die "unpinned root Cargo config exists: /.cargo/config"
-[ ! -e /.cargo/config.toml ] && [ ! -L /.cargo/config.toml ] ||
-  die "unpinned root Cargo config exists: /.cargo/config.toml"
 
 clean_git() {
   /usr/bin/env -i \
@@ -630,11 +575,15 @@ cd "$REPO_ROOT"
 STAGE0A_PHASE=verify_checkout
 [ "$(clean_git rev-parse HEAD^{commit})" = "$EXPECTED_REVISION" ] ||
   die "checkout revision differs from the launch manifest"
+[ "$(clean_git rev-parse HEAD^{tree})" = "$EXPECTED_SOURCE_TREE" ] ||
+  die "checkout tree differs from the launch manifest"
 assert_clean_checkout() {
   [ -z "$(clean_git status --porcelain=v1 --untracked-files=all)" ] ||
     die "T11 checkout is dirty"
   [ "$(clean_git rev-parse HEAD^{commit})" = "$EXPECTED_REVISION" ] ||
     die "T11 checkout revision changed"
+  [ "$(clean_git rev-parse HEAD^{tree})" = "$EXPECTED_SOURCE_TREE" ] ||
+    die "T11 checkout tree changed"
 }
 assert_clean_checkout
 
@@ -649,13 +598,13 @@ readonly SOURCE_SNAPSHOT="$PROVENANCE_ROOT/frozen-target.smt2"
 snapshot_file "$TARGET" "$SOURCE_SNAPSHOT" "$SOURCE_BEFORE_SHA256" 0400 ||
   die "could not snapshot frozen target"
 
-readonly BUILD_CLOSURE_ROOT="$RUN_ROOT/build-closure"
-readonly BUILD_CLOSURE_STDOUT="$RUN_ROOT/build-closure.stdout"
-readonly BUILD_CLOSURE_STDERR="$RUN_ROOT/build-closure.stderr"
-readonly BUILD_STDOUT="$RUN_ROOT/build.stdout"
-readonly BUILD_STDERR="$RUN_ROOT/build.stderr"
+readonly PREBUILT_ROOT="$RUN_ROOT/prebuilt-materialization"
+readonly PREBUILT_BUNDLE_STDOUT="$RUN_ROOT/prebuilt-bundle.stdout"
+readonly PREBUILT_BUNDLE_STDERR="$RUN_ROOT/prebuilt-bundle.stderr"
 readonly BINARY="$PROVENANCE_ROOT/euf-viper"
-readonly PRIVATE_CLOSURE_ROOT="$BUILD_CLOSURE_ROOT/extracted"
+readonly BUILD_RECEIPT="$PROVENANCE_ROOT/build-receipt.json"
+readonly DEPENDENCY_INVENTORY="$PROVENANCE_ROOT/dependency-inventory.json"
+readonly PRIVATE_PREBUILT_ROOT="$PREBUILT_ROOT/extracted"
 readonly UNSHARE_TOOL=/usr/bin/unshare
 readonly MOUNT_TOOL=/usr/bin/mount
 readonly BASH_TOOL=/usr/bin/bash
@@ -691,8 +640,8 @@ readonly BASH_TOOL_SHA256="$(sha256_file "$BASH_TOOL")"
 readonly OUTSIDE_UID="$(id -u)"
 readonly OUTSIDE_GID="$(id -g)"
 
-STAGE0A_PHASE=private_build
-mkdir -m 700 "$BUILD_CLOSURE_ROOT"
+STAGE0A_PHASE=materialize_prebuilt_candidate
+mkdir -m 700 "$PREBUILT_ROOT"
 set +e
 bootstrap_python -c '
 import errno
@@ -767,7 +716,7 @@ def open_verified(path, expected, role, executable=False):
 def copy_sealed(path, expected, mode, role):
     source, before = open_verified(path, expected, role, executable=bool(mode & 0o100))
     snapshot = os.memfd_create(
-        f"euf-viper-t11-private-build-{role}",
+        f"euf-viper-t11-prebuilt-materialization-{role}",
         flags=os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC,
     )
     try:
@@ -813,7 +762,7 @@ closure_tool_fd = copy_sealed(
     closure_tool_path, closure_tool_sha256, 0o400, "closure-tool"
 )
 archive_fd, archive_metadata = open_verified(
-    archive_path, archive_sha256, "build-closure archive"
+    archive_path, archive_sha256, "prebuilt-bundle archive"
 )
 replacements = {
     "@ARCHIVE@": f"{proc_root}/{archive_fd}",
@@ -827,7 +776,9 @@ replacements = {
 }
 for placeholder in replacements:
     if command.count(placeholder) != 1:
-        raise RuntimeError(f"private-build placeholder count differs: {placeholder}")
+        raise RuntimeError(
+            f"prebuilt-materialization placeholder count differs: {placeholder}"
+        )
 command = [replacements.get(argument, argument) for argument in command]
 required = {archive_fd, closure_tool_fd, python_fd}
 for entry in os.listdir(proc_root):
@@ -843,7 +794,7 @@ for entry in os.listdir(proc_root):
             raise
 for descriptor in required:
     if not os.get_inheritable(descriptor):
-        raise RuntimeError("private-build descriptor is not inheritable")
+        raise RuntimeError("prebuilt-materialization descriptor is not inheritable")
 os.execve(
     unshare_path,
     [
@@ -859,21 +810,23 @@ os.execve(
 ' \
   "$UNSHARE_TOOL" "$UNSHARE_TOOL_SHA256" \
   "$PYTHON_SNAPSHOT" "$PYTHON_SHA256" \
-  "$BUILD_CLOSURE_TOOL_SNAPSHOT" "$BUILD_CLOSURE_TOOL_SHA256" \
-  "$BUILD_CLOSURE" "$BUILD_CLOSURE_SHA256" \
+  "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" "$PREBUILT_BUNDLE_TOOL_SHA256" \
+  "$PREBUILT_BUNDLE_SNAPSHOT" "$PREBUILT_BUNDLE_SHA256" \
   "$BASH_TOOL" --noprofile --norc -s -- \
-  "$BUILD_CLOSURE_ROOT" @ARCHIVE@ "$BUILD_CLOSURE_SHA256" \
-  @CLOSURE_TOOL@ @PYTHON@ "$CARGO_SHA256" \
-  "$CARGO_VERSION" "$RUSTC_SHA256" "$RUSTC_VERSION" \
-  "$CARGO_TOML_SHA256" "$CARGO_LOCK_SHA256" "$EXPECTED_REVISION" \
-  "$BUILD_CLOSURE_MANIFEST_SHA256" "$BUILD_STDOUT" "$BUILD_STDERR" \
+  "$PREBUILT_ROOT" @ARCHIVE@ "$PREBUILT_BUNDLE_SHA256" \
+  @CLOSURE_TOOL@ @PYTHON@ "$CANDIDATE_SHA256" \
+  "$CANDIDATE_BYTES" "$BUILD_RECEIPT_SHA256" \
+  "$DEPENDENCY_INVENTORY_SHA256" "$EXPECTED_SOURCE_TREE" \
+  "$PREBUILT_BUNDLE_SCHEMA" "$EXPECTED_REVISION" \
+  "$PREBUILT_BUNDLE_MANIFEST_SHA256" "$BUILD_RECEIPT" \
+  "$DEPENDENCY_INVENTORY" \
   "$BINARY" "$OUTSIDE_UID" "$OUTSIDE_GID" \
   "$UNSHARE_TOOL" "$UNSHARE_TOOL_SHA256" \
   "$MOUNT_TOOL" "$MOUNT_TOOL_SHA256" \
   "$BASH_TOOL" "$BASH_TOOL_SHA256" \
   @ARCHIVE_DEVICE@ @ARCHIVE_INODE@ @ARCHIVE_SIZE@ \
-  @ARCHIVE_MTIME_NS@ @ARCHIVE_CTIME_NS@ "$BUILD_CLOSURE" \
-  >"$BUILD_CLOSURE_STDOUT" 2>"$BUILD_CLOSURE_STDERR" <<'PRIVATE_BUILD'
+  @ARCHIVE_MTIME_NS@ @ARCHIVE_CTIME_NS@ "$PREBUILT_BUNDLE_SNAPSHOT" \
+  >"$PREBUILT_BUNDLE_STDOUT" 2>"$PREBUILT_BUNDLE_STDERR" <<'PREBUILT_MATERIALIZATION'
 set -euo pipefail
 umask 077
 
@@ -882,16 +835,16 @@ archive="$2"
 archive_sha256="$3"
 closure_tool="$4"
 python="$5"
-cargo_sha256="$6"
-cargo_version="$7"
-rustc_sha256="$8"
-rustc_version="$9"
-cargo_toml_sha256="${10}"
-cargo_lock_sha256="${11}"
+candidate_sha256="$6"
+candidate_bytes="$7"
+build_receipt_sha256="$8"
+dependency_inventory_sha256="$9"
+source_tree="${10}"
+bundle_schema="${11}"
 revision="${12}"
 manifest_sha256="${13}"
-build_stdout="${14}"
-build_stderr="${15}"
+build_receipt_out="${14}"
+dependency_inventory_out="${15}"
 binary_out="${16}"
 outside_uid="${17}"
 outside_gid="${18}"
@@ -912,13 +865,10 @@ archive_source_path="${30}"
 "$mount_tool" -t tmpfs -o nodev,nosuid,mode=0700,size=7168M \
   tmpfs "$root"
 
-private_closure="$root/extracted"
-private_cargo_home="$root/cargo-home"
-private_target="$root/target"
+extracted_bundle="$root/extracted"
 private_home="$root/home"
-private_tmp="$root/tmp"
-closure_report="$root/closure-report.json"
-mkdir -m 700 "$private_cargo_home" "$private_target" "$private_home" "$private_tmp"
+bundle_report="$root/bundle-report.json"
+mkdir -m 700 "$private_home"
 
 private_python() {
   /usr/bin/env -i \
@@ -928,17 +878,12 @@ private_python() {
 
 private_python "$closure_tool" extract \
   --archive "$archive" --sha256 "$archive_sha256" \
-  --destination "$private_closure" >"$closure_report"
+  --destination "$extracted_bundle" >"$bundle_report"
 
-payload="$private_closure/payload"
-source_root="$payload/source-tree"
-cargo="$payload/cargo-executable"
-cargo_home="$payload/cargo-home"
-rustc="$payload/rustc-executable"
-native_compiler="$payload/native-compiler"
-native_archiver="$payload/native-archiver"
-native_linker="$payload/native-linker"
-native_libs="$payload/native-libs"
+payload="$extracted_bundle/payload"
+candidate="$payload/candidate-binary"
+build_receipt="$payload/build-receipt"
+dependency_inventory="$payload/dependency-inventory"
 
 private_python -c '
 import hashlib,os,stat,sys
@@ -948,48 +893,22 @@ for path, expected, label in zip(sys.argv[1::3], sys.argv[2::3], sys.argv[3::3])
     digest=hashlib.sha256(open(path,"rb").read()).hexdigest()
     if digest != expected: raise SystemExit(f"{label} SHA-256 mismatch")
 ' \
-  "$cargo" "$cargo_sha256" cargo \
-  "$rustc" "$rustc_sha256" rustc \
-  "$source_root/Cargo.toml" "$cargo_toml_sha256" Cargo.toml \
-  "$source_root/Cargo.lock" "$cargo_lock_sha256" Cargo.lock
-
-[ "$(/usr/bin/env -i HOME="$private_home" LANG=C LC_ALL=C TZ=UTC \
-  PATH=/usr/bin:/bin "$cargo" --version)" = "$cargo_version" ]
-[ "$(/usr/bin/env -i HOME="$private_home" LANG=C LC_ALL=C TZ=UTC \
-  PATH=/usr/bin:/bin "$rustc" --version)" = "$rustc_version" ]
-[ -d "$cargo_home/registry" ] && [ ! -L "$cargo_home/registry" ]
-private_python -c '
-import os,sys
-source,destination,parent=sys.argv[1:]
-os.symlink(source,destination)
-descriptor=os.open(parent,os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC)
-os.fsync(descriptor); os.close(descriptor)
-' "$cargo_home/registry" "$private_cargo_home/registry" "$private_cargo_home"
-
-(
-  cd /
-  /usr/bin/env -i \
-    HOME="$private_home" LANG=C LC_ALL=C TZ=UTC PATH=/usr/bin:/bin \
-    TMPDIR="$private_tmp" OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
-    RAYON_NUM_THREADS=1 CARGO_HOME="$private_cargo_home" \
-    CARGO_TARGET_DIR="$private_target" CARGO_NET_OFFLINE=true \
-    RUSTC="$rustc" CC="$native_compiler" CXX="$native_compiler" \
-    AR="$native_archiver" \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="$native_linker" \
-    LIBRARY_PATH="$native_libs" LD_LIBRARY_PATH="$native_libs" \
-    EUF_VIPER_T11_BUILD_STDOUT="$build_stdout" \
-    "$cargo" build --manifest-path "$source_root/Cargo.toml" \
-    --locked --offline --features certificates --release
-) >"$build_stdout" 2>"$build_stderr"
+  "$candidate" "$candidate_sha256" candidate \
+  "$build_receipt" "$build_receipt_sha256" build-receipt \
+  "$dependency_inventory" "$dependency_inventory_sha256" dependency-inventory
 
 private_python - \
-  "$closure_report" "$archive_sha256" "$manifest_sha256" "$revision" \
-  "$private_closure" "$root" "$private_target/release/euf-viper" \
+  "$bundle_report" "$archive_sha256" "$manifest_sha256" "$revision" \
+  "$source_tree" "$bundle_schema" "$candidate_sha256" "$candidate_bytes" \
+  "$build_receipt_sha256" "$dependency_inventory_sha256" \
+  "$extracted_bundle" "$root" "$candidate" \
+  "$build_receipt" "$dependency_inventory" \
+  "$build_receipt_out" "$dependency_inventory_out" \
   "$binary_out" "$outside_uid" "$outside_gid" \
   "$unshare_tool" "$unshare_sha256" "$mount_tool" "$mount_sha256" \
   "$bash_tool" "$bash_sha256" "$archive" "$archive_source_path" \
   "$archive_device" "$archive_inode" "$archive_size" \
-  "$archive_mtime_ns" "$archive_ctime_ns" <<'PRIVATE_BUILD_REPORT_PY'
+  "$archive_mtime_ns" "$archive_ctime_ns" <<'PREBUILT_MATERIALIZATION_REPORT_PY'
 import hashlib
 import json
 import os
@@ -998,13 +917,23 @@ import stat
 import sys
 
 (
-    closure_report_path,
+    bundle_report_path,
     archive_sha256,
     manifest_sha256,
     revision,
-    private_closure,
+    source_tree,
+    bundle_schema,
+    candidate_sha256,
+    candidate_bytes,
+    build_receipt_sha256,
+    dependency_inventory_sha256,
+    extracted_bundle,
     root,
-    built_binary,
+    candidate_binary,
+    build_receipt,
+    dependency_inventory,
+    build_receipt_out,
+    dependency_inventory_out,
     binary_out,
     outside_uid,
     outside_gid,
@@ -1037,25 +966,30 @@ def canonical(value):
     ).encode("ascii")
 
 
-encoded = open(closure_report_path, "rb").read()
-closure = json.loads(encoded)
-if encoded != canonical(closure):
-    raise SystemExit("build-closure report is not canonical")
-expected_closure = {
+encoded = open(bundle_report_path, "rb").read()
+bundle = json.loads(encoded)
+if encoded != canonical(bundle):
+    raise SystemExit("prebuilt-bundle report is not canonical")
+expected_bundle = {
     "archive_sha256": archive_sha256,
+    "build_receipt_sha256": build_receipt_sha256,
+    "candidate_sha256": candidate_sha256,
+    "dependency_inventory_sha256": dependency_inventory_sha256,
+    "entries": 4,
     "manifest_sha256": manifest_sha256,
-    "schema": "euf-viper.t11-build-closure.v1",
-    "source_revision": revision,
+    "schema": bundle_schema,
+    "source_commit": revision,
+    "source_tree": source_tree,
     "status": "verified",
-    "destination": private_closure,
+    "destination": extracted_bundle,
 }
-for key, value in expected_closure.items():
-    if closure.get(key) != value:
-        raise SystemExit(f"build-closure report mismatch: {key}")
+for key, value in expected_bundle.items():
+    if bundle.get(key) != value:
+        raise SystemExit(f"prebuilt-bundle report mismatch: {key}")
 
 descriptor_match = re.fullmatch(r"/proc/self/fd/([1-9][0-9]*)", archive_descriptor_path)
 if descriptor_match is None:
-    raise SystemExit("build-closure archive is not descriptor-bound")
+    raise SystemExit("prebuilt-bundle archive is not descriptor-bound")
 archive_fd = os.dup(int(descriptor_match.group(1)))
 try:
     archive_before = os.fstat(archive_fd)
@@ -1074,7 +1008,9 @@ try:
         archive_before.st_ctime_ns,
     )
     if observed_archive_identity != expected_archive_identity:
-        raise SystemExit("build-closure archive identity changed before final verification")
+        raise SystemExit(
+            "prebuilt-bundle archive identity changed before final verification"
+        )
     archive_digest = hashlib.sha256()
     os.lseek(archive_fd, 0, os.SEEK_SET)
     while True:
@@ -1098,7 +1034,7 @@ if (
     != expected_archive_identity
     or archive_digest.hexdigest() != archive_sha256
 ):
-    raise SystemExit("build-closure archive changed during the private build")
+    raise SystemExit("prebuilt bundle changed during materialization")
 archive_binding = {
     "bytes": archive_after.st_size,
     "ctime_ns": archive_after.st_ctime_ns,
@@ -1125,11 +1061,11 @@ def parse_id_map(path):
 uid_map = parse_id_map("/proc/self/uid_map")
 gid_map = parse_id_map("/proc/self/gid_map")
 if uid_map != [[0, int(outside_uid), 1]]:
-    raise SystemExit("private build UID mapping differs")
+    raise SystemExit("prebuilt materialization UID mapping differs")
 if gid_map != [[0, int(outside_gid), 1]]:
-    raise SystemExit("private build GID mapping differs")
+    raise SystemExit("prebuilt materialization GID mapping differs")
 if os.getuid() != 0 or os.getgid() != 0:
-    raise SystemExit("private build did not enter namespace root")
+    raise SystemExit("prebuilt materialization did not enter namespace root")
 
 
 def unescape_mount(value):
@@ -1148,19 +1084,19 @@ for line in open("/proc/self/mountinfo", "r", encoding="ascii"):
         mount_record = (fields, separator)
         break
 if mount_record is None:
-    raise SystemExit("private build tmpfs mount is absent")
+    raise SystemExit("prebuilt materialization tmpfs mount is absent")
 fields, separator = mount_record
 if fields[separator + 1] != "tmpfs":
-    raise SystemExit("private build filesystem is not tmpfs")
+    raise SystemExit("prebuilt materialization filesystem is not tmpfs")
 optional_fields = fields[6:separator]
 if any(value.startswith(("shared:", "master:", "propagate_from:")) for value in optional_fields):
-    raise SystemExit("private build mount propagation is not private")
+    raise SystemExit("prebuilt materialization mount propagation is not private")
 mount_options = sorted(
     set(fields[5].split(",")) | set(fields[separator + 3].split(","))
 )
 for required in ("rw", "nosuid", "nodev"):
     if required not in mount_options:
-        raise SystemExit(f"private build mount lacks {required}")
+        raise SystemExit(f"prebuilt materialization mount lacks {required}")
 
 
 def identity(value):
@@ -1175,74 +1111,97 @@ def identity(value):
     )
 
 
-source_fd = os.open(
-    built_binary,
-    os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-)
-parent_fd = os.open(
-    os.path.dirname(binary_out),
-    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
-)
-output_fd = None
-try:
-    source_before = os.fstat(source_fd)
-    if not stat.S_ISREG(source_before.st_mode) or source_before.st_nlink != 1:
-        raise SystemExit("private build binary is not a unique regular file")
-    output_fd = os.open(
-        os.path.basename(binary_out),
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
-        0o600,
-        dir_fd=parent_fd,
+def publish(source_path, output_path, expected_sha256, mode, artifact):
+    source_fd = os.open(
+        source_path,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
     )
-    digest = hashlib.sha256()
-    copied = 0
-    while True:
-        block = os.read(source_fd, 1024 * 1024)
-        if not block:
-            break
-        digest.update(block)
-        view = memoryview(block)
-        while view:
-            written = os.write(output_fd, view)
-            if written <= 0:
-                raise SystemExit("short private binary publication")
-            view = view[written:]
-        copied += len(block)
-    source_after = os.fstat(source_fd)
-    if identity(source_before) != identity(source_after) or copied != source_after.st_size:
-        raise SystemExit("private build binary changed while published")
-    os.fsync(output_fd)
-    os.fchmod(output_fd, 0o500)
-    os.fsync(output_fd)
-    os.fsync(parent_fd)
-    published = os.fstat(output_fd)
-finally:
-    if output_fd is not None:
+    parent_fd = os.open(
+        os.path.dirname(output_path),
+        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC,
+    )
+    output_fd = None
+    try:
+        source_before = os.fstat(source_fd)
+        if not stat.S_ISREG(source_before.st_mode) or source_before.st_nlink != 1:
+            raise SystemExit(f"prebuilt {artifact} is not a unique regular file")
+        output_fd = os.open(
+            os.path.basename(output_path),
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        digest = hashlib.sha256()
+        copied = 0
+        while True:
+            block = os.read(source_fd, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            view = memoryview(block)
+            while view:
+                written = os.write(output_fd, view)
+                if written <= 0:
+                    raise SystemExit(f"short prebuilt {artifact} publication")
+                view = view[written:]
+            copied += len(block)
+        source_after = os.fstat(source_fd)
+        if identity(source_before) != identity(source_after) or copied != source_after.st_size:
+            raise SystemExit(f"prebuilt {artifact} changed while published")
+        if digest.hexdigest() != expected_sha256:
+            raise SystemExit(f"prebuilt {artifact} SHA-256 differs")
+        os.fsync(output_fd)
+        os.fchmod(output_fd, mode)
+        os.fsync(output_fd)
+        published = os.fstat(output_fd)
         os.close(output_fd)
-    os.close(parent_fd)
-    os.close(source_fd)
+        output_fd = None
+        os.fsync(parent_fd)
+    finally:
+        if output_fd is not None:
+            os.close(output_fd)
+        os.close(parent_fd)
+        os.close(source_fd)
+    named = os.stat(output_path, follow_symlinks=False)
+    if identity(named) != identity(published):
+        raise SystemExit(f"published {artifact} pathname identity differs")
+    return {
+        "artifact": artifact,
+        "bytes": published.st_size,
+        "ctime_ns": published.st_ctime_ns,
+        "device": published.st_dev,
+        "inode": published.st_ino,
+        "links": published.st_nlink,
+        "mode": f"{stat.S_IMODE(published.st_mode):04o}",
+        "mtime_ns": published.st_mtime_ns,
+        "path": output_path,
+        "schema": "euf-viper.t11-publication-binding.v1",
+        "sha256": expected_sha256,
+    }
 
-named = os.stat(binary_out, follow_symlinks=False)
-if identity(named) != identity(published):
-    raise SystemExit("published binary pathname identity differs")
-binary_binding = {
-    "artifact": "binary",
-    "bytes": published.st_size,
-    "ctime_ns": published.st_ctime_ns,
-    "device": published.st_dev,
-    "inode": published.st_ino,
-    "links": published.st_nlink,
-    "mode": f"{stat.S_IMODE(published.st_mode):04o}",
-    "mtime_ns": published.st_mtime_ns,
-    "path": binary_out,
-    "schema": "euf-viper.t11-publication-binding.v1",
-    "sha256": digest.hexdigest(),
-}
+
+binary_binding = publish(
+    candidate_binary, binary_out, candidate_sha256, 0o500, "binary"
+)
+if binary_binding["bytes"] != int(candidate_bytes):
+    raise SystemExit("prebuilt candidate byte count differs")
+receipt_binding = publish(
+    build_receipt, build_receipt_out, build_receipt_sha256, 0o400, "build receipt"
+)
+dependency_binding = publish(
+    dependency_inventory,
+    dependency_inventory_out,
+    dependency_inventory_sha256,
+    0o400,
+    "dependency inventory",
+)
 
 report = {
     "archive": archive_binding,
     "binary": binary_binding,
-    "build_closure": closure,
+    "build_receipt": receipt_binding,
+    "dependency_inventory": dependency_binding,
+    "prebuilt_bundle": bundle,
     "enforcement_tools": {
         "bash": {"path": bash_tool, "sha256": bash_sha256},
         "mount": {"path": mount_tool, "sha256": mount_sha256},
@@ -1259,40 +1218,42 @@ report = {
         "uid_map": uid_map,
         "user_namespace": True,
     },
-    "schema": "euf-viper.t11-private-build.v1",
+    "schema": "euf-viper.t11-prebuilt-materialization.v1",
     "status": "verified",
 }
 sys.stdout.buffer.write(canonical(report))
-PRIVATE_BUILD_REPORT_PY
-PRIVATE_BUILD
+PREBUILT_MATERIALIZATION_REPORT_PY
+PREBUILT_MATERIALIZATION
 BUILD_EXIT=$?
 set -e
-for artifact in \
-  "$BUILD_CLOSURE_STDOUT" "$BUILD_CLOSURE_STDERR" \
-  "$BUILD_STDOUT" "$BUILD_STDERR"; do
+for artifact in "$PREBUILT_BUNDLE_STDOUT" "$PREBUILT_BUNDLE_STDERR"; do
   [ -f "$artifact" ] && [ ! -L "$artifact" ] ||
-    die "private build omitted an expected output: $artifact"
+    die "prebuilt materialization omitted an expected output: $artifact"
   chmod 400 "$artifact"
   fsync_path "$artifact"
 done
-[ "$BUILD_EXIT" -eq 0 ] || die "private tmpfs certificate build failed"
-[ ! -s "$BUILD_CLOSURE_STDERR" ] ||
-  die "private build controller emitted stderr"
-[ -d "$BUILD_CLOSURE_ROOT" ] && [ ! -L "$BUILD_CLOSURE_ROOT" ] ||
-  die "private build mountpoint vanished or became a symlink"
-[ "$(stat -c '%a' "$BUILD_CLOSURE_ROOT")" = 700 ] ||
-  die "private build host mountpoint mode changed"
+[ "$BUILD_EXIT" -eq 0 ] || die "prebuilt candidate materialization failed"
+[ ! -s "$PREBUILT_BUNDLE_STDERR" ] ||
+  die "prebuilt materialization controller emitted stderr"
+[ -d "$PREBUILT_ROOT" ] && [ ! -L "$PREBUILT_ROOT" ] ||
+  die "prebuilt materialization mountpoint vanished or became a symlink"
+[ "$(stat -c '%a' "$PREBUILT_ROOT")" = 700 ] ||
+  die "prebuilt materialization host mountpoint mode changed"
 pinned_python -c '
 import os,sys
 if os.listdir(sys.argv[1]):
-    raise SystemExit("private build tree propagated into the host mount namespace")
-' "$BUILD_CLOSURE_ROOT" || die "private build state escaped its mount namespace"
+    raise SystemExit("prebuilt materialization tree propagated into the host mount namespace")
+' "$PREBUILT_ROOT" || die "prebuilt state escaped its mount namespace"
 
 BINARY_BEFORE_SHA256_VALUE="$(pinned_python - \
-  "$BUILD_CLOSURE_STDOUT" "$BINARY" "$BUILD_CLOSURE" \
-  "$BUILD_CLOSURE_SHA256" \
-  "$BUILD_CLOSURE_MANIFEST_SHA256" "$EXPECTED_REVISION" \
-  "$PRIVATE_CLOSURE_ROOT" "$OUTSIDE_UID" "$OUTSIDE_GID" \
+  "$PREBUILT_BUNDLE_STDOUT" "$BINARY" "$BUILD_RECEIPT" \
+  "$DEPENDENCY_INVENTORY" "$PREBUILT_BUNDLE_SNAPSHOT" \
+  "$PREBUILT_BUNDLE_SHA256" \
+  "$PREBUILT_BUNDLE_MANIFEST_SHA256" "$PREBUILT_BUNDLE_SCHEMA" \
+  "$EXPECTED_REVISION" "$EXPECTED_SOURCE_TREE" "$CANDIDATE_SHA256" \
+  "$CANDIDATE_BYTES" "$BUILD_RECEIPT_SHA256" \
+  "$DEPENDENCY_INVENTORY_SHA256" \
+  "$PRIVATE_PREBUILT_ROOT" "$OUTSIDE_UID" "$OUTSIDE_GID" \
   "$UNSHARE_TOOL" "$UNSHARE_TOOL_SHA256" \
   "$MOUNT_TOOL" "$MOUNT_TOOL_SHA256" \
   "$BASH_TOOL" "$BASH_TOOL_SHA256" <<'PY'
@@ -1305,10 +1266,18 @@ import sys
 (
     report_path,
     binary_path,
+    build_receipt_path,
+    dependency_inventory_path,
     archive_path,
     archive_sha256,
     manifest_sha256,
+    bundle_schema,
     revision,
+    source_tree,
+    candidate_sha256,
+    candidate_bytes,
+    build_receipt_sha256,
+    dependency_inventory_sha256,
     destination,
     outside_uid,
     outside_gid,
@@ -1332,35 +1301,43 @@ canonical = (
     + "\n"
 ).encode("ascii")
 if encoded != canonical:
-    raise SystemExit("private-build report is not canonical")
-if set(record) != {"archive", "binary", "build_closure", "enforcement_tools", "isolation", "schema", "status"}:
-    raise SystemExit("private-build report keys differ")
-if record["schema"] != "euf-viper.t11-private-build.v1" or record["status"] != "verified":
-    raise SystemExit("private-build report status differs")
-closure = record["build_closure"]
-expected_closure = {
+    raise SystemExit("prebuilt-materialization report is not canonical")
+if set(record) != {
+    "archive", "binary", "build_receipt", "dependency_inventory",
+    "enforcement_tools", "isolation", "prebuilt_bundle", "schema", "status",
+}:
+    raise SystemExit("prebuilt-materialization report keys differ")
+if record["schema"] != "euf-viper.t11-prebuilt-materialization.v1" or record["status"] != "verified":
+    raise SystemExit("prebuilt-materialization report status differs")
+bundle = record["prebuilt_bundle"]
+expected_bundle = {
     "archive_sha256": archive_sha256,
+    "build_receipt_sha256": build_receipt_sha256,
+    "candidate_sha256": candidate_sha256,
+    "dependency_inventory_sha256": dependency_inventory_sha256,
     "destination": destination,
+    "entries": 4,
     "manifest_sha256": manifest_sha256,
-    "schema": "euf-viper.t11-build-closure.v1",
-    "source_revision": revision,
+    "schema": bundle_schema,
+    "source_commit": revision,
+    "source_tree": source_tree,
     "status": "verified",
 }
-for key, value in expected_closure.items():
-    if closure.get(key) != value:
-        raise SystemExit(f"private-build closure mismatch: {key}")
+for key, value in expected_bundle.items():
+    if bundle.get(key) != value:
+        raise SystemExit(f"prebuilt-bundle mismatch: {key}")
 archive_binding = record["archive"]
 if set(archive_binding) != {
     "bytes", "ctime_ns", "device", "inode", "links", "mode", "mtime_ns",
     "path", "sha256",
 }:
-    raise SystemExit("private-build archive binding keys differ")
+    raise SystemExit("prebuilt-materialization archive binding keys differ")
 if (
     archive_binding["path"] != archive_path
     or archive_binding["sha256"] != archive_sha256
     or archive_binding["links"] != 1
 ):
-    raise SystemExit("private-build archive binding identity differs")
+    raise SystemExit("prebuilt-materialization archive binding identity differs")
 archive_fd = os.open(
     archive_path,
     os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
@@ -1381,7 +1358,7 @@ archive_identity = lambda value: (
     value.st_mtime_ns, value.st_ctime_ns,
 )
 if archive_identity(archive_before) != archive_identity(archive_after):
-    raise SystemExit("build-closure archive changed during final host verification")
+    raise SystemExit("prebuilt-bundle archive changed during final host verification")
 expected_archive_binding = {
     "bytes": archive_after.st_size,
     "ctime_ns": archive_after.st_ctime_ns,
@@ -1394,14 +1371,14 @@ expected_archive_binding = {
     "sha256": archive_digest.hexdigest(),
 }
 if archive_binding != expected_archive_binding or archive_after.st_mode & 0o222:
-    raise SystemExit("private-build archive changed after namespace exit")
+    raise SystemExit("prebuilt-materialization archive changed after namespace exit")
 expected_tools = {
     "bash": {"path": bash_path, "sha256": bash_sha256},
     "mount": {"path": mount_path, "sha256": mount_sha256},
     "unshare": {"path": unshare_path, "sha256": unshare_sha256},
 }
 if record["enforcement_tools"] != expected_tools:
-    raise SystemExit("private-build enforcement tools differ")
+    raise SystemExit("prebuilt-materialization enforcement tools differ")
 isolation = record["isolation"]
 if set(isolation) != {
     "filesystem",
@@ -1414,7 +1391,7 @@ if set(isolation) != {
     "uid_map",
     "user_namespace",
 }:
-    raise SystemExit("private-build isolation keys differ")
+    raise SystemExit("prebuilt-materialization isolation keys differ")
 if (
     isolation["filesystem"] != "tmpfs"
     or isolation["mount_propagation"] != "private"
@@ -1425,68 +1402,154 @@ if (
     or isolation["uid_map"] != [[0, int(outside_uid), 1]]
     or isolation["gid_map"] != [[0, int(outside_gid), 1]]
 ):
-    raise SystemExit("private-build isolation attestation differs")
+    raise SystemExit("prebuilt-materialization isolation attestation differs")
 if not {"rw", "nosuid", "nodev"}.issubset(isolation["mount_options"]):
-    raise SystemExit("private-build mount options differ")
+    raise SystemExit("prebuilt-materialization mount options differ")
 
-binding = record["binary"]
 expected_binding_keys = {
     "artifact", "bytes", "ctime_ns", "device", "inode", "links",
     "mode", "mtime_ns", "path", "schema", "sha256",
 }
-if set(binding) != expected_binding_keys:
-    raise SystemExit("private-build binary binding keys differ")
-if (
-    binding["artifact"] != "binary"
-    or binding["path"] != binary_path
-    or binding["schema"] != "euf-viper.t11-publication-binding.v1"
-    or binding["mode"] != "0500"
-    or binding["links"] != 1
-):
-    raise SystemExit("private-build binary binding identity differs")
-descriptor = os.open(
-    binary_path,
-    os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
-)
-try:
-    before = os.fstat(descriptor)
-    digest = hashlib.sha256()
-    size = 0
-    while True:
-        block = os.read(descriptor, 1024 * 1024)
-        if not block:
-            break
-        digest.update(block)
-        size += len(block)
-    after = os.fstat(descriptor)
-finally:
-    os.close(descriptor)
 identity = lambda value: (
     value.st_dev, value.st_ino, value.st_mode, value.st_nlink, value.st_size,
     value.st_mtime_ns, value.st_ctime_ns,
 )
-if identity(before) != identity(after):
-    raise SystemExit("published private-build binary changed while read")
-named = os.stat(binary_path, follow_symlinks=False)
-if identity(named) != identity(after):
-    raise SystemExit("published private-build binary pathname changed")
-expected_binding = {
-    "bytes": size,
-    "ctime_ns": after.st_ctime_ns,
-    "device": after.st_dev,
-    "inode": after.st_ino,
-    "links": after.st_nlink,
-    "mode": f"{stat.S_IMODE(after.st_mode):04o}",
-    "mtime_ns": after.st_mtime_ns,
-    "sha256": digest.hexdigest(),
-}
-for key, value in expected_binding.items():
-    if binding[key] != value:
-        raise SystemExit(f"private-build binary {key} differs from its producer binding")
-print(binding["sha256"])
+
+
+def verify_binding(binding, path, expected_sha256, expected_bytes, mode, artifact):
+    if set(binding) != expected_binding_keys:
+        raise SystemExit(f"prebuilt {artifact} binding keys differ")
+    if (
+        binding["artifact"] != artifact
+        or binding["path"] != path
+        or binding["schema"] != "euf-viper.t11-publication-binding.v1"
+        or binding["mode"] != mode
+        or binding["links"] != 1
+    ):
+        raise SystemExit(f"prebuilt {artifact} binding identity differs")
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        before = os.fstat(descriptor)
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            size += len(block)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if identity(before) != identity(after) or identity(os.stat(path, follow_symlinks=False)) != identity(after):
+        raise SystemExit(f"published prebuilt {artifact} changed while read")
+    expected = {
+        "bytes": size,
+        "ctime_ns": after.st_ctime_ns,
+        "device": after.st_dev,
+        "inode": after.st_ino,
+        "links": after.st_nlink,
+        "mode": f"{stat.S_IMODE(after.st_mode):04o}",
+        "mtime_ns": after.st_mtime_ns,
+        "sha256": digest.hexdigest(),
+    }
+    if digest.hexdigest() != expected_sha256 or (
+        expected_bytes is not None and size != int(expected_bytes)
+    ):
+        raise SystemExit(f"published prebuilt {artifact} content differs")
+    for key, value in expected.items():
+        if binding[key] != value:
+            raise SystemExit(f"prebuilt {artifact} {key} differs from its producer binding")
+
+
+verify_binding(record["binary"], binary_path, candidate_sha256, candidate_bytes, "0500", "binary")
+verify_binding(
+    record["build_receipt"], build_receipt_path, build_receipt_sha256,
+    None, "0400", "build receipt",
+)
+verify_binding(
+    record["dependency_inventory"], dependency_inventory_path,
+    dependency_inventory_sha256, None, "0400", "dependency inventory",
+)
+print(candidate_sha256)
 PY
-)" || die "private build report or binary binding differs"
+)" || die "prebuilt materialization report or artifact binding differs"
 readonly BINARY_BEFORE_SHA256="$BINARY_BEFORE_SHA256_VALUE"
+
+validate_runtime_dependencies() {
+  pinned_python - "$DEPENDENCY_INVENTORY" "$CANDIDATE_SHA256" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+
+path, candidate_sha256 = sys.argv[1:]
+encoded = open(path, "rb").read()
+inventory = json.loads(encoded)
+canonical = (
+    json.dumps(inventory, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":"))
+    + "\n"
+).encode("ascii")
+if encoded != canonical:
+    raise SystemExit("dependency inventory is not canonical")
+if set(inventory) != {"candidate_sha256", "platform", "runtime_files", "schema"}:
+    raise SystemExit("dependency inventory fields differ")
+if (
+    inventory["schema"] != "euf-viper.t11-binary-dependencies.v1"
+    or inventory["platform"] != "linux-x86_64"
+    or inventory["candidate_sha256"] != candidate_sha256
+    or not isinstance(inventory["runtime_files"], list)
+):
+    raise SystemExit("dependency inventory contract differs")
+observed = []
+for index, record in enumerate(inventory["runtime_files"]):
+    if not isinstance(record, dict) or set(record) != {"path", "sha256"}:
+        raise SystemExit(f"runtime dependency {index} fields differ")
+    dependency = record["path"]
+    expected = record["sha256"]
+    if (
+        not isinstance(dependency, str)
+        or not os.path.isabs(dependency)
+        or os.path.realpath(dependency) != dependency
+        or not isinstance(expected, str)
+        or len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        raise SystemExit(f"runtime dependency {index} identity is malformed")
+    descriptor = os.open(
+        dependency,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise SystemExit(f"runtime dependency {dependency!r} is not regular")
+        digest = hashlib.sha256()
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    identity = lambda value: (
+        value.st_dev, value.st_ino, value.st_mode, value.st_nlink,
+        value.st_size, value.st_mtime_ns, value.st_ctime_ns,
+    )
+    if identity(before) != identity(after) or digest.hexdigest() != expected:
+        raise SystemExit(f"runtime dependency {dependency!r} changed or mismatched")
+    observed.append((dependency, expected))
+if observed != sorted(set(observed), key=lambda value: value[0].encode("utf-8")):
+    raise SystemExit("runtime dependencies are duplicated or not byte-sorted")
+PY
+}
+
+validate_runtime_dependencies || die "prebuilt runtime dependency validation failed"
 assert_clean_checkout
 
 readonly BUNDLE="$RUN_ROOT/projection-bundle.json"
@@ -2131,7 +2194,8 @@ finally:
     os.close(parent_fd)
 PY
   for artifact in \
-    "$BUILD_STDOUT" "$BUILD_STDERR" "$PROJECT_STDOUT" "$PROJECT_STDERR" \
+    "$PREBUILT_BUNDLE_STDOUT" "$PREBUILT_BUNDLE_STDERR" \
+    "$PROJECT_STDOUT" "$PROJECT_STDERR" \
     "$AUDIT_STDOUT" "$AUDIT_STDERR" "$BUNDLE" "$RECEIPT"; do
     if [ -f "$artifact" ] && [ ! -L "$artifact" ]; then
       chmod 400 "$artifact"
@@ -2212,6 +2276,8 @@ readonly BUNDLE_AUDIT_SHA256="$BUNDLE_AUDIT_SHA256_VALUE"
 if [ "$AUDIT_EXIT" -eq 3 ]; then
   scientific_reject external_auditor_rejected 4 3
 fi
+validate_runtime_dependencies ||
+  die "prebuilt runtime dependencies changed during Stage 0A"
 readonly BINARY_AFTER_SHA256="$(sha256_file "$BINARY")"
 readonly SOURCE_AFTER_SHA256="$(sha256_file "$TARGET")"
 [ "$BUNDLE_AUDIT_SHA256" = "$BUNDLE_PROJECT_SHA256" ] ||
@@ -2228,10 +2294,8 @@ verify_publication_binding "$PROJECT_STDOUT" "$BUNDLE" bundle >/dev/null ||
   die "bundle changed before independent validation"
 verify_publication_binding "$AUDIT_STDOUT" "$RECEIPT" "audit receipt" >/dev/null ||
   die "audit receipt changed before independent validation"
-readonly BUILD_STDOUT_SHA256="$(sha256_file "$BUILD_STDOUT")"
-readonly BUILD_STDERR_SHA256="$(sha256_file "$BUILD_STDERR")"
-readonly BUILD_CLOSURE_STDOUT_SHA256="$(sha256_file "$BUILD_CLOSURE_STDOUT")"
-readonly BUILD_CLOSURE_STDERR_SHA256="$(sha256_file "$BUILD_CLOSURE_STDERR")"
+readonly PREBUILT_BUNDLE_STDOUT_SHA256="$(sha256_file "$PREBUILT_BUNDLE_STDOUT")"
+readonly PREBUILT_BUNDLE_STDERR_SHA256="$(sha256_file "$PREBUILT_BUNDLE_STDERR")"
 readonly PROJECT_STDOUT_SHA256="$(sha256_file "$PROJECT_STDOUT")"
 readonly PROJECT_STDERR_SHA256="$(sha256_file "$PROJECT_STDERR")"
 readonly AUDIT_STDOUT_SHA256="$(sha256_file "$AUDIT_STDOUT")"
@@ -2244,11 +2308,10 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --input @RECEIPT@ "$RECEIPT" "$RECEIPT_SHA256" \
   --input @BINARY@ "$BINARY" "$BINARY_AFTER_SHA256" \
   --input @LAUNCH_MANIFEST@ "$LAUNCH_MANIFEST_SNAPSHOT" "$LAUNCH_MANIFEST_SHA256" \
-  --input @CARGO@ "$CARGO_SNAPSHOT" "$CARGO_SHA256" \
-  --input @RUSTC@ "$RUSTC_SNAPSHOT" "$RUSTC_SHA256" \
   --input @PYTHON_TOOL@ "$PYTHON_SNAPSHOT" "$PYTHON_SHA256" \
-  --input @CARGO_TOML@ "$CARGO_TOML_SNAPSHOT" "$CARGO_TOML_SHA256" \
-  --input @CARGO_LOCK@ "$CARGO_LOCK_SNAPSHOT" "$CARGO_LOCK_SHA256" \
+  --input @BUILD_RECEIPT@ "$BUILD_RECEIPT" "$BUILD_RECEIPT_SHA256" \
+  --input @DEPENDENCY_INVENTORY@ "$DEPENDENCY_INVENTORY" "$DEPENDENCY_INVENTORY_SHA256" \
+  --input @PREBUILT_BUNDLE@ "$PREBUILT_BUNDLE_SNAPSHOT" "$PREBUILT_BUNDLE_SHA256" \
   --input @DESIGN_NOTE@ "$DESIGN_NOTE_SNAPSHOT" "$DESIGN_NOTE_SHA256" \
   --input @HASH_CONTRACT@ "$HASH_CONTRACT_SNAPSHOT" "$HASH_CONTRACT_SHA256" \
   --input @AUDIT_CONTRACT@ "$AUDIT_CONTRACT_SNAPSHOT" "$AUDIT_CONTRACT_SHA256" \
@@ -2259,11 +2322,9 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --input @AUTHORIZER@ "$AUTHORIZER_SNAPSHOT" "$AUTHORIZER_SHA256" \
   --input @EXEC_HELPER@ "$EXEC_HELPER_SNAPSHOT" "$EXEC_HELPER_SHA256" \
   --input @CONTROL_GIT@ "$CONTROL_GIT_SNAPSHOT" "$CONTROL_GIT_SHA256" \
-  --input @BUILD_CLOSURE_TOOL@ "$BUILD_CLOSURE_TOOL_SNAPSHOT" "$BUILD_CLOSURE_TOOL_SHA256" \
-  --input @BUILD_CLOSURE_STDOUT@ "$BUILD_CLOSURE_STDOUT" "$BUILD_CLOSURE_STDOUT_SHA256" \
-  --input @BUILD_CLOSURE_STDERR@ "$BUILD_CLOSURE_STDERR" "$BUILD_CLOSURE_STDERR_SHA256" \
-  --input @BUILD_STDOUT@ "$BUILD_STDOUT" "$BUILD_STDOUT_SHA256" \
-  --input @BUILD_STDERR@ "$BUILD_STDERR" "$BUILD_STDERR_SHA256" \
+  --input @PREBUILT_BUNDLE_TOOL@ "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" "$PREBUILT_BUNDLE_TOOL_SHA256" \
+  --input @PREBUILT_BUNDLE_STDOUT@ "$PREBUILT_BUNDLE_STDOUT" "$PREBUILT_BUNDLE_STDOUT_SHA256" \
+  --input @PREBUILT_BUNDLE_STDERR@ "$PREBUILT_BUNDLE_STDERR" "$PREBUILT_BUNDLE_STDERR_SHA256" \
   --input @PROJECT_STDOUT@ "$PROJECT_STDOUT" "$PROJECT_STDOUT_SHA256" \
   --input @PROJECT_STDERR@ "$PROJECT_STDERR" "$PROJECT_STDERR_SHA256" \
   --input @AUDIT_STDOUT@ "$AUDIT_STDOUT" "$AUDIT_STDOUT_SHA256" \
@@ -2285,11 +2346,10 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --audit-exit "$AUDIT_EXIT" \
   --artifact source "$TARGET" @SOURCE@ \
   --artifact binary "$BINARY" @BINARY@ \
-  --artifact cargo "$CARGO" @CARGO@ \
-  --artifact rustc "$RUSTC" @RUSTC@ \
   --artifact python "$PYTHON" @PYTHON_TOOL@ \
-  --artifact cargo_toml "$REPO_ROOT/Cargo.toml" @CARGO_TOML@ \
-  --artifact cargo_lock "$REPO_ROOT/Cargo.lock" @CARGO_LOCK@ \
+  --artifact build_receipt "$BUILD_RECEIPT" @BUILD_RECEIPT@ \
+  --artifact dependency_inventory "$DEPENDENCY_INVENTORY" @DEPENDENCY_INVENTORY@ \
+  --artifact prebuilt_bundle "$PREBUILT_BUNDLE" @PREBUILT_BUNDLE@ \
   --artifact design_note "$DESIGN_NOTE" @DESIGN_NOTE@ \
   --artifact hash_contract "$HASH_CONTRACT" @HASH_CONTRACT@ \
   --artifact audit_contract "$AUDIT_CONTRACT" @AUDIT_CONTRACT@ \
@@ -2301,12 +2361,10 @@ VALIDATION_REQUEST_SHA256_VALUE="$(write_exec_request validate "$VALIDATION_REQU
   --artifact validator "$VALIDATOR" @VALIDATOR@ \
   --artifact exec_helper "$EXEC_HELPER" @EXEC_HELPER@ \
   --artifact control_git "$CONTROL_GIT" @CONTROL_GIT@ \
-  --artifact build_closure_tool "$BUILD_CLOSURE_TOOL" @BUILD_CLOSURE_TOOL@ \
-  --artifact build_closure_stdout "$BUILD_CLOSURE_STDOUT" @BUILD_CLOSURE_STDOUT@ \
-  --artifact build_closure_stderr "$BUILD_CLOSURE_STDERR" @BUILD_CLOSURE_STDERR@ \
+  --artifact prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL" @PREBUILT_BUNDLE_TOOL@ \
+  --artifact prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" @PREBUILT_BUNDLE_STDOUT@ \
+  --artifact prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" @PREBUILT_BUNDLE_STDERR@ \
   --artifact launch_manifest "$LAUNCH_MANIFEST" @LAUNCH_MANIFEST@ \
-  --artifact build_stdout "$BUILD_STDOUT" @BUILD_STDOUT@ \
-  --artifact build_stderr "$BUILD_STDERR" @BUILD_STDERR@ \
   --artifact bundle "$BUNDLE" @BUNDLE@ \
   --artifact audit_receipt "$RECEIPT" @RECEIPT@ \
   --artifact project_stdout "$PROJECT_STDOUT" @PROJECT_STDOUT@ \
@@ -2343,8 +2401,8 @@ verify_publication_binding "$PROJECT_STDOUT" "$BUNDLE" bundle >/dev/null ||
 verify_publication_binding "$AUDIT_STDOUT" "$RECEIPT" "audit receipt" >/dev/null ||
   die "audit receipt changed after independent validation"
 assert_clean_checkout
-STAGE0A_PHASE=discard_transient_build_state
-discard_transient_tree "$BUILD_CLOSURE_ROOT"
+STAGE0A_PHASE=discard_transient_prebuilt_state
+discard_transient_tree "$PREBUILT_ROOT"
 discard_transient_tree "$RUN_TMP"
 discard_transient_tree "$RUN_HOME"
 STAGE0A_PHASE=write_compute_index
@@ -2360,21 +2418,18 @@ write_compute_index "$COMPUTE_INDEX" \
   validator "$VALIDATOR_SNAPSHOT" \
   exec_helper "$EXEC_HELPER_SNAPSHOT" \
   control_git "$CONTROL_GIT_SNAPSHOT" \
-  build_closure_tool "$BUILD_CLOSURE_TOOL_SNAPSHOT" \
-  build_closure_stdout "$BUILD_CLOSURE_STDOUT" \
-  build_closure_stderr "$BUILD_CLOSURE_STDERR" \
-  cargo "$CARGO_SNAPSHOT" \
-  rustc "$RUSTC_SNAPSHOT" \
+  prebuilt_bundle_tool "$PREBUILT_BUNDLE_TOOL_SNAPSHOT" \
+  prebuilt_bundle_archive "$PREBUILT_BUNDLE_SNAPSHOT" \
+  prebuilt_bundle_stdout "$PREBUILT_BUNDLE_STDOUT" \
+  prebuilt_bundle_stderr "$PREBUILT_BUNDLE_STDERR" \
   python "$PYTHON_SNAPSHOT" \
-  cargo_toml "$CARGO_TOML_SNAPSHOT" \
-  cargo_lock "$CARGO_LOCK_SNAPSHOT" \
+  build_receipt "$BUILD_RECEIPT" \
+  dependency_inventory "$DEPENDENCY_INVENTORY" \
   design_note "$DESIGN_NOTE_SNAPSHOT" \
   hash_contract "$HASH_CONTRACT_SNAPSHOT" \
   audit_contract "$AUDIT_CONTRACT_SNAPSHOT" \
   source_snapshot "$SOURCE_SNAPSHOT" \
   binary "$BINARY" \
-  build_stdout "$BUILD_STDOUT" \
-  build_stderr "$BUILD_STDERR" \
   project_request "$PROJECT_REQUEST" \
   project_stdout "$PROJECT_STDOUT" \
   project_stderr "$PROJECT_STDERR" \
