@@ -89,6 +89,9 @@ class T11SubmissionStaticTests(unittest.TestCase):
         self.assertIn("os.memfd_create", source)
         self.assertIn("F_ADD_SEALS", source)
         self.assertIn("FINALIZER_DEPENDENCY_READY", source)
+        self.assertIn('"/proc/self/exe"', source)
+        self.assertIn('"-c",\n    bootstrap', source)
+        self.assertIn('f"/proc/self/fd/{authorizer_fd}"', source)
 
     def test_finalizer_has_explicit_pins_and_sealed_isolated_execution(self) -> None:
         source = FINALIZER_RUNNER.read_text(encoding="utf-8")
@@ -732,6 +735,8 @@ class T11SubmissionDynamicTests(unittest.TestCase):
                 "WorkDir": slurm["finalizer_work_dir"],
                 "StdOut": slurm["finalizer_stdout_path"],
                 "StdErr": slurm["finalizer_stderr_path"],
+                "Requeue": "0",
+                "Restarts": "0",
             },
             "batch": {
                 "Cluster": slurm["cluster"],
@@ -917,6 +922,11 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         )
         self.assertEqual(request["submission"]["sha256"], hashlib.sha256(encoded).hexdigest())
         self.assertEqual(request["argv"][0], str(self.python))
+        self.assertEqual(request["argv"][4], "-c")
+        compile(request["argv"][5], "authorization-bootstrap", "exec")
+        self.assertIn("os.memfd_create", request["argv"][5])
+        self.assertIn("executed controller Python digest mismatch", request["argv"][5])
+        self.assertIn("authorizer_fd = copy_sealed", request["argv"][5])
         self.assertIn("--submission-sha256", request["argv"])
         self.assertEqual(
             outputs["t11_stage0a_authorization_request"],
@@ -1018,7 +1028,9 @@ class T11SubmissionDynamicTests(unittest.TestCase):
         )
         self.assertEqual(request["submission"]["sha256"], sha256(submission_path))
         self.assertEqual(request["argv"][0], request["controller_python"]["path"])
-        self.assertEqual(request["argv"][4], request["authorizer"]["path"])
+        self.assertEqual(request["argv"][4], "-c")
+        self.assertNotEqual(request["argv"][4], request["authorizer"]["path"])
+        self.assertIn(request["authorizer"]["path"], request["argv"][6:])
         self.assertEqual(
             request["argv"][request["argv"].index("--finalizer-module") + 1],
             request["finalizer_module"]["path"],
@@ -1072,6 +1084,42 @@ class T11SubmissionDynamicTests(unittest.TestCase):
             )
         )
         self.assertEqual(stat.S_IMODE(decision_path.stat().st_mode), 0o400)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "memfd_create"),
+        "sealed authorization execution requires Linux memfd support",
+    )
+    def test_linux_authorization_request_rejects_preexec_authorizer_replacement(self) -> None:
+        submitted = self._submit()
+        self.assertEqual(submitted.returncode, 0, submitted.stderr)
+        campaign = (
+            self.run_base.resolve()
+            / "t11-stage0a-submission-0123456789abcdef0123456789abcdef"
+        )
+        request = json.loads(
+            (campaign / "control/authorization-request.json").read_bytes()
+        )
+        authorizer = Path(request["authorizer"]["path"])
+        authorizer.chmod(0o700)
+        authorizer.write_bytes(b"raise SystemExit('replacement executed')\n")
+        authorizer.chmod(0o500)
+        completed = subprocess.run(
+            request["argv"],
+            cwd=self.run_base,
+            env={
+                "HOME": str(self.work),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("authorizer digest mismatch", completed.stderr)
+        self.assertNotIn("replacement executed", completed.stderr)
+        self.assertFalse(Path(request["output_path"]).exists())
 
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "memfd_create"),

@@ -717,6 +717,29 @@ class T11Stage0AFinalizerTests(unittest.TestCase):
         self.fixture.root.chmod(0o700)
         self.assertRejected("candidate root is writable")
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "open-directory replacement semantics are Linux-specific",
+    )
+    def test_descriptor_inventory_rejects_replaced_root_path(self) -> None:
+        descriptor = os.open(
+            self.fixture.root,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+        )
+        displaced = self.fixture.root.with_name("descriptor-bound-root")
+        try:
+            self.fixture.root.rename(displaced)
+            self.fixture.root.mkdir(mode=0o555)
+            with self.assertRaisesRegex(
+                FINALIZER.FinalizationError,
+                "descriptor differs from its pathname",
+            ):
+                FINALIZER.inventory_run_root_descriptor(
+                    self.fixture.root, descriptor
+                )
+        finally:
+            os.close(descriptor)
+
     def test_symlink_artifact_rejects(self) -> None:
         self.fixture.open_root_for_change()
         os.symlink("candidate.bin", self.fixture.root / "alias")
@@ -773,6 +796,59 @@ class T11Stage0AFinalizerTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o400)
         with self.assertRaisesRegex(FINALIZER.FinalizationError, "must be fresh"):
             FINALIZER.publish_scheduler_candidate(destination, payload)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "anonymous publication descriptor ordering requires Linux O_TMPFILE",
+    )
+    def test_linux_publication_closes_writer_before_readback(self) -> None:
+        payload = self.fixture.finalize()
+        destination = self.base / "descriptor-order.json"
+        real_open = FINALIZER.os.open
+        real_close = FINALIZER.os.close
+        real_link = FINALIZER.os.link
+        events: list[str] = []
+        staging_descriptor = -1
+        staging_closed = False
+
+        def tracking_open(path, flags, *args, **kwargs):
+            nonlocal staging_descriptor
+            descriptor = real_open(path, flags, *args, **kwargs)
+            if flags & os.O_TMPFILE == os.O_TMPFILE:
+                staging_descriptor = descriptor
+                events.append("writer-open")
+            elif (
+                path == destination.name
+                and flags & os.O_ACCMODE == os.O_RDONLY
+            ):
+                self.assertTrue(staging_closed)
+                events.append("reader-open")
+            return descriptor
+
+        def tracking_close(descriptor):
+            nonlocal staging_closed
+            if descriptor == staging_descriptor:
+                staging_closed = True
+                events.append("writer-close")
+            return real_close(descriptor)
+
+        def tracking_link(*args, **kwargs):
+            events.append("link")
+            return real_link(*args, **kwargs)
+
+        FINALIZER.os.open = tracking_open
+        FINALIZER.os.close = tracking_close
+        FINALIZER.os.link = tracking_link
+        try:
+            FINALIZER.publish_scheduler_candidate(destination, payload)
+        finally:
+            FINALIZER.os.open = real_open
+            FINALIZER.os.close = real_close
+            FINALIZER.os.link = real_link
+        self.assertEqual(
+            events,
+            ["writer-open", "link", "writer-close", "reader-open"],
+        )
 
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),

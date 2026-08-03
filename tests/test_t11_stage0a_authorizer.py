@@ -143,6 +143,8 @@ class AuthorizerFixture:
             "WorkDir": fixture.work_dir,
             "StdOut": fixture.finalizer_stdout_path,
             "StdErr": fixture.finalizer_stderr_path,
+            "Requeue": "0",
+            "Restarts": "0",
         }
         batch = {
             "Cluster": fixture.cluster,
@@ -257,8 +259,8 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
         )
         self.assertIn("DBIndex", allocation_format)
         self.assertIn("SubmitLine", allocation_format)
-        self.assertNotIn("Restarts", allocation_format)
-        self.assertNotIn("Requeue", allocation_format)
+        self.assertIn("Restarts", allocation_format)
+        self.assertIn("Requeue", allocation_format)
         encoded = AUTHORIZER.canonical_json_bytes(payload)
         self.assertEqual(AUTHORIZER.decode_canonical_json(encoded, "authorization"), payload)
 
@@ -276,6 +278,18 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
                     batch_overrides=batch,
                 )
                 with self.assertRaisesRegex(AUTHORIZER.AuthorizationError, pattern):
+                    self.fixture.authorize(runner)
+
+    def test_finalizer_restart_and_requeue_accounting_rejects(self) -> None:
+        for field in ("Requeue", "Restarts"):
+            with self.subTest(field=field):
+                runner = self.fixture.finalizer_runner(
+                    allocation_overrides={field: "1"}
+                )
+                with self.assertRaisesRegex(
+                    AUTHORIZER.AuthorizationError,
+                    f"finalizer allocation {field} must be 0",
+                ):
                     self.fixture.authorize(runner)
 
     def test_finalizer_identity_resource_and_submitline_mismatches_reject(self) -> None:
@@ -451,7 +465,7 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
         "candidate-root publication race requires Linux O_TMPFILE",
     )
-    def test_candidate_root_replacement_immediately_before_link_rejects(self) -> None:
+    def test_candidate_root_replacement_after_prelink_revalidation_rejects(self) -> None:
         displaced = self.fixture.candidate.root.with_name("candidate-displaced")
 
         def replace_root() -> None:
@@ -473,7 +487,7 @@ class T11Stage0AAuthorizerTests(unittest.TestCase):
                     finalizer_module_sha256=self.fixture.finalizer_module_sha256,
                     command_runner=self.fixture.finalizer_runner(),
                     sacct_bin=os.fspath(self.fixture.sacct_path),
-                    before_publish=replace_root,
+                    after_root_revalidation=replace_root,
                 )
         except OSError as error:
             if error.errno in (errno.EOPNOTSUPP, errno.EINVAL):

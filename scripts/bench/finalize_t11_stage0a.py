@@ -501,8 +501,9 @@ def _inventory_directory(
         _fail(f"run-root directory changed during inventory: {prefix or '.'}")
 
 
-def inventory_run_root(
+def inventory_run_root_descriptor(
     root: Path,
+    descriptor: int,
 ) -> tuple[str, list[dict[str, Any]], tuple[int, int]]:
     if not root.is_absolute() or os.path.normpath(os.fspath(root)) != os.fspath(root):
         _fail("candidate root must be a canonical absolute path")
@@ -514,22 +515,14 @@ def inventory_run_root(
         _fail("candidate root must be a real directory, not a symbolic link")
     if stat.S_IMODE(initial.st_mode) & 0o222:
         _fail("candidate root is writable")
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    descriptor = os.open(root, flags)
-    try:
-        opened = os.fstat(descriptor)
-        if (initial.st_dev, initial.st_ino) != (opened.st_dev, opened.st_ino):
-            _fail("candidate-root identity changed while opening")
-        records: list[dict[str, Any]] = []
-        _inventory_directory(descriptor, "", records, set(), set())
-        final = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
+    opened = os.fstat(descriptor)
+    if not stat.S_ISDIR(opened.st_mode):
+        _fail("candidate-root descriptor is not a directory")
+    if (initial.st_dev, initial.st_ino) != (opened.st_dev, opened.st_ino):
+        _fail("candidate-root descriptor differs from its pathname")
+    records: list[dict[str, Any]] = []
+    _inventory_directory(descriptor, "", records, set(), set())
+    final = os.fstat(descriptor)
     if (opened.st_dev, opened.st_ino, opened.st_mode) != (
         final.st_dev,
         final.st_ino,
@@ -552,6 +545,24 @@ def inventory_run_root(
         records,
         (opened.st_dev, opened.st_ino),
     )
+
+
+def inventory_run_root(
+    root: Path,
+) -> tuple[str, list[dict[str, Any]], tuple[int, int]]:
+    if not root.is_absolute() or os.path.normpath(os.fspath(root)) != os.fspath(root):
+        _fail("candidate root must be a canonical absolute path")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(root, flags)
+    try:
+        return inventory_run_root_descriptor(root, descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _open_relative_file(
@@ -1904,6 +1915,8 @@ def publish_scheduler_candidate(path: Path, payload: Mapping[str, Any]) -> None:
                 )
             except FileExistsError:
                 _fail("final output path ceased to be fresh")
+            os.close(descriptor)
+            descriptor = -1
             os.fsync(directory_fd)
             final_descriptor = os.open(
                 name,
@@ -1924,7 +1937,8 @@ def publish_scheduler_candidate(path: Path, payload: Mapping[str, Any]) -> None:
             finally:
                 os.close(final_descriptor)
         finally:
-            os.close(descriptor)
+            if descriptor >= 0:
+                os.close(descriptor)
         parent_after = os.fstat(directory_fd)
         if (parent_before.st_dev, parent_before.st_ino) != (
             parent_after.st_dev,

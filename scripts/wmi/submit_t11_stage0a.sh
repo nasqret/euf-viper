@@ -1167,12 +1167,153 @@ import sys
     sacct,
     sacct_sha256,
 ) = sys.argv[1:]
-argv = [
-    python_path,
-    "-I",
-    "-S",
-    "-B",
-    authorizer,
+bootstrap = r'''import fcntl
+import hashlib
+import os
+import stat
+import sys
+
+python_path, python_sha256, authorizer_path, authorizer_sha256, *arguments = sys.argv[1:]
+required_seals = (
+    getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+    | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+    | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+    | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+)
+
+
+def identity(metadata):
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def hash_descriptor(descriptor):
+    digest = hashlib.sha256()
+    offset = 0
+    size = os.fstat(descriptor).st_size
+    while offset < size:
+        block = os.pread(descriptor, min(1024 * 1024, size - offset), offset)
+        if not block:
+            raise SystemExit("sealed authorization bootstrap input was truncated")
+        digest.update(block)
+        offset += len(block)
+    if os.pread(descriptor, 1, offset):
+        raise SystemExit("sealed authorization bootstrap input grew while hashing")
+    return digest.hexdigest()
+
+
+def copy_sealed(path, expected, mode, maximum, role):
+    source = os.open(
+        path,
+        os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
+    )
+    snapshot = -1
+    try:
+        before = os.fstat(source)
+        if not stat.S_ISREG(before.st_mode):
+            raise SystemExit(f"{role} is not a regular file")
+        if role == "controller Python" and not before.st_mode & 0o111:
+            raise SystemExit("controller Python is not executable")
+        if before.st_size < 1 or before.st_size > maximum:
+            raise SystemExit(f"{role} size is outside its bound")
+        snapshot = os.memfd_create(
+            f"t11-authorization-{role}",
+            getattr(os, "MFD_CLOEXEC", 0x0001)
+            | getattr(os, "MFD_ALLOW_SEALING", 0x0002),
+        )
+        offset = 0
+        digest = hashlib.sha256()
+        while offset < before.st_size:
+            block = os.pread(source, min(1024 * 1024, before.st_size - offset), offset)
+            if not block:
+                raise SystemExit(f"{role} was truncated while copied")
+            digest.update(block)
+            written_offset = 0
+            while written_offset < len(block):
+                written = os.write(snapshot, block[written_offset:])
+                if written <= 0:
+                    raise SystemExit(f"short sealed {role} write")
+                written_offset += written
+            offset += len(block)
+        after = os.fstat(source)
+        if identity(before) != identity(after):
+            raise SystemExit(f"{role} changed while copied")
+        if digest.hexdigest() != expected:
+            raise SystemExit(f"{role} digest mismatch")
+        os.fchmod(snapshot, mode)
+        fcntl.fcntl(snapshot, getattr(fcntl, "F_ADD_SEALS", 1033), required_seals)
+        if (
+            fcntl.fcntl(snapshot, getattr(fcntl, "F_GET_SEALS", 1034))
+            & required_seals
+            != required_seals
+        ):
+            raise SystemExit(f"sealed {role} lacks mandatory seals")
+        if hash_descriptor(snapshot) != expected:
+            raise SystemExit(f"sealed {role} digest mismatch")
+        result = snapshot
+        snapshot = -1
+        return result
+    finally:
+        if snapshot >= 0:
+            os.close(snapshot)
+        os.close(source)
+
+
+if not sys.platform.startswith("linux") or not hasattr(os, "memfd_create"):
+    raise SystemExit("authorization execution requires Linux sealed memfd support")
+running = os.open(
+    "/proc/self/exe",
+    os.O_RDONLY | os.O_CLOEXEC,
+)
+try:
+    if hash_descriptor(running) != python_sha256:
+        raise SystemExit("executed controller Python digest mismatch")
+finally:
+    os.close(running)
+python_fd = copy_sealed(
+    python_path, python_sha256, 0o500, 1024 * 1024 * 1024, "controller Python"
+)
+authorizer_fd = copy_sealed(
+    authorizer_path, authorizer_sha256, 0o400, 16 * 1024 * 1024, "authorizer"
+)
+os.set_inheritable(authorizer_fd, True)
+for entry in os.listdir("/proc/self/fd"):
+    if not entry.isdecimal():
+        continue
+    descriptor = int(entry)
+    if descriptor <= 2 or descriptor == authorizer_fd:
+        continue
+    try:
+        os.set_inheritable(descriptor, False)
+    except OSError:
+        pass
+environment = {
+    "HOME": os.environ.get("HOME", "/"),
+    "LANG": "C",
+    "LC_ALL": "C",
+    "PATH": "/usr/bin:/bin",
+    "TZ": "UTC",
+}
+os.execve(
+    f"/proc/self/fd/{python_fd}",
+    [
+        "python3",
+        "-I",
+        "-S",
+        "-B",
+        f"/proc/self/fd/{authorizer_fd}",
+        *arguments,
+    ],
+    environment,
+)
+'''
+authorizer_argv = [
     "--submission",
     submission,
     "--submission-sha256",
@@ -1191,6 +1332,19 @@ argv = [
     "12",
     "--poll-interval-seconds",
     "5",
+]
+argv = [
+    python_path,
+    "-I",
+    "-S",
+    "-B",
+    "-c",
+    bootstrap,
+    python_path,
+    python_sha256,
+    authorizer,
+    authorizer_sha256,
+    *authorizer_argv,
 ]
 payload = {
     "argv": argv,

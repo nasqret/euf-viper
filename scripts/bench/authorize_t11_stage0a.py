@@ -117,6 +117,8 @@ FINALIZER_ALLOCATION_FIELDS = (
     "WorkDir",
     "StdOut",
     "StdErr",
+    "Requeue",
+    "Restarts",
 )
 FINALIZER_BATCH_FIELDS = (
     "Cluster",
@@ -199,6 +201,7 @@ class BoundInput:
     require_nonwritable: bool
     require_executable: bool
     initial: FileRead
+    sealed_descriptor: int | None = None
 
 
 @dataclass(frozen=True)
@@ -217,6 +220,7 @@ class PreparedAuthorization:
     output_path: Path
     inputs: tuple[BoundInput, ...]
     revalidate_candidate_root: Callable[[], None]
+    candidate_root_descriptor: int
 
 
 CommandRunner = Callable[[Sequence[str]], CommandOutput]
@@ -486,19 +490,93 @@ def _bind_input(
     )
 
 
+def _stable_read_sealed_descriptor(
+    descriptor: int,
+    maximum_bytes: int,
+    context: str,
+    *,
+    require_nonwritable: bool,
+    require_executable: bool = False,
+) -> FileRead:
+    if not sys.platform.startswith("linux"):
+        _fail(f"{context} sealed descriptor requires Linux")
+    try:
+        before = os.fstat(descriptor)
+    except OSError as error:
+        _fail(f"cannot inspect sealed {context}: {error}")
+    if not stat.S_ISREG(before.st_mode):
+        _fail(f"sealed {context} is not a regular file")
+    permissions = stat.S_IMODE(before.st_mode)
+    if require_nonwritable and permissions & 0o222:
+        _fail(f"sealed {context} is writable")
+    if require_executable and not permissions & 0o111:
+        _fail(f"sealed {context} is not executable")
+    if before.st_nlink != 0:
+        _fail(f"sealed {context} must be anonymous")
+    if before.st_size < 0 or before.st_size > maximum_bytes:
+        _fail(f"sealed {context} size is outside its bound")
+    required_seals = (
+        getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+        | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+        | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+        | getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+    )
+    try:
+        seals = fcntl.fcntl(descriptor, getattr(fcntl, "F_GET_SEALS", 1034))
+    except OSError as error:
+        _fail(f"cannot inspect sealed {context} seals: {error}")
+    if seals & required_seals != required_seals:
+        _fail(f"sealed {context} lacks mandatory memfd seals")
+    digest = hashlib.sha256()
+    chunks: list[bytes] = []
+    offset = 0
+    while offset < before.st_size:
+        chunk = os.pread(descriptor, min(1024 * 1024, before.st_size - offset), offset)
+        if not chunk:
+            _fail(f"sealed {context} was truncated while reading")
+        chunks.append(chunk)
+        digest.update(chunk)
+        offset += len(chunk)
+    if os.pread(descriptor, 1, offset):
+        _fail(f"sealed {context} grew while reading")
+    after = os.fstat(descriptor)
+    if _metadata_tuple(before) != _metadata_tuple(after):
+        _fail(f"sealed {context} changed while reading")
+    return FileRead(
+        data=b"".join(chunks),
+        mode=f"{permissions:04o}",
+        size=before.st_size,
+        sha256=digest.hexdigest(),
+        device=before.st_dev,
+        inode=before.st_ino,
+        links=before.st_nlink,
+        mtime_ns=before.st_mtime_ns,
+        ctime_ns=before.st_ctime_ns,
+    )
+
+
 def _same_read(left: FileRead, right: FileRead) -> bool:
     return left == right
 
 
 def _revalidate_inputs(inputs: Sequence[BoundInput]) -> None:
     for binding in inputs:
-        current = _stable_read_path(
-            binding.path,
-            binding.maximum_bytes,
-            binding.context,
-            require_nonwritable=binding.require_nonwritable,
-            require_executable=binding.require_executable,
-        )
+        if binding.sealed_descriptor is None:
+            current = _stable_read_path(
+                binding.path,
+                binding.maximum_bytes,
+                binding.context,
+                require_nonwritable=binding.require_nonwritable,
+                require_executable=binding.require_executable,
+            )
+        else:
+            current = _stable_read_sealed_descriptor(
+                binding.sealed_descriptor,
+                binding.maximum_bytes,
+                binding.context,
+                require_nonwritable=binding.require_nonwritable,
+                require_executable=binding.require_executable,
+            )
         if not _same_read(binding.initial, current):
             _fail(f"{binding.context} changed during authorization")
 
@@ -539,6 +617,8 @@ def _load_finalizer_module(
         "BATCH_FIELDS",
         "FinalizationError",
         "SchedulerEvidence",
+        "inventory_run_root",
+        "inventory_run_root_descriptor",
         "validate_submission",
         "_require_scheduler_record",
     ):
@@ -549,6 +629,23 @@ def _load_finalizer_module(
     if tuple(module.BATCH_FIELDS) != COMPUTE_BATCH_FIELDS:
         _fail("bound finalizer batch fields differ from the authorizer contract")
     return module, binding
+
+
+def _inventory_candidate_root(
+    module: types.ModuleType,
+    root: Path,
+    *,
+    descriptor: int | None = None,
+    context: str,
+) -> tuple[str, list[dict[str, Any]], tuple[int, int]]:
+    try:
+        if descriptor is None:
+            return module.inventory_run_root(root)
+        return module.inventory_run_root_descriptor(root, descriptor)
+    except module.FinalizationError as error:
+        _fail(f"{context}: {error}")
+    except Exception as error:
+        _fail(f"{context} unexpectedly failed: {error}")
 
 
 def _validate_submission_with_module(
@@ -1289,6 +1386,10 @@ def validate_finalizer_evidence(
         _fail("finalizer allocation and batch step must both be COMPLETED")
     if allocation["ExitCode"] != "0:0" or allocation["DerivedExitCode"] != "0:0":
         _fail("finalizer allocation exit and derived-exit codes must both be 0:0")
+    if allocation["Requeue"] != "0":
+        _fail("finalizer allocation Requeue must be 0")
+    if allocation["Restarts"] != "0":
+        _fail("finalizer allocation Restarts must be 0")
     if batch["JobName"] != "batch":
         _fail("finalizer batch step name differs")
     if batch["ExitCode"] != "0:0" or batch["DerivedExitCode"] not in ("", "0:0"):
@@ -1409,6 +1510,24 @@ def validate_finalizer_evidence(
 
 
 def _authorizer_source_binding() -> BoundInput:
+    source_text = os.fspath(__file__)
+    sealed_match = re.fullmatch(r"/proc/self/fd/([1-9][0-9]*)", source_text)
+    if sealed_match is not None:
+        descriptor = int(sealed_match.group(1))
+        return BoundInput(
+            path=Path(source_text),
+            context="authorizer module",
+            maximum_bytes=MAX_MODULE_BYTES,
+            require_nonwritable=True,
+            require_executable=False,
+            initial=_stable_read_sealed_descriptor(
+                descriptor,
+                MAX_MODULE_BYTES,
+                "authorizer module",
+                require_nonwritable=True,
+            ),
+            sealed_descriptor=descriptor,
+        )
     try:
         source = Path(__file__).resolve(strict=True)
     except OSError as error:
@@ -1511,7 +1630,11 @@ def _prepare_authorization(
         module=module,
     )
     candidate_root = Path(submission["candidate_root"])
-    root_mode, root_inventory, root_identity = module.inventory_run_root(candidate_root)
+    root_mode, root_inventory, root_identity = _inventory_candidate_root(
+        module,
+        candidate_root,
+        context="cannot inventory candidate root",
+    )
     if root_mode != candidate["candidate"]["root_mode"]:
         _fail("candidate-root mode differs from the scheduler candidate")
     if root_inventory != candidate["artifacts"]:
@@ -1520,9 +1643,11 @@ def _prepare_authorization(
         canonical_json_bytes(root_inventory)
     ).hexdigest()
 
-    def revalidate_candidate_root() -> None:
-        current_mode, current_inventory, current_identity = module.inventory_run_root(
-            candidate_root
+    def revalidate_candidate_root_path() -> None:
+        current_mode, current_inventory, current_identity = _inventory_candidate_root(
+            module,
+            candidate_root,
+            context="candidate root changed during authorization",
         )
         if (
             current_mode != root_mode
@@ -1563,7 +1688,48 @@ def _prepare_authorization(
         sacct_binding,
     )
     _revalidate_inputs(inputs)
-    revalidate_candidate_root()
+    revalidate_candidate_root_path()
+    root_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        candidate_root_descriptor = os.open(candidate_root, root_flags)
+    except OSError as error:
+        _fail(f"cannot bind candidate root for authorization: {error}")
+    try:
+        bound_mode, bound_inventory, bound_identity = _inventory_candidate_root(
+            module,
+            candidate_root,
+            descriptor=candidate_root_descriptor,
+            context="cannot bind candidate root for authorization",
+        )
+        if (
+            bound_mode != root_mode
+            or bound_inventory != root_inventory
+            or bound_identity != root_identity
+        ):
+            _fail("candidate root changed before descriptor binding")
+    except BaseException:
+        os.close(candidate_root_descriptor)
+        raise
+
+    def revalidate_candidate_root() -> None:
+        current_mode, current_inventory, current_identity = _inventory_candidate_root(
+            module,
+            candidate_root,
+            descriptor=candidate_root_descriptor,
+            context="candidate root changed during authorization",
+        )
+        if (
+            current_mode != root_mode
+            or current_inventory != root_inventory
+            or current_identity != root_identity
+        ):
+            _fail("candidate root changed during authorization")
+
     root_binding = {
         "device": root_identity[0],
         "inode": root_identity[1],
@@ -1626,6 +1792,7 @@ def _prepare_authorization(
         output_path=output_path,
         inputs=inputs,
         revalidate_candidate_root=revalidate_candidate_root,
+        candidate_root_descriptor=candidate_root_descriptor,
     )
 
 
@@ -1656,7 +1823,10 @@ def build_authorization_payload(
         sleeper=sleeper,
         output_path=output_path,
     )
-    return dict(prepared.payload)
+    try:
+        return dict(prepared.payload)
+    finally:
+        os.close(prepared.candidate_root_descriptor)
 
 
 def _ensure_destination_fresh(path: Path) -> tuple[Path, str]:
@@ -1729,6 +1899,8 @@ def publish_authorization(
     payload: Mapping[str, Any],
     *,
     before_link: Callable[[], None] | None = None,
+    after_prelink_validation: Callable[[], None] | None = None,
+    after_link: Callable[[], None] | None = None,
 ) -> None:
     parent, name = _ensure_destination_fresh(path)
     _validate_publishable_payload(payload)
@@ -1771,8 +1943,6 @@ def publish_authorization(
             or stat.S_IMODE(staged.st_mode) != 0o400
         ):
             _fail("anonymous authorization inode violates the publication contract")
-        if before_link is not None:
-            before_link()
         try:
             os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
         except FileNotFoundError:
@@ -1783,6 +1953,10 @@ def publish_authorization(
         proc_metadata = os.stat(proc_path)
         if (staged.st_dev, staged.st_ino) != (proc_metadata.st_dev, proc_metadata.st_ino):
             _fail("authorization proc descriptor does not bind the staging inode")
+        if before_link is not None:
+            before_link()
+        if after_prelink_validation is not None:
+            after_prelink_validation()
         try:
             os.link(
                 proc_path,
@@ -1794,6 +1968,23 @@ def publish_authorization(
             _fail("authorization output path ceased to be fresh")
         os.close(descriptor)
         descriptor = -1
+        if after_link is not None:
+            try:
+                after_link()
+            except BaseException:
+                try:
+                    published = os.stat(
+                        name, dir_fd=directory_fd, follow_symlinks=False
+                    )
+                    if (published.st_dev, published.st_ino) == (
+                        staged.st_dev,
+                        staged.st_ino,
+                    ):
+                        os.unlink(name, dir_fd=directory_fd)
+                        os.fsync(directory_fd)
+                except FileNotFoundError:
+                    pass
+                raise
         os.fsync(directory_fd)
         final_descriptor = os.open(
             name,
@@ -1839,6 +2030,7 @@ def authorize_and_publish(
     poll_interval_seconds: float = 0.0,
     sleeper: Sleeper = time.sleep,
     before_publish: Callable[[], None] | None = None,
+    after_root_revalidation: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     _ensure_destination_fresh(output_path)
     prepared = _prepare_authorization(
@@ -1854,18 +2046,27 @@ def authorize_and_publish(
         sleeper=sleeper,
         output_path=output_path,
     )
-    def revalidate_before_link() -> None:
-        if before_publish is not None:
-            before_publish()
-        _revalidate_inputs(prepared.inputs)
-        prepared.revalidate_candidate_root()
+    try:
+        def revalidate_before_link() -> None:
+            if before_publish is not None:
+                before_publish()
+            _revalidate_inputs(prepared.inputs)
+            prepared.revalidate_candidate_root()
 
-    publish_authorization(
-        prepared.output_path,
-        prepared.payload,
-        before_link=revalidate_before_link,
-    )
-    return dict(prepared.payload)
+        def revalidate_after_link() -> None:
+            _revalidate_inputs(prepared.inputs)
+            prepared.revalidate_candidate_root()
+
+        publish_authorization(
+            prepared.output_path,
+            prepared.payload,
+            before_link=revalidate_before_link,
+            after_prelink_validation=after_root_revalidation,
+            after_link=revalidate_after_link,
+        )
+        return dict(prepared.payload)
+    finally:
+        os.close(prepared.candidate_root_descriptor)
 
 
 def build_parser() -> argparse.ArgumentParser:
