@@ -355,7 +355,24 @@ Stage 0A has `sat_calls=0`. It passes only if:
   Congruence; for a nonempty result, at least one emitted lemma's checked
   dependency DAG contains one.
 
-Failure stops T11 without a full census, SAT call, WMI job, or timing run.
+The target-only Stage 0A job may run on WMI only after an exact clean revision,
+launch manifest, and independent publication, provenance, proof, and
+exact-revision reviews are all GO. Every executable and authorization input is
+first copied into a sealed Linux memfd and then executed or read only through
+that descriptor. Bundle, audit receipt, and metadata publication use anonymous
+`O_TMPFILE` inodes, exact byte and digest verification, mode `0400`, atomic
+no-replace linking, parent-directory sync, and final descriptor-relative
+reopening. Other platforms fail closed.
+
+A standalone audit receipt or direct invocation of the validator never
+authorizes Stage 0B. Authorization requires the complete immutable Stage 0A run
+root, including the manifest, clean revision, exact binary and toolchain,
+runner, helper, validator, source snapshot, bundle, receipt, logs, metadata,
+exit semantics, and successful scheduler record. The manifest-pinned validator
+must verify both semantic and execution layers from their sealed snapshots.
+
+Stage 0A failure stops T11 without a full census, SAT-enabled job, or timing
+run.
 
 ## Stage 0B: complete no-SAT census
 

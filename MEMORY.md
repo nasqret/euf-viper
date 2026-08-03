@@ -1241,3 +1241,34 @@
   Production-evidence review of `aac576c` also remains NO-GO on fresh-parent
   replacement and FIFO blocking. Both repairs remain isolated; do not push,
   host, or run WMI controls before new exact reviews pass.
+- On 2026-07-18 WMI audit jobs `147317` and `147320` were pending on
+  permanently unfulfilled `afterok` chains: completed tasks from held parent
+  arrays `147316` and `147319` failed with exit `2`. They allocate no CPU and
+  are not evidence. Do not release, cancel, or reinterpret them as T11 work.
+- T11 Stage 0A remains pre-launch. Before recovery, matrices passed 378 Rust
+  tests with three ignored without certificates, 413 with four ignored with
+  certificates, and 455 local Python tests with 24 expected platform skips.
+  WMI Linux passed 21/21 helper, 25/25 runner/validator, and the complete
+  420-pass/four-ignore certificate matrix from a disposable source-only
+  checkout. The runner validates authorization artifacts from sealed memfd
+  snapshots and builds Cargo from `/` with an explicit manifest path. The
+  x86-64 Linux publisher uses descriptor-relative parents plus `O_TMPFILE`,
+  closes its writable staging descriptor after atomic no-replace linking, and
+  has actual-syscall-window `EEXIST`, parent-drift, and same-length corruption
+  regressions; other platforms fail closed. Proof review was GO. Publication,
+  provenance, and exact-revision reviews must be repeated after recovery. The
+  frozen target has not been opened and no T11 job has been submitted; do not
+  create a launch manifest before every review gate is GO.
+- On 2026-07-19 `/private/tmp` rollover removed the uncommitted T11 worktree.
+  Recover current source/tests from the corpus-free WMI roots
+  `euf-viper-t11-publication-review-20260718-1` and
+  `euf-viper-t11-runner-review-20260718-1` onto durable branch
+  `perf-t11-equality-resolution`, excluding the unrelated T9 formatting diff.
+  Eleven recovered files matched those roots by SHA-256. Repeated local gates
+  pass Rust 378/3 and 413/4, Python 455/24 skipped, targeted formatting, diff
+  check, and book build. A fresh WMI `/work`-hosted Cargo build passes Linux
+  420/4, helper 21/21, and runner/validator 25/25; `/home` quota is still full.
+  Fresh publication, provenance, proof, and exact-commit reviews remain gates.
+- Production-evidence commit `f223d49` remains isolated and NO-GO. It does not
+  apply standalone to the T11 branch and sends numeric-PID signals before
+  pidfd/starttime validation, leaving a PID-reuse hazard. Do not cherry-pick it.

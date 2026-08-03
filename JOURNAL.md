@@ -1903,6 +1903,95 @@
   greedy-explanation study reports smaller explanations but substantial overall
   runtime overhead, justifying T11's structural router and hard caps.
 
+## 2026-07-18 - T11 Stage 0A evidence-gate hardening
+
+- A live WMI audit found 73 allocated one-core jobs and no T11 job. Audit jobs
+  `147317` and `147320` remained pending on unfulfilled `afterok` dependencies;
+  completed tasks from parent arrays `147316` and `147319` failed with exit
+  code `2`, while the remaining array elements were user-held. These pending
+  records allocate no CPU and cannot start in their current state. Nothing was
+  released, cancelled, or submitted. LTS load was approximately
+  `0.32/0.31/0.28`, with no active Magma, SageMath, or Singular computation.
+- The T11 bundle schema now rejects unknown nested fields and malformed sealed
+  state during deserialization. The checker rejects equality atoms whose
+  endpoints have Boolean sort. The incomplete future Stage 1 run-record binder
+  was removed because it bound arbitrary supplied blobs without establishing
+  execution provenance.
+- Stage 0A validation now enforces exact Rust field order and Boolean types,
+  every frozen search cap, baseline proof-work initialization, the frozen
+  logical-memory equation, worklist accounting, trace topology, and the exact
+  compiler/checker/auditor counter copies. Attempted events are correctly
+  constrained to dominate worklist pushes; they are not equated with popped
+  events because duplicate and tautological attempts are charged before queue
+  admission.
+- The output publisher now fails closed outside x86-64 Linux. On Linux it holds
+  every parent component by descriptor, stages with `O_TMPFILE`, verifies exact
+  bytes and SHA-256, syncs data, sets mode `0400`, publishes atomically without
+  replacement, syncs the parent, and reopens the final inode for exact
+  descriptor-relative verification. The old environment-triggered test bypass
+  was removed.
+- The first hardened runner review exposed a functional provenance defect that
+  fake pipeline tests had missed: the real validator compared a sealed memfd
+  copy of the binary with the original inode, which can never match. The
+  repaired interface passes the validator, source, bundle, receipt, binary,
+  toolchain, contracts, runner, helper, and all logs only through sealed memfd
+  snapshots. Original paths are metadata labels, not reopened evidence. Cargo
+  builds from `/` with an explicit manifest path so unpinned ancestor Cargo
+  configuration cannot enter the build.
+- Verification reached green before the temporary-worktree rollover: Rust
+  without certificates passed 378 tests with three ignored; Rust with
+  certificates passed 413 with four ignored. Full local Python discovery passed
+  455 tests with 24 expected platform skips; the focused helper/runner set
+  passed 46 tests with 18 Linux-only skips. Exact WMI Linux subsets passed 21/21
+  helper and 25/25 runner/validator tests, including the real metadata
+  authorizer. A disposable source-only WMI checkout also passed the complete
+  Linux certificate matrix with 420 tests and four ignored; it contained no
+  corpus.
+- Independent proof/compiler/checker/auditor review returned GO. The first
+  publication review was NO-GO because its adversarial tests stopped before the
+  actual no-replace syscall and changed metadata before byte verification. The
+  repair adds an exact post-revalidation/pre-`linkat` event, proves `EEXIST`
+  preserves a competitor and parent replacement publishes only through the held
+  parent, closes the writable staging descriptor immediately after linking, and
+  tests same-length corruption after restoring mode `0400`. Those Linux tests
+  passed. Replacement publication and provenance reviews remained mandatory.
+  The frozen target was not opened and no T11 Slurm job was submitted.
+
+## 2026-07-19 - Temporary-worktree recovery
+
+- The date/environment rollover purged `/private/tmp/euf-viper-t11-eqres`
+  before the reviewed changes were committed, and the two active read-only
+  review agents disappeared with that temporary workspace. Git retained branch
+  `perf-t11-equality-resolution` at checkpoint `a1d7924`.
+- Current Rust source and tests were recovered from the corpus-free WMI
+  publication checkout
+  `/work/bnaskrecki/euf-viper-t11-publication-review-20260718-1`; runner,
+  helper, validator, and their tests were recovered from
+  `/work/bnaskrecki/euf-viper-t11-runner-review-20260718-1`. The unrelated
+  `src/t9_ackermann.rs` formatting change was explicitly excluded.
+- Live WMI state still shows dependency-blocked audit jobs `147317` and
+  `147320`, with held parent remainders `147316_[6-63%8]` and
+  `147319_[45-63%8]`; they allocate no CPU. No T11 job exists. LTS load is
+  approximately `0.22/0.23/0.25`, with only Magma documentation viewers and no
+  active Magma, SageMath, or Singular computation.
+- Recovery is not itself evidence. Re-run hashes, all local matrices, Linux
+  qualification, documentation validation, and fresh independent publication,
+  provenance, and exact-revision reviews before creating any launch manifest.
+- All 11 recovered code/pipeline files matched their two WMI recovery copies
+  byte-for-byte by SHA-256. Recovered local validation passed Rust 378/3 ignored
+  and 413/4 ignored, full Python 455/24 skipped, targeted Rust formatting,
+  `git diff --check`, and the Jupyter Book build. Full `cargo fmt --check`
+  remains inapplicable because untouched base file `src/t9_ackermann.rs` has a
+  pre-existing Rust 1.93 import-order diff; T11 files pass with children
+  excluded and T9 remains unmodified.
+- WMI `/home` quota blocked Cargo's package-cache lock, so the fresh Linux build
+  used a writable Cargo home and new target directory under the disposable
+  `/work` review root while reading the existing registry cache. The from-scratch
+  Linux certificate matrix passed 420/4 ignored; helper 21/21 and
+  runner/validator 25/25 also passed. No corpus was copied or opened and no
+  Slurm job was submitted. Fresh publication, provenance, and proof reviews were
+  restarted from the durable branch.
+
 ## Next Entry Template
 
 - Benchmark corpus:

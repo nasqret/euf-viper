@@ -829,7 +829,18 @@ DAG, must contain a Congruence that directly produces or consumes an equality
 absent from the baseline atom map. Search is capped at 25,000 resolvents,
 100,000 proof nodes, 150,000 derived literal slots, two million canonical
 proof-work charges, p95 width eight, maximum width 32, and a logical 16 MiB
-charge. Failure stops before a full census or WMI.
+charge. The target-only Stage 0A job is allowed on WMI; failure stops every
+subsequent census, SAT-enabled job, or timing campaign.
+
+Stage 0A authorization is an end-to-end Linux evidence boundary. The clean
+revision and launch manifest pin the runner, validator, helper, toolchain, and
+contracts. Every executable or input consumed by projection, audit, and final
+validation is copied into a write/grow/shrink-sealed memfd first. Bundle,
+receipt, and metadata are staged anonymously with `O_TMPFILE`, checked byte for
+byte, set to mode `0400`, linked without replacement, directory-synced, and
+reopened through held descriptors. A receipt by itself remains forgeable local
+data; only the complete sealed run root plus the successful scheduler record
+can authorize Stage 0B.
 
 Only a target pass authorizes the exact 7,503-row no-SAT selector census. Only
 that census authorizes tree-parser timing. Stage 1 requires untimed baseline
@@ -850,6 +861,16 @@ optimization is NP-hard; greedy small-proof algorithms already exist; and a
 2026 cvc5 study reports smaller explanations together with substantial
 aggregate runtime overhead. The possible contribution is the complete bounded
 static architecture and its evidence, not a renamed known rule.
+
+At the last pre-recovery checkpoint, the local Rust matrices passed 378 tests
+with three ignored without certificates and 413 with four ignored with
+certificates. Full Python discovery passed 455 tests with 24 expected platform
+skips. On WMI, source-only Linux validation passed all 21 helper tests, all 25
+runner/validator tests, and the complete certificate matrix with 420 tests and
+four ignored. Proof review was GO. Publication race repairs passed Linux tests;
+publication and provenance reviews must be restarted after recovery of the
+temporary worktree. The frozen target has not been opened, no launch manifest
+exists, and no T11 Slurm job has been submitted.
 
 ## Victory Conditions
 

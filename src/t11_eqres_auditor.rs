@@ -108,6 +108,7 @@ pub(crate) enum AuditFailureKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct AuditFailure {
     pub(crate) kind: AuditFailureKind,
     pub(crate) event_id: Option<EventId>,
@@ -154,7 +155,12 @@ impl<'de> serde::Deserialize<'de> for NonEmptyAuditFailures {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "status", content = "failures", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "status",
+        content = "failures",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum AuditStatus {
     Accepted,
@@ -163,6 +169,7 @@ pub(crate) enum AuditStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct AuditResult {
     pub(crate) status: AuditStatus,
     pub(crate) counters: DeterministicCounters,
@@ -173,6 +180,7 @@ pub(crate) struct AuditResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct EqresAuditReceipt {
     pub(crate) schema_version: u32,
     pub(crate) exact_bundle_sha256: Sha256Digest,
@@ -4074,6 +4082,24 @@ mod tests {
             term
         }
 
+        fn boolean_constant(&mut self) -> TermId {
+            let function = self.declarations.slots.len() as u32;
+            self.declarations.insert(
+                function,
+                FunDecl {
+                    arg_sorts: Vec::new(),
+                    result_sort: BOOL_SORT,
+                },
+            );
+            let term = self.terms.len();
+            self.terms.push(Term {
+                fun: function,
+                args: Vec::new(),
+                sort: BOOL_SORT,
+            });
+            term
+        }
+
         fn binary_pair(&mut self, left_arguments: [TermId; 2], right_arguments: [TermId; 2]) {
             let function = self.declaration(vec![DATA_SORT, DATA_SORT]);
             let left = self.terms.len();
@@ -4506,6 +4532,24 @@ mod tests {
                 .iter()
                 .any(|failure| { failure.kind == kind && failure.artifact == Some(artifact) })
         );
+    }
+
+    #[test]
+    fn rejects_boolean_sorted_equality_endpoints() {
+        let mut builder = FixtureBuilder::new();
+        let left = builder.boolean_constant();
+        let right = builder.boolean_constant();
+        let equality = builder.equality(left, right);
+        builder.clause(vec![equality]);
+        let fixture = builder.build();
+
+        let reconstruction = reconstruct(fixture.input(), CompilerVariant::Ordinary);
+        assert!(matches!(
+            reconstruction.status,
+            ReconstructionStatus::Fatal(ReconstructionError::Malformed(
+                InputFailure::InvalidAtomTerm
+            ))
+        ));
     }
 
     #[test]

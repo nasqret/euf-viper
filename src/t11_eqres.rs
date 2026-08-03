@@ -627,55 +627,6 @@ mod tests {
         );
         assert!(internally_accepted_projection(&bundle));
 
-        let exact_projection_bundle_sha256 = crate::t11_eqres_types::Sha256Digest::new([0x91; 32]);
-        let exact_audit_receipt_sha256 = crate::t11_eqres_types::Sha256Digest::new([0x92; 32]);
-        let mut auditor_hashes = bundle.compiler.hashes;
-        auditor_hashes.candidate_binary_sha256 =
-            crate::t11_eqres_types::Sha256Digest::new([0x93; 32]);
-        auditor_hashes.revision_sha256 = crate::t11_eqres_types::Sha256Digest::new([0x94; 32]);
-        auditor_hashes.corpus_manifest_sha256 =
-            crate::t11_eqres_types::Sha256Digest::new([0x95; 32]);
-        auditor_hashes.projection_record_sha256 = exact_projection_bundle_sha256;
-        auditor_hashes.checker_record_sha256 = exact_audit_receipt_sha256;
-        let run_bindings = crate::t11_eqres_types::EqresRunBindings::new(
-            exact_projection_bundle_sha256,
-            exact_audit_receipt_sha256,
-            auditor_hashes,
-        );
-
-        let run_record = crate::t11_eqres_types::EqresRunRecord::new(
-            bundle.clone(),
-            crate::t11_eqres_types::SatComponent::TheoryEmpty(
-                crate::t11_eqres_types::TheoryEmptySatComponent::new(100, 101).unwrap(),
-            ),
-            run_bindings,
-        )
-        .expect("theory-empty output must bind to the zero-session SAT component");
-        assert_eq!(run_record.bundle(), &bundle);
-        assert_eq!(run_record.hashes(), auditor_hashes);
-        assert!(matches!(
-            run_record.sat_component(),
-            crate::t11_eqres_types::SatComponent::TheoryEmpty(_)
-        ));
-
-        let fresh_session = crate::t11_eqres_types::FreshSatComponent::new(
-            bundle.compiler.counters.input.baseline_variables,
-            bundle.compiler.counters.input.baseline_clauses + 1,
-            1,
-            crate::t11_eqres_types::SatKernelResult::Unsat,
-            100,
-            101,
-        )
-        .unwrap();
-        assert_eq!(
-            crate::t11_eqres_types::EqresRunRecord::new(
-                bundle.clone(),
-                crate::t11_eqres_types::SatComponent::FreshSession(fresh_session),
-                run_bindings,
-            ),
-            Err(crate::t11_eqres_types::SatComponentError::OutputComponentMismatch)
-        );
-
         let mut forged_external_acceptance = bundle.clone();
         forged_external_acceptance
             .report

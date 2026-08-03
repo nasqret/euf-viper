@@ -70,3 +70,27 @@ read-only view.
 No receipt authorizes target inspection until the compiler, checker, auditor,
 CLI, and exact-snapshot reviews all pass locally. A receipt from a rejected or
 nonselected source is evidence of rejection, not a Stage 0A pass.
+
+## Authorization boundary
+
+The receipt proves only the independent semantic reconstruction recorded in its
+fields. It does not establish which executable produced the bundle, which
+runner invoked the commands, whether the source or tools changed between
+checks, or whether the process and scheduler exit records belong to the same
+attempt. Consequently neither a standalone receipt nor a direct successful
+Python validation authorizes Stage 0B.
+
+Stage 0A authorization requires one complete immutable run root: the reviewed
+launch manifest and clean Git revision; exact runner, execution helper,
+validator, Cargo and Rust tools, candidate binary, source, bundle, receipt,
+contracts, logs, metadata, and exit records; and the successful scheduler
+record for that same attempt. Inputs consumed by project, audit, and validation
+are sealed descriptor snapshots. Outputs are anonymously staged, atomically
+published without replacement, directory-synced, and rebound to exact bytes and
+identities. The manifest-pinned validator and an independent exact-revision
+reviewer must verify both layers before the target-only result can authorize a
+7,503-row Stage 0B census.
+
+Infrastructure failure, scientific rejection, and successful authorization are
+distinct terminal states. A rejected or incomplete run root remains evidence
+of that failure and must not be upgraded by copying out its receipt.

@@ -916,6 +916,27 @@ fallback can be an operational portfolio but never a standalone victory.
     exact-integer `1.05x` Yices2 gates. Equality resolution,
     proof-producing congruence closure, positive equality, RTC, Minimal-E, and
     greedy short explanations are prior art, not novelty claims.
+15. Recover and finish the T11 Stage 0A evidence boundary before constructing a
+    launch manifest. The pre-rollover matrices passed 378/3 ignored without
+    certificates, 413/4 ignored with certificates, and 455/24 skipped in full
+    Python discovery. WMI Linux gates passed 21/21 helper, 25/25
+    runner/validator, and 420/4 ignored in the complete certificate matrix from
+    a disposable source-only checkout. The runner supplies every authorization
+    artifact through a sealed memfd snapshot and builds from `/` with an
+    explicit manifest path. Proof review was GO. The first publication review's
+    test-window NO-GO was repaired with actual pre-`linkat` races, same-length
+    corruption, and immediate writable-descriptor closure.
+16. Treat the 2026-07-19 temporary-worktree loss as an evidence reset, not a
+    scientific result. Restore code only from the two corpus-free WMI review
+    roots onto durable branch `perf-t11-equality-resolution`, explicitly exclude
+    the unrelated T9 formatting diff. Eleven recovered files now match the WMI
+    copies by SHA-256; repeated local Rust/Python matrices, WMI Linux
+    qualification, targeted formatting, diff check, and documentation build are
+    green. Fresh publication, provenance, and proof reviews are active; an
+    exact-clean-revision review follows only after a scoped commit. Any NO-GO
+    returns to local repair and another review. Do not open the frozen target,
+    create the launch manifest, or submit Stage 0A until all gates are GO on the
+    committed recovered revision.
 
 No result enters promotion because it was submitted, queued, or partially
 observed. Every branch remains isolated until its complete audit passes.

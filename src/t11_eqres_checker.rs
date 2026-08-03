@@ -487,7 +487,7 @@ impl<'a> Checker<'a> {
                     self.failures.input(CheckerFailureKind::TermId);
                     return;
                 };
-                if left_term.sort != right_term.sort {
+                if left_term.sort != right_term.sort || left_term.sort == BOOL_SORT {
                     self.failures.input(CheckerFailureKind::Sort);
                 }
             }
@@ -3149,6 +3149,25 @@ mod tests {
     fn rejects_application_sort_mutation() {
         let mut fixture = fixture();
         fixture.terms[4].sort = BOOL_SORT;
+        fixture.reseal();
+        assert_rejects(&fixture, CheckerFailureKind::Sort);
+    }
+
+    #[test]
+    fn rejects_equality_atom_with_boolean_endpoints() {
+        let mut fixture = fixture();
+        fixture.declarations.slots.push(Some(FunDecl {
+            arg_sorts: Vec::new(),
+            result_sort: BOOL_SORT,
+        }));
+        fixture.terms.push(Term {
+            fun: 5,
+            args: Vec::new(),
+            sort: BOOL_SORT,
+        });
+        fixture.atom_variables.remove(&BoolAtomKey::Eq(0, 1));
+        fixture.variable_atoms[1] = Some(BoolAtomKey::Eq(5, 5));
+        fixture.atom_variables.insert(BoolAtomKey::Eq(5, 5), 1);
         fixture.reseal();
         assert_rejects(&fixture, CheckerFailureKind::Sort);
     }

@@ -3427,6 +3427,24 @@ mod tests {
             id
         }
 
+        fn boolean_constant(&mut self) -> TermId {
+            let function = self.declarations.slots.len() as u32;
+            self.declarations.insert(
+                function,
+                FunDecl {
+                    arg_sorts: Vec::new(),
+                    result_sort: BOOL_SORT,
+                },
+            );
+            let id = self.terms.len();
+            self.terms.push(Term {
+                fun: function,
+                args: Vec::new(),
+                sort: BOOL_SORT,
+            });
+            id
+        }
+
         fn unary_pair(
             &mut self,
             left_argument: TermId,
@@ -3577,6 +3595,24 @@ mod tests {
         let hashes = compute_input_hashes(input).expect("fixture hashes should compute");
         Compiler::new(input, variant, CompilerLimits::FROZEN, prepared, hashes)
             .expect("fixture compiler should initialize")
+    }
+
+    #[test]
+    fn rejects_boolean_sorted_equality_endpoints() {
+        let mut builder = FixtureBuilder::new();
+        let left = builder.boolean_constant();
+        let right = builder.boolean_constant();
+        let equality = builder.equality(left, right);
+        builder.clause(vec![equality]);
+        let fixture = builder.build();
+
+        let result = compile(fixture.input(), CompilerVariant::Ordinary);
+        assert!(matches!(
+            result.status,
+            CompilerStatus::Rejected(CompilerFailure::MalformedInput(
+                InputFailure::InvalidAtomTerm
+            ))
+        ));
     }
 
     #[test]

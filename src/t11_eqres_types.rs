@@ -299,6 +299,7 @@ pub(crate) enum ClauseOrigin {
 /// A clause ID is global; `origin` records which topological rule applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ClauseRef {
     pub(crate) id: ClauseId,
     pub(crate) origin: ClauseOrigin,
@@ -306,6 +307,7 @@ pub(crate) struct ClauseRef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ClausePivot {
     pub(crate) clause: ClauseRef,
     pub(crate) literal_offset: LiteralOffset,
@@ -316,6 +318,7 @@ pub(crate) struct ClausePivot {
 /// in its trace record and are deliberately not substituted for this sequence.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct EventKey {
     pub(crate) resulting_clause_width: u32,
     pub(crate) proof_depth: ProofDepth,
@@ -328,18 +331,21 @@ pub(crate) struct EventKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct SeedRecord {
     pub(crate) positive_source: ClausePivot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ReflexivityRecord {
     pub(crate) term: TermId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct TransitivityRecord {
     /// Sorted ascending for the event key; endpoint orientation is recovered
     /// independently from the conclusions and `intermediate`.
@@ -349,6 +355,7 @@ pub(crate) struct TransitivityRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CongruenceArgumentParent {
     pub(crate) argument_index: ArgumentIndex,
     pub(crate) parent: NodeId,
@@ -356,6 +363,7 @@ pub(crate) struct CongruenceArgumentParent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CongruenceRecord {
     pub(crate) applications: [ApplicationId; 2],
     /// One entry for every differing argument, in increasing argument-index
@@ -365,6 +373,7 @@ pub(crate) struct CongruenceRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ConflictRecord {
     pub(crate) equality_parent: NodeId,
     pub(crate) negative_source: ClausePivot,
@@ -374,7 +383,12 @@ pub(crate) struct ConflictRecord {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "rule", content = "premises", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "rule",
+        content = "premises",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum EqualityRuleRecord {
     Seed(SeedRecord),
@@ -385,6 +399,7 @@ pub(crate) enum EqualityRuleRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct EqualityTraceRecord {
     pub(crate) event_id: EventId,
     pub(crate) node_id: NodeId,
@@ -396,6 +411,7 @@ pub(crate) struct EqualityTraceRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ConflictTraceRecord {
     pub(crate) event_id: EventId,
     pub(crate) clause_id: ClauseId,
@@ -408,7 +424,12 @@ pub(crate) struct ConflictTraceRecord {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "record_kind", content = "record", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "record_kind",
+        content = "record",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum TraceRecord {
     Equality(EqualityTraceRecord),
@@ -417,6 +438,7 @@ pub(crate) enum TraceRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct EmittedLemma {
     pub(crate) source_clause_id: ClauseId,
     pub(crate) clause: CanonicalClause,
@@ -429,7 +451,12 @@ pub(crate) struct EmittedLemma {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "outcome", content = "output", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "outcome",
+        content = "output",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum EqresOutput {
     Lemmas(Box<[EmittedLemma]>),
@@ -551,6 +578,7 @@ impl<'de> serde::Deserialize<'de> for MaterializedClauseStore {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct RuleCounters {
     pub(crate) seed: u64,
     pub(crate) reflexivity: u64,
@@ -561,6 +589,7 @@ pub(crate) struct RuleCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct InputCounters {
     pub(crate) terms: u64,
     pub(crate) baseline_variables: u64,
@@ -575,6 +604,7 @@ pub(crate) struct InputCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct SearchCounters {
     pub(crate) attempted_events: RuleCounters,
     pub(crate) accepted_events: RuleCounters,
@@ -600,6 +630,7 @@ pub(crate) struct SearchCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct PruningCounters {
     pub(crate) support_subset_discards: u64,
     pub(crate) support_capacity_discards: u64,
@@ -612,6 +643,7 @@ pub(crate) struct PruningCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct OutputCounters {
     pub(crate) emitted_lemmas: u64,
     pub(crate) emitted_literal_slots: u64,
@@ -622,6 +654,7 @@ pub(crate) struct OutputCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct DeterministicCounters {
     pub(crate) input: InputCounters,
     pub(crate) search: SearchCounters,
@@ -664,7 +697,12 @@ pub(crate) enum CapReason {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "boundary", content = "context", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "boundary",
+        content = "context",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum CapBoundary {
     StaticInput,
@@ -679,6 +717,7 @@ pub(crate) enum CapBoundary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CapAttempt {
     pub(crate) reason: CapReason,
     pub(crate) boundary: CapBoundary,
@@ -732,7 +771,12 @@ pub(crate) enum HashArtifact {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "failure", content = "detail", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "failure",
+        content = "detail",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum CompilerFailure {
     Cap(CapAttempt),
@@ -747,7 +791,12 @@ pub(crate) enum CompilerFailure {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "status", content = "detail", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "status",
+        content = "detail",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum CompilerStatus {
     NotRun,
@@ -863,6 +912,7 @@ const fn decode_lower_hex(byte: u8) -> u8 {
 /// theory-empty and no-lemma records still hash their exact empty byte streams.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct HashBindings {
     pub(crate) source_sha256: Sha256Digest,
     pub(crate) root_cnf_mode_sha256: Sha256Digest,
@@ -887,6 +937,7 @@ pub(crate) struct HashBindings {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CompilerResult {
     pub(crate) variant: CompilerVariant,
     pub(crate) status: CompilerStatus,
@@ -898,6 +949,7 @@ pub(crate) struct CompilerResult {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CheckerCounters {
     pub(crate) replayed_equality_nodes: u64,
     pub(crate) replayed_conflict_clauses: u64,
@@ -941,6 +993,7 @@ pub(crate) enum CheckerFailureKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CheckerFailure {
     pub(crate) kind: CheckerFailureKind,
     pub(crate) event_id: Option<EventId>,
@@ -951,7 +1004,12 @@ pub(crate) struct CheckerFailure {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "status", content = "failures", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "status",
+        content = "failures",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum CheckerStatus {
     NotRun,
@@ -961,6 +1019,7 @@ pub(crate) enum CheckerStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct CheckerResult {
     pub(crate) status: CheckerStatus,
     pub(crate) counters: CheckerCounters,
@@ -991,6 +1050,7 @@ pub(crate) enum SolverBackend {
 /// fields, preserving the preregistered information boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct SelectorFacts {
     pub(crate) finite_added_clauses: u64,
     pub(crate) covered_finite_terms: u64,
@@ -1028,7 +1088,12 @@ pub(crate) enum SelectorRejection {
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "certificates",
-    serde(tag = "decision", content = "reason", rename_all = "snake_case")
+    serde(
+        deny_unknown_fields,
+        tag = "decision",
+        content = "reason",
+        rename_all = "snake_case"
+    )
 )]
 pub(crate) enum SelectorDecision {
     Selected,
@@ -1037,6 +1102,7 @@ pub(crate) enum SelectorDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct SelectorReport {
     pub(crate) mode: EqresMode,
     pub(crate) facts: SelectorFacts,
@@ -1045,6 +1111,7 @@ pub(crate) struct SelectorReport {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct ForbiddenGrowthCounters {
     pub(crate) added_terms: u64,
     pub(crate) added_atoms: u64,
@@ -1055,6 +1122,7 @@ pub(crate) struct ForbiddenGrowthCounters {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct IntegrityReport {
     pub(crate) baseline_unchanged: bool,
     pub(crate) trace_materialization_equal: bool,
@@ -1077,6 +1145,7 @@ pub(crate) enum ReportOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", serde(deny_unknown_fields))]
 pub(crate) struct EqresReport {
     pub(crate) schema_version: u32,
     pub(crate) selector: SelectorReport,
@@ -1200,7 +1269,7 @@ struct OutputStructureSummary {
 /// Compiler output and independent replay are kept side by side rather than
 /// allowing the checker to mutate or replace compiler-owned records.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
 pub(crate) struct EqresBundle {
     pub(crate) selector: SelectorReport,
     pub(crate) compiler: CompilerResult,
@@ -1632,6 +1701,7 @@ fn validate_report_structure(bundle: &EqresBundle) -> Result<(), EqresBundleStru
         || bundle.report.integrity.trace_materialization_equal != expected_trace_materialization
         || bundle.report.integrity.compiler_checker_agree != expected_compiler_checker_agree
         || bundle.report.integrity.output_canonical != checker_accepted
+        || bundle.report.integrity.external_audit_accepted
         || (bundle.report.integrity.off_path_unchanged
             && (!matches!(bundle.compiler.status, CompilerStatus::NotRun)
                 || bundle.selector.decision == SelectorDecision::Selected))
@@ -1641,72 +1711,47 @@ fn validate_report_structure(bundle: &EqresBundle) -> Result<(), EqresBundleStru
     Ok(())
 }
 
+#[cfg(feature = "certificates")]
+impl<'de> serde::Deserialize<'de> for EqresBundle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct EqresBundleWire {
+            selector: SelectorReport,
+            compiler: CompilerResult,
+            materialized_lemmas: MaterializedClauseStore,
+            checker: CheckerResult,
+            report: EqresReport,
+        }
+
+        let wire = EqresBundleWire::deserialize(deserializer)?;
+        let bundle = Self::new(
+            wire.selector,
+            wire.compiler,
+            wire.materialized_lemmas,
+            wire.checker,
+            wire.report,
+        );
+        bundle
+            .validate_structure()
+            .map_err(serde::de::Error::custom)?;
+        Ok(bundle)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SatComponentError {
-    BundleStructure(EqresBundleStructureError),
-    ProjectionNotInternallyAccepted,
     ResultBeforeChecker,
-    InvalidComponentInvariant,
-    OutputComponentMismatch,
-    NoRunnableOutput,
-    SatLoadMismatch,
-    KernelResultNotUnsat,
-    InternalHashMismatch,
-    MaterializedOutputMismatch,
-    MissingExactProjectionBundleDigest,
-    MissingExactAuditReceiptDigest,
-    ProjectionRecordDigestMismatch,
-    AuditReceiptDigestMismatch,
-    MissingExternalIdentity(HashArtifact),
 }
 
 impl fmt::Display for SatComponentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BundleStructure(error) => {
-                write!(formatter, "invalid equality-resolution bundle: {error}")
-            }
-            Self::ProjectionNotInternallyAccepted => {
-                formatter.write_str("projection bundle is not internally accepted")
-            }
             Self::ResultBeforeChecker => {
                 formatter.write_str("SAT result timestamp precedes checker completion")
-            }
-            Self::InvalidComponentInvariant => {
-                formatter.write_str("SAT component violates its variant invariant")
-            }
-            Self::OutputComponentMismatch => {
-                formatter.write_str("SAT component does not match the compiler output")
-            }
-            Self::NoRunnableOutput => formatter.write_str("compiler output is not runnable"),
-            Self::SatLoadMismatch => {
-                formatter.write_str("fresh SAT load does not match the sealed projection")
-            }
-            Self::KernelResultNotUnsat => {
-                formatter.write_str("fresh SAT session did not return UNSAT")
-            }
-            Self::InternalHashMismatch => {
-                formatter.write_str("internal artifact hash bindings do not agree")
-            }
-            Self::MaterializedOutputMismatch => {
-                formatter.write_str("sealed materialized output does not match compiler output")
-            }
-            Self::MissingExactProjectionBundleDigest => {
-                formatter.write_str("exact projection-bundle digest is zero")
-            }
-            Self::MissingExactAuditReceiptDigest => {
-                formatter.write_str("exact audit-receipt digest is zero")
-            }
-            Self::ProjectionRecordDigestMismatch => formatter
-                .write_str("projection-record digest does not bind the exact projection bundle"),
-            Self::AuditReceiptDigestMismatch => {
-                formatter.write_str("checker-record digest does not bind the exact audit receipt")
-            }
-            Self::MissingExternalIdentity(artifact) => {
-                write!(
-                    formatter,
-                    "required external identity is zero: {artifact:?}"
-                )
             }
         }
     }
@@ -1966,301 +2011,6 @@ impl<'de> serde::Deserialize<'de> for SatComponent {
     }
 }
 
-/// Exact pre-run artifact identities and auditor-carried hash recomputation.
-///
-/// These fields provide structural binding only; artifact authenticity is an
-/// external publication and audit responsibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct EqresRunBindings {
-    exact_projection_bundle_sha256: Sha256Digest,
-    exact_audit_receipt_sha256: Sha256Digest,
-    auditor_recomputed_hashes: HashBindings,
-}
-
-impl EqresRunBindings {
-    pub(crate) const fn new(
-        exact_projection_bundle_sha256: Sha256Digest,
-        exact_audit_receipt_sha256: Sha256Digest,
-        auditor_recomputed_hashes: HashBindings,
-    ) -> Self {
-        Self {
-            exact_projection_bundle_sha256,
-            exact_audit_receipt_sha256,
-            auditor_recomputed_hashes,
-        }
-    }
-}
-
-// Keep stale test-only call sites type-checking while making the old loose
-// binding path unconditionally fail validation. Production callers must pass
-// `EqresRunBindings` explicitly.
-#[cfg(test)]
-impl From<HashBindings> for EqresRunBindings {
-    fn from(auditor_recomputed_hashes: HashBindings) -> Self {
-        Self::new(
-            Sha256Digest::ZERO,
-            Sha256Digest::ZERO,
-            auditor_recomputed_hashes,
-        )
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "certificates", derive(serde::Serialize))]
-pub(crate) struct EqresRunRecord {
-    bundle: EqresBundle,
-    sat_component: SatComponent,
-    exact_projection_bundle_sha256: Sha256Digest,
-    exact_audit_receipt_sha256: Sha256Digest,
-    hashes: HashBindings,
-}
-
-impl EqresRunRecord {
-    pub(crate) fn new<B>(
-        bundle: EqresBundle,
-        sat_component: SatComponent,
-        bindings: B,
-    ) -> Result<Self, SatComponentError>
-    where
-        B: Into<EqresRunBindings>,
-    {
-        let bindings = bindings.into();
-        let record = Self {
-            bundle,
-            sat_component,
-            exact_projection_bundle_sha256: bindings.exact_projection_bundle_sha256,
-            exact_audit_receipt_sha256: bindings.exact_audit_receipt_sha256,
-            hashes: bindings.auditor_recomputed_hashes,
-        };
-        record.validate()?;
-        Ok(record)
-    }
-
-    pub(crate) fn validate(&self) -> Result<(), SatComponentError> {
-        self.bundle
-            .validate_structure()
-            .map_err(SatComponentError::BundleStructure)?;
-
-        let expected_integrity = IntegrityReport {
-            baseline_unchanged: true,
-            trace_materialization_equal: true,
-            compiler_checker_agree: true,
-            output_canonical: true,
-            external_audit_accepted: false,
-            off_path_unchanged: false,
-        };
-        if self.bundle.selector.mode != EqresMode::CliqueErAuto
-            || self.bundle.selector.decision != SelectorDecision::Selected
-            || self.bundle.report.sat_calls != 0
-            || self.bundle.report.cap_attempt.is_some()
-            || self.bundle.report.forbidden_growth != ForbiddenGrowthCounters::default()
-            || self.bundle.report.integrity != expected_integrity
-            || self
-                .bundle
-                .compiler
-                .counters
-                .output
-                .emitted_with_missing_equality_congruence
-                == 0
-            || !matches!(self.bundle.checker.status, CheckerStatus::Accepted)
-            || self.bundle.checker.counters.replay_failures != 0
-        {
-            return Err(SatComponentError::ProjectionNotInternallyAccepted);
-        }
-
-        if self.exact_projection_bundle_sha256 == Sha256Digest::ZERO {
-            return Err(SatComponentError::MissingExactProjectionBundleDigest);
-        }
-        if self.exact_audit_receipt_sha256 == Sha256Digest::ZERO {
-            return Err(SatComponentError::MissingExactAuditReceiptDigest);
-        }
-        if !internal_hashes_match(self.hashes, self.bundle.compiler.hashes)
-            || !internal_hashes_match(self.hashes, self.bundle.checker.recomputed_hashes)
-            || !internal_hashes_match(self.hashes, self.bundle.report.hashes)
-            || !internal_hashes_nonzero(self.hashes)
-        {
-            return Err(SatComponentError::InternalHashMismatch);
-        }
-        for (artifact, digest) in [
-            (
-                HashArtifact::CandidateBinary,
-                self.hashes.candidate_binary_sha256,
-            ),
-            (HashArtifact::Revision, self.hashes.revision_sha256),
-            (
-                HashArtifact::CorpusManifest,
-                self.hashes.corpus_manifest_sha256,
-            ),
-            (
-                HashArtifact::ProjectionRecord,
-                self.hashes.projection_record_sha256,
-            ),
-            (
-                HashArtifact::CheckerRecord,
-                self.hashes.checker_record_sha256,
-            ),
-        ] {
-            if digest == Sha256Digest::ZERO {
-                return Err(SatComponentError::MissingExternalIdentity(artifact));
-            }
-        }
-        // Observation and DRAT identities may depend on the completed run and
-        // are intentionally not mandatory at this construction boundary.
-        if self.hashes.projection_record_sha256 != self.exact_projection_bundle_sha256 {
-            return Err(SatComponentError::ProjectionRecordDigestMismatch);
-        }
-        if self.hashes.checker_record_sha256 != self.exact_audit_receipt_sha256 {
-            return Err(SatComponentError::AuditReceiptDigestMismatch);
-        }
-
-        match (&self.bundle.compiler.status, self.sat_component) {
-            (
-                CompilerStatus::Completed(EqresOutput::TheoryEmpty { lemma, .. }),
-                SatComponent::TheoryEmpty(component),
-            ) => {
-                if component.sat_session()
-                    || component.sat_calls() != 0
-                    || component.sat_variables_loaded() != 0
-                    || component.sat_clauses_loaded() != 0
-                    || component.load_solve_ns() != 0
-                    || component.result_timestamp_ns() < component.checker_completed_ns()
-                {
-                    return Err(SatComponentError::InvalidComponentInvariant);
-                }
-                if !lemma.clause.is_empty()
-                    || self.bundle.materialized_lemmas().len() != 1
-                    || self.bundle.materialized_lemmas().clause(0) != Some(lemma.clause.as_slice())
-                {
-                    return Err(SatComponentError::MaterializedOutputMismatch);
-                }
-            }
-            (
-                CompilerStatus::Completed(EqresOutput::Lemmas(lemmas)),
-                SatComponent::FreshSession(component),
-            ) => {
-                if !component.sat_session()
-                    || component.sat_calls() != 1
-                    || component.result_timestamp_ns() < component.checker_completed_ns()
-                {
-                    return Err(SatComponentError::InvalidComponentInvariant);
-                }
-                if component.result() != SatKernelResult::Unsat {
-                    return Err(SatComponentError::KernelResultNotUnsat);
-                }
-                let expected_clauses = self
-                    .bundle
-                    .compiler
-                    .counters
-                    .input
-                    .baseline_clauses
-                    .checked_add(
-                        u64::try_from(lemmas.len())
-                            .map_err(|_| SatComponentError::SatLoadMismatch)?,
-                    )
-                    .ok_or(SatComponentError::SatLoadMismatch)?;
-                if lemmas.is_empty()
-                    || component.sat_variables_loaded()
-                        != self.bundle.compiler.counters.input.baseline_variables
-                    || component.sat_clauses_loaded() != expected_clauses
-                {
-                    return Err(SatComponentError::SatLoadMismatch);
-                }
-                if lemmas.len() != self.bundle.materialized_lemmas().len()
-                    || !lemmas.iter().enumerate().all(|(index, lemma)| {
-                        self.bundle.materialized_lemmas().clause(index)
-                            == Some(lemma.clause.as_slice())
-                    })
-                {
-                    return Err(SatComponentError::MaterializedOutputMismatch);
-                }
-            }
-            (CompilerStatus::Completed(EqresOutput::NoLemmas), _) => {
-                return Err(SatComponentError::NoRunnableOutput);
-            }
-            (CompilerStatus::NotRun | CompilerStatus::Rejected(_), _) => {
-                return Err(SatComponentError::NoRunnableOutput);
-            }
-            _ => return Err(SatComponentError::OutputComponentMismatch),
-        }
-        Ok(())
-    }
-
-    pub(crate) fn bundle(&self) -> &EqresBundle {
-        &self.bundle
-    }
-
-    pub(crate) const fn sat_component(&self) -> SatComponent {
-        self.sat_component
-    }
-
-    pub(crate) const fn exact_projection_bundle_sha256(&self) -> Sha256Digest {
-        self.exact_projection_bundle_sha256
-    }
-
-    pub(crate) const fn exact_audit_receipt_sha256(&self) -> Sha256Digest {
-        self.exact_audit_receipt_sha256
-    }
-
-    pub(crate) const fn hashes(&self) -> HashBindings {
-        self.hashes
-    }
-}
-
-#[cfg(feature = "certificates")]
-impl<'de> serde::Deserialize<'de> for EqresRunRecord {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct EqresRunRecordWire {
-            bundle: EqresBundle,
-            sat_component: SatComponent,
-            exact_projection_bundle_sha256: Sha256Digest,
-            exact_audit_receipt_sha256: Sha256Digest,
-            hashes: HashBindings,
-        }
-
-        let wire = EqresRunRecordWire::deserialize(deserializer)?;
-        Self::new(
-            wire.bundle,
-            wire.sat_component,
-            EqresRunBindings::new(
-                wire.exact_projection_bundle_sha256,
-                wire.exact_audit_receipt_sha256,
-                wire.hashes,
-            ),
-        )
-        .map_err(serde::de::Error::custom)
-    }
-}
-
-fn internal_hashes_match(left: HashBindings, right: HashBindings) -> bool {
-    internal_hashes(left) == internal_hashes(right)
-}
-
-fn internal_hashes_nonzero(hashes: HashBindings) -> bool {
-    internal_hashes(hashes)
-        .into_iter()
-        .all(|digest| digest != Sha256Digest::ZERO)
-}
-
-fn internal_hashes(hashes: HashBindings) -> [Sha256Digest; 10] {
-    [
-        hashes.source_sha256,
-        hashes.root_cnf_mode_sha256,
-        hashes.term_dag_sha256,
-        hashes.atom_map_sha256,
-        hashes.baseline_cnf_sha256,
-        hashes.baseline_problem_sha256,
-        hashes.trace_sha256,
-        hashes.lemma_sequence_sha256,
-        hashes.materialized_lemmas_sha256,
-        hashes.materialized_candidate_sha256,
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2437,20 +2187,32 @@ mod tests {
         EqresBundle::new(selector, compiler, materialized_lemmas, checker, report)
     }
 
-    fn run_bindings(bundle: &EqresBundle) -> EqresRunBindings {
-        let exact_projection_bundle_sha256 = digest(101);
-        let exact_audit_receipt_sha256 = digest(102);
-        let mut hashes = bundle.compiler.hashes;
-        hashes.candidate_binary_sha256 = digest(103);
-        hashes.revision_sha256 = digest(104);
-        hashes.corpus_manifest_sha256 = digest(105);
-        hashes.projection_record_sha256 = exact_projection_bundle_sha256;
-        hashes.checker_record_sha256 = exact_audit_receipt_sha256;
-        EqresRunBindings::new(
-            exact_projection_bundle_sha256,
-            exact_audit_receipt_sha256,
-            hashes,
-        )
+    #[cfg(feature = "certificates")]
+    fn add_unknown_field(mut value: serde_json::Value, pointer: &str) -> serde_json::Value {
+        let target = if pointer.is_empty() {
+            &mut value
+        } else {
+            value
+                .pointer_mut(pointer)
+                .unwrap_or_else(|| panic!("missing JSON pointer {pointer}"))
+        };
+        target
+            .as_object_mut()
+            .unwrap_or_else(|| panic!("JSON pointer is not an object: {pointer}"))
+            .insert("unexpected".to_owned(), serde_json::json!(true));
+        value
+    }
+
+    #[cfg(feature = "certificates")]
+    fn assert_bundle_decode_err(value: serde_json::Value, context: &str) {
+        assert!(
+            serde_json::from_value::<EqresBundle>(value.clone()).is_err(),
+            "bundle mutation accepted from value: {context}"
+        );
+        assert!(
+            serde_json::from_slice::<EqresBundle>(&serde_json::to_vec(&value).unwrap()).is_err(),
+            "bundle mutation accepted from bytes: {context}"
+        );
     }
 
     #[test]
@@ -2658,147 +2420,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn run_record_requires_exact_external_and_auditor_bindings() {
-        let bundle = accepted_bundle(true);
-        let bindings = run_bindings(&bundle);
-        let component = SatComponent::TheoryEmpty(TheoryEmptySatComponent::new(100, 101).unwrap());
-        let record = EqresRunRecord::new(bundle.clone(), component, bindings).unwrap();
-        assert_eq!(record.bundle(), &bundle);
-        assert_eq!(record.sat_component(), component);
-        assert_eq!(record.exact_projection_bundle_sha256(), digest(101));
-        assert_eq!(record.exact_audit_receipt_sha256(), digest(102));
-        assert_eq!(record.hashes(), bindings.auditor_recomputed_hashes);
-
-        assert_eq!(
-            EqresRunRecord::new(bundle.clone(), component, bundle.compiler.hashes),
-            Err(SatComponentError::MissingExactProjectionBundleDigest)
-        );
-
-        let mut missing_identity = run_bindings(&bundle);
-        missing_identity
-            .auditor_recomputed_hashes
-            .candidate_binary_sha256 = Sha256Digest::ZERO;
-        assert_eq!(
-            EqresRunRecord::new(bundle.clone(), component, missing_identity),
-            Err(SatComponentError::MissingExternalIdentity(
-                HashArtifact::CandidateBinary
-            ))
-        );
-
-        let mut stale_auditor = run_bindings(&bundle);
-        stale_auditor.auditor_recomputed_hashes.trace_sha256 = digest(77);
-        assert_eq!(
-            EqresRunRecord::new(bundle.clone(), component, stale_auditor),
-            Err(SatComponentError::InternalHashMismatch)
-        );
-
-        let mut wrong_exact_bundle = run_bindings(&bundle);
-        wrong_exact_bundle.exact_projection_bundle_sha256 = digest(88);
-        assert_eq!(
-            EqresRunRecord::new(bundle, component, wrong_exact_bundle),
-            Err(SatComponentError::ProjectionRecordDigestMismatch)
-        );
-    }
-
-    #[test]
-    fn run_record_preserves_disjoint_sat_load_invariants() {
-        let theory_empty_bundle = accepted_bundle(true);
-        let fresh_component = FreshSatComponent::new(
-            theory_empty_bundle
-                .compiler
-                .counters
-                .input
-                .baseline_variables,
-            theory_empty_bundle.compiler.counters.input.baseline_clauses + 1,
-            1,
-            SatKernelResult::Unsat,
-            100,
-            101,
-        )
-        .unwrap();
-        assert_eq!(
-            EqresRunRecord::new(
-                theory_empty_bundle.clone(),
-                SatComponent::FreshSession(fresh_component),
-                run_bindings(&theory_empty_bundle),
-            ),
-            Err(SatComponentError::OutputComponentMismatch)
-        );
-
-        let lemmas_bundle = accepted_bundle(false);
-        let fresh_component = FreshSatComponent::new(
-            lemmas_bundle.compiler.counters.input.baseline_variables,
-            lemmas_bundle.compiler.counters.input.baseline_clauses + 1,
-            1,
-            SatKernelResult::Unsat,
-            100,
-            101,
-        )
-        .unwrap();
-        EqresRunRecord::new(
-            lemmas_bundle.clone(),
-            SatComponent::FreshSession(fresh_component),
-            run_bindings(&lemmas_bundle),
-        )
-        .unwrap();
-        assert_eq!(
-            EqresRunRecord::new(
-                lemmas_bundle.clone(),
-                SatComponent::TheoryEmpty(TheoryEmptySatComponent::new(100, 101).unwrap()),
-                run_bindings(&lemmas_bundle),
-            ),
-            Err(SatComponentError::OutputComponentMismatch)
-        );
-
-        let wrong_load = FreshSatComponent::new(
-            lemmas_bundle.compiler.counters.input.baseline_variables,
-            lemmas_bundle.compiler.counters.input.baseline_clauses,
-            1,
-            SatKernelResult::Unsat,
-            100,
-            101,
-        )
-        .unwrap();
-        assert_eq!(
-            EqresRunRecord::new(
-                lemmas_bundle.clone(),
-                SatComponent::FreshSession(wrong_load),
-                run_bindings(&lemmas_bundle),
-            ),
-            Err(SatComponentError::SatLoadMismatch)
-        );
-
-        let sat_result = FreshSatComponent::new(
-            lemmas_bundle.compiler.counters.input.baseline_variables,
-            lemmas_bundle.compiler.counters.input.baseline_clauses + 1,
-            1,
-            SatKernelResult::Sat,
-            100,
-            101,
-        )
-        .unwrap();
-        assert_eq!(
-            EqresRunRecord::new(
-                lemmas_bundle.clone(),
-                SatComponent::FreshSession(sat_result),
-                run_bindings(&lemmas_bundle),
-            ),
-            Err(SatComponentError::KernelResultNotUnsat)
-        );
-
-        let mut externally_marked = lemmas_bundle.clone();
-        externally_marked.report.integrity.external_audit_accepted = true;
-        assert_eq!(
-            EqresRunRecord::new(
-                externally_marked,
-                SatComponent::FreshSession(fresh_component),
-                run_bindings(&lemmas_bundle),
-            ),
-            Err(SatComponentError::ProjectionNotInternallyAccepted)
-        );
-    }
-
     #[cfg(feature = "certificates")]
     #[test]
     fn invariant_deserializers_reject_noncanonical_and_unknown_data() {
@@ -2851,44 +2472,94 @@ mod tests {
 
     #[cfg(feature = "certificates")]
     #[test]
-    fn bundle_and_run_record_deserialization_revalidate_structure() {
+    fn bundle_deserialization_rejects_malformed_and_unknown_nested_state() {
         let bundle = accepted_bundle(false);
         let encoded = serde_json::to_value(&bundle).unwrap();
         let decoded: EqresBundle = serde_json::from_value(encoded.clone()).unwrap();
         assert_eq!(decoded, bundle);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let decoded: EqresBundle = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, bundle);
 
         let mut stale_report = encoded.clone();
         stale_report["report"]["counters"]["search"]["events_popped"] = serde_json::json!(3);
-        let stale_report: EqresBundle = serde_json::from_value(stale_report).unwrap();
-        assert_eq!(
-            stale_report.validate_structure(),
-            Err(EqresBundleStructureError::ReportCounterMismatch)
+        assert_bundle_decode_err(stale_report, "stale report counters");
+
+        let mut malformed_store = encoded.clone();
+        malformed_store["materialized_lemmas"]["end_offsets"] = serde_json::json!([1, 1]);
+        assert_bundle_decode_err(malformed_store, "malformed materialized store");
+
+        let mut noncanonical_clause = encoded.clone();
+        noncanonical_clause["compiler"]["trace"][1]["record"]["clause"] = serde_json::json!([2, 1]);
+        assert_bundle_decode_err(noncanonical_clause, "noncanonical trace clause");
+
+        let mut reversed_key = encoded.clone();
+        reversed_key["compiler"]["trace"][0]["record"]["conclusion"] =
+            serde_json::json!({"left": 7, "right": 3});
+        assert_bundle_decode_err(reversed_key, "reversed equality key");
+
+        let mut unaudited_external_claim = encoded.clone();
+        unaudited_external_claim["report"]["integrity"]["external_audit_accepted"] =
+            serde_json::json!(true);
+        assert_bundle_decode_err(unaudited_external_claim, "unreceipted external-audit claim");
+
+        let theory_empty = serde_json::to_value(accepted_bundle(true)).unwrap();
+        let unknown_theory_empty_output =
+            add_unknown_field(theory_empty, "/compiler/status/detail/output");
+        assert_bundle_decode_err(
+            unknown_theory_empty_output,
+            "unknown theory-empty output field",
         );
 
-        let fresh_component =
-            FreshSatComponent::new(7, 12, 1, SatKernelResult::Unsat, 100, 101).unwrap();
-        let record = EqresRunRecord::new(
-            bundle,
-            SatComponent::FreshSession(fresh_component),
-            run_bindings(&decoded),
-        )
-        .unwrap();
-        let encoded = serde_json::to_value(&record).unwrap();
-        let decoded_record: EqresRunRecord = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(decoded_record, record);
-
-        let mut zero_identity = encoded.clone();
-        zero_identity["hashes"]["candidate_binary_sha256"] =
-            serde_json::json!(Sha256Digest::ZERO.to_string());
-        assert!(serde_json::from_value::<EqresRunRecord>(zero_identity).is_err());
-
-        let mut invalid_component = encoded.clone();
-        invalid_component["sat_component"]["component"]["sat_calls"] = serde_json::json!(2);
-        assert!(serde_json::from_value::<EqresRunRecord>(invalid_component).is_err());
-
-        let mut unknown_record = encoded;
-        unknown_record["unexpected"] = serde_json::json!(true);
-        assert!(serde_json::from_value::<EqresRunRecord>(unknown_record).is_err());
+        for pointer in [
+            "",
+            "/selector",
+            "/selector/facts",
+            "/selector/decision",
+            "/compiler",
+            "/compiler/status",
+            "/compiler/status/detail",
+            "/compiler/status/detail/output/0",
+            "/compiler/trace/0",
+            "/compiler/trace/0/record",
+            "/compiler/trace/0/record/rule",
+            "/compiler/trace/0/record/rule/premises",
+            "/compiler/trace/1/record",
+            "/compiler/trace/1/record/rule",
+            "/compiler/trace/1/record/rule/negative_source",
+            "/compiler/trace/1/record/rule/negative_source/clause",
+            "/compiler/counters",
+            "/compiler/counters/input",
+            "/compiler/counters/search",
+            "/compiler/counters/search/attempted_events",
+            "/compiler/counters/search/accepted_events",
+            "/compiler/counters/pruning",
+            "/compiler/counters/output",
+            "/compiler/hashes",
+            "/materialized_lemmas",
+            "/checker",
+            "/checker/status",
+            "/checker/counters",
+            "/checker/recomputed_hashes",
+            "/report",
+            "/report/selector",
+            "/report/selector/facts",
+            "/report/selector/decision",
+            "/report/counters",
+            "/report/counters/input",
+            "/report/counters/search",
+            "/report/counters/search/attempted_events",
+            "/report/counters/search/accepted_events",
+            "/report/counters/pruning",
+            "/report/counters/output",
+            "/report/checker_counters",
+            "/report/forbidden_growth",
+            "/report/integrity",
+            "/report/hashes",
+        ] {
+            let mutated = add_unknown_field(encoded.clone(), pointer);
+            assert_bundle_decode_err(mutated, &format!("unknown field at {pointer}"));
+        }
     }
 
     #[cfg(feature = "certificates")]

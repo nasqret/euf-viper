@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import copy
+import fcntl
 import hashlib
 import importlib.util
 import json
 import os
+import re
+import shutil
 import stat
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -34,21 +39,42 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
         self.assertIn("#SBATCH --cpus-per-task=1", self.text)
         self.assertIn("#SBATCH --mem=8G", self.text)
-        self.assertIn("export RUSTUP_TOOLCHAIN=1.93.0", self.text)
-        self.assertIn("build --locked --features certificates --release", self.text)
+        self.assertIn("RUSTUP_TOOLCHAIN=1.93.0-x86_64-unknown-linux-gnu", self.text)
+        self.assertIn(
+            'build --manifest-path "$source_root/Cargo.toml"',
+            self.text,
+        )
+        self.assertIn("--locked --offline --features certificates --release", self.text)
+        for namespace_option in (
+            '"--user"',
+            '"--map-root-user"',
+            '"--mount"',
+            '"--fork"',
+        ):
+            self.assertIn(namespace_option, self.text)
+        self.assertIn("--make-rprivate /", self.text)
+        self.assertIn("-t tmpfs -o nodev,nosuid", self.text)
+        self.assertIn("private build state escaped its mount namespace", self.text)
+        self.assertIn("cd /", self.text)
         self.assertIn("project-t11", self.text)
         self.assertIn("audit-t11", self.text)
+        self.assertIn("exec_t11_stage0a.py", self.text)
+        self.assertIn('sealed_exec_request "$PROJECT_REQUEST"', self.text)
+        self.assertIn('sealed_exec_request "$AUDIT_REQUEST"', self.text)
+        self.assertIn('sealed_exec_request "$VALIDATION_REQUEST"', self.text)
+        self.assertIn("--request-fd", self.text)
+        self.assertIn("--self-fd", self.text)
+        self.assertNotIn('pinned_python "$EXEC_HELPER', self.text)
         self.assertNotIn("compare_solvers.py", self.text)
         self.assertNotIn("YICES", self.text)
         self.assertNotIn("Z3", self.text)
 
     def test_exact_revision_toolchain_target_and_baseline_are_frozen(self) -> None:
         for required in (
-            "EUF_VIPER_EXPECTED_REVISION:?",
-            "EUF_VIPER_CARGO_SHA256:?",
-            "EUF_VIPER_RUSTC_SHA256:?",
-            "EUF_VIPER_PYTHON_SHA256:?",
-            "git status --porcelain=v1 --untracked-files=all",
+            "EUF_VIPER_T11_LAUNCH_MANIFEST:?",
+            "EUF_VIPER_T11_LAUNCH_MANIFEST_SHA256:?",
+            "inspect-launch",
+            "clean_git status --porcelain=v1 --untracked-files=all",
             "QF_UF_sokoban.2.prop1_ab_br_max.smt2",
             "cfe0e5e611139004e7f8a06461c4cbf3066bb604786377db1a94d40e797f3112",
             "2fa9cabb8279cf59a9ca73cd254c0c60fe028753e8aa01d1794dd0c645167496",
@@ -56,41 +82,879 @@ class T11Stage0AWmiContractTests(unittest.TestCase):
             "652e7b303accb7396dd9dfd5fdf40d17abd523f4a87897609390b6aa94d33597",
         ):
             self.assertIn(required, self.text)
+        for forbidden in (
+            "EUF_VIPER_EXPECTED_REVISION:?",
+            "EUF_VIPER_CARGO_SHA256:?",
+            "EUF_VIPER_RUSTC_SHA256:?",
+            "EUF_VIPER_PYTHON_SHA256:?",
+        ):
+            self.assertNotIn(forbidden, self.text)
 
     def test_exit_and_evidence_contract_is_fail_closed(self) -> None:
         self.assertIn('case "$PROJECT_EXIT" in', self.text)
-        self.assertIn("4) ;;", self.text)
+        self.assertIn("4|3) ;;", self.text)
         self.assertIn("projector_rejected 3 -1", self.text)
         self.assertIn('case "$AUDIT_EXIT" in', self.text)
         self.assertIn("external_auditor_rejected 4 3", self.text)
-        self.assertIn("independent_validation_rejected 4 0", self.text)
-        self.assertIn("source_identity_changed", self.text)
-        self.assertIn("euf-viper.t11-stage0a-rejection.v1", self.text)
+        self.assertIn(
+            'die "independent validator rejected the candidate evidence"', self.text
+        )
+        self.assertIn('die "source identity changed after snapshotting"', self.text)
+        self.assertIn('die "bundle identity changed between projection and audit"', self.text)
+        self.assertIn('die "binary identity changed after execution"', self.text)
+        self.assertIn("euf-viper.t11-stage0a-rejection.v2", self.text)
+        self.assertIn(
+            "euf-viper.t11-stage0a-infrastructure-rejection.v1", self.text
+        )
+        self.assertIn("stage0a_exit_trap", self.text)
+        self.assertIn("infrastructure-rejection.json", self.text)
         self.assertIn("stop_before_stage0b", self.text)
 
     def test_outputs_are_external_fresh_immutable_and_directory_synced(self) -> None:
         self.assertIn("EUF_VIPER_T11_RUN_BASE:?", self.text)
         self.assertIn('RUN_ROOT="$RUN_BASE/t11-stage0a-$SLURM_JOB_ID"', self.text)
         self.assertIn('mkdir -m 700 "$RUN_ROOT"', self.text)
-        self.assertIn('chmod 500 "$BINARY"', self.text)
+        self.assertIn('readonly BINARY="$PROVENANCE_ROOT/euf-viper"', self.text)
+        self.assertIn('os.fchmod(output_fd, 0o500)', self.text)
         self.assertIn("chmod -R a-w", self.text)
         self.assertIn("os.O_EXCL", self.text)
-        self.assertIn("os.fsync(parent_fd)", self.text)
+        self.assertGreaterEqual(self.text.count('fsync_path "$RUN_BASE"'), 2)
+        self.assertIn('fsync_path "$RUN_ROOT"', self.text)
         self.assertNotIn('RUN_ROOT="$PWD/results/', self.text)
 
     def test_independent_validator_binds_full_evidence(self) -> None:
         for required in (
             "validate_t11_stage0a.py",
+            "exec_t11_stage0a.py",
+            "--launch-manifest-sha256",
             "--source-before-sha256",
             "--source-after-sha256",
+            "--binary-before-sha256",
+            "--binary-after-sha256",
+            "--bundle-project-sha256",
+            "--bundle-audit-sha256",
             "--project-exit",
             "--audit-exit",
-            'artifact "bundle=$BUNDLE"',
-            'artifact "audit_receipt=$RECEIPT"',
-            'artifact "runner=$RUNNER"',
-            'artifact "validator=$VALIDATOR"',
+            '--artifact bundle "$BUNDLE" @BUNDLE@',
+            '--artifact audit_receipt "$RECEIPT" @RECEIPT@',
+            '--artifact runner "$RUNNER_SNAPSHOT" @RUNNER@',
+            '--artifact submitter "$SUBMITTER" @SUBMITTER@',
+            '--artifact finalizer_sbatch "$FINALIZER_SBATCH" @FINALIZER_SBATCH@',
+            '--artifact finalizer "$FINALIZER" @FINALIZER@',
+            '--artifact authorizer "$AUTHORIZER" @AUTHORIZER@',
+            '--artifact validator "$VALIDATOR" @VALIDATOR@',
+            '--artifact exec_helper "$EXEC_HELPER" @EXEC_HELPER@',
+            '--artifact control_git "$CONTROL_GIT" @CONTROL_GIT@',
+            '--artifact build_closure_tool "$BUILD_CLOSURE_TOOL" @BUILD_CLOSURE_TOOL@',
+            '--artifact build_closure_stdout "$BUILD_CLOSURE_STDOUT" @BUILD_CLOSURE_STDOUT@',
+            '--artifact build_closure_stderr "$BUILD_CLOSURE_STDERR" @BUILD_CLOSURE_STDERR@',
+            '--artifact launch_manifest "$LAUNCH_MANIFEST" @LAUNCH_MANIFEST@',
+            '--artifact cargo "$CARGO" @CARGO@',
+            '--artifact rustc "$RUSTC" @RUSTC@',
+            '--artifact python "$PYTHON" @PYTHON_TOOL@',
         ):
             self.assertIn(required, self.text)
+
+    def test_embedded_python_and_line_continuations_are_valid(self) -> None:
+        programs = re.findall(r"<<'PY'\n(.*?)\nPY", self.text, flags=re.DOTALL)
+        self.assertEqual(len(programs), 9)
+        for index, program in enumerate(programs):
+            compile(program, f"stage0-embedded-{index}.py", "exec")
+        private_python = re.findall(
+            r"<<'PRIVATE_BUILD_REPORT_PY'\n(.*?)\nPRIVATE_BUILD_REPORT_PY",
+            self.text,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(len(private_python), 1)
+        compile(private_python[0], "stage0-private-build-report.py", "exec")
+        private_bootstrap = re.findall(
+            r"bootstrap_python -c '\n(.*?)\n' \\\n  \"\$UNSHARE_TOOL\"",
+            self.text,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(len(private_bootstrap), 1)
+        compile(private_bootstrap[0], "stage0-private-build-bootstrap.py", "exec")
+        private_build = re.findall(
+            r"<<'PRIVATE_BUILD'\n(.*?)\nPRIVATE_BUILD\n",
+            self.text,
+            flags=re.DOTALL,
+        )
+        self.assertEqual(len(private_build), 1)
+        subprocess.run(
+            ["bash", "-n"],
+            input=private_build[0],
+            text=True,
+            check=True,
+        )
+        self.assertIn("while offset < len(data)", self.text)
+        self.assertIn("while offset < len(encoded)", self.text)
+        self.assertIn("while written < len(encoded)", self.text)
+        self.assertIn("short runner-snapshot write", self.text)
+        self.assertNotIn("+  ", self.text)
+
+
+@unittest.skipUnless(
+    sys.platform.startswith("linux")
+    and Path("/usr/bin/python3").is_file()
+    and Path("/proc/self/fd").is_dir()
+    and shutil.which("git") is not None,
+    "Stage 0A dynamic pipeline tests require Linux, /proc, Python, and Git",
+)
+class T11Stage0ADynamicPipelineTests(unittest.TestCase):
+    TARGET_RELATIVE_PATH = (
+        "QF_UF/2018-Goel-hwbench/"
+        "QF_UF_sokoban.2.prop1_ab_br_max.smt2"
+    )
+    POISON = "EUF_VIPER_STAGE0A_INHERITED_POISON"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name).resolve()
+        self.fixture_index = 0
+
+    def tearDown(self) -> None:
+        for current, directories, files in os.walk(self.root, topdown=True):
+            for name in directories:
+                try:
+                    (Path(current) / name).chmod(0o700)
+                except FileNotFoundError:
+                    pass
+            for name in files:
+                try:
+                    (Path(current) / name).chmod(0o600)
+                except FileNotFoundError:
+                    pass
+        self.temporary.cleanup()
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    @staticmethod
+    def _write(path: Path, data: str | bytes, mode: int = 0o600) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = data.encode("ascii") if isinstance(data, str) else data
+        path.write_bytes(encoded)
+        path.chmod(mode)
+
+    @staticmethod
+    def _run_command(argv: list[str], *, cwd: Path) -> str:
+        completed = subprocess.run(
+            argv,
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={
+                "HOME": str(cwd),
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin",
+            },
+        )
+        return completed.stdout.strip()
+
+    def _solver_source(self, python: Path, scenario: str) -> str:
+        return textwrap.dedent(
+            f"""\
+            #!{python}
+            import hashlib
+            import json
+            import os
+            import sys
+
+            SCENARIO = {scenario!r}
+            POISON = {self.POISON!r}
+
+            def write_fresh(path, payload):
+                parent = os.path.dirname(path)
+                parent_fd = os.open(
+                    parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+                )
+                try:
+                    descriptor = os.open(
+                        os.path.basename(path),
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                        0o600,
+                        dir_fd=parent_fd,
+                    )
+                    try:
+                        offset = 0
+                        while offset < len(payload):
+                            written = os.write(descriptor, payload[offset:])
+                            if written <= 0:
+                                raise RuntimeError("short fake-solver write")
+                            offset += written
+                        os.fsync(descriptor)
+                        os.fchmod(descriptor, 0o400)
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
+                    os.fsync(parent_fd)
+                finally:
+                    os.close(parent_fd)
+
+            def emit_binding(path, artifact):
+                metadata = os.stat(path, follow_symlinks=False)
+                with open(path, "rb") as handle:
+                    payload = handle.read()
+                binding = {{
+                    "artifact": artifact,
+                    "bytes": len(payload),
+                    "ctime_ns": metadata.st_ctime_ns,
+                    "device": metadata.st_dev,
+                    "inode": metadata.st_ino,
+                    "links": metadata.st_nlink,
+                    "mode": f"{{metadata.st_mode & 0o7777:04o}}",
+                    "mtime_ns": metadata.st_mtime_ns,
+                    "path": path,
+                    "schema": "euf-viper.t11-publication-binding.v1",
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }}
+                print(json.dumps(binding, sort_keys=True, separators=(",", ":")))
+
+            if POISON in os.environ:
+                raise SystemExit(91)
+            command = sys.argv[1]
+            source = sys.argv[2]
+            with open(source, "rb") as handle:
+                if handle.read() != b"synthetic-stage0a-target\\n":
+                    raise SystemExit(92)
+
+            if command == "project-t11":
+                if os.environ.get("EUF_VIPER_T11_EQRES") != "clique-er-auto":
+                    raise SystemExit(93)
+                output = sys.argv[sys.argv.index("--bundle-out") + 1]
+                write_fresh(output, b"BUNDLE\\n")
+                emit_binding(output, "bundle")
+                if SCENARIO == "project_reject":
+                    raise SystemExit(3)
+                raise SystemExit(4)
+
+            if command == "audit-t11":
+                if "EUF_VIPER_T11_EQRES" in os.environ:
+                    raise SystemExit(94)
+                bundle = sys.argv[sys.argv.index("--bundle") + 1]
+                with open(bundle, "rb") as handle:
+                    if handle.read() != b"BUNDLE\\n":
+                        raise SystemExit(95)
+                if SCENARIO == "replace_bundle":
+                    bundle_path = os.path.join(
+                        os.path.dirname(os.environ["HOME"]),
+                        "projection-bundle.json",
+                    )
+                    os.unlink(bundle_path)
+                    write_fresh(bundle_path, b"REPLACED\\n")
+                receipt = sys.argv[sys.argv.index("--receipt-out") + 1]
+                write_fresh(receipt, b"RECEIPT\\n")
+                emit_binding(receipt, "audit receipt")
+                if SCENARIO == "audit_reject":
+                    raise SystemExit(3)
+                raise SystemExit(0)
+
+            raise SystemExit(96)
+            """
+        )
+
+    def _cargo_source(
+        self, python: Path, solver_source: str, scenario: str
+    ) -> str:
+        return textwrap.dedent(
+            f"""\
+            #!{python}
+            import os
+            import sys
+
+            POISON = {self.POISON!r}
+            SOLVER = {solver_source!r}.encode("ascii")
+            SCENARIO = {scenario!r}
+
+            def write_all(descriptor, payload):
+                offset = 0
+                while offset < len(payload):
+                    written = os.write(descriptor, payload[offset:])
+                    if written <= 0:
+                        raise RuntimeError("short fake-cargo write")
+                    offset += written
+
+            if sys.argv[1:] == ["--version"]:
+                print("cargo 1.93.0 (stage0a-fake)")
+                raise SystemExit(0)
+            if POISON in os.environ:
+                raise SystemExit(81)
+            if os.environ.get("CARGO_NET_OFFLINE") != "true":
+                raise SystemExit(82)
+            target = os.path.join(
+                os.environ["CARGO_TARGET_DIR"], "release", "euf-viper"
+            )
+            os.makedirs(os.path.dirname(target), mode=0o700, exist_ok=True)
+            descriptor = os.open(
+                target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o700
+            )
+            try:
+                write_all(descriptor, SOLVER)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            parent_fd = os.open(
+                os.path.dirname(target), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+            )
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            if SCENARIO == "unexpected_runner_failure":
+                os.unlink(
+                    os.path.join(
+                        os.path.dirname(os.environ["CARGO_TARGET_DIR"]),
+                        "build.stdout",
+                    )
+                )
+            print("fake offline certificate build")
+            """
+        )
+
+    def _validator_source(self, python: Path) -> str:
+        artifact_fields = (
+            "submitter_sha256",
+            "runner_sha256",
+            "finalizer_sbatch_sha256",
+            "finalizer_sha256",
+            "authorizer_sha256",
+            "validator_sha256",
+            "exec_helper_sha256",
+            "build_closure_tool_sha256",
+            "cargo_toml_sha256",
+            "cargo_lock_sha256",
+            "design_note_sha256",
+            "hash_contract_sha256",
+            "audit_contract_sha256",
+        )
+        return textwrap.dedent(
+            f"""\
+            #!{python}
+            import hashlib
+            import json
+            import os
+            import sys
+
+            POISON = {self.POISON!r}
+            ARTIFACT_FIELDS = {artifact_fields!r}
+            CONFIG_SCOPES = (
+                "repository/config",
+                "repository/config.toml",
+                "cargo_home/config",
+                "cargo_home/config.toml",
+            )
+
+            def write_all(descriptor, payload):
+                offset = 0
+                while offset < len(payload):
+                    written = os.write(descriptor, payload[offset:])
+                    if written <= 0:
+                        raise RuntimeError("short fake-validator write")
+                    offset += written
+
+            def value_after(name):
+                return sys.argv[sys.argv.index(name) + 1]
+
+            def load_manifest(path, expected):
+                with open(path, "rb") as handle:
+                    encoded = handle.read()
+                if hashlib.sha256(encoded).hexdigest() != expected:
+                    raise RuntimeError("manifest hash mismatch")
+                return json.loads(encoded)
+
+            if POISON in os.environ:
+                raise SystemExit(71)
+
+            if len(sys.argv) > 1 and sys.argv[1] == "inspect-launch":
+                manifest = load_manifest(
+                    value_after("--launch-manifest"),
+                    value_after("--launch-manifest-sha256"),
+                )
+                if manifest.get("inspect_reject"):
+                    print("synthetic manifest contract mismatch", file=sys.stderr)
+                    raise SystemExit(3)
+                toolchain = manifest["toolchain"]
+                values = [
+                    manifest["solver_revision"],
+                    toolchain["cargo_home"],
+                    toolchain["rustup_home"],
+                ]
+                for label in ("cargo", "rustc", "python"):
+                    values.extend(
+                        [
+                            toolchain[label]["path"],
+                            toolchain[label]["sha256"],
+                            toolchain[label]["version"],
+                        ]
+                    )
+                values.extend(manifest["artifacts"][name] for name in ARTIFACT_FIELDS)
+                build_closure = manifest["build_closure"]
+                values.extend(
+                    [
+                        build_closure["path"],
+                        build_closure["sha256"],
+                        build_closure["manifest_sha256"],
+                        build_closure["source_revision"],
+                    ]
+                )
+                for label in ("git", "sbatch", "scontrol", "scancel", "sacct"):
+                    tool = manifest["control_tools"][label]
+                    values.extend([tool["path"], tool["sha256"], tool["version"]])
+                configs = {{item["scope"]: item for item in toolchain["cargo_configs"]}}
+                for scope in CONFIG_SCOPES:
+                    item = configs[scope]
+                    values.extend([scope, item["state"], item["sha256"] or "-"])
+                output = b"\\0".join(item.encode("ascii") for item in values) + b"\\0"
+                write_all(1, output)
+                raise SystemExit(0)
+
+            source = value_after("--source")
+            bundle = value_after("--bundle")
+            receipt = value_after("--receipt")
+            with open(source, "rb") as handle:
+                if handle.read() != b"synthetic-stage0a-target\\n":
+                    raise SystemExit(72)
+            with open(bundle, "rb") as handle:
+                if handle.read() != b"BUNDLE\\n":
+                    raise SystemExit(73)
+            with open(receipt, "rb") as handle:
+                if handle.read() != b"RECEIPT\\n":
+                    raise SystemExit(74)
+            if value_after("--project-exit") != "4":
+                raise SystemExit(75)
+            if value_after("--audit-exit") != "0":
+                raise SystemExit(76)
+            output = value_after("--metadata-out")
+            payload = (
+                json.dumps(
+                    {{
+                        "schema": "euf-viper.t11-stage0a-dynamic-test.v1",
+                        "status": "validated_candidate",
+                        "decision": "requires_scheduler_finalization",
+                        "stage0b_authority": False,
+                        "environment_isolated": True,
+                    }},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\\n"
+            ).encode("ascii")
+            parent_fd = os.open(
+                os.path.dirname(output), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+            )
+            try:
+                descriptor = os.open(
+                    os.path.basename(output),
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+                try:
+                    write_all(descriptor, payload)
+                    os.fsync(descriptor)
+                    os.fchmod(descriptor, 0o400)
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            metadata = os.stat(output, follow_symlinks=False)
+            binding = {{
+                "artifact": "validation metadata",
+                "bytes": len(payload),
+                "ctime_ns": metadata.st_ctime_ns,
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+                "links": metadata.st_nlink,
+                "mode": f"{{metadata.st_mode & 0o7777:04o}}",
+                "mtime_ns": metadata.st_mtime_ns,
+                "path": output,
+                "schema": "euf-viper.t11-publication-binding.v1",
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }}
+            print(json.dumps(binding, sort_keys=True, separators=(",", ":")))
+            """
+        )
+
+    def _make_fixture(
+        self,
+        scenario: str,
+        *,
+        inspect_reject: bool = False,
+        mutate_cargo_after_manifest: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], Path]:
+        self.fixture_index += 1
+        case = self.root / f"case-{self.fixture_index}-{scenario}"
+        repo = case / "repo"
+        run_base = case / "runs"
+        corpus = case / "corpus"
+        tools = case / "tools"
+        cargo_home = case / "cargo-home"
+        rustup_home = case / "rustup-home"
+        closure_source = case / "closure-source"
+        native_libs = case / "native-libs"
+        python_runtime = case / "python-runtime"
+        for directory in (
+            repo,
+            run_base,
+            corpus,
+            tools,
+            cargo_home,
+            rustup_home,
+            closure_source,
+            native_libs,
+            python_runtime,
+        ):
+            directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+        (cargo_home / "registry").mkdir(mode=0o700)
+
+        python = Path(os.path.realpath("/usr/bin/python3"))
+        python_version_result = subprocess.run(
+            [str(python), "--version"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        python_version = python_version_result.stdout.strip()
+
+        target = corpus / self.TARGET_RELATIVE_PATH
+        self._write(target, b"synthetic-stage0a-target\n", 0o400)
+        target_sha256 = self._sha256(target)
+        runner_text, replacements = re.subn(
+            r'readonly TARGET_SHA256="[0-9a-f]{64}"',
+            f'readonly TARGET_SHA256="{target_sha256}"',
+            SCRIPT.read_text(encoding="ascii"),
+            count=1,
+        )
+        self.assertEqual(replacements, 1)
+
+        runner = repo / "scripts/wmi/euf_viper_t11_stage0a.sbatch"
+        submitter = repo / "scripts/wmi/submit_t11_stage0a.sh"
+        finalizer_sbatch = repo / "scripts/wmi/euf_viper_t11_stage0a_finalize.sbatch"
+        finalizer = repo / "scripts/bench/finalize_t11_stage0a.py"
+        authorizer = repo / "scripts/bench/authorize_t11_stage0a.py"
+        validator = repo / "scripts/bench/validate_t11_stage0a.py"
+        exec_helper = repo / "scripts/bench/exec_t11_stage0a.py"
+        build_closure_tool = repo / "scripts/bench/t11_build_closure.py"
+        cargo = tools / "cargo"
+        rustc = tools / "rustc"
+        self._write(runner, runner_text, 0o755)
+        self._write(submitter, "#!/bin/sh\nexit 0\n", 0o755)
+        self._write(finalizer_sbatch, "#!/bin/sh\nexit 0\n", 0o755)
+        self._write(finalizer, "#!/usr/bin/python3\n", 0o755)
+        self._write(authorizer, "#!/usr/bin/python3\n", 0o755)
+        self._write(validator, self._validator_source(python), 0o755)
+        self._write(exec_helper, (ROOT / "scripts/bench/exec_t11_stage0a.py").read_bytes(), 0o755)
+        self._write(
+            build_closure_tool,
+            (ROOT / "scripts/bench/t11_build_closure.py").read_bytes(),
+            0o755,
+        )
+        self._write(
+            cargo,
+            self._cargo_source(
+                python, self._solver_source(python, scenario), scenario
+            ),
+            0o755,
+        )
+        self._write(
+            rustc,
+            textwrap.dedent(
+                f"""\
+                #!{python}
+                import os
+                import sys
+                if {self.POISON!r} in os.environ:
+                    raise SystemExit(61)
+                if sys.argv[1:] == ["--version"]:
+                    print("rustc 1.93.0 (stage0a-fake)")
+                    raise SystemExit(0)
+                raise SystemExit(62)
+                """
+            ),
+            0o755,
+        )
+
+        cargo_toml = repo / "Cargo.toml"
+        cargo_lock = repo / "Cargo.lock"
+        design_note = repo / "research-vault/02-design/2026-07-17-t11-bounded-equality-resolution-compiler.md"
+        hash_contract = repo / "research-vault/02-design/2026-07-17-t11-canonical-hash-contract.md"
+        audit_contract = repo / "research-vault/02-design/2026-07-17-t11-external-audit-receipt.md"
+        self._write(cargo_toml, "[package]\nname='stage0a-fake'\nversion='0.0.0'\n")
+        self._write(cargo_lock, "# stage0a fake lock\n")
+        closure_cargo_toml = closure_source / "Cargo.toml"
+        closure_cargo_lock = closure_source / "Cargo.lock"
+        self._write(closure_cargo_toml, cargo_toml.read_bytes())
+        self._write(closure_cargo_lock, cargo_lock.read_bytes())
+        self._write(design_note, "stage0a fake design\n")
+        self._write(hash_contract, "stage0a fake hash contract\n")
+        self._write(audit_contract, "stage0a fake audit contract\n")
+
+        self._run_command(["git", "init", "-q"], cwd=repo)
+        self._run_command(["git", "config", "user.name", "Stage0A Test"], cwd=repo)
+        self._run_command(
+            ["git", "config", "user.email", "stage0a-test@example.invalid"], cwd=repo
+        )
+        self._run_command(["git", "add", "."], cwd=repo)
+        self._run_command(["git", "commit", "-qm", "stage0a fixture"], cwd=repo)
+        revision = self._run_command(["git", "rev-parse", "HEAD"], cwd=repo)
+
+        native_tools = {}
+        for label in (
+            "native-archiver",
+            "native-compiler",
+            "native-linker",
+            "native-loader",
+        ):
+            path = tools / label
+            self._write(path, "#!/bin/sh\nexit 0\n", 0o755)
+            native_tools[label] = path
+        build_closure = case / "build-closure.tar"
+        closure_report = json.loads(
+            self._run_command(
+                [
+                    str(python),
+                    str(build_closure_tool),
+                    "create",
+                    "--output",
+                    str(build_closure),
+                    "--source-revision",
+                    revision,
+                    "--input",
+                    f"source-tree={closure_source}",
+                    "--input",
+                    f"cargo-executable={cargo}",
+                    "--input",
+                    f"cargo-home={cargo_home}",
+                    "--input",
+                    f"rustc-executable={rustc}",
+                    "--input",
+                    f"rust-sysroot={rustup_home}",
+                    "--input",
+                    f"native-archiver={native_tools['native-archiver']}",
+                    "--input",
+                    f"native-compiler={native_tools['native-compiler']}",
+                    "--input",
+                    f"native-linker={native_tools['native-linker']}",
+                    "--input",
+                    f"native-loader={native_tools['native-loader']}",
+                    "--input",
+                    f"native-libs={native_libs}",
+                    "--input",
+                    f"python-runtime={python_runtime}",
+                ],
+                cwd=case,
+            )
+        )
+
+        artifact_paths = {
+            "submitter_sha256": submitter,
+            "runner_sha256": runner,
+            "finalizer_sbatch_sha256": finalizer_sbatch,
+            "finalizer_sha256": finalizer,
+            "authorizer_sha256": authorizer,
+            "validator_sha256": validator,
+            "exec_helper_sha256": exec_helper,
+            "build_closure_tool_sha256": build_closure_tool,
+            "cargo_toml_sha256": cargo_toml,
+            "cargo_lock_sha256": cargo_lock,
+            "design_note_sha256": design_note,
+            "hash_contract_sha256": hash_contract,
+            "audit_contract_sha256": audit_contract,
+        }
+        manifest = {
+            "solver_revision": revision,
+            "inspect_reject": inspect_reject,
+            "toolchain": {
+                "cargo_home": str(cargo_home),
+                "rustup_home": str(rustup_home),
+                "cargo": {
+                    "path": str(cargo),
+                    "sha256": self._sha256(cargo),
+                    "version": "cargo 1.93.0 (stage0a-fake)",
+                },
+                "rustc": {
+                    "path": str(rustc),
+                    "sha256": self._sha256(rustc),
+                    "version": "rustc 1.93.0 (stage0a-fake)",
+                },
+                "python": {
+                    "path": str(python),
+                    "sha256": self._sha256(python),
+                    "version": python_version,
+                },
+                "cargo_configs": [
+                    {"scope": scope, "state": "absent", "sha256": None}
+                    for scope in (
+                        "repository/config",
+                        "repository/config.toml",
+                        "cargo_home/config",
+                        "cargo_home/config.toml",
+                    )
+                ],
+            },
+            "control_tools": {
+                label: {
+                    "path": str(Path(shutil.which("git") or "").resolve()),
+                    "sha256": self._sha256(Path(shutil.which("git") or "").resolve()),
+                    "version": self._run_command(
+                        [str(Path(shutil.which("git") or "").resolve()), "--version"],
+                        cwd=case,
+                    ),
+                }
+                for label in ("git", "sbatch", "scontrol", "scancel", "sacct")
+            },
+            "build_closure": {
+                "path": str(build_closure),
+                "sha256": closure_report["archive_sha256"],
+                "manifest_sha256": closure_report["manifest_sha256"],
+                "source_revision": revision,
+            },
+            "artifacts": {
+                name: self._sha256(path) for name, path in artifact_paths.items()
+            },
+        }
+        launch_manifest = case / "launch-manifest.json"
+        self._write(
+            launch_manifest,
+            (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode(
+                "ascii"
+            ),
+            0o400,
+        )
+        launch_manifest_sha256 = self._sha256(launch_manifest)
+        if mutate_cargo_after_manifest:
+            cargo.chmod(0o700)
+            cargo.write_bytes(cargo.read_bytes() + b"# post-manifest mutation\n")
+            cargo.chmod(0o500)
+
+        job_id = str(9100 + self.fixture_index)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "EUF_VIPER_T11_REPO_ROOT": str(repo),
+                "EUF_VIPER_T11_RUN_BASE": str(run_base),
+                "EUF_VIPER_T11_CORPUS_ROOT": str(corpus),
+                "EUF_VIPER_T11_LAUNCH_MANIFEST": str(launch_manifest),
+                "EUF_VIPER_T11_LAUNCH_MANIFEST_SHA256": launch_manifest_sha256,
+                "EUF_VIPER_T11_RUN_NONCE": f"{self.fixture_index:032x}",
+                "SLURM_JOB_ID": job_id,
+                "SLURM_CLUSTER_NAME": "stage0a-test-cluster",
+                "SLURM_RESTART_COUNT": "0",
+                "SLURM_SUBMIT_DIR": str(run_base),
+                self.POISON: "must-not-reach-any-executed-tool",
+                "PYTHON": "/definitely/not/the/pinned/python",
+                "CARGO_HOME": "/definitely/not/the/pinned/cargo-home",
+                "RUSTUP_HOME": "/definitely/not/the/pinned/rustup-home",
+                "GIT_DIR": "/definitely/not/a/git-dir",
+            }
+        )
+        completed = subprocess.run(
+            ["bash", str(runner)],
+            cwd=run_base,
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30,
+        )
+        return completed, run_base / f"t11-stage0a-{job_id}"
+
+    def assertSealed(self, path: Path) -> None:
+        self.assertTrue(path.exists(), path)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o222, 0, path)
+
+    def test_success_project_4_audit_0_and_inherited_environment_isolation(self) -> None:
+        completed, run_root = self._make_fixture("success")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn(f"t11_stage0a_root={run_root}", completed.stdout)
+        self.assertFalse((run_root / "rejection.json").exists())
+        self.assertFalse((run_root / "infrastructure-rejection.json").exists())
+        metadata = json.loads((run_root / "metadata.json").read_text(encoding="ascii"))
+        self.assertEqual(metadata["decision"], "requires_scheduler_finalization")
+        self.assertEqual(metadata["status"], "validated_candidate")
+        self.assertFalse(metadata["stage0b_authority"])
+        self.assertTrue(metadata["environment_isolated"])
+        compute_index = json.loads(
+            (run_root / "compute-index.json").read_text(encoding="ascii")
+        )
+        self.assertEqual(compute_index["status"], "candidate_complete")
+        self.assertEqual(
+            compute_index["decision"], "requires_scheduler_finalization"
+        )
+        self.assertFalse(compute_index["stage0b_authority"])
+        self.assertNotIn("authorize_stage0b", json.dumps(compute_index))
+        self.assertSealed(run_root)
+        self.assertSealed(run_root / "metadata.json")
+        self.assertSealed(run_root / "compute-index.json")
+
+    def test_scientific_project_and_audit_rejections_are_sealed(self) -> None:
+        for scenario, expected_reason in (
+            ("project_reject", "projector_rejected"),
+            ("audit_reject", "external_auditor_rejected"),
+        ):
+            with self.subTest(scenario=scenario):
+                completed, run_root = self._make_fixture(scenario)
+                self.assertEqual(completed.returncode, 3, completed.stderr)
+                rejection = json.loads(
+                    (run_root / "rejection.json").read_text(encoding="ascii")
+                )
+                self.assertEqual(rejection["reason"], expected_reason)
+                self.assertEqual(rejection["decision"], "stop_before_stage0b")
+                self.assertFalse(
+                    (run_root / "infrastructure-rejection.json").exists()
+                )
+                self.assertSealed(run_root)
+                self.assertSealed(run_root / "rejection.json")
+
+    def test_manifest_and_tool_mismatches_leave_sealed_infrastructure_records(self) -> None:
+        cases = (
+            ({"inspect_reject": True}, "strict launch-manifest inspection failed"),
+            ({"mutate_cargo_after_manifest": True}, "cargo SHA-256 mismatch"),
+        )
+        for options, expected_reason in cases:
+            with self.subTest(options=options):
+                completed, run_root = self._make_fixture("success", **options)
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                record_path = run_root / "infrastructure-rejection.json"
+                record = json.loads(record_path.read_text(encoding="ascii"))
+                self.assertEqual(record["classification"], "infrastructure")
+                self.assertEqual(record["decision"], "stop_before_stage0b")
+                self.assertIn(expected_reason, record["reason"])
+                self.assertSealed(record_path)
+                self.assertSealed(run_root)
+
+    def test_private_build_failure_is_captured_as_infrastructure(self) -> None:
+        completed, run_root = self._make_fixture("unexpected_runner_failure")
+        self.assertNotEqual(completed.returncode, 0, completed.stderr)
+        record_path = run_root / "infrastructure-rejection.json"
+        record = json.loads(record_path.read_text(encoding="ascii"))
+        self.assertEqual(record["classification"], "infrastructure")
+        self.assertEqual(record["phase"], "private_build")
+        self.assertEqual(record["reason"], "private tmpfs certificate build failed")
+        self.assertEqual(record["record_file"], record_path.name)
+        self.assertSealed(record_path)
+        self.assertSealed(run_root)
+
+    def test_bundle_path_replacement_is_an_infrastructure_rejection(self) -> None:
+        completed, run_root = self._make_fixture("replace_bundle")
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        rejection = json.loads(
+            (run_root / "infrastructure-rejection.json").read_text(encoding="ascii")
+        )
+        self.assertEqual(rejection["classification"], "infrastructure")
+        self.assertEqual(
+            rejection["reason"], "bundle changed during external audit"
+        )
+        self.assertEqual((run_root / "projection-bundle.json").read_bytes(), b"REPLACED\n")
+        self.assertFalse((run_root / "rejection.json").exists())
+        self.assertSealed(run_root)
 
 
 class T11Stage0AValidatorTests(unittest.TestCase):
@@ -137,31 +1001,34 @@ class T11Stage0AValidatorTests(unittest.TestCase):
             "applications": 138,
             "application_pairs": 3_686,
             "maximum_arity": 2,
-            "application_argument_slots": 276,
+            "application_argument_slots": 268,
         }
-        rules = dict.fromkeys(self.validator.RULE_COUNTER_FIELDS, 0)
-        rules["congruence"] = 1
-        rules["conflict"] = 1
+        accepted_rules = dict.fromkeys(self.validator.RULE_COUNTER_FIELDS, 0)
+        accepted_rules["reflexivity"] = 1
+        accepted_rules["congruence"] = 1
+        accepted_rules["conflict"] = 1
+        attempted_rules = dict(accepted_rules)
+        attempted_rules["seed"] = 1
         search = {
-            "attempted_events": dict(rules),
-            "accepted_events": dict(rules),
-            "events_popped": 2,
-            "distinct_event_keys_inserted": 2,
+            "attempted_events": attempted_rules,
+            "accepted_events": accepted_rules,
+            "events_popped": 3,
+            "distinct_event_keys_inserted": 3,
             "duplicate_event_keys": 0,
-            "worklist_pushes": 2,
+            "worklist_pushes": 3,
             "live_worklist_entries": 0,
             "peak_live_worklist_entries": 1,
             "queued_events_discarded_at_theory_empty": 0,
-            "accepted_equality_nodes": 1,
+            "accepted_equality_nodes": 2,
             "accepted_conflict_clauses": 1,
-            "proof_parent_references": 1,
-            "maximum_proof_depth": 1,
+            "proof_parent_references": 2,
+            "maximum_proof_depth": 2,
             "accepted_trace_literal_slots": 1,
-            "canonical_proof_work_literal_charge": 1,
+            "canonical_proof_work_literal_charge": 147_132,
             "retained_antichain_entries": 1,
             "peak_retained_antichain_entries": 1,
             "registered_negative_equality_occurrences": 1,
-            "logical_incremental_memory_bytes": 64,
+            "logical_incremental_memory_bytes": 119_420,
             "suppressed_missing_equality_congruence_events": 0,
         }
         pruning = dict.fromkeys(self.validator.PRUNING_COUNTER_FIELDS, 0)
@@ -178,7 +1045,7 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         hashes = self._hashes()
         counters = self._counters()
         checker_counters = {
-            "replayed_equality_nodes": 1,
+            "replayed_equality_nodes": 2,
             "replayed_conflict_clauses": 1,
             "replayed_emitted_lemmas": 1,
             "replay_failures": 0,
@@ -194,19 +1061,70 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 "status": "completed",
                 "detail": {
                     "outcome": "lemmas",
-                    "output": [{"source_clause_id": 1, "clause": [1]}],
+                    "output": [{"source_clause_id": 89_470, "clause": [1]}],
                 },
             },
             "trace": [
                 {
                     "record_kind": "equality",
-                    "record": {"rule": {"rule": "congruence", "premises": {}}},
+                    "record": {
+                        "event_id": 0,
+                        "node_id": 0,
+                        "depth": 0,
+                        "conclusion": {"left": 0, "right": 0},
+                        "side_clause": [],
+                        "rule": {
+                            "rule": "reflexivity",
+                            "premises": {"term": 0},
+                        },
+                    },
                 },
-                {"record_kind": "conflict", "record": {}},
+                {
+                    "record_kind": "equality",
+                    "record": {
+                        "event_id": 1,
+                        "node_id": 1,
+                        "depth": 1,
+                        "conclusion": {"left": 1, "right": 2},
+                        "side_clause": [],
+                        "rule": {
+                            "rule": "congruence",
+                            "premises": {
+                                "applications": [1, 2],
+                                "arguments": [
+                                    {"argument_index": 0, "parent": 0}
+                                ],
+                            },
+                        },
+                    },
+                },
+                {
+                    "record_kind": "conflict",
+                    "record": {
+                        "event_id": 2,
+                        "clause_id": 89_470,
+                        "depth": 2,
+                        "clause": [1],
+                        "rule": {
+                            "equality_parent": 1,
+                            "negative_source": {
+                                "clause": {"id": 0, "origin": "baseline"},
+                                "literal_offset": 0,
+                            },
+                        },
+                    },
+                },
             ],
             "counters": counters,
             "hashes": hashes,
         }
+        _, _, trace_sha256, _ = self.validator._validate_trace(
+            compiler["trace"], 1, counters
+        )
+        hashes["trace_sha256"] = trace_sha256
+        emitted_sha256 = self.validator._emitted_clause_digest([[1]])
+        hashes["lemma_sequence_sha256"] = emitted_sha256
+        hashes["materialized_lemmas_sha256"] = emitted_sha256
         checker = {
             "status": {"status": "accepted"},
             "counters": checker_counters,
@@ -242,6 +1160,16 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         receipt = {
             "schema_version": 1,
             "exact_bundle_sha256": "",
+            "source_sha256": hashes["source_sha256"],
+            "baseline_problem_sha256": hashes["baseline_problem_sha256"],
+            "trace_sha256": hashes["trace_sha256"],
+            "lemma_sequence_sha256": hashes["lemma_sequence_sha256"],
+            "materialized_lemmas_sha256": hashes[
+                "materialized_lemmas_sha256"
+            ],
+            "materialized_candidate_sha256": hashes[
+                "materialized_candidate_sha256"
+            ],
             "hashes": copy.deepcopy(hashes),
             "result": {
                 "status": {"status": "accepted"},
@@ -279,6 +1207,105 @@ class T11Stage0AValidatorTests(unittest.TestCase):
         self.assertEqual(result["checker_counters"]["replay_failures"], 0)
         self.assertEqual(result["hashes"]["source_sha256"], self.source_sha256)
 
+    def test_rejects_reversed_json_object_fields(self) -> None:
+        for record_name in ("bundle", "receipt"):
+            with self.subTest(record=record_name):
+                bundle, receipt = self._records()
+                if record_name == "bundle":
+                    bundle = dict(reversed(tuple(bundle.items())))
+                else:
+                    receipt = dict(reversed(tuple(receipt.items())))
+                self._write_records(bundle, receipt)
+                with self.assertRaisesRegex(
+                    self.validator.ValidationError,
+                    "fields are not in canonical Rust serialization order",
+                ):
+                    self.validator.validate_evidence(
+                        source_path=self.source,
+                        bundle_path=self.bundle_path,
+                        receipt_path=self.receipt_path,
+                    )
+                self.bundle_path.chmod(0o600)
+                self.receipt_path.chmod(0o600)
+
+    def test_rejects_integer_in_boolean_integrity_field(self) -> None:
+        bundle, receipt = self._records()
+        bundle["report"]["integrity"]["baseline_unchanged"] = 1
+        self._write_records(bundle, receipt)
+        with self.assertRaisesRegex(
+            self.validator.ValidationError,
+            r"report\.integrity\.baseline_unchanged must be a Boolean",
+        ):
+            self.validator.validate_evidence(
+                source_path=self.source,
+                bundle_path=self.bundle_path,
+                receipt_path=self.receipt_path,
+            )
+
+    def test_rejects_every_frozen_search_cap_overflow(self) -> None:
+        self.assertIn(
+            "canonical_proof_work_literal_charge", self.validator.SEARCH_LIMITS
+        )
+        for field, limit in self.validator.SEARCH_LIMITS.items():
+            with self.subTest(field=field, limit=limit):
+                bundle, receipt = self._records()
+                bundle["compiler"]["counters"]["search"][field] = limit + 1
+                self._write_records(bundle, receipt)
+                with self.assertRaisesRegex(
+                    self.validator.ValidationError,
+                    rf"counters\.search\.{re.escape(field)} exceeds the frozen limit",
+                ):
+                    self.validator.validate_evidence(
+                        source_path=self.source,
+                        bundle_path=self.bundle_path,
+                        receipt_path=self.receipt_path,
+                    )
+                self.bundle_path.chmod(0o600)
+                self.receipt_path.chmod(0o600)
+
+    def test_rejects_mismatched_logical_incremental_memory(self) -> None:
+        bundle, receipt = self._records()
+        memory = bundle["compiler"]["counters"]["search"]
+        self.assertEqual(memory["logical_incremental_memory_bytes"], 119_420)
+        memory["logical_incremental_memory_bytes"] += 1
+        self._write_records(bundle, receipt)
+        with self.assertRaisesRegex(
+            self.validator.ValidationError,
+            "logical incremental memory differs from the frozen accounting equation",
+        ):
+            self.validator.validate_evidence(
+                source_path=self.source,
+                bundle_path=self.bundle_path,
+                receipt_path=self.receipt_path,
+            )
+
+    def test_rejects_attempted_total_below_distinct_worklist_pushes(self) -> None:
+        bundle, receipt = self._records()
+        search = bundle["compiler"]["counters"]["search"]
+        search["attempted_events"]["seed"] = 0
+        search["attempted_events"]["conflict"] = 0
+        search["accepted_events"]["conflict"] = 0
+        self.assertLess(
+            sum(search["attempted_events"].values()), search["worklist_pushes"]
+        )
+        self.assertTrue(
+            all(
+                search["accepted_events"][field]
+                <= search["attempted_events"][field]
+                for field in self.validator.RULE_COUNTER_FIELDS
+            )
+        )
+        self._write_records(bundle, receipt)
+        with self.assertRaisesRegex(
+            self.validator.ValidationError,
+            "attempted rule counters are below distinct worklist pushes",
+        ):
+            self.validator.validate_evidence(
+                source_path=self.source,
+                bundle_path=self.bundle_path,
+                receipt_path=self.receipt_path,
+            )
+
     def test_rejects_coherent_forgery_of_previously_omitted_hash(self) -> None:
         bundle, receipt = self._records()
         for record in (
@@ -313,6 +1340,73 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 receipt_path=self.receipt_path,
             )
 
+    def test_rejects_malformed_or_nontopological_trace_records(self) -> None:
+        mutations = (
+            (
+                lambda bundle: bundle["compiler"]["trace"][0]["record"].__setitem__(
+                    "unexpected", 0
+                ),
+                "keys differ",
+            ),
+            (
+                lambda bundle: bundle["compiler"]["trace"][1]["record"]["rule"][
+                    "premises"
+                ]["arguments"][0].__setitem__("parent", 1),
+                "not topological",
+            ),
+            (
+                lambda bundle: bundle["compiler"]["trace"][2]["record"].__setitem__(
+                    "clause_id", 89_471
+                ),
+                "not sequential",
+            ),
+        )
+        for index, (mutate, message) in enumerate(mutations):
+            with self.subTest(index=index):
+                bundle, receipt = self._records()
+                mutate(bundle)
+                self._write_records(bundle, receipt)
+                with self.assertRaisesRegex(self.validator.ValidationError, message):
+                    self.validator.validate_evidence(
+                        source_path=self.source,
+                        bundle_path=self.bundle_path,
+                        receipt_path=self.receipt_path,
+                    )
+                self.bundle_path.chmod(0o600)
+                self.receipt_path.chmod(0o600)
+
+    def test_rejects_trace_hash_and_real_receipt_schema_forgery(self) -> None:
+        bundle, receipt = self._records()
+        bundle["compiler"]["hashes"]["trace_sha256"] = self._digest("forged-trace")
+        bundle["checker"]["recomputed_hashes"]["trace_sha256"] = self._digest(
+            "forged-trace"
+        )
+        bundle["report"]["hashes"]["trace_sha256"] = self._digest("forged-trace")
+        receipt["hashes"]["trace_sha256"] = self._digest("forged-trace")
+        receipt["result"]["recomputed_hashes"]["trace_sha256"] = self._digest(
+            "forged-trace"
+        )
+        receipt["trace_sha256"] = self._digest("forged-trace")
+        self._write_records(bundle, receipt)
+        with self.assertRaisesRegex(self.validator.ValidationError, "recomputed trace hash"):
+            self.validator.validate_evidence(
+                source_path=self.source,
+                bundle_path=self.bundle_path,
+                receipt_path=self.receipt_path,
+            )
+
+        self.bundle_path.chmod(0o600)
+        self.receipt_path.chmod(0o600)
+        bundle, receipt = self._records()
+        del receipt["materialized_candidate_sha256"]
+        self._write_records(bundle, receipt)
+        with self.assertRaisesRegex(self.validator.ValidationError, "receipt keys differ"):
+            self.validator.validate_evidence(
+                source_path=self.source,
+                bundle_path=self.bundle_path,
+                receipt_path=self.receipt_path,
+            )
+
     def test_rejects_sat_call_cap_and_missing_mechanism_evidence(self) -> None:
         mutations = (
             (lambda bundle: bundle["report"].__setitem__("sat_calls", 1), "dispatched SAT"),
@@ -341,6 +1435,12 @@ class T11Stage0AValidatorTests(unittest.TestCase):
                 self.bundle_path.chmod(0o600)
                 self.receipt_path.chmod(0o600)
 
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "memfd_create")
+        and Path("/proc/self/fd").is_dir(),
+        "sealed validator integration requires Linux memfd support",
+    )
     def test_main_writes_fresh_immutable_hash_bound_metadata(self) -> None:
         bundle, receipt = self._records()
         self._write_records(bundle, receipt)
@@ -359,59 +1459,220 @@ class T11Stage0AValidatorTests(unittest.TestCase):
             "bundle": self.bundle_path,
             "audit_receipt": self.receipt_path,
         }
-        for name in self.validator.REQUIRED_ARTIFACTS - set(artifacts):
+        for name in self.validator.REQUIRED_ARTIFACTS - set(artifacts) - {
+            "launch_manifest"
+        }:
+            if name in tools:
+                artifacts[name] = tools[name]
+                continue
             path = self.root / name
             path.write_bytes((name + "\n").encode("ascii"))
             artifacts[name] = path
+        build_closure = self.root / "build-closure.tar"
+        build_closure.write_bytes(b"synthetic closure archive\n")
+        build_closure.chmod(0o400)
+        launch_manifest = self.root / "launch_manifest.json"
+        manifest = {
+            "schema": self.validator.LAUNCH_SCHEMA,
+            "solver_revision": "a" * 40,
+            "target": {
+                "relative_path": self.validator.TARGET_RELATIVE_PATH,
+                "sha256": self.source_sha256,
+            },
+            "baseline": {
+                **self.validator.EXPECTED_INPUT_COUNTERS,
+                "atom_map_sha256": self.validator.ATOM_MAP_SHA256,
+                "baseline_cnf_sha256": self.validator.BASELINE_CNF_SHA256,
+                "baseline_problem_sha256": self.validator.BASELINE_PROBLEM_SHA256,
+            },
+            "toolchain": {
+                "rustup_toolchain": "1.93.0-x86_64-unknown-linux-gnu",
+                "cargo_home": str(self.root / "cargo-home"),
+                "rustup_home": str(self.root / "rustup-home"),
+                **{
+                    name: {
+                        "path": str(path),
+                        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                        "version": f"{name} test-version",
+                    }
+                    for name, path in tools.items()
+                },
+                "cargo_configs": [
+                    {"scope": scope, "state": "absent", "sha256": None}
+                    for scope in (
+                        "repository/config",
+                        "repository/config.toml",
+                        "cargo_home/config",
+                        "cargo_home/config.toml",
+                    )
+                ],
+            },
+            "build_closure": {
+                "path": str(build_closure),
+                "sha256": hashlib.sha256(build_closure.read_bytes()).hexdigest(),
+                "manifest_sha256": self._digest("build-closure-manifest"),
+                "source_revision": "a" * 40,
+            },
+            "control_tools": {
+                label: {
+                    "path": str(artifacts["control_git"]),
+                    "sha256": hashlib.sha256(
+                        artifacts["control_git"].read_bytes()
+                    ).hexdigest(),
+                    "version": f"{label} test-version",
+                }
+                for label in ("git", "sbatch", "scontrol", "scancel", "sacct")
+            },
+            "artifacts": {
+                manifest_field: hashlib.sha256(
+                    artifacts[artifact_name].read_bytes()
+                ).hexdigest()
+                for manifest_field, artifact_name in self.validator.PINNED_ARTIFACT_HASH_FIELDS.items()
+            },
+        }
+        launch_manifest.write_bytes(self._encode(manifest))
+        artifacts["launch_manifest"] = launch_manifest
         metadata = self.root / "metadata.json"
+        binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+        bundle_sha256 = hashlib.sha256(self.bundle_path.read_bytes()).hexdigest()
+
+        descriptors: list[int] = []
+        snapshots: dict[str, Path] = {}
+
+        def seal_snapshot(name: str, path: Path) -> Path:
+            descriptor = os.memfd_create(
+                f"t11-validator-test-{name}",
+                flags=os.MFD_ALLOW_SEALING | os.MFD_CLOEXEC,
+            )
+            descriptors.append(descriptor)
+            encoded = path.read_bytes()
+            offset = 0
+            while offset < len(encoded):
+                written = os.write(descriptor, encoded[offset:])
+                self.assertGreater(written, 0)
+                offset += written
+            os.fchmod(descriptor, 0o400)
+            fcntl.fcntl(
+                descriptor,
+                fcntl.F_ADD_SEALS,
+                fcntl.F_SEAL_WRITE
+                | fcntl.F_SEAL_GROW
+                | fcntl.F_SEAL_SHRINK
+                | fcntl.F_SEAL_SEAL,
+            )
+            os.set_inheritable(descriptor, True)
+            return Path(f"/proc/self/fd/{descriptor}")
+
+        for name, path in artifacts.items():
+            snapshots[name] = seal_snapshot(name, path)
+
         argv = [
             "--source",
-            str(self.source),
+            str(snapshots["source"]),
             "--bundle",
-            str(self.bundle_path),
+            str(snapshots["bundle"]),
             "--receipt",
-            str(self.receipt_path),
+            str(snapshots["audit_receipt"]),
             "--binary",
-            str(binary),
+            str(snapshots["binary"]),
             "--metadata-out",
             str(metadata),
-            "--revision",
-            "a" * 40,
+            "--launch-manifest",
+            str(snapshots["launch_manifest"]),
+            "--launch-manifest-sha256",
+            hashlib.sha256(launch_manifest.read_bytes()).hexdigest(),
             "--job-id",
             "17",
-            "--target-relative-path",
-            self.validator.TARGET_RELATIVE_PATH,
             "--source-before-sha256",
             self.source_sha256,
             "--source-after-sha256",
             self.source_sha256,
+            "--binary-before-sha256",
+            binary_sha256,
+            "--binary-after-sha256",
+            binary_sha256,
+            "--bundle-project-sha256",
+            bundle_sha256,
+            "--bundle-audit-sha256",
+            bundle_sha256,
             "--project-exit",
             "4",
             "--audit-exit",
             "0",
         ]
-        for name in ("cargo", "rustc", "python"):
-            argv.extend(
-                [
-                    f"--{name}",
-                    str(tools[name]),
-                    f"--{name}-sha256",
-                    hashlib.sha256(tools[name].read_bytes()).hexdigest(),
-                    f"--{name}-version",
-                    f"{name} test-version",
-                ]
-            )
         for name, path in sorted(artifacts.items()):
-            argv.extend(["--artifact", f"{name}={path}"])
-        self.assertEqual(self.validator.main(argv), 0)
+            argv.extend(
+                ["--artifact", name, str(path), str(snapshots[name])]
+            )
+        previous_argv0 = sys.argv[0]
+        try:
+            sys.argv[0] = str(snapshots["validator"])
+            self.assertEqual(self.validator.main(argv), 0)
+        finally:
+            sys.argv[0] = previous_argv0
+            for descriptor in descriptors:
+                os.close(descriptor)
         self.assertEqual(stat.S_IMODE(metadata.stat().st_mode), 0o400)
         payload = json.loads(metadata.read_text(encoding="ascii"))
-        self.assertEqual(payload["decision"], "authorize_stage0b")
+        self.assertEqual(payload["decision"], "requires_scheduler_finalization")
+        self.assertEqual(payload["status"], "validated_candidate")
+        self.assertFalse(payload["stage0b_authority"])
+        self.assertNotIn("authorize_stage0b", json.dumps(payload))
         self.assertEqual(payload["projection"]["project_exit"], 4)
         self.assertEqual(payload["projection"]["audit_exit"], 0)
         self.assertEqual(payload["artifacts"]["binary"]["sha256"], hashlib.sha256(b"binary").hexdigest())
         self.assertNotIn("elapsed", json.dumps(payload))
         self.assertNotIn("timing", json.dumps(payload))
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "anonymous metadata publication requires Linux O_TMPFILE support",
+    )
+    def test_metadata_publication_never_replaces_an_existing_entry(self) -> None:
+        destination = self.root / "existing-metadata.json"
+        original = b"preexisting\n"
+        destination.write_bytes(original)
+        destination.chmod(0o400)
+        with self.assertRaisesRegex(
+            self.validator.ValidationError, "metadata output path must be fresh"
+        ):
+            self.validator._write_immutable_json(destination, {"status": "new"})
+        self.assertEqual(destination.read_bytes(), original)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "anonymous metadata publication requires Linux O_TMPFILE support",
+    )
+    def test_metadata_publication_loses_a_no_replace_race_fail_closed(self) -> None:
+        destination = self.root / "raced-metadata.json"
+        competitor = b"competitor\n"
+        real_link = self.validator.os.link
+
+        def racing_link(source, target, *args, **kwargs):
+            directory_fd = kwargs["dst_dir_fd"]
+            descriptor = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
+                0o600,
+                dir_fd=directory_fd,
+            )
+            try:
+                self.assertEqual(os.write(descriptor, competitor), len(competitor))
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            return real_link(source, target, *args, **kwargs)
+
+        self.validator.os.link = racing_link
+        try:
+            with self.assertRaisesRegex(
+                self.validator.ValidationError,
+                "metadata output path ceased to be fresh",
+            ):
+                self.validator._write_immutable_json(destination, {"status": "new"})
+        finally:
+            self.validator.os.link = real_link
+        self.assertEqual(destination.read_bytes(), competitor)
 
 
 if __name__ == "__main__":
