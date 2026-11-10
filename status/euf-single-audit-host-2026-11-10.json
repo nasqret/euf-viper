@@ -1,0 +1,64 @@
+{
+  "cases": {
+    "724": {
+      "answer": "sat",
+      "calls": 1,
+      "duplicated_physical": 195211,
+      "mixed_root_audits": 13,
+      "mixed_root_repeats": 5,
+      "phases": {
+        "fixed": {
+          "duplicated_physical": 4,
+          "empty_roots": 8012,
+          "second_physical": 4,
+          "second_virtual": 0,
+          "target_calls": 8013
+        },
+        "post": {
+          "duplicated_physical": 195207,
+          "empty_roots": 8184,
+          "second_physical": 195207,
+          "second_virtual": 341952,
+          "target_calls": 16808
+        }
+      },
+      "share": "195211/537163",
+      "witness_visits": 537163
+    },
+    "990001": {
+      "answer": "unsat",
+      "calls": 1,
+      "duplicated_physical": 0,
+      "mixed_root_audits": 0,
+      "mixed_root_repeats": 0,
+      "phases": {
+        "fixed": {
+          "duplicated_physical": 0,
+          "empty_roots": 94,
+          "second_physical": 0,
+          "second_virtual": 0,
+          "target_calls": 94
+        },
+        "post": {
+          "duplicated_physical": 0,
+          "empty_roots": 2,
+          "second_physical": 0,
+          "second_virtual": 126,
+          "target_calls": 4
+        }
+      },
+      "share": "0",
+      "witness_visits": 126
+    }
+  },
+  "competitor_rerun": false,
+  "host": "aarch64-apple-darwin",
+  "host_exe": "744adfcf8214a0d0aba4f0ad326c650bbdb02e35a17507148f6d13f79d4264b0",
+  "measured_speedup": null,
+  "native_wmi_jobs": 0,
+  "optimization_level": 0,
+  "receipt_sha256": "08ced82808487bcf8cb3708515aa7e7739f52f1f4b74ad9ac368a5246086b8c8",
+  "revision": "967d4d0bce9cb55a9b889e2cda5e8619ff512810",
+  "schema": "viper-single-audit-host-functional-summary-v1",
+  "selected_candidate": null
+}

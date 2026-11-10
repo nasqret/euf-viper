@@ -1,0 +1,93 @@
+{
+  "base_env_sha256": "34e05d7d75f5a010603661bff8ed21901f1dbb9b1f75a4f330a5253dd65330c2",
+  "cases": {
+    "724": {
+      "argv": [
+        "<HOST_EXE>",
+        "fabric-solve",
+        "--engine",
+        "quotient-portfolio",
+        "inputs/724.smt2"
+      ],
+      "audit_sha256": "cfbb3261e5864e437aac293db0a1248e4f080e908717f53d2bfce554987da105",
+      "env": {
+        "EUF_VIPER_FABRIC_CHECKED_ROOT_MODEL": "1",
+        "EUF_VIPER_FABRIC_CHECKED_ROOT_RELATIONS": "1",
+        "EUF_VIPER_FABRIC_CHECKED_SMALL_MODEL": "0",
+        "EUF_VIPER_FABRIC_FINITE_PARTIAL_DEGREE7": "1",
+        "EUF_VIPER_FINITE_SELECTOR_SHARED_CONTEXT": "0",
+        "EUF_VIPER_PARSER_RESOLVED_SYMBOL_REUSE": "0",
+        "EUF_VIPER_STREAM_ELIDE_SYMBOL_NAMES": "0",
+        "EUF_VIPER_TREE_TOKEN_FUSION": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "MKL_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "PATH": "/usr/bin:/bin",
+        "TMPDIR": "<TMP>",
+        "TZ": "UTC",
+        "VPR_ANTECEDENTS": "off",
+        "VPR_DESCRIPTOR": "off",
+        "VPR_GROUP_ROWS": "on",
+        "VPR_SINGLE_AUDIT": "<TMP>/724/audit.json",
+        "VPR_VIRTUAL_ADJACENCY": "on"
+      },
+      "input_sha256": "9721f1a277e7905f5ffa919a34854843f4ce0c76fc90f1564b6212ec2fed890d",
+      "outcome": "sat",
+      "pid": 7681,
+      "rc": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "d9dbf94b05b8314af9ca7f2034e92685c33447917605a7243b1099c693a12e5e"
+    },
+    "990001": {
+      "argv": [
+        "<HOST_EXE>",
+        "fabric-solve",
+        "--engine",
+        "quotient-portfolio",
+        "inputs/990001.smt2"
+      ],
+      "audit_sha256": "d4be17f3443cd68b1f548d760d6375508b92f23bb779d9b8df1e27604bf74104",
+      "env": {
+        "EUF_VIPER_FABRIC_CHECKED_ROOT_MODEL": "1",
+        "EUF_VIPER_FABRIC_CHECKED_ROOT_RELATIONS": "1",
+        "EUF_VIPER_FABRIC_CHECKED_SMALL_MODEL": "0",
+        "EUF_VIPER_FABRIC_FINITE_PARTIAL_DEGREE7": "1",
+        "EUF_VIPER_FINITE_SELECTOR_SHARED_CONTEXT": "0",
+        "EUF_VIPER_PARSER_RESOLVED_SYMBOL_REUSE": "0",
+        "EUF_VIPER_STREAM_ELIDE_SYMBOL_NAMES": "0",
+        "EUF_VIPER_STREAM_PARSER": "1",
+        "EUF_VIPER_TREE_TOKEN_FUSION": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "MKL_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "PATH": "/usr/bin:/bin",
+        "TMPDIR": "<TMP>",
+        "TZ": "UTC",
+        "VPR_ANTECEDENTS": "off",
+        "VPR_DESCRIPTOR": "off",
+        "VPR_GROUP_ROWS": "on",
+        "VPR_SINGLE_AUDIT": "<TMP>/990001/audit.json",
+        "VPR_VIRTUAL_ADJACENCY": "on"
+      },
+      "input_sha256": "dfcda313bd9be6ef14d100d3c5a9905e86958be21093199cab00c2cd89a317b0",
+      "outcome": "unsat",
+      "pid": 7691,
+      "rc": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_sha256": "5c17dfcc2a8f1f30d9e96df6a9825a5030ade046d560332c19de74d93d591a18"
+    }
+  },
+  "compiler": "rustc 1.93.0 (254b59607 2026-01-19)",
+  "host": "aarch64-apple-darwin",
+  "host_exe_sha256": "744adfcf8214a0d0aba4f0ad326c650bbdb02e35a17507148f6d13f79d4264b0",
+  "opt_level": 0,
+  "original_receipt_sha256": "08ced82808487bcf8cb3708515aa7e7739f52f1f4b74ad9ac368a5246086b8c8",
+  "parent": "22c88b8677c2f790d4d1bbb1ab419cff58bbb529",
+  "revision": "967d4d0bce9cb55a9b889e2cda5e8619ff512810",
+  "schema": "single-audit-public-run-v1",
+  "tree_inventory": "0a2b6bb0d619ba9c963dfc97683aebedfb1ae34b10ba96c220f4bf7897232c57"
+}

@@ -1,0 +1,5 @@
+# Keep archival bytes stable, including under core.autocrlf.
+* -text
+inputs/*.smt2 -whitespace
+native/src/fabric/*.rs -whitespace
+observer.patch -whitespace

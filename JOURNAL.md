@@ -1,5 +1,9 @@
 # Journal
 
+## 2026-11-10: checked witness traversal
+
+Published the two original-input host captures, observer patch, standalone Rust tests and raw-data replay. Four duplicate checks on 724 occurred at fixed-root setup and 195,207 afterward. No quiet optimization or competitor timing is included. [Study](results/local/single-audit-2026-11-10/README.md).
+
 ## 2026-07-08
 
 - Created `euf-viper` as a Rust package.

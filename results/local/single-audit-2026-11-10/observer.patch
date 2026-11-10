@@ -1,0 +1,451 @@
+diff --git a/src/fabric/cadical_up.rs b/src/fabric/cadical_up.rs
+index d1070592840b545a2f112aaeccfe8549f9d83265..f9e0409640447166231164d89f4296b1b2769e54 100644
+--- a/src/fabric/cadical_up.rs
++++ b/src/fabric/cadical_up.rs
+@@ -1865,7 +1865,9 @@ impl<'problem> TheoryPropagator<'problem> {
+         }
+         profiler.enter(ConstructionPhase::FixedRootApplication);
+         if let Some(plan) = prepared_group.take() {
+-            group_wire.register(&mut congruence, &plan);
++            if group_wire.register(&mut congruence, &plan){
++                congruence.partition().single_arm(&plan.terms,&plan.row_atoms,caps.checked_root_relations);
++            }
+         }
+         let mut initial_conflict = None;
+         let mut checked_root_relations = None;
+@@ -1963,6 +1965,7 @@ impl<'problem> TheoryPropagator<'problem> {
+         profiler.leave();
+ 
+         if group_wire.registered { congruence.finish_group_rows(); }
++        congruence.partition().single_fixed();
+         if caps.preapply_forced_root_literals && initial_conflict.is_none() {
+             if group_wire.audit && group_wire.emit(&congruence, initial_conflict.is_some()).is_err() {
+                 return Err((CadicalUpAbstention::Internal("writing end-fixed source-group audit"), stats));
+@@ -2206,6 +2209,9 @@ impl<'problem> TheoryPropagator<'problem> {
+     }
+ 
+     fn finish(mut self, outcome: CadicalUpOutcome) -> CadicalUpReport {
++        self.congruence.partition().single_terminal(match &outcome{
++            CadicalUpOutcome::Sat{..}=>"sat",CadicalUpOutcome::Unsat=>"unsat",CadicalUpOutcome::Abstain{..}=>"abstain",
++        });
+         self.stats.theory_index = self.theory_atoms.telemetry();
+         self.stats.signature_index = self.congruence.signature_telemetry();
+         CadicalUpReport {
+diff --git a/src/fabric/impact.rs b/src/fabric/impact.rs
+index 1f05f9cdb9c59816f9f34f04300cf60929eb344c..7dfe3c4b76010c06c4ff850f7f2cc32424b97bde 100644
+--- a/src/fabric/impact.rs
++++ b/src/fabric/impact.rs
+@@ -135,6 +135,7 @@ pub(crate) fn affected_terms_with_member_index(
+     caps: ImpactCaps,
+     indexed_class_members: bool,
+ ) -> Result<ImpactOutcome, ImpactError> {
++    let mut single_scope=partition.single_impact();
+     let mut stats = ImpactStats::default();
+     if let Some(limit) = set_count(
+         &mut stats.seed_relations,
+@@ -174,7 +175,7 @@ pub(crate) fn affected_terms_with_member_index(
+         .map_err(|_| ImpactError::AllocationFailed("theory-impact touched classes"))?;
+     touched_classes.extend_from_slice(&seed_classes);
+     for representative in seed_classes {
+-        let neighbors = partition.disequal_class_representatives(representative)?;
++        let neighbors = partition.single_representatives(representative,single_scope.as_mut())?;
+         let attempted = stats
+             .neighbor_edges
+             .checked_add(neighbors.len())
+diff --git a/src/fabric/partition.rs b/src/fabric/partition.rs
+index 5bae1e37534f8f118d6f4576b2b608596f03785f..692cf3438a101c3c02e3c29b0c7ca498a7879cd2 100644
+--- a/src/fabric/partition.rs
++++ b/src/fabric/partition.rs
+@@ -21,6 +21,7 @@ use rustc_hash::FxHashMap;
+ #[path="group_rows.rs"] mod group_rows;
+ pub(crate) use group_rows::GroupRowsStats;
+ #[path="virtual_adjacency.rs"] mod virtual_adjacency;
++#[path="single_audit.rs"] mod single_audit;
+ pub(crate) use virtual_adjacency::VirtualAdjacencyStats;
+ #[cfg(test)]
+ #[path="virtual_adjacency_tests.rs"] mod virtual_adjacency_tests;
+@@ -458,6 +459,7 @@ pub struct Partition {
+     separation_records: FxHashMap<EdgeId, SeparationRecord>,
+     group_rows: group_rows::Slot,
+     virtual_rows: virtual_adjacency::Slot,
++    single_audit: std::sync::OnceLock<Box<single_audit::Observer>>,
+     trail: Vec<TrailEntry>,
+     next_state_id: u64,
+ }
+@@ -505,6 +507,7 @@ impl CheckedSeparationBatch {
+                 .ok_or(PartitionError::InvariantViolation(
+                     "checked separation root is out of range",
+                 ))?;
++        if let Some(o)=partition.single_audit.get(){o.batch(*checked==self.epoch,partition.has_virtual_adjacency())}
+         if *checked != self.epoch {
+             partition.check_root_adjacency(root)?;
+             *checked = self.epoch;
+@@ -606,6 +609,7 @@ impl Partition {
+             separation_records: FxHashMap::default(),
+             group_rows: group_rows::Slot::default(),
+             virtual_rows: virtual_adjacency::Slot::default(),
++            single_audit: std::sync::OnceLock::new(),
+             trail: Vec::new(),
+             next_state_id: 1,
+         })
+@@ -795,8 +799,14 @@ impl Partition {
+     /// disequal to `term`'s class. The result is independent of union roots and
+     /// sorted by stable minimum-term representative.
+     pub fn disequal_class_representatives(&self, term: TermId) -> PartitionResult<Vec<TermId>> {
++        self.single_representatives(term,None)
++    }
++
++    pub(crate) fn single_representatives(&self,term:TermId,mut impact:Option<&mut single_audit::Impact<'_>>)
++        ->PartitionResult<Vec<TermId>> {
+         let root = self.root_of_term(term)?;
+         let degree = self.checked_root_degree(root)?;
++        if let Some(i)=impact.as_deref_mut(){i.success(root,false)}
+         let mut representatives = Vec::new();
+         representatives
+             .try_reserve_exact(degree)
+@@ -808,6 +818,7 @@ impl Partition {
+                 ));
+             }
+             self.check_root_adjacency(neighbor_root)?;
++            if let Some(i)=impact.as_deref_mut(){i.success(neighbor_root,true)}
+             representatives.push(*self.minimum.get(neighbor_root).ok_or(
+                 PartitionError::InvariantViolation(
+                     "disequality neighbor has no canonical representative",
+@@ -1957,6 +1968,11 @@ impl Partition {
+     // Count each witness at its lower root only. For a whole-partition audit the
+     // other visit still verifies the reverse edge, but need not decode it again.
+     fn audit_logical_root<const WHOLE: bool>(&self, root: usize) -> PartitionResult<(usize, usize)> {
++        self.single_walk::<WHOLE,false>(root,&mut single_audit::Walk::default())
++    }
++
++    fn single_walk<const WHOLE:bool,const COUNT:bool>(&self,root:usize,w:&mut single_audit::Walk)
++        ->PartitionResult<(usize,usize)> {
+         if self.parent.get(root) != Some(&root) {
+             return Err(PartitionError::InvariantViolation("disequality adjacency owner is not a root"));
+         }
+@@ -1968,7 +1984,9 @@ impl Partition {
+                 return Err(PartitionError::InvariantViolation("invalid logical neighbor order"));
+             }
+             previous = Some(neighbor);
+-            let ids = self.logical_ids(root, neighbor)?;
++            let mut confirmed=None;
++            let ids=self.logical_ids_counted::<COUNT>(root,neighbor,&mut w.first,&mut confirmed)?;
++            let virtual_id=ids.single_virtual_id();
+             if ids.len() == 0 {
+                 return Err(PartitionError::InvariantViolation("logical neighbor has no witnesses"));
+             }
+@@ -1985,15 +2003,25 @@ impl Partition {
+                         return Err(PartitionError::InvariantViolation("duplicate or unordered logical witness"));
+                     }
+                     self.checked_edge_record(root, neighbor, id)?;
++                    if COUNT {w.second(id,virtual_id,&mut confirmed);}
+                     prior = Some(id);
+                 }
+             }
++            if COUNT {w.end_pair(confirmed);w.neighbors+=1;}
+         }
+         Ok((degree, witnesses))
+     }
+ 
+     #[inline]
+     fn check_root_adjacency(&self, root: usize) -> PartitionResult<()> {
++        if let Some(o)=self.single_audit.get(){
++            if self.has_virtual_adjacency(){
++                let mut w=single_audit::Walk::default();
++                let r=self.single_walk::<false,true>(root,&mut w);
++                o.target(w,&r);
++                return r.map(|_| ());
++            }
++        }
+         self.checked_root_degree(root).map(|_| ())
+     }
+ 
+diff --git a/src/fabric/single_audit.rs b/src/fabric/single_audit.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a831f8b4b98c4762d6d03715e916e5da7220867
+--- /dev/null
++++ b/src/fabric/single_audit.rs
+@@ -0,0 +1,156 @@
++//! Selected-partition, counter-only observer. No timers, per-ID writes, or solver shortcuts.
++use super::*;
++use std::fs::{File, OpenOptions};
++use std::path::PathBuf;
++use std::sync::{Mutex, MutexGuard};
++
++const MAX_TERMS_OBSERVED:usize=1<<20;
++const NAMES:[&str;25]=[
++    "target_calls","target_ok","target_errors","empty_roots","nonempty_roots","neighbors",
++    "first_physical","second_physical","second_virtual","duplicated_physical","id_join_errors",
++    "impact_calls","impact_seed","impact_neighbor","impact_seed_repeat","impact_neighbor_repeat",
++    "impact_calls_mixed","impact_seed_mixed","impact_neighbor_mixed","impact_seed_repeat_mixed","impact_neighbor_repeat_mixed",
++    "batch_hits","batch_misses","batch_hits_mixed","batch_misses_mixed",
++];
++#[derive(Debug,Default,Copy,Clone)]
++struct Phase([u64;25]);
++impl Phase{
++    fn put(&mut self,i:usize,n:u64){self.0[i]=self.0[i].checked_add(n).expect("single-audit counter overflow");}
++    fn consistent(&self)->bool{
++        let a=self.0;
++        a[0]==a[1]+a[2] && a[2]==0 && a[1]==a[3]+a[4] && a[4]<=a[5] &&
++            a[5]<=a[7]+a[8] && a[6]==a[7] && a[7]==a[9] && a[10]==0 &&
++            a[14]<=a[12] && a[15]<=a[13] && a[19]<=a[17] && a[20]<=a[18] &&
++            (11..16).all(|i|a[i+5]<=a[i]) && a[23]<=a[21] && a[24]<=a[22] && a[18]<=a[1]
++    }
++    #[cfg(feature="fabric")]
++    fn json(&self)->serde_json::Value{
++        serde_json::Value::Object(NAMES.into_iter().zip(self.0).map(|(k,v)|(k.into(),v.into())).collect())
++    }
++}
++#[derive(Default)]
++pub(super) struct Walk {
++    pub(super) first:u64, pub(super) neighbors:u64,
++    second:u64, virtuals:u64, duplicate:u64, join_errors:u64,
++}
++impl Walk {
++    #[inline] pub(super) fn second(&mut self,id:EdgeId,virt:Option<EdgeId>,confirmed:&mut Option<std::collections::btree_set::Iter<'_,EdgeId>>){
++        if Some(id)==virt{self.virtuals+=1;return}
++        self.second+=1;
++        if confirmed.as_mut().and_then(|it|it.next().copied())==Some(id){self.duplicate+=1}else{self.join_errors+=1}
++    }
++    #[inline] pub(super) fn end_pair(&mut self,confirmed:Option<std::collections::btree_set::Iter<'_,EdgeId>>){
++        if confirmed.is_some_and(|it|it.len()!=0){self.join_errors+=1}
++    }
++}
++#[derive(Debug,Default)]
++struct State {
++    p:[Phase;2],post:bool,singletons:bool,fixed_live:usize,bad:bool,
++}
++#[derive(Debug)]
++struct Seen { epoch:u32, marks:Vec<u32> }
++#[derive(Debug)]
++pub(super) struct Observer {
++    id:u64,n:usize,members:Vec<TermId>,bases:Vec<u32>,file:File,
++    state:Mutex<State>,seen:Mutex<Seen>,
++}
++impl Observer{
++    fn new(p:&Partition,members:&[TermId],bases:&[u32],file:File)->Self{
++        assert!((2..=256).contains(&members.len()) && members.len()==bases.len()+1 &&
++            p.term_count()<=MAX_TERMS_OBSERVED && members.iter().all(|&t|p.row_singleton(t) && p.virtual_member(t.index())),
++            "single-audit: unbound/oversized selected group");
++        Self{id:p.partition_id,n:p.term_count(),members:members.to_vec(),bases:bases.to_vec(),file,
++            state:Mutex::default(),seen:Mutex::new(Seen{epoch:0,marks:vec![0;p.term_count()]})}
++    }
++    fn add(&self,body:impl FnOnce(&mut Phase)){
++        let mut s=self.state.lock().unwrap();let ix=usize::from(s.post);body(&mut s.p[ix])
++    }
++    pub(super) fn target(&self,w:Walk,result:&PartitionResult<(usize,usize)>){
++        self.add(|p|{
++            p.put(0,1);
++            match result{
++                Ok((degree,_))=>{
++                    p.put(1,1);p.put(if *degree==0{3}else{4},1);
++                    p.put(10,u64::from(*degree as u64!=w.neighbors));
++                }
++                Err(_)=>p.put(2,1),
++            }
++            for (i,n) in [w.neighbors,w.first,w.second,w.virtuals,w.duplicate,w.join_errors].into_iter().enumerate(){p.put(i+5,n)}
++        })
++    }
++    pub(super) fn batch(&self,hit:bool,mixed:bool){
++        self.add(|p|{let i=if hit{21}else{22};p.put(i,1);if mixed{p.put(i+2,1)}})
++    }
++}
++
++pub(crate) struct Impact<'a> {
++    owner:&'a Observer, seen:MutexGuard<'a,Seen>, mixed:bool, local:[u64;4],
++}
++impl Impact<'_> {
++    // Same immutable partition for the entire scope; the key is a physical root, not its minimum.
++    pub(super) fn success(&mut self,root:usize,neighbor:bool){
++        let k=usize::from(neighbor);
++        self.local[k]+=1;
++        let epoch=self.seen.epoch;let mark=&mut self.seen.marks[root];
++        if *mark==epoch{self.local[k+2]+=1}else{*mark=epoch}
++    }
++}
++impl Drop for Impact<'_>{
++    fn drop(&mut self){
++        self.owner.add(|p|{
++            p.put(11,1);if self.mixed{p.put(16,1)}
++            for (i,n) in self.local.into_iter().enumerate(){p.put(12+i,n);if self.mixed{p.put(17+i,n)}}
++        });
++    }
++}
++
++impl Partition{
++    pub(crate) fn single_arm(&self,members:&[TermId],bases:&[u32],checked:bool){
++        let Some(path)=std::env::var_os("VPR_SINGLE_AUDIT").filter(|s|!s.is_empty()) else{return};
++        let path=PathBuf::from(path);
++        assert!(path.is_absolute() && checked && self.virtual_rows.active() && self.group_rows_stats().groups==1,
++            "single-audit requires absolute path and verified compact, globally checked registration");
++        let file=OpenOptions::new().write(true).create_new(true).open(path).expect("fresh single audit output");
++        assert!(self.single_audit.set(Box::new(Observer::new(self,members,bases,file))).is_ok(),"duplicate single audit");
++    }
++    pub(crate) fn single_fixed(&self){
++        if let Some(o)=self.single_audit.get(){
++            let mut s=o.state.lock().unwrap();s.bad|=s.post;s.post=true;
++            s.singletons=o.members.iter().all(|&t|self.row_singleton(t));s.fixed_live=self.virtual_adjacency_stats().live_pairs;
++        }
++    }
++    pub(crate) fn single_impact(&self)->Option<Impact<'_>>{
++        let o=self.single_audit.get()?;
++        let mut seen=o.seen.try_lock().expect("overlapping impact scopes on selected partition");
++        if let Some(n)=seen.epoch.checked_add(1){seen.epoch=n}else{seen.marks.fill(0);seen.epoch=1}
++        Some(Impact{owner:o,seen,mixed:self.has_virtual_adjacency(),local:[0;4]})
++    }
++    pub(crate) fn single_terminal(&self,outcome:&str){
++        let Some(o)=self.single_audit.get() else{return};
++        #[cfg(not(feature="fabric"))]
++        { let _=o;panic!("named single-audit requires fabric: {outcome}") }
++        #[cfg(feature="fabric")]
++        {
++            use serde_json::json;
++            use std::io::Write;
++            let s=o.state.lock().unwrap();let v=self.virtual_adjacency_stats();
++            let mut errors=Vec::new();
++            if o.id!=self.partition_id||o.n!=self.term_count()||s.bad||!s.post||!s.singletons{
++                errors.push("selected partition or fixed boundary mismatch")
++            }
++            if !s.p.iter().all(Phase::consistent){errors.push("audit or impact conservation")}
++            if !matches!(outcome,"sat"|"unsat"){errors.push("native did not finish normally")}
++            let doc=json!({"schema":"single-audit-v1","pid":std::process::id(),"complete":errors.is_empty(),"errors":errors,
++                "partition_id":o.id,"term_count":o.n,"member_terms":o.members.iter().map(|t|t.index()).collect::<Vec<_>>(),
++                "row_atoms":o.bases,"arity":o.members.len(),"full_group_pairs":o.members.len()*(o.members.len()-1)/2,
++                "fixed_all_singleton":s.singletons,"fixed_live_pairs":s.fixed_live,"terminal_live_pairs":v.live_pairs,
++                "terminal_materialized_pairs":v.materialized_pairs,"terminal_outcome":outcome,"fixed":s.p[0].json(),"post":s.p[1].json()});
++            let mut file=&o.file;
++            serde_json::to_writer(&mut file,&doc).expect("write single-audit");
++            file.write_all(b"\n").and_then(|_|file.sync_all()).expect("sync single-audit");
++        }
++    }
++}
++
++#[cfg(test)]
++#[path="single_audit_tests.rs"] mod single_audit_tests;
+diff --git a/src/fabric/single_audit_tests.rs b/src/fabric/single_audit_tests.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..b3808746321c717d76e28cd7c1f46cf3c62fc318
+--- /dev/null
++++ b/src/fabric/single_audit_tests.rs
+@@ -0,0 +1,88 @@
++use super::*;
++use crate::fabric::impact::{affected_terms_with_member_index,ImpactCaps,ImpactOutcome};
++
++fn t(v:u32)->TermId{TermId::new(v)}
++fn negative(v:u32)->ReasonId{ReasonId::new(2*u64::from(v)+2)}
++struct Tmp(PathBuf);
++impl Drop for Tmp{fn drop(&mut self){let _=std::fs::remove_file(&self.0);}}
++fn setup(triangle:bool)->(Partition,Tmp){
++    let mut p=Partition::new(8).unwrap();
++    let terms=[t(0),t(1),t(2)];let bases=[10,15];
++    assert!(p.register_group_rows_for_virtual_test(&terms,&bases,false,true));
++    p.separate(t(0),t(1),negative(10)).unwrap();
++    if triangle{
++        p.separate(t(0),t(2),negative(11)).unwrap();p.separate(t(1),t(2),negative(15)).unwrap();
++    }else{
++        p.separate(t(0),t(1),ReasonId::new(5)).unwrap(); // second reason, ordinary
++        p.separate(t(0),t(4),ReasonId::new(7)).unwrap(); // purely ordinary neighbor
++    }
++    let path=std::env::temp_dir().join(format!("vpr-single-audit-{}-{}",std::process::id(),p.partition_id));
++    let f=OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
++    p.single_audit.set(Box::new(Observer::new(&p,&terms,&bases,f))).unwrap();
++    (p,Tmp(path))
++}
++fn phase(p:&Partition,post:bool)->Phase{p.single_audit.get().unwrap().state.lock().unwrap().p[usize::from(post)]}
++
++#[test]
++fn single_audit_completed_ordered_ids_only_and_scope_exclusions(){
++    let (p,_tmp)=setup(false);
++    p.checked_root_degree(0).unwrap();p.audit_logical_root::<true>(0).unwrap();
++    p.audit_logical_root::<false>(0).unwrap();p.separation_witnesses(t(0),t(1)).unwrap();
++    assert_eq!(phase(&p,false).0,[0;25]);
++    p.check_root_adjacency(0).unwrap();p.check_root_adjacency(7).unwrap();
++    let a=phase(&p,false);
++    assert_eq!(&a.0[..11],&[2,2,0,1,1,2,2,2,1,2,0]);assert!(a.consistent());
++    p.single_fixed();p.check_root_adjacency(1).unwrap();
++    let b=phase(&p,true);assert_eq!(&b.0[..11],&[1,1,0,0,1,1,1,1,1,1,0]);
++    #[cfg(feature="fabric")]
++    {
++        p.single_terminal("sat");
++        let j:serde_json::Value=serde_json::from_slice(&std::fs::read(&_tmp.0).unwrap()).unwrap();
++        assert_eq!(j["complete"],true);assert_eq!(j["fixed"]["duplicated_physical"],2);
++        assert_eq!(j["post"]["second_virtual"],1);assert_eq!(j["member_terms"],serde_json::json!([0,1,2]));
++    }
++}
++
++#[test]
++fn single_audit_partial_first_pass_cannot_be_promoted_to_duplicate(){
++    let (mut p,_tmp)=setup(false);
++    // ID 3 exists, but on 0/4. Both directions of 0/1 bear the same
++    // invalid ID after its legitimate physical secondary witness (ID 2).
++    for (a,b) in [(0,1),(1,0)]{p.disequalities[a].get_mut(&b).unwrap().insert(3);}
++    assert!(p.check_root_adjacency(0).is_err());
++    let a=phase(&p,false);
++    assert_eq!(&a.0[..11],&[1,0,1,0,0,0,1,0,0,0,0]);assert!(!a.consistent());
++    let mut w=Walk::default();let observed=BTreeSet::from([12u64,17]);
++    let mut cursor=Some(observed.iter());
++    w.second(13,None,&mut cursor);w.end_pair(cursor);
++    assert_eq!((w.second,w.duplicate,w.join_errors),(1,0,2));
++}
++
++#[test]
++fn single_audit_impact_deduplicates_across_roles_not_across_calls(){
++    let (mut p,_tmp)=setup(true);p.single_fixed();
++    for round in 1..=2 {
++        let result=affected_terms_with_member_index(&p,&[(t(0),t(1))],ImpactCaps::unlimited(),true).unwrap();
++        assert!(matches!(result,ImpactOutcome::Complete{..}));
++        let a=phase(&p,true);
++        for base in [11,16]{assert_eq!(&a.0[base..base+5],&[round,2*round,4*round,round,2*round])}
++        assert_eq!(a.0[0],4*round);assert!(a.consistent());
++    }
++    p.disequal_class_representatives(t(0)).unwrap();assert_eq!(phase(&p,true).0[13],8);
++    p.merge(t(0),t(5),ReasonId::new(77)).unwrap();assert!(!p.has_virtual_adjacency());
++    let before=phase(&p,true);
++    affected_terms_with_member_index(&p,&[(t(5),t(1))],ImpactCaps::unlimited(),true).unwrap();
++    let a=phase(&p,true);
++    assert_eq!(&a.0[16..21],&before.0[16..21]);assert_eq!(a.0[11],3);
++    assert_eq!(a.0[14],3);assert_eq!(a.0[15],6);assert!(a.consistent());
++}
++
++#[test]
++fn single_audit_checked_batch_hits_are_not_root_traversals(){
++    let (p,_tmp)=setup(true);let mut batch=p.checked_separation_batch().unwrap();
++    batch.check_root(&p,1).unwrap();batch.check_root(&p,1).unwrap();
++    let mut independent=p.checked_separation_batch().unwrap();independent.check_root(&p,1).unwrap();
++    let a=phase(&p,false);
++    assert_eq!(&a.0[21..],&[1,2,1,2]);assert_eq!(a.0[0],2);assert_eq!(a.0[6],0);
++    assert_eq!(a.0[8],4);assert!(a.consistent());
++}
+diff --git a/src/fabric/virtual_adjacency.rs b/src/fabric/virtual_adjacency.rs
+index 59ee96f5503130747c5c24ffda4c584b0acd8d7b..5fdbe3a4697b4b6fe6f675c205c9eabfa698ebb1 100644
+--- a/src/fabric/virtual_adjacency.rs
++++ b/src/fabric/virtual_adjacency.rs
+@@ -117,6 +117,7 @@ impl Slot {
+ }
+ 
+ pub(super) struct Ids<'a>{ physical:Option<btree_set::Iter<'a,EdgeId>>, virtual_id:Option<EdgeId> }
++impl Ids<'_>{pub(super) fn single_virtual_id(&self)->Option<EdgeId>{self.virtual_id}}
+ impl Iterator for Ids<'_>{
+     type Item=EdgeId;
+     fn next(&mut self)->Option<EdgeId>{
+@@ -205,9 +206,19 @@ impl Partition {
+     }
+ 
+     pub(super) fn logical_ids(&self,a:usize,b:usize)->PartitionResult<Ids<'_>>{
++        self.logical_ids_counted::<false>(a,b,&mut 0,&mut None)
++    }
++    pub(super) fn logical_ids_counted<'a,const COUNT:bool>(&'a self,a:usize,b:usize,first:&mut u64,
++        confirmed:&mut Option<btree_set::Iter<'a,EdgeId>>)->PartitionResult<Ids<'a>> {
+         let physical=self.physical_ids_between(a,b)?;
+         if let Some(ids)=physical.filter(|_|self.has_virtual_adjacency()){
+-            for &id in ids { self.checked_edge_record(a,b,id)?; }
++            for &id in ids {
++                self.checked_edge_record(a,b,id)?;
++                if COUNT{*first+=1;}
++            }
++            // This exact sorted set was just validated, ID by ID, for (a,b).
++            // Borrow it only after success; the enclosing walk cannot mutate it.
++            if COUNT{*confirmed=Some(ids.iter());}
+         }
+         let virtual_id=if let Some(g)=self.virtual_rows.group(){
+             if let Some((id,rec))=g.at(a,b)?{

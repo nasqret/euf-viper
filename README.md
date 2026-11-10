@@ -5,6 +5,10 @@ uninterpreted functions. It parses ground SMT-LIB Boolean structure, builds a
 Tseitin CNF, runs an eager finite-domain/EUF encoding through SAT backends, and
 validates candidate SAT models with congruence closure before accepting them.
 
+[November 2026 witness-audit data and replay](results/local/single-audit-2026-11-10/README.md):
+195,211 of 537,163 witness visits repeated a physical check on one Sokoban3 run.
+This is a work count, not a speedup or a new competitive ranking.
+
 The long-term research target is to outperform both Z3 and Yices2 on QF_UF.
 This repository is structured so that claim can only be made after reproducible
 SMT-LIB and SMT-COMP runs.

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="300" viewBox="0 0 800 300" role="img" aria-labelledby="title desc">
+<title id="title">Duplicate physical witness validations</title>
+<desc id="desc">Share of second-pass witness visits at the targeted mixed-root audit. Observed on the host, not a timing comparison.</desc>
+<rect width="800" height="300" fill="white"/><g font-family="Arial,sans-serif" fill="#1c3842">
+<text x="25" y="36" font-size="23" font-weight="bold">How much witness validation repeats?</text>
+<text x="25" y="63" font-size="14">One functional macOS run per input. Bars show the share of witness visits, not solver time.</text>
+<text x="25" y="102" font-size="16" font-weight="bold">Input 724</text>
+<rect x="164" y="87" width="520" height="19" fill="#d7e4eb"/>
+<rect x="164" y="87" width="188.9738" height="19" fill="#047566"/>
+<text x="700" y="102" font-size="15">36.34%</text>
+<text x="164" y="127" font-size="14">195,211 repeated physical checks out of 537,163 witness visits</text>
+<text x="25" y="168" font-size="16" font-weight="bold">Input 990001</text>
+<rect x="164" y="153" width="520" height="19" fill="#d7e4eb"/>
+<rect x="164" y="153" width="0.0000" height="19" fill="#047566"/>
+<text x="700" y="168" font-size="15">0.00%</text>
+<text x="164" y="193" font-size="14">0 repeated physical checks out of 126 witness visits</text>
+<rect x="25" y="220" width="12" height="12" fill="#047566"/><text x="44" y="231" font-size="14">Already checked on this pair</text>
+<rect x="285" y="220" width="12" height="12" fill="#d7e4eb"/><text x="304" y="231" font-size="14">Other second-pass witnesses</text>
+<text x="25" y="272" font-size="13">Sokoban3 724 and the 990001 UNSAT control. No Yices2 or native WMI race.</text></g></svg>

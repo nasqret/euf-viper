@@ -1,5 +1,9 @@
 # Project Memory
 
+## 2026-11-10: duplicate physical witness checks
+
+The host probe counted 195,211 duplicate physical witness visits out of 537,163 on Sokoban3 724, and 0/126 on the UNSAT control. One observation per input; no WMI scout, candidate promotion or ranking change. [Probe and source-bound replay](results/local/single-audit-2026-11-10/README.md).
+
 ## 2026-07-22 Viper Fabric
 
 - The active performance implementation is isolated on branch

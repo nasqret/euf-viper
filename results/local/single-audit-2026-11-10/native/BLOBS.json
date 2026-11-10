@@ -1,0 +1,19 @@
+{
+  "schema": "single-audit-source-blobs-v1",
+  "source_commit": "967d4d0bce9cb55a9b889e2cda5e8619ff512810",
+  "git_object_format": "sha1",
+  "upstream_cargo_lock_blob": "7eacd600c18b210f759e56291fb475f5018fce08",
+  "files": {
+    "src/fabric/group_rows.rs": "0a16ed1968a1e9a4ed4b79e24b789004663138c0",
+    "src/fabric/group_rows_tests.rs": "907fdf5f7b77b2bb50e115477164ef2f8a88cd74",
+    "src/fabric/impact.rs": "7dfe3c4b76010c06c4ff850f7f2cc32424b97bde",
+    "src/fabric/partition.rs": "692cf3438a101c3c02e3c29b0c7ca498a7879cd2",
+    "src/fabric/policy_ablation_partition.rs": "0b68689cf467d5bb6eb1e73f1c5639e493e69197",
+    "src/fabric/row_representation.rs": "e410429fbce4c986d9ba71f22091cf8db0a56ec9",
+    "src/fabric/row_representation_tests.rs": "196084a52609ff5c6f51641655004ba67b1e6dd3",
+    "src/fabric/single_audit.rs": "6a831f8b4b98c4762d6d03715e916e5da7220867",
+    "src/fabric/single_audit_tests.rs": "b3808746321c717d76e28cd7c1f46cf3c62fc318",
+    "src/fabric/virtual_adjacency.rs": "5fdbe3a4697b4b6fe6f675c205c9eabfa698ebb1",
+    "src/fabric/virtual_adjacency_tests.rs": "7659eb9517b78b642e8b1f932276e6c63419c43b"
+  }
+}

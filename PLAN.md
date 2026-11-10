@@ -1,5 +1,11 @@
 # Plan
 
+## 2026-11-10: witness audit follow-up
+
+- [x] Publish the host observations, observer and reproducible count reduction. [Evidence](results/local/single-audit-2026-11-10/README.md).
+- [ ] Replicate the counts with the eight-block WMI release scout. Only then qualify the selected one-pass candidate and race it against physical Viper and Yices2. Do not translate a share of visits into a share of wall time.
+
+
 ## Objective
 
 Build the best standalone single-core QF_UF solver overall: sound, certifying,
